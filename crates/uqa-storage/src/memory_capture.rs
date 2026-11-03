@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use parking_lot::{MappedRwLockWriteGuard, Mutex, RwLock, RwLockReadGuard};
+use parking_lot::{MappedRwLockWriteGuard, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use uqa_core::memory::{Budgeted, MemoryReservation, OwnedMap};
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
@@ -92,13 +92,9 @@ impl MemoryCaptureRegistry {
         &self,
         value: T,
     ) -> StorageBackendResult<MemoryCaptureCell<T>> {
-        let _admission = self.0.admission.read_recursive();
-        Ok(MemoryCaptureCell {
-            registry: self.0.clone(),
-            id: allocate(&self.0.next_cell)?,
-            born: self.0.next_capture.load(Ordering::Relaxed),
-            value: RwLock::new(value),
-        })
+        let mut cell = MemoryCaptureCell::new(value);
+        cell.register(self)?;
+        Ok(cell)
     }
 }
 
@@ -217,22 +213,133 @@ impl Drop for Capture {
 
 /// Mutable source ownership with automatic preservation before write admission. The source's existing copy-on-write implementation determines detachment cost; writes with no active captures never invoke `freeze`.
 pub struct MemoryCaptureCell<T: MemoryCaptureSource> {
-    registry: Arc<Registry>,
-    id: u64,
-    born: u64,
+    registration: Option<Registration>,
     value: RwLock<T>,
 }
 
+struct Registration {
+    registry: Arc<Registry>,
+    id: u64,
+    born: u64,
+}
+
 impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
+    /// An unregistered owner uses the same read/write boundary without allocating a private capture domain. Register it before publishing it in a shared memory source.
+    pub fn new(value: T) -> Self {
+        Self {
+            registration: None,
+            value: RwLock::new(value),
+        }
+    }
+
+    /// Join one domain without moving the source or invalidating existing cuts. Re-registering in that domain is harmless; transferring a registered source to another domain is rejected.
+    pub fn register(&mut self, registry: &MemoryCaptureRegistry) -> StorageBackendResult<()> {
+        if let Some(registration) = &self.registration {
+            return if Arc::ptr_eq(&registration.registry, &registry.0) {
+                Ok(())
+            } else {
+                Err(StorageBackendError::Other(
+                    "memory capture source is already registered in another domain".into(),
+                ))
+            };
+        }
+        let _admission = registry.0.admission.read_recursive();
+        self.registration = Some(Registration {
+            registry: registry.0.clone(),
+            id: allocate(&registry.0.next_cell)?,
+            born: registry.0.next_capture.load(Ordering::Relaxed),
+        });
+        Ok(())
+    }
+
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
         self.value.read()
     }
 
+    pub fn read_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RwLockReadGuard<'_, T>> {
+        loop {
+            control.check()?;
+            if let Some(value) = self.value.try_read_for(WAIT) {
+                control.check()?;
+                return Ok(value);
+            }
+            #[cfg(test)]
+            tests::source_wait();
+        }
+    }
+
     /// Preserve every applicable cut before exposing mutable state. A source freeze failure invalidates that cut and releases its archive; the caller can still perform the ordinary write. No caller-side snapshot preparation is needed.
     pub fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
-        let value = self.value.write();
+        self.admit_write(self.value.write())
+    }
+
+    pub fn write_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<MemoryCaptureWriteGuard<'_, T>> {
+        let value = loop {
+            control.check()?;
+            if let Some(value) = self.value.try_write_for(WAIT) {
+                break value;
+            }
+            #[cfg(test)]
+            tests::source_wait();
+        };
+        control.check()?;
+        let guard = self.admit_write(value);
+        control.check()?;
+        Ok(guard)
+    }
+
+    fn admit_write<'a>(&'a self, value: RwLockWriteGuard<'a, T>) -> MemoryCaptureWriteGuard<'a, T> {
         #[cfg(test)]
         tests::source_locked();
+        let admission = self
+            .registration
+            .as_ref()
+            .map(|registration| registration.preserve(&*value));
+        MemoryCaptureWriteGuard {
+            source_guard: parking_lot::RwLockWriteGuard::map(value, |value| value),
+            _admission: admission,
+        }
+    }
+
+    /// Retain this cell's value at the selected cut. Reading an unmodified cell performs its first freeze outside a writer; later reads reuse the same immutable owner. Foreign cuts and cells created later are rejected.
+    pub fn captured(
+        &self,
+        capture: &MemoryCapture,
+    ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
+        let Some(registration) = &self.registration else {
+            return Err(StorageBackendError::Other(
+                "memory capture source is not registered".into(),
+            ));
+        };
+        if !Weak::ptr_eq(&capture.0.registry, &Arc::downgrade(&registration.registry))
+            || capture.0.id < registration.born
+        {
+            return Err(StorageBackendError::Other(
+                "cell does not belong to this memory capture".into(),
+            ));
+        }
+        let value = loop {
+            if let Some(value) = capture.0.retained::<T>(registration.id)? {
+                return Ok(value);
+            }
+            if let Some(value) = self.value.try_read_for(WAIT) {
+                break value;
+            }
+            #[cfg(test)]
+            tests::source_wait();
+        };
+        capture.0.frozen(registration.id, &*value)
+    }
+}
+
+impl Registration {
+    fn preserve<T: MemoryCaptureSource>(&self, value: &T) -> RwLockReadGuard<'_, ()> {
         // Recursive read admission permits ordinary nested cell guards even when a capture is waiting. The enclosing transaction boundary supplies multi-cell atomicity.
         let admission = self.registry.admission.read_recursive();
         let mut after = 0;
@@ -248,46 +355,18 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
             if id >= self.born {
                 if let Some(capture) = capture {
                     // The capture owns terminal failure handling; a failed backup cannot consume the source's write operation.
-                    drop(capture.frozen(self.id, &*value));
+                    drop(capture.frozen(self.id, value));
                 }
             }
         }
-        MemoryCaptureWriteGuard {
-            source_guard: parking_lot::RwLockWriteGuard::map(value, |value| value),
-            _admission: admission,
-        }
-    }
-
-    /// Retain this cell's value at the selected cut. Reading an unmodified cell performs its first freeze outside a writer; later reads reuse the same immutable owner. Foreign cuts and cells created later are rejected.
-    pub fn captured(
-        &self,
-        capture: &MemoryCapture,
-    ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
-        if !Weak::ptr_eq(&capture.0.registry, &Arc::downgrade(&self.registry))
-            || capture.0.id < self.born
-        {
-            return Err(StorageBackendError::Other(
-                "cell does not belong to this memory capture".into(),
-            ));
-        }
-        let value = loop {
-            if let Some(value) = capture.0.retained::<T>(self.id)? {
-                return Ok(value);
-            }
-            if let Some(value) = self.value.try_read_for(WAIT) {
-                break value;
-            }
-            #[cfg(test)]
-            tests::source_wait();
-        };
-        capture.0.frozen(self.id, &*value)
+        admission
     }
 }
 
 /// Write admission remains held through the final mutation, including mapped guards.
 pub struct MemoryCaptureWriteGuard<'a, T: ?Sized> {
     source_guard: MappedRwLockWriteGuard<'a, T>,
-    _admission: RwLockReadGuard<'a, ()>,
+    _admission: Option<RwLockReadGuard<'a, ()>>,
 }
 
 impl<'a, T: ?Sized> MemoryCaptureWriteGuard<'a, T> {

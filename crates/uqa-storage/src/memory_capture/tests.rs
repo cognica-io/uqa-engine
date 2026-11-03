@@ -52,6 +52,73 @@ fn scalar(registry: &MemoryCaptureRegistry, value: u64) -> MemoryCaptureCell<Sca
 }
 
 #[test]
+fn memory_capture_unregistered_owners_allocate_no_domain_and_join_once() {
+    let calls = Arc::default();
+    let mut cell = None;
+    let allocated = allocation_counter::measure(|| {
+        cell = Some(MemoryCaptureCell::new(Scalar {
+            value: 1,
+            calls,
+            scratch: 0,
+        }));
+    });
+    assert_eq!(allocated.bytes_total, 0);
+    let mut cell = cell.unwrap();
+    let written = allocation_counter::measure(|| cell.write().value = 2);
+    assert_eq!(written.bytes_total, 0);
+    assert_eq!(cell.read().calls.load(Ordering::Relaxed), 0);
+    let registry = MemoryCaptureRegistry::new();
+    let control = StorageReadControl::with_limit(4096);
+    let before = registry.capture(&control).unwrap();
+    assert!(cell.captured(&before).is_err());
+    cell.register(&registry).unwrap();
+    assert!(cell.captured(&before).is_err());
+    let after = registry.capture(&control).unwrap();
+    cell.register(&registry).unwrap();
+    assert!(cell.register(&MemoryCaptureRegistry::new()).is_err());
+    cell.write().value = 3;
+    assert_eq!(**cell.captured(&after).unwrap(), 2);
+    drop((before, after, cell));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn memory_capture_controlled_read_and_write_waits_cancel_without_admission() {
+    let registry = MemoryCaptureRegistry::new();
+    let cell = scalar(&registry, 1);
+    let control = StorageReadControl::with_limit(4096);
+    let guard = cell.write();
+    let (ready, entered) = mpsc::channel();
+    thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for write in [false, true] {
+            let ready = ready.clone();
+            let cell = &cell;
+            let control = &control;
+            workers.push(scope.spawn(move || {
+                ON_SOURCE_WAIT.set(Some(Box::new(move || ready.send(()).unwrap())));
+                let result = if write {
+                    cell.write_with_control(control).map(|_| ())
+                } else {
+                    cell.read_with_control(control).map(|_| ())
+                };
+                assert!(matches!(result, Err(StorageBackendError::Cancelled(_))));
+            }));
+        }
+        for _ in 0..2 {
+            entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        control.cancellation().cancel();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    assert_eq!(guard.value, 1);
+    assert_eq!(guard.calls.load(Ordering::Relaxed), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn memory_capture_registration_does_not_visit_sources_and_writes_preserve_each_cut_once() {
     let registry = MemoryCaptureRegistry::new();
     let first = scalar(&registry, 7);

@@ -11,12 +11,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::DocId;
 
 use super::math::l2_normalize;
-use super::state::{IVFIndex, IVFMetadataSnapshot, IVFState, StoredVector};
+use super::state::{IVFData, IVFMetadataSnapshot, IVFState, StoredVector};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::validate_vector_values;
 use crate::{StorageBackendError, StorageBackendResult};
 
-impl IVFIndex {
+impl IVFData {
     pub fn from_persistence(
         dimensions: u32,
         nlist: usize,
@@ -137,14 +137,14 @@ impl IVFIndex {
         Ok(Self {
             dimensions,
             nlist,
-            nprobe: parking_lot::Mutex::new(nprobe),
+            nprobe,
             train_threshold,
-            state: parking_lot::Mutex::new(snapshot.state),
-            vectors: parking_lot::Mutex::new(persisted),
-            centroids: parking_lot::Mutex::new(snapshot.centroids),
-            inverted_lists: parking_lot::Mutex::new(inverted_lists),
-            trained_size: parking_lot::Mutex::new(snapshot.trained_size),
-            deletes_since_train: parking_lot::Mutex::new(snapshot.deletes_since_train),
+            state: snapshot.state,
+            vectors: persisted,
+            centroids: snapshot.centroids,
+            inverted_lists,
+            trained_size: snapshot.trained_size,
+            deletes_since_train: snapshot.deletes_since_train,
         })
     }
 }

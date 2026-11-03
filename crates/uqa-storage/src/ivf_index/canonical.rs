@@ -20,7 +20,7 @@ impl VectorRead for IVFIndex {
         control.check()
     }
     fn dimensions(&self) -> u32 {
-        self.dimensions
+        self.data.read().dimensions
     }
     fn next_document_after(
         &self,
@@ -29,8 +29,9 @@ impl VectorRead for IVFIndex {
     ) -> StorageBackendResult<Option<DocId>> {
         control.check()?;
         Ok(self
+            .data
+            .read_with_control(control)?
             .vectors
-            .lock()
             .range((
                 after.map_or(Unbounded, |document| Excluded((document, u32::MAX))),
                 Unbounded,
@@ -44,8 +45,9 @@ impl VectorRead for IVFIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
         ordinal_count(
-            self.vectors
-                .lock()
+            self.data
+                .read_with_control(control)?
+                .vectors
                 .range((document, 0)..=(document, u32::MAX))
                 .map(|(key, _)| key.1),
             control,
@@ -58,7 +60,8 @@ impl VectorRead for IVFIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<BudgetedVec<f32>>> {
         control.check()?;
-        let vectors = self.vectors.lock();
+        let data = self.data.read_with_control(control)?;
+        let vectors = &data.vectors;
         vectors
             .get(&(document, ordinal))
             .map(|vector| copy_vector(&vector.raw_vector, control))

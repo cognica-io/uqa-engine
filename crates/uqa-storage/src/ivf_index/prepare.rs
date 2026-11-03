@@ -16,7 +16,7 @@ use uqa_core::{
 
 use super::{
     state::{StoredVector, VectorKey},
-    IVFIndex, IVFMetadataSnapshot, IVFState,
+    IVFData, IVFMetadataSnapshot, IVFState,
 };
 use crate::{read_control::StorageReadControl, vector_index::IVFIndexParams, StorageBackendResult};
 
@@ -32,7 +32,7 @@ pub enum IVFMutation<'a> {
     Train,
 }
 
-impl IVFIndex {
+impl IVFData {
     /// Restore one validated physical generation under the caller's allowance. Reconstruction scratch is released before returning; the index retains its payload capacity and any later training output under the same allowance.
     pub fn restore_controlled(
         dimensions: u32,
@@ -87,7 +87,7 @@ impl IVFIndex {
     }
 
     fn retained_bytes(&self, control: &StorageReadControl) -> StorageBackendResult<usize> {
-        let vectors = self.vectors.lock();
+        let vectors = &self.vectors;
         let mut bytes = checked_product(vectors.len(), size_of::<(VectorKey, StoredVector)>())?;
         for vector in vectors.values() {
             control.check()?;
@@ -98,19 +98,19 @@ impl IVFIndex {
                 )?;
             }
         }
-        let centroids = self.centroids.lock();
+        let centroids = &self.centroids;
         let clusters = centroids.len().max(self.nlist.min(vectors.len()));
         let mut centroid_bytes = checked_product(centroids.capacity(), size_of::<Vec<f32>>())?;
-        for centroid in centroids.iter() {
+        for centroid in centroids {
             control.check()?;
             add_bytes(
                 &mut centroid_bytes,
                 checked_product(centroid.capacity(), size_of::<f32>())?,
             )?;
         }
-        let lists = self.inverted_lists.lock();
+        let lists = &self.inverted_lists;
         let mut list_bytes = checked_product(lists.capacity(), size_of::<Vec<VectorKey>>())?;
-        for list in lists.iter() {
+        for list in lists {
             control.check()?;
             add_bytes(
                 &mut list_bytes,
@@ -140,15 +140,6 @@ impl IVFIndex {
         Ok(bytes)
     }
 
-    /// Compute an immutable metadata candidate without changing the supplied index. All private state and numerical scratch are reserved before cloning; the published snapshot owns a separate allowance.
-    pub fn prepare_metadata(
-        &self,
-        mutation: IVFMutation<'_>,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<IVFMetadataSnapshot>> {
-        self.prepare_metadata_changes(std::slice::from_ref(&mutation), control)
-    }
-
     pub(crate) fn prepare_metadata_changes(
         &self,
         mutations: &[IVFMutation<'_>],
@@ -164,7 +155,7 @@ impl IVFIndex {
             )
             .metadata_controlled(control);
         }
-        let mut count = self.vectors.lock().len();
+        let mut count = self.vectors.len();
         for mutation in mutations {
             if let IVFMutation::Replace { vectors, .. } = mutation {
                 count = count
@@ -176,7 +167,7 @@ impl IVFIndex {
                 }
             }
         }
-        let clusters = self.centroids.lock().len().max(self.nlist.min(count));
+        let clusters = self.centroids.len().max(self.nlist.min(count));
         let _workspace =
             control
                 .memory()
@@ -206,12 +197,12 @@ impl IVFIndex {
         candidate.metadata_controlled(control)
     }
 
-    fn metadata_controlled(
+    pub(super) fn metadata_controlled(
         &self,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<IVFMetadataSnapshot>> {
-        let vectors = self.vectors.lock();
-        let centroids = self.centroids.lock();
+        let vectors = &self.vectors;
+        let centroids = &self.centroids;
         let assignment_count = if self.state() == IVFState::Untrained {
             0
         } else {
@@ -222,7 +213,7 @@ impl IVFIndex {
             &mut bytes,
             checked_product(centroids.len(), size_of::<Vec<f32>>())?,
         )?;
-        for centroid in centroids.iter() {
+        for centroid in centroids {
             control.check()?;
             add_bytes(
                 &mut bytes,
@@ -238,7 +229,7 @@ impl IVFIndex {
             }
         }
         let mut copied = Vec::with_capacity(centroids.len());
-        for centroid in centroids.iter() {
+        for centroid in centroids {
             control.check()?;
             copied.push(centroid.clone());
         }
@@ -247,8 +238,8 @@ impl IVFIndex {
                 state: self.state(),
                 centroids: copied,
                 assignments,
-                trained_size: *self.trained_size.lock(),
-                deletes_since_train: *self.deletes_since_train.lock(),
+                trained_size: self.trained_size,
+                deletes_since_train: self.deletes_since_train,
                 vector_count: vectors.len(),
             },
             memory,

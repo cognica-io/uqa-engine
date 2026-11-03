@@ -36772,6 +36772,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_unregistered_owners_allocate_no_domain_and_join_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Unregistered source admission",
+      "workload": "Create and mutate an unregistered source, attach it after an earlier cut, repeat registration and reject a foreign domain.",
+      "invariant": "Construction and ordinary mutation allocate no domain; birth identity excludes earlier cuts and remains stable through repeated registration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_capture_controlled_read_and_write_waits_cancel_without_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Cancellable source admission",
+      "workload": "Hold the owning write guard until both controlled readers and writers have entered their lock wait, then cancel.",
+      "invariant": "Both waits terminate before the guard is released, without observing or changing source data or retaining allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_preserves_probe_training_and_canonical_generations_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF capture generation ownership",
+      "workload": "Capture around probe changes, canonical replacement, deletion, training and clear; export after source and cut handles are dropped.",
+      "invariant": "Each cut preserves its exact pre-transition image and original allowance until its final independently retained owner is dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_precedes_query_retraining_and_ignores_rejected_or_empty_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF query mutation admission",
+      "workload": "Capture a stale index, execute invalid and empty queries, then race two queries that require retraining.",
+      "invariant": "Rejected, empty and threshold queries do not preserve or train a generation; successful training retains the original image and deterministic ranked results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_failure_retires_only_the_archive_and_preserves_ordinary_progress",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF archive failure isolation",
+      "workload": "Exhaust a capture allowance before probe publication, continue ordinary writes, and cancel a separately retained image.",
+      "invariant": "Retention failure cannot consume ordinary source operations; failed cuts cannot revive and cancelled export writes no bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_capture_registration_rejects_foreign_and_earlier_cuts_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/capture_tests.rs",
+      "capability": "IVF source identity",
+      "workload": "Attach after an existing cut, repeat the same registration, attempt transfer and a foreign cut, then clear.",
+      "invariant": "Only cuts registered after the same domain attachment can retain the original image; re-registration never changes source identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_publication_shares_retained_weights_without_payload_copies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Retained model catalog memory",
+      "workload": "Retain a catalog with two MiB of weights, publish a separate small model, replace the original and close the Engine.",
+      "invariant": "Catalog capture allocates zero bytes, separate publication allocates less than 64 KiB, and retained weights share identity until replacement and survive source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_generations_preserve_rollback_and_owned_public_results",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Model catalog transaction ownership",
+      "workload": "Replace and create models in an explicit transaction, roll back, mutate an owned public result and drop the live model.",
+      "invariant": "Rollback restores the original immutable owner; private names and caller mutations cannot change a retained catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "model_catalog_generations_preserve_all_provider_publication_and_reopen",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/tests.rs",
+      "capability": "Model catalog provider ownership",
+      "workload": "Exercise model publication, rollback and retained values on memory, native SQLite, SQLite KV and redb, including peer refresh and reopen for every persistent provider.",
+      "invariant": "Retained model values survive source replacement and closure; rollback removes private names, and restored or refreshed models preserve predictions and durable removal.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

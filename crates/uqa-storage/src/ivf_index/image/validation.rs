@@ -30,7 +30,7 @@ pub(super) fn validate(view: &View<'_>, control: &StorageReadControl) -> Storage
             }
         }
     }
-    for centroid in view.centroids.iter() {
+    for centroid in view.centroids {
         crate::vector_index::validate_vector_values_controlled(
             view.index.dimensions,
             centroid,
@@ -38,7 +38,7 @@ pub(super) fn validate(view: &View<'_>, control: &StorageReadControl) -> Storage
         )?;
     }
     let mut previous = None;
-    for (&key, vector) in view.vectors.iter() {
+    for (&key, vector) in view.vectors {
         control.check()?;
         let expected = match previous {
             Some((document, ordinal)) if document == key.0 => u64::from(ordinal) + 1,

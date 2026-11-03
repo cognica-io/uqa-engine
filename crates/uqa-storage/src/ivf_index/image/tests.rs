@@ -9,8 +9,9 @@
 use super::*;
 use crate::{
     vector_index::{image::read_vector_image, image::tests::encode},
-    VectorIndex,
+    IVFIndex, VectorIndex,
 };
+use std::time::Duration;
 
 fn restore(bytes: &[u8], control: &StorageReadControl) -> Budgeted<IVFIndex> {
     let mut bytes = &bytes[13..];
@@ -54,7 +55,7 @@ fn independent_stale_training_fixture_preserves_exact_values_and_defers_training
     assert_eq!(restored.metadata_snapshot().assignments, [(5, 0, 0)]);
     assert_eq!(encode(&*restored), bytes);
     assert_eq!(
-        restored.vectors.lock()[&(5, 0)].vector[0].to_bits(),
+        restored.data.read().vectors[&(5, 0)].vector[0].to_bits(),
         (-0.0_f32).to_bits()
     );
     assert_eq!(
@@ -101,8 +102,8 @@ fn actual_training_states_and_reconstructed_sorted_lists_preserve_queries() {
         let restored = restore(&bytes, &control);
         assert_eq!(restored.metadata_snapshot(), index.metadata_snapshot());
         assert_eq!(
-            *restored.inverted_lists.lock(),
-            *index.inverted_lists.lock()
+            restored.data.read().inverted_lists,
+            index.data.read().inverted_lists
         );
         assert_eq!(encode(&*restored), bytes);
         for query in [[1.0, 0.0], [0.0, 1.0]] {
@@ -129,7 +130,7 @@ fn malformed_training_metadata_and_source_indexes_never_escape_as_images() {
         assert!(read_vector_image(&mut bytes.as_slice(), &control).is_err());
         assert_eq!(control.memory().used(), 0);
     }
-    index.inverted_lists.lock()[0].push((100, 0));
+    index.data.write().inverted_lists[0].push((100, 0));
     let mut output = Vec::new();
     assert!(index.write_image(&mut output, &control).is_err());
     assert!(output.is_empty());
@@ -140,7 +141,7 @@ fn training_lock_wait_observes_cancellation_before_output() {
     let index = IVFIndex::new(2);
     let control = StorageReadControl::with_limit(1 << 20);
     let (entered, cancelled) = std::thread::scope(|scope| {
-        let guard = index.nprobe.lock();
+        let guard = index.data.write();
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let index = &index;
         let control = &control;
@@ -149,18 +150,12 @@ fn training_lock_wait_observes_cancellation_before_output() {
             let result = index.write_image(&mut output, control);
             send.send((result, output)).unwrap();
         });
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while !index.vectors.is_locked() && std::time::Instant::now() < deadline {
-            std::thread::yield_now();
-        }
-        let entered = index.vectors.is_locked();
-        // The first publication lock proves the reader entered admission. Keep the
-        // second lock unavailable through at least one cancellable wait interval.
+        // Keep the owning state unavailable through a cancellable wait interval.
         let waited = receive.recv_timeout(Duration::from_millis(30)).is_err();
         control.cancellation().cancel();
         let cancelled = receive.recv_timeout(Duration::from_secs(2));
         drop(guard);
-        (entered && waited, cancelled)
+        (waited, cancelled)
     });
     assert!(entered);
     let (result, output) = cancelled.unwrap();

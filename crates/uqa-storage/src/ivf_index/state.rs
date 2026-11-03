@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 
-use parking_lot::Mutex;
 use uqa_core::DocId;
 
 const DEFAULT_NLIST: usize = 100;
@@ -45,20 +44,20 @@ pub(super) struct StoredVector {
     pub(super) centroid: Option<usize>,
 }
 
-pub struct IVFIndex {
+pub(super) struct IVFData {
     pub(super) dimensions: u32,
     pub(super) nlist: usize,
-    pub(super) nprobe: Mutex<usize>,
+    pub(super) nprobe: usize,
     pub(super) train_threshold: usize,
-    pub(super) state: Mutex<IVFState>,
-    pub(super) vectors: Mutex<BTreeMap<VectorKey, StoredVector>>,
-    pub(super) centroids: Mutex<Vec<Vec<f32>>>,
-    pub(super) inverted_lists: Mutex<Vec<Vec<VectorKey>>>,
-    pub(super) trained_size: Mutex<usize>,
-    pub(super) deletes_since_train: Mutex<usize>,
+    pub(super) state: IVFState,
+    pub(super) vectors: BTreeMap<VectorKey, StoredVector>,
+    pub(super) centroids: Vec<Vec<f32>>,
+    pub(super) inverted_lists: Vec<Vec<VectorKey>>,
+    pub(super) trained_size: usize,
+    pub(super) deletes_since_train: usize,
 }
 
-impl IVFIndex {
+impl IVFData {
     pub fn new(dimensions: u32) -> Self {
         Self::with_params(
             dimensions,
@@ -77,35 +76,31 @@ impl IVFIndex {
         Self {
             dimensions,
             nlist: nlist.max(1),
-            nprobe: Mutex::new(nprobe.max(1)),
+            nprobe: nprobe.max(1),
             train_threshold: train_threshold.max(1),
-            state: Mutex::new(IVFState::Untrained),
-            vectors: Mutex::new(BTreeMap::new()),
-            centroids: Mutex::new(Vec::new()),
-            inverted_lists: Mutex::new(Vec::new()),
-            trained_size: Mutex::new(0),
-            deletes_since_train: Mutex::new(0),
+            state: IVFState::Untrained,
+            vectors: BTreeMap::new(),
+            centroids: Vec::new(),
+            inverted_lists: Vec::new(),
+            trained_size: 0,
+            deletes_since_train: 0,
         }
     }
 
     pub fn state(&self) -> IVFState {
-        *self.state.lock()
-    }
-
-    pub fn nlist(&self) -> usize {
-        self.nlist
+        self.state
     }
 
     pub fn nprobe(&self) -> usize {
-        *self.nprobe.lock()
+        self.nprobe
     }
 
-    pub fn set_nprobe(&self, nprobe: usize) {
-        *self.nprobe.lock() = nprobe.max(1);
+    pub fn set_nprobe(&mut self, nprobe: usize) {
+        self.nprobe = nprobe.max(1);
     }
 
     pub fn metadata_snapshot(&self) -> IVFMetadataSnapshot {
-        let vectors = self.vectors.lock();
+        let vectors = &self.vectors;
         let mut assignments = vectors
             .values()
             .filter_map(|vector| {
@@ -116,11 +111,11 @@ impl IVFIndex {
             .collect::<Vec<_>>();
         assignments.sort_by_key(|(doc_id, ordinal, _)| (*doc_id, *ordinal));
         IVFMetadataSnapshot {
-            state: *self.state.lock(),
-            centroids: self.centroids.lock().clone(),
+            state: self.state,
+            centroids: self.centroids.clone(),
             assignments,
-            trained_size: *self.trained_size.lock(),
-            deletes_since_train: *self.deletes_since_train.lock(),
+            trained_size: self.trained_size,
+            deletes_since_train: self.deletes_since_train,
             vector_count: vectors.len(),
         }
     }

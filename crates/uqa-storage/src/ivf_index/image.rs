@@ -6,15 +6,14 @@
 
 //! Images retain evaluated training state and normalization bits without training or normalization replay.
 
-use super::state::{IVFIndex, IVFState, StoredVector, VectorKey};
+use super::state::{IVFData, IVFState, StoredVector, VectorKey};
 use crate::{
     image_io::{ImageInput, ImageOutput},
     read_control::StorageReadControl,
     vector_index::image::{entries, floats, header, invalid, read_floats},
     StorageBackendResult,
 };
-use parking_lot::{Mutex, MutexGuard};
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};
 
 mod input;
@@ -26,47 +25,34 @@ mod tests;
 pub(crate) use input::read;
 
 struct View<'a> {
-    index: &'a IVFIndex,
-    vectors: MutexGuard<'a, BTreeMap<VectorKey, StoredVector>>,
-    nprobe: MutexGuard<'a, usize>,
-    state: MutexGuard<'a, IVFState>,
-    centroids: MutexGuard<'a, Vec<Vec<f32>>>,
-    lists: MutexGuard<'a, Vec<Vec<VectorKey>>>,
-    trained_size: MutexGuard<'a, usize>,
-    deletes: MutexGuard<'a, usize>,
-}
-
-fn lock<'a, T>(
-    value: &'a Mutex<T>,
-    control: &StorageReadControl,
-) -> StorageBackendResult<MutexGuard<'a, T>> {
-    loop {
-        control.check()?;
-        if let Some(guard) = value.try_lock_for(Duration::from_millis(10)) {
-            return Ok(guard);
-        }
-    }
+    index: &'a IVFData,
+    vectors: &'a BTreeMap<VectorKey, StoredVector>,
+    nprobe: &'a usize,
+    state: &'a IVFState,
+    centroids: &'a Vec<Vec<f32>>,
+    lists: &'a Vec<Vec<VectorKey>>,
+    trained_size: &'a usize,
+    deletes: &'a usize,
 }
 
 impl<'a> View<'a> {
-    fn new(index: &'a IVFIndex, control: &StorageReadControl) -> StorageBackendResult<Self> {
-        // Training publishes all dependent fields under the vectors lock. The selected source must be detached from the live Engine before repository output begins.
-        let vectors = lock(&index.vectors, control)?;
+    fn new(index: &'a IVFData, control: &StorageReadControl) -> StorageBackendResult<Self> {
+        control.check()?;
         Ok(Self {
             index,
-            vectors,
-            nprobe: lock(&index.nprobe, control)?,
-            state: lock(&index.state, control)?,
-            centroids: lock(&index.centroids, control)?,
-            lists: lock(&index.inverted_lists, control)?,
-            trained_size: lock(&index.trained_size, control)?,
-            deletes: lock(&index.deletes_since_train, control)?,
+            vectors: &index.vectors,
+            nprobe: &index.nprobe,
+            state: &index.state,
+            centroids: &index.centroids,
+            lists: &index.inverted_lists,
+            trained_size: &index.trained_size,
+            deletes: &index.deletes_since_train,
         })
     }
 }
 
 pub(super) fn write(
-    index: &IVFIndex,
+    index: &IVFData,
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
@@ -89,11 +75,11 @@ pub(super) fn write(
     out.count(*view.trained_size)?;
     out.count(*view.deletes)?;
     out.count(view.centroids.len())?;
-    for centroid in view.centroids.iter() {
+    for centroid in view.centroids {
         floats(&mut out, centroid)?;
     }
     out.count(view.vectors.len())?;
-    for (&(document, ordinal), vector) in view.vectors.iter() {
+    for (&(document, ordinal), vector) in view.vectors {
         out.bytes(&document.to_le_bytes())?;
         out.bytes(&ordinal.to_le_bytes())?;
         floats(&mut out, &vector.raw_vector)?;

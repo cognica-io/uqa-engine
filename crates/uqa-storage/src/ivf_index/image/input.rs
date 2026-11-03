@@ -6,8 +6,9 @@
 
 //! One private candidate owns raw and normalized vectors, centroids, assignments and reconstructed lists.
 
+use super::super::IVFIndex;
 use super::{
-    entries, invalid, read_floats, validation, Budgeted, BudgetedVec, IVFIndex, IVFState,
+    entries, invalid, read_floats, validation, Budgeted, BudgetedVec, IVFData, IVFState,
     ImageInput, MemoryReservation, StorageBackendResult, StoredVector, VectorKey, View,
 };
 use uqa_core::memory::MemoryError;
@@ -23,15 +24,15 @@ pub(crate) fn read(
     if nlist == 0 || nprobe == 0 || threshold == 0 {
         return Err(invalid());
     }
-    let mut index = IVFIndex::with_params(dimensions, nlist, nprobe, threshold);
-    *index.state.get_mut() = match input.array::<1>()?[0] {
+    let mut index = IVFData::with_params(dimensions, nlist, nprobe, threshold);
+    index.state = match input.array::<1>()?[0] {
         0 => IVFState::Untrained,
         1 => IVFState::Trained,
         2 => IVFState::Stale,
         _ => return Err(invalid()),
     };
-    *index.trained_size.get_mut() = input.count()?;
-    *index.deletes_since_train.get_mut() = input.count()?;
+    index.trained_size = input.count()?;
+    index.deletes_since_train = input.count()?;
     let count = input.count()?;
     if count > nlist {
         return Err(invalid());
@@ -45,16 +46,16 @@ pub(crate) fn read(
     }
     let (centroids, lease) = centroids.into_parts();
     memory.absorb(lease);
-    *index.centroids.get_mut() = centroids;
+    index.centroids = centroids;
     read_vectors(input, &mut index, &mut memory)?;
     restore_lists(&mut index, &mut memory, input.control)?;
     validation::validate(&View::new(&index, input.control)?, input.control)?;
-    Ok(Budgeted::new(index, memory))
+    Ok(IVFIndex::from_budgeted(Budgeted::new(index, memory)))
 }
 
 fn read_vectors(
     input: &mut ImageInput<'_>,
-    index: &mut IVFIndex,
+    index: &mut IVFData,
     memory: &mut MemoryReservation,
 ) -> StorageBackendResult<()> {
     let count = input.count()?;
@@ -78,7 +79,7 @@ fn read_vectors(
             1 => Some(input.count()?),
             _ => return Err(invalid()),
         };
-        index.vectors.get_mut().insert(
+        index.vectors.insert(
             key,
             StoredVector {
                 key,
@@ -96,17 +97,17 @@ fn read_vectors(
 }
 
 fn restore_lists(
-    index: &mut IVFIndex,
+    index: &mut IVFData,
     memory: &mut MemoryReservation,
     control: &super::StorageReadControl,
 ) -> StorageBackendResult<()> {
-    let count = index.centroids.get_mut().len();
+    let count = index.centroids.len();
     let mut counts = BudgetedVec::new(control.memory());
     counts.reserve(count)?;
     for _ in 0..count {
         counts.push(0_usize)?;
     }
-    for vector in index.vectors.get_mut().values() {
+    for vector in index.vectors.values() {
         control.check()?;
         if let Some(centroid) = vector.centroid {
             let count = counts.get_mut(centroid).ok_or_else(invalid)?;
@@ -124,7 +125,7 @@ fn restore_lists(
         lists.push(list)?;
     }
     drop(counts);
-    for (&key, vector) in index.vectors.get_mut().iter() {
+    for (&key, vector) in &index.vectors {
         control.check()?;
         if let Some(centroid) = vector.centroid {
             // The counted capacity is admitted above; primary map order reproduces the owner's sorted centroid lists.
@@ -133,6 +134,6 @@ fn restore_lists(
     }
     let (lists, lease) = lists.into_parts();
     memory.absorb(lease);
-    *index.inverted_lists.get_mut() = lists;
+    index.inverted_lists = lists;
     Ok(())
 }

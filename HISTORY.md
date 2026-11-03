@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve memory IVF state before every registered capture-domain mutation, including query-triggered retraining and probe changes. Export-only captures retain the original training state and controls after source closure; complete Engine backup integration remains under implementation.
 - Add exact stored-model backup images preserving every supported layer, parameter bit, label and gating value. Controlled private reconstruction validates the complete model and retains decoded allocation ownership; joint Engine backup integration remains under implementation.
 - Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; joint Engine backup integration remains under implementation.
 - Add fresh native SQLite image import with dependency-ordered physical rows, exact revision/namespace/watermark preservation, bounded row verification and recovery of uncertain history publication. Partial images remain unavailable; full logical catalog validation and public Engine backup jobs remain in progress.
@@ -38,6 +39,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.
 - Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
 - Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
 
