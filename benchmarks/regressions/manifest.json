@@ -2,6 +2,136 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_match_independent_wire_and_empty_allocation_fixtures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Memory graph wire identity",
+      "workload": "Decode independently assembled empty and populated graph bytes and compare literal membership, adjacency and original allocation counters.",
+      "invariant": "Re-encoding is byte-identical and dropping reconstructed owners returns all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_preserve_evaluated_properties_memberships_and_algebra",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Evaluated graph reconstruction",
+      "workload": "Round-trip shared graphs, union/intersection/difference, loops, parallel edges, unattached records and exact property carriers.",
+      "invariant": "Properties, signed-zero/NaN bits, opaque datums, membership, degree and adjacency observations survive source destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph allocation history",
+      "workload": "Retain unused counter and label reservations, registry aliases, merged tombstones, legacy kinds and metadata preceding graph creation.",
+      "invariant": "Subsequent source/restored allocations and complete image bytes match without replay or registry migration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_keep_label_drop_edges_and_empty_index_observations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph label-drop images",
+      "workload": "Drop a vertex label while retaining incident edges, then restore and allocate the old name again.",
+      "invariant": "Dangling endpoint payloads, label tombstones, empty index observations and future label identity remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_reject_truncation_order_membership_and_counter_corruption",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image admission",
+      "workload": "Reject every truncated fixture prefix, trailing bytes, unknown version, invalid UTF-8/value carrier, unordered entities/memberships, absent references and regressed counters.",
+      "invariant": "No invalid candidate escapes and every failed decode releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_reject_corrupt_derived_sources_before_output",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph source integrity",
+      "workload": "Corrupt primary entities, reverse memberships, label indexes and each adjacency direction.",
+      "invariant": "The source owner rejects inconsistent primary/derived state before writing any bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_admit_private_candidates_and_release_every_failure",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image memory admission",
+      "workload": "Sweep every insufficient allowance, admit the exact successful payload and reject overflowing advertised cardinality.",
+      "invariant": "All limits preserve typed memory failures, peak remains within allowance, and every candidate releases its complete charge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_stream_large_borrowed_properties_with_bounded_io",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Bounded graph image output",
+      "workload": "Stream a two-MiB property under a one-byte scratch allowance and attempt small/sufficient reconstruction.",
+      "invariant": "Export uses zero admitted dynamic scratch and at-most-16-KiB I/O; underfunded import fails without leaking and sufficient import is byte-identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_keep_typed_cancellation_between_io_attempts",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image cancellation",
+      "workload": "Cancel during partial and interrupted reads and writes.",
+      "invariant": "The original typed cancellation stops before another I/O attempt and all scratch is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "memory_graph_images_propagate_partial_io_failures_without_publishing_a_candidate",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
+      "capability": "Graph image I/O failure",
+      "workload": "Fail output after a known byte prefix and attempt to reconstruct it.",
+      "invariant": "Partial bytes match the independent prefix but cannot become a candidate; the original source remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "evaluated_text_images_keep_wire_identity_duplicates_raw_terms_and_historical_metadata",

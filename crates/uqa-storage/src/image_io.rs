@@ -6,23 +6,47 @@
 
 //! Bounded image I/O observes cancellation between partial and interrupted attempts.
 
-use super::{invalid, StorageBackendError, StorageBackendResult, StorageReadControl};
+use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use std::io::{Read, Write};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
 const CHUNK: usize = 4096;
 
-fn io_error(error: std::io::Error) -> StorageBackendError {
-    StorageBackendError::backend("evaluated text image I/O", error)
+fn invalid() -> StorageBackendError {
+    StorageBackendError::Other("invalid owner image stream".into())
 }
 
-pub(super) struct Output<'a> {
+fn io_error(error: std::io::Error) -> StorageBackendError {
+    StorageBackendError::backend("owner image I/O", error)
+}
+
+/// Bounded binary output for an owning image codec. Failed output belongs to the enclosing unpublished artifact.
+pub struct ImageOutput<'a> {
     pub writer: &'a mut dyn Write,
     pub control: &'a StorageReadControl,
     pub written: u64,
 }
 
-impl Output<'_> {
+impl ImageOutput<'_> {
+    /// Reuse Core's evaluated-value map codec. Its borrowed payload writes use at most 16 KiB windows and preserve all value carriers.
+    pub fn fields<'a>(
+        &mut self,
+        fields: impl ExactSizeIterator<Item = (&'a str, &'a uqa_core::Value)>,
+    ) -> StorageBackendResult<()> {
+        let written = uqa_core::value_image::write_fields_image(
+            fields,
+            self.writer,
+            self.control.memory(),
+            self.control.cancellation(),
+        )
+        .map_err(value_error)?;
+        self.written = self
+            .written
+            .checked_add(written)
+            .ok_or(MemoryError::SizeOverflow)?;
+        Ok(())
+    }
+
     pub fn bytes(&mut self, mut bytes: &[u8]) -> StorageBackendResult<()> {
         while !bytes.is_empty() {
             self.control.check()?;
@@ -58,12 +82,28 @@ impl Output<'_> {
     }
 }
 
-pub(super) struct Input<'a> {
+/// Controlled binary input; payload buffers retain their decoding allowance.
+pub struct ImageInput<'a> {
     pub reader: &'a mut dyn Read,
     pub control: &'a StorageReadControl,
 }
 
-impl Input<'_> {
+impl ImageInput<'_> {
+    pub fn value(&mut self) -> StorageBackendResult<Budgeted<uqa_core::Value>> {
+        uqa_core::value_image::read_value_image(
+            self.reader,
+            self.control.memory(),
+            self.control.cancellation(),
+        )
+        .map_err(value_error)
+    }
+
+    pub fn text(&mut self) -> StorageBackendResult<Budgeted<String>> {
+        let (bytes, memory) = self.bytes()?.into_parts();
+        let text = String::from_utf8(bytes).map_err(|_| invalid())?;
+        Ok(Budgeted::new(text, memory))
+    }
+
     pub fn exact(&mut self, mut bytes: &mut [u8]) -> StorageBackendResult<()> {
         while !bytes.is_empty() {
             self.control.check()?;
@@ -114,5 +154,13 @@ impl Input<'_> {
                 Err(error) => return Err(io_error(error)),
             }
         }
+    }
+}
+
+fn value_error(error: uqa_core::value_image::ValueImageError) -> StorageBackendError {
+    match error {
+        uqa_core::value_image::ValueImageError::Memory(error) => error.into(),
+        uqa_core::value_image::ValueImageError::Cancelled(error) => error.into(),
+        other => StorageBackendError::backend("owner image value", other),
     }
 }

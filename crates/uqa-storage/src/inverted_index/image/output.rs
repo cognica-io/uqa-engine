@@ -6,11 +6,8 @@
 
 //! Borrow existing reverse keys and occurrences instead of collecting a second corpus.
 
-use super::{
-    invalid, io::Output, DocId, MemoryInvertedIndex, StorageBackendResult, StorageReadControl,
-    MAGIC,
-};
-use crate::inverted_index::MemoryDocument;
+use super::{invalid, DocId, MemoryInvertedIndex, StorageBackendResult, StorageReadControl, MAGIC};
+use crate::{image_io::ImageOutput as Output, inverted_index::MemoryDocument};
 use uqa_core::TokenOccurrence;
 
 pub(super) fn write(

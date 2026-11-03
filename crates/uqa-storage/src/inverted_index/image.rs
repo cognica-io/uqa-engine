@@ -15,7 +15,6 @@ use crate::read_control::StorageReadControl;
 use uqa_core::memory::Budgeted;
 
 mod input;
-mod io;
 mod output;
 #[cfg(test)]
 pub(super) mod tests;

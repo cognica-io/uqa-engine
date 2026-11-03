@@ -7,9 +7,9 @@
 //! Admit and validate a complete evaluated document before publishing any postings.
 
 use super::{
-    invalid, io::Input, DocId, StagedMemoryDocument, StorageBackendResult, StorageReadControl,
-    MAGIC,
+    invalid, DocId, StagedMemoryDocument, StorageBackendResult, StorageReadControl, MAGIC,
 };
+use crate::image_io::ImageInput as Input;
 use crate::{
     inverted_index::{
         retained::copy_name, FieldName, IndexedFieldMetadata, MemoryPosting, PostingKey,

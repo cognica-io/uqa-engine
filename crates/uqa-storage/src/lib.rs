@@ -25,6 +25,7 @@ pub mod document_store;
 pub mod encryption_key;
 pub use encryption_key::StorageEncryptionKey;
 pub mod hnsw_index;
+pub mod image_io;
 pub mod index_abc;
 pub mod index_manager;
 pub mod index_types;
