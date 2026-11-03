@@ -49,14 +49,31 @@ pub fn fields(
     values: &BTreeMap<(String, String), FieldAnalyzerBinding>,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<CapturedFieldAnalyzerBindings>> {
+    selected_fields(values, |_| Ok(true), control)
+}
+
+/// The immutable table selection precedes field names and historical resource admission.
+pub fn selected_fields(
+    values: &BTreeMap<(String, String), FieldAnalyzerBinding>,
+    selected: impl Fn(&str) -> StorageBackendResult<bool>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<CapturedFieldAnalyzerBindings>> {
     let production = ProductionControl::new(
         control.memory(),
         control.cancellation(),
         control.cancellation(),
     );
+    let count = values.keys().try_fold(0, |count, (table, _)| {
+        control.check()?;
+        Ok::<_, crate::StorageBackendError>(count + usize::from(selected(table)?))
+    })?;
     let mut entries = ProductionVec::new(production);
-    entries.reserve(values.len())?;
+    entries.reserve(count)?;
     for ((table, field), binding) in values {
+        control.check()?;
+        if !selected(table)? {
+            continue;
+        }
         let FieldAnalyzerBinding {
             index,
             search,

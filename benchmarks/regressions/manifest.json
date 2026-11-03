@@ -39147,6 +39147,59 @@
         "case_1",
         "case_2"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_metadata_capture_selects_original_persistence_before_names_and_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_capture/tests.rs",
+      "capability": "Original table metadata selection",
+      "workload": "Capture quoted durable and unlogged owners beside one-MiB excluded index and analyzer metadata; compare native bytes, allocations and exact admission.",
+      "invariant": "Original persistence selects matching encoded indexes and historical analyzer sides with identical allocation and admission whether temporary metadata is present or absent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_metadata_capture_rejects_missing_or_invalid_original_relations_without_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_capture/tests.rs",
+      "capability": "Atomic original metadata joins",
+      "workload": "Capture index and field metadata with missing or malformed relation references, including failure after index output has been admitted.",
+      "invariant": "Unresolved original ownership returns no partial metadata and releases every prior payload lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_metadata_generations_retain_independent_controls_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_capture/tests.rs",
+      "capability": "Independent original table metadata controls",
+      "workload": "Retire an unread source selected by funded and insufficient captures, then cancel detached analyzer children after registry closure.",
+      "invariant": "Failure does not invalidate a funded peer; original metadata survives source loss and original cancellation releases all retained charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_table_metadata_preserves_original_relations_and_historical_analyzers",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/table_metadata.rs",
+      "capability": "Transaction table metadata generations",
+      "workload": "Select unread index and analyzer roots under 128 KiB beside large temporary metadata, private DDL and savepoints, then COMMIT/ROLLBACK, reuse table names and close the Engine.",
+      "invariant": "Exact original index encodings, historical analyzer bytes and table data survive together; temporary payloads are excluded and raw source roots retire.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
     }
   ]
 }

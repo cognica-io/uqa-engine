@@ -17,6 +17,7 @@ pub mod range_type;
 pub mod security;
 pub mod sequence;
 pub mod shell_type;
+pub mod table_capture;
 pub mod tuples;
 pub mod type_identity_restoration;
 pub(crate) mod type_records;

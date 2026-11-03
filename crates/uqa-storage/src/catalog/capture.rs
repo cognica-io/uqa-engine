@@ -65,10 +65,27 @@ pub fn indexes(
     values: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Vec<(RelationIdentity, CatalogIndexRow)>>> {
+    selected_indexes(values, |_| Ok(true), control)
+}
+
+/// The immutable table selection precedes output capacity and encoded-payload admission.
+pub fn selected_indexes(
+    values: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    selected: impl Fn(&str) -> StorageBackendResult<bool>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Vec<(RelationIdentity, CatalogIndexRow)>>> {
     let control = production(control);
+    let count = values.values().try_fold(0, |count, value| {
+        control.check()?;
+        Ok::<_, crate::StorageBackendError>(count + usize::from(selected(&value.table_name)?))
+    })?;
     let mut entries = ProductionVec::new(control);
-    entries.reserve(values.len())?;
+    entries.reserve(count)?;
     for (name, value) in values {
+        control.check()?;
+        if !selected(&value.table_name)? {
+            continue;
+        }
         let (name, key_memory) = relation(name, &control)?.into_parts();
         let (value, value_memory) = index(value, &control)?.into_parts();
         entries.push_produced(

@@ -15,6 +15,7 @@ mod catalogs;
 mod events;
 mod resources;
 mod sequences;
+mod table_metadata;
 
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();
