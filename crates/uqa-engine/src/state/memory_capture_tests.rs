@@ -13,6 +13,7 @@ use uqa_storage::read_control::StorageReadControl;
 mod catalog_authority;
 mod metadata;
 mod resources;
+mod roles;
 
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();

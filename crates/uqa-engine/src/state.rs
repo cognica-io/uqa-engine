@@ -180,9 +180,20 @@ pub(super) struct DurableCatalogState {
         CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
-    pub(super) roles: CatalogCell<BTreeMap<String, super::roles::RoleDefinition>>,
-    pub(super) role_memberships:
-        CatalogCell<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
+    pub(super) roles: CatalogCell<
+        BTreeMap<String, super::roles::RoleDefinition>,
+        Vec<(
+            String,
+            uqa_sql::catalog::roles::capture::CapturedRoleDefinition,
+        )>,
+    >,
+    pub(super) role_memberships: CatalogCell<
+        BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>,
+        Vec<(
+            super::roles::RoleMembershipKey,
+            super::roles::RoleMembership,
+        )>,
+    >,
     pub(super) triggers:
         CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
     pub(super) rules: CatalogCell<RuleCatalog>,

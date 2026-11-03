@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve role incarnations, tuple revisions, attributes and complete membership grant paths in retained memory catalog generations. Role rename, same-name replacement, rollback and Engine closure keep the selected authority under independent capture limits; complete committed Engine capture remains in progress.
 - Preserve memory database, schema and sequence authority in captured catalog generations, including bound role incarnations, ACL absence and grant paths, exact qualified names and namespace tuple identities. Complete committed Engine capture remains under implementation.
 - Retain immutable memory graph and model images through catalog replacement, rollback and Engine closure, with explicit payload admission and original cancellation preserved by independently retained image handles. Complete committed Engine selection and public backup jobs remain in progress.
 - Preserve non-temporary memory table definitions, complete ACL identities, statistics, analyzer configuration and allocation state through captured generations. Metadata mutation, rollback and source closure retain the original values under the backup's own limits; complete committed Engine selection and public backup jobs remain in progress.

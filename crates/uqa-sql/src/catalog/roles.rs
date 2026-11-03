@@ -10,6 +10,7 @@ use crate::ast::{CreateRoleStmt, RoleAttribute};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+pub mod capture;
 pub mod identity;
 pub mod rename;
 pub mod session;

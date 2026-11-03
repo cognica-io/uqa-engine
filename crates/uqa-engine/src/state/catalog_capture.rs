@@ -29,6 +29,16 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::security::capture::sequences,
         )?;
+        self.roles = CatalogCell::capture_source(
+            self.roles.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::roles::capture::roles,
+        )?;
+        self.role_memberships = CatalogCell::capture_source(
+            self.role_memberships.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::roles::capture::memberships,
+        )?;
         Ok(())
     }
 }

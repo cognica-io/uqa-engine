@@ -22,6 +22,17 @@ Pull-request workflows now select only ready-for-review candidates targeting `ma
 - [ ] Finish the single final-source automatic qualification: all 3,958 required Linux/macOS work, memory and output cases, the independent-process fixture, workspace checks and every affected C/package/FDW configuration.
 - [ ] Merge the qualified candidate, update #1322 and delivery records, and remove superseded branches.
 
+### Remaining durable catalog capture
+
+The dependent `feature/backup-catalog-generations` draft continues the unfinished catalog work from #1322 after integrated candidate #1343. Its first batch adds SQL-owned role and membership capture and registers both actual memory Engine catalogs. Exact role incarnations, tuple revisions, attributes, names and membership grant paths remain owned by independent capture allowances. SQL role tests pass all 61 cases on Linux aarch64 and macOS; Engine state/transaction verification and strict Clippy are still running. Five additional deterministic gates bring this draft to 2,800 checks and 3,963 required cases. The [role preservation argument](../design/backup-image-format.md#captured-role-and-membership-generations) covers the component boundary without claiming one committed Engine cut.
+
+- [ ] Complete role/membership Engine verification, failure isolation and strict owning-crate checks for the current batch.
+- [ ] Capture the remaining type, view, routine, event, comment, sequence/identity, foreign and system authority catalogs with exact owned representations and admitted payloads.
+- [ ] Finish analyzer/path resources and admitted table/catalog membership through their owning interfaces.
+- [ ] Reconcile final source, focused verification and live task records before integrating and qualifying the completed candidate once.
+
+Committed/private selection, autonomous overlays, joint-cut acceptance, fresh Engine activation, public jobs and incremental repository work retain their separate requirements in #1322. This draft does not expand or rerun #1343's fixed qualification source.
+
 ### Owner evidence before stack consolidation
 
 The following records preserve each original implementation scope and its source-specific verification. Their former dependency and pending-qualification statements describe those earlier candidates, not separate current delivery queues. All included implementation is now in #1343; only its complete integrated source receives final automatic qualification. The unfinished Engine-level requirements remain live in #1322 and are not marked complete by these owner results.

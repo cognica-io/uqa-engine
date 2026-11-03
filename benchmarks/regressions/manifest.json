@@ -18802,7 +18802,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -37510,6 +37510,71 @@
       "capability": "Authority capture failure isolation",
       "workload": "Revoke a real schema grant with independent insufficient and sufficient capture limits.",
       "invariant": "The grant mutation completes, only the unfunded cut fails and the other capture retains the original authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_capture_preserves_incarnations_revisions_attributes_and_exact_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Role definition capture",
+      "workload": "Capture all seven role attributes, maximum tuple revision, exact names and independent identity before source loss.",
+      "invariant": "Every role field and ordered attribute survives under admitted output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_capture_keeps_distinct_incarnations_grant_paths_and_all_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Membership identity capture",
+      "workload": "Capture multiple grant paths and recycled role OIDs with distinct incarnations.",
+      "invariant": "Endpoint incarnations, row identities and all membership flags remain distinct and exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_capture_uses_independent_admission_and_retires_failed_production",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Role capture admission",
+      "workload": "Capture denied large role/grantor names and an independently admitted session binding; cancel original and capture controls.",
+      "invariant": "Failed output retains no reservation; captured bindings do not retain source session admission or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_role_capture_preserves_rollback_membership_and_same_name_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/roles.rs",
+      "capability": "Actual Engine role generations",
+      "workload": "Capture real SQL roles and memberships before savepoint rollback, rename, same-name replacement and unread Engine closure.",
+      "invariant": "Selected tuple versions and grant paths remain unchanged and retain original capture cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "underfunded_role_capture_does_not_abort_role_or_membership_changes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/roles.rs",
+      "capability": "Role capture failure isolation",
+      "workload": "Alter and revoke real role state with independent denied and funded captures.",
+      "invariant": "Ordinary publication completes, only the underfunded cut fails and all capture reservations retire.",
       "case_names": [
         ""
       ]

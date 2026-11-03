@@ -175,6 +175,22 @@ impl RoleSubject for RoleReference {
 }
 
 impl RoleBinding {
+    /// Copy a selected incarnation without retaining an unrelated owner's allowance.
+    pub fn capture_binding(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, SQLError> {
+        let Self {
+            name,
+            oid,
+            object_id,
+            memory: _,
+        } = self;
+        let output = crate::plan::copy::SyntaxProduction::new(*control);
+        let copied = Self::new(output.text(name)?, *oid, *object_id);
+        output.finish(copied)
+    }
+
     pub fn new(name: String, oid: u32, object_id: [u8; 16]) -> Self {
         Self {
             name,
