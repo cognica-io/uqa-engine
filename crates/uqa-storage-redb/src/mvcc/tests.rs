@@ -13,6 +13,7 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod backup_metadata;
 mod commit;
 mod diskann;
 mod identifiers;
@@ -24,6 +25,20 @@ mod receipts;
 mod reclamation;
 mod serializable;
 mod vector_spill;
+
+fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
+    transaction
+        .delete_table(super::backup_metadata::BIRTHS)
+        .unwrap();
+    transaction
+        .delete_table(super::backup_metadata::HISTORY)
+        .unwrap();
+    transaction
+        .open_table(METADATA)
+        .unwrap()
+        .remove(super::backup_metadata::EPOCH)
+        .unwrap();
+}
 
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {

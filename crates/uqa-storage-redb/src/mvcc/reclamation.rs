@@ -9,12 +9,15 @@
 use super::{codec, physical_writer, RedbRecordStore, HEADS, METADATA, VERSIONS};
 use crate::error::redb_error;
 use redb::ReadableTable;
-use uqa_storage::mvcc::{CommitSequence, ReclamationHorizon, VersionError, VersionResult};
+use uqa_storage::mvcc::{
+    CommitSequence, MetadataEpoch, ReclamationHorizon, VersionError, VersionResult,
+};
 use uqa_storage::read_control::StorageReadControl;
 
 pub(super) fn reclaim(
     store: &RedbRecordStore,
     oldest: Option<CommitSequence>,
+    oldest_metadata: Option<MetadataEpoch>,
     control: &StorageReadControl,
 ) -> VersionResult<u64> {
     control.cancellation().check()?;
@@ -61,6 +64,7 @@ pub(super) fn reclaim(
             }
         }
     }
+    super::backup_metadata::reclaim(&transaction, oldest_metadata, control)?;
     control.cancellation().check()?;
     transaction.commit().map_err(redb_error)?;
     Ok(removed)

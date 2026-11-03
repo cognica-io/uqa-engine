@@ -6,6 +6,7 @@
 
 //! Short redb transactions persist versioned records and authoritative commit receipts.
 
+mod backup_metadata;
 mod codec;
 mod identifiers;
 mod migration;
@@ -37,8 +38,8 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Every owner preserves expanded record field bindings and their original tuple bytes.
-const RECORD_FORMAT: u64 = 63;
+/// Every identifier writer preserves metadata boundaries retained by online backups.
+const RECORD_FORMAT: u64 = 64;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");
@@ -53,6 +54,7 @@ pub struct RedbRecordStore {
     database: Arc<Database>,
     identity: DatabaseId,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    metadata_snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry<uqa_storage::mvcc::MetadataEpoch>>,
     serializable: Arc<uqa_storage::mvcc::LocalSerializableState>,
     receipts: Arc<uqa_storage::mvcc::LocalSerializableState>,
 }
@@ -65,6 +67,7 @@ impl RedbRecordStore {
     pub(crate) fn new(database: Arc<Database>) -> VersionResult<Self> {
         let transaction = physical_writer(&database)?;
         let present = record_table_presence(&transaction)?;
+        let initialize_backup_metadata;
         let identity = {
             let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
             let heads = transaction.open_table(HEADS).map_err(redb_error)?;
@@ -82,9 +85,16 @@ impl RedbRecordStore {
                 if !(1..=RECORD_FORMAT).contains(&format) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
-                if present != if format < 5 { 15 } else { 31 } {
+                let expected = if format < 5 {
+                    15
+                } else if format < 64 {
+                    31
+                } else {
+                    127
+                };
+                if present != expected {
                     return Err(VersionError::InvalidEncoding(
-                        "identifier allocation table disagrees with record format",
+                        "record tables disagree with record format",
                     ));
                 }
                 let allocated = read_u64(&metadata, "allocated")?;
@@ -111,6 +121,7 @@ impl RedbRecordStore {
                 if format < 53 {
                     identifiers::consolidate_diskann_generations(&mut identifiers)?;
                 }
+                initialize_backup_metadata = format < 64;
                 if format < RECORD_FORMAT {
                     metadata
                         .insert("format", RECORD_FORMAT.to_be_bytes().as_slice())
@@ -129,17 +140,21 @@ impl RedbRecordStore {
                         "uninitialized metadata has record data",
                     ));
                 }
+                initialize_backup_metadata = true;
                 initialize_record_metadata(&mut metadata)?
             }
         };
+        backup_metadata::initialize(&transaction, initialize_backup_metadata)?;
         transaction.commit().map_err(redb_error)?;
         let snapshots = retention::registry(&database, identity)?;
+        let metadata_snapshots = retention::metadata_registry(&database, identity)?;
         let serializable = serializable::registry(&database, identity, false)?;
         let receipts = serializable::registry(&database, identity, true)?;
         Ok(Self {
             database,
             identity,
             snapshots,
+            metadata_snapshots,
             serializable,
             receipts,
         })
@@ -337,8 +352,17 @@ impl VersionedPersistence for RedbRecordStore {
 
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
-            reclamation::reclaim(self, oldest, control)
+            self.metadata_snapshots.reclaim(control, |oldest_metadata| {
+                reclamation::reclaim(self, oldest, oldest_metadata, control)
+            })
         })
+    }
+
+    fn capture_backup_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<Arc<dyn uqa_storage::mvcc::CommittedBackupSnapshot>>> {
+        backup_metadata::capture(self, control).map(Some)
     }
 
     fn reclaim_tombstones(
@@ -468,6 +492,8 @@ fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
         VERSIONS.name(),
         TRANSACTIONS.name(),
         identifiers::TABLE.name(),
+        backup_metadata::BIRTHS.name(),
+        backup_metadata::HISTORY.name(),
     ];
     let mut present = 0_u8;
     for table in transaction.list_tables().map_err(redb_error)? {
@@ -475,7 +501,7 @@ fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
             present |= 1 << position;
         }
     }
-    if present != 0 && present != 15 && present != 31 {
+    if !matches!(present, 0 | 15 | 31 | 127) {
         return Err(VersionError::InvalidEncoding("incomplete record table set"));
     }
     Ok(present)
