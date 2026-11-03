@@ -52,6 +52,52 @@ fn rule() -> StoredRule {
     }
 }
 
+#[test]
+fn durable_rules_exclude_temporary_relations_before_admitting_names_and_bodies() {
+    let mut source = RuleCatalog::from([
+        (
+            RelationIdentity::new("Quoted.Schema", "Relation.Name"),
+            Arc::new(BTreeMap::from([("saved".into(), rule())])),
+        ),
+        (
+            RelationIdentity::new("public", "pg_temp_local"),
+            Arc::new(BTreeMap::new()),
+        ),
+    ]);
+    let memory = MemoryBudget::new(128 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let original = durable_rules(&source, &control).unwrap();
+    let retained = memory.used();
+    let mut temporary = rule();
+    temporary.definition.name = "x".repeat(1 << 20);
+    source.insert(
+        RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
+        Arc::new(BTreeMap::from([("huge".into(), temporary)])),
+    );
+    source.insert(
+        RelationIdentity::new("pg_toast_temp_1", "toast"),
+        Arc::new(BTreeMap::new()),
+    );
+    let saved = durable_rules(&source, &control).unwrap();
+    assert_eq!(memory.used(), retained * 2);
+    assert_eq!(saved.len(), 2);
+    same(&saved[0].1[0].1, &source[&saved[0].0]["saved"]);
+    assert_eq!(saved[1].0, RelationIdentity::new("public", "pg_temp_local"));
+    assert!(rules(&source, &control).is_err());
+    drop((saved, original));
+    assert_eq!(memory.used(), 0);
+    let exact = MemoryBudget::new(retained);
+    let saved = durable_rules(&source, &ProductionControl::new(&exact, &token, &token)).unwrap();
+    let denied = MemoryBudget::new(retained - 1);
+    assert!(durable_rules(&source, &ProductionControl::new(&denied, &token, &token)).is_err());
+    assert_eq!(denied.used(), 0);
+    drop(saved);
+    assert_eq!(exact.used(), 0);
+    token.cancel();
+    assert!(durable_rules(&source, &control).is_err());
+}
+
 fn same(value: &CapturedRule, old: &StoredRule) {
     assert_eq!(
         serde_json::to_value(&value.definition).unwrap(),

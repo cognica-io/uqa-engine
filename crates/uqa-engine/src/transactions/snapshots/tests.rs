@@ -9,8 +9,11 @@ use std::sync::{mpsc, Arc};
 use uqa_core::RelationIdentity;
 use uqa_storage::read_control::StorageReadControl;
 
+mod authority;
 mod capture;
 mod catalogs;
+mod events;
+mod resources;
 mod sequences;
 
 fn sql(engine: &Engine, text: &str) {

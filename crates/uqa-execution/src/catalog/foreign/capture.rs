@@ -21,6 +21,9 @@ use uqa_sql::{
     SQLError,
 };
 
+mod durable;
+pub use durable::{CapturedForeignRelation, ForeignTableCaptureSource};
+
 #[derive(Debug)]
 pub struct CapturedForeignTable {
     pub name: String,

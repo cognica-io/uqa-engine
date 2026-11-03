@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -39039,6 +39039,113 @@
       "invariant": "Capture completes before the callback, excludes temporary/private definitions and releases every lease after source and result closure.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_triggers_exclude_temporary_relations_before_admitting_names_and_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Durable trigger membership",
+      "workload": "Add one-MiB temporary names and arguments beside quoted durable and temporary-looking local relation names.",
+      "invariant": "Excluded entries add no retained capacity; complete durable bindings and original admission survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_rules_exclude_temporary_relations_before_admitting_names_and_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Durable rule membership",
+      "workload": "Add one-MiB temporary relation and rule bodies, then capture at exact and insufficient allowances.",
+      "invariant": "Durable bindings preserve original OLD/NEW metadata; excluded bodies are never admitted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_foreign_capture_joins_original_authority_before_admitting_selected_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/durable/tests.rs",
+      "capability": "Original foreign membership and authority",
+      "workload": "Join permanent/unlogged definitions and ACL revisions beside a huge temporary definition with no authority row.",
+      "invariant": "Original identities and absent/empty ACLs survive; exclusion precedes joining and retained allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_foreign_capture_rejects_missing_selected_authority_and_releases_partial_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/durable/tests.rs",
+      "capability": "Foreign capture join completeness",
+      "workload": "Remove authority for a selected relation after an earlier complete row.",
+      "invariant": "Capture rejects incomplete metadata and releases every partial-output lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "durable_foreign_capture_retains_original_admission_and_independent_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/durable/tests.rs",
+      "capability": "Foreign capture resource ownership",
+      "workload": "Capture with insufficient and exact allowances, close the source and cancel only one successful capture.",
+      "invariant": "Denial leaks no leases; independent capture survives original cancellation and releases its final allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_authority_sources_preserve_matching_foreign_and_role_generations_after_retirement",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/authority.rs",
+      "capability": "Transaction authority generations",
+      "workload": "Capture original role, authority and foreign roots beside private data/DDL and a savepoint; complete, replace and close.",
+      "invariant": "Original object identities, table data, ACL paths and revisions remain joined through COMMIT/ROLLBACK and cancellation.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/events.rs",
+      "capability": "Transaction durable event generations",
+      "workload": "Preserve unread trigger/rule sources with huge temporary events and foreign metadata under 64 KiB through COMMIT/ROLLBACK.",
+      "invariant": "Temporary payloads are excluded before admission and original bound events survive name replacement and Engine closure.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_resource_sources_preserve_original_images_across_private_mutation_and_closure",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/resources.rs",
+      "capability": "Transaction resource generations",
+      "workload": "Mutate graph/model/path/analyzer/scoring resources in private frames, capture independently funded and denied cuts, complete and close.",
+      "invariant": "Original native images, graph identities, evaluated paths and table data survive; child cancellation and complete lease release remain independent.",
+      "case_names": [
+        "case_1",
+        "case_2"
       ]
     }
   ]

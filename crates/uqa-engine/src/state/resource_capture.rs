@@ -64,7 +64,7 @@ impl DurableCatalogState {
     }
 }
 
-fn resources<T, F>(
+pub(super) fn resources<T, F>(
     values: &BTreeMap<String, T>,
     control: &StorageReadControl,
     capture: fn(&T, &StorageReadControl) -> StorageBackendResult<F>,

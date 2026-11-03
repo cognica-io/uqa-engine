@@ -6,7 +6,9 @@
 
 //! Register the original immutable definitions with their owning durable producers.
 
-use crate::state::{CatalogCell, DurableCatalogSnapshot, SnapshotTableSources};
+use crate::state::{
+    BoundDatabaseSecurity, CatalogCell, DurableCatalogSnapshot, SnapshotTableSources,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::{
@@ -14,7 +16,12 @@ use uqa_sql::catalog::{
     definition_capture::{routines::CapturedRoutines, views::CapturedViews},
     domain::StoredDomain,
     enum_type::StoredEnum,
+    events::{RuleCatalog, TriggerCatalog},
+    foreign_server::ForeignServerDefinition,
+    foreign_wrapper::ForeignWrappers,
+    graph_oids::GraphCatalogOids,
     range_type::StoredRange,
+    roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
     security::BoundSchemaSecurity,
     shell_type::StoredShellType,
     stored_view::StoredView,
@@ -64,4 +71,14 @@ catalog_sources! {
     schemas: BTreeMap<String, BoundSchemaSecurity> => Vec<(String, BoundSchemaSecurity)>, uqa_sql::catalog::security::capture::schemas;
     views: BTreeMap<RelationIdentity, StoredView> => CapturedViews, uqa_sql::catalog::definition_capture::views::durable_views;
     sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;
+    roles: BTreeMap<String, RoleDefinition> => Vec<(String, uqa_sql::catalog::roles::capture::CapturedRoleDefinition)>, uqa_sql::catalog::roles::capture::roles;
+    role_memberships: BTreeMap<RoleMembershipKey, RoleMembership> => Vec<(RoleMembershipKey, RoleMembership)>, uqa_sql::catalog::roles::capture::memberships;
+    database_security: BoundDatabaseSecurity => BoundDatabaseSecurity, BoundDatabaseSecurity::capture_security;
+    builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => Vec<(u32, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity)>, uqa_sql::catalog::security::capture::relations::builtin_routines;
+    system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => Vec<(RelationIdentity, uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity)>, uqa_sql::catalog::security::capture::relations::system_relations;
+    foreign_wrappers: ForeignWrappers => Vec<(String, uqa_sql::catalog::foreign_wrapper::ForeignWrapperDefinition)>, uqa_sql::catalog::definition_capture::foreign::wrappers;
+    foreign_servers: BTreeMap<String, ForeignServerDefinition> => Vec<(String, uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer)>, uqa_sql::catalog::definition_capture::foreign::servers;
+    triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;
+    rules: RuleCatalog => uqa_sql::catalog::definition_capture::rules::CapturedRules, uqa_sql::catalog::definition_capture::rules::durable_rules;
+    graph_catalog_oids: BTreeMap<String, GraphCatalogOids> => Vec<(String, uqa_sql::catalog::definition_capture::identities::CapturedGraphCatalogOids)>, uqa_sql::catalog::definition_capture::identities::graph_oids;
 }

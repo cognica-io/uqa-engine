@@ -11,7 +11,8 @@ use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
-    security::roles::persistence::RoleCatalogSnapshot, sequence::snapshot::SequenceReadSnapshot,
+    foreign::capture::ForeignTableCaptureSource, security::roles::persistence::RoleCatalogSnapshot,
+    sequence::snapshot::SequenceReadSnapshot,
 };
 use uqa_storage::{
     memory_capture::{MemoryCaptureCell, MemoryCaptureRegistry},
@@ -19,12 +20,15 @@ use uqa_storage::{
 };
 
 mod catalogs;
+mod resources;
 
 pub(crate) struct SnapshotSources {
     // Retire membership before the catalog sources it selects.
     tables: SnapshotTableSources,
     sequences: MemoryCaptureCell<SequenceReadSnapshot>,
+    foreign: MemoryCaptureCell<ForeignTableCaptureSource>,
     catalogs: catalogs::CatalogSources,
+    resources: resources::ResourceSources,
 }
 
 impl SnapshotSources {
@@ -45,13 +49,22 @@ impl SnapshotSources {
             },
         })?;
         let catalogs = catalogs::CatalogSources::new(&registry, durable)?;
+        let resources = resources::ResourceSources::new(&registry, durable)?;
+        let foreign = registry.cell(ForeignTableCaptureSource {
+            tables: durable.foreign_tables.clone(),
+            security: durable.foreign_table_security.clone(),
+        })?;
         let mut sources = Self {
             tables: SnapshotTableSources::new(registry, tables)?,
             sequences,
+            foreign,
             catalogs,
+            resources,
         };
         sources.tables.select(&sources.sequences.key()?)?;
+        sources.tables.select(&sources.foreign.key()?)?;
         sources.catalogs.select(&mut sources.tables)?;
+        sources.resources.select(&mut sources.tables)?;
         Ok(sources)
     }
 }
@@ -64,10 +77,19 @@ type SequenceKey = uqa_storage::memory_capture::MemoryCaptureKey<
 >;
 
 #[cfg(test)]
+type ForeignKey = uqa_storage::memory_capture::MemoryCaptureKey<
+    uqa_storage::memory_capture::CapturedMemoryValue<
+        Vec<uqa_execution::catalog::foreign::capture::CapturedForeignRelation>,
+    >,
+>;
+
+#[cfg(test)]
 pub(crate) struct SnapshotCut {
     pub(crate) tables: super::SnapshotTableCut,
     pub(crate) sequences: uqa_core::memory::Budgeted<SequenceKey>,
+    pub(crate) foreign: uqa_core::memory::Budgeted<ForeignKey>,
     pub(crate) catalogs: uqa_core::memory::Budgeted<catalogs::CatalogKeys>,
+    pub(crate) resources: uqa_core::memory::Budgeted<resources::ResourceKeys>,
 }
 
 #[cfg(test)]
@@ -90,11 +112,18 @@ impl SnapshotSources {
             .memory()
             .reserve(size_of::<SequenceKey>() + key.retained_source_bytes())?;
         let catalogs = self.catalogs.keys(control)?;
+        let resources = self.resources.keys(control)?;
+        let foreign = self.foreign.key()?;
+        let foreign_memory = control
+            .memory()
+            .reserve(size_of::<ForeignKey>() + foreign.retained_source_bytes())?;
         let tables = self.tables.capture(control)?;
         Ok(SnapshotCut {
             tables,
             sequences: uqa_core::memory::Budgeted::new(key, memory),
+            foreign: uqa_core::memory::Budgeted::new(foreign, foreign_memory),
             catalogs,
+            resources,
         })
     }
 }

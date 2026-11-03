@@ -295,7 +295,8 @@ fn committed_table_capture_admission_does_not_walk_or_freeze_the_table_corpus() 
 fn committed_table_selection_excludes_definitions_created_in_the_outer_message() {
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE private_data(id integer); INSERT INTO private_data VALUES(1); BEGIN; INSERT INTO private_data VALUES(2)");
-    let control = StorageReadControl::with_limit(4096);
+    // Fixed family keys now include all authority and immutable resource sources.
+    let control = StorageReadControl::with_limit(8192);
     let selected = capture(&engine, &control);
     assert!(selected.names().unwrap().is_empty());
     sql(&engine, "COMMIT");
