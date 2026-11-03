@@ -8,9 +8,11 @@
 
 use super::{
     Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, Engine, FieldName,
-    PersistentStorageBackend, RwLock, StorageBackendError, StorageBackendResult, TableSchema,
-    TableState, VectorIndex,
+    PersistentStorageBackend, StorageBackendError, StorageBackendResult, TableSchema, TableState,
+    VectorIndex,
 };
+use crate::state::CatalogCell;
+use crate::statistics::MaintenanceState;
 use crate::{VectorIndexOpenMode, VectorIndexSpec};
 use uqa_execution::schema::indexes::constraint_names::KeyConstraintNames;
 
@@ -79,7 +81,7 @@ impl Engine {
                     allocator.persist(
                         catalog,
                         &relation.qualified_name(),
-                        &mut table.next_id.lock(),
+                        &mut table.next_id.write(),
                     )?;
                 }
             }
@@ -204,12 +206,8 @@ impl Engine {
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
         let column_stats_dirty = (column_stats.is_empty() && !columns.is_empty())
-            || crate::statistics::MaintenanceState::load_for(
-                catalog,
-                &table_name,
-                schema.object_id,
-            )?
-            .invalidates_existing_statistics();
+            || MaintenanceState::load_for(catalog, &table_name, schema.object_id)?
+                .invalidates_existing_statistics();
         let max_id = docs.max_doc_id()?;
         let persisted_next_id = if columns.iter().any(|column| {
             column
@@ -229,27 +227,27 @@ impl Engine {
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
-            security: crate::state::CatalogCell::new(security),
-            storage_generation: RwLock::new(schema.storage_generation),
+            security: CatalogCell::new(security),
+            storage_generation: CatalogCell::new(schema.storage_generation),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv),
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vectors.into()),
-            fts_fields: crate::state::CatalogCell::new(schema.fts_fields),
-            columns_declared: crate::state::CatalogCell::new(
+            fts_fields: CatalogCell::new(schema.fts_fields),
+            columns_declared: CatalogCell::new(
                 constraints.columns_declared.unwrap_or(!columns.is_empty()),
             ),
-            columns: crate::state::CatalogCell::new(columns),
-            next_id: parking_lot::Mutex::new(next_id),
-            maps_integer_keys: AtomicBool::new(maps_integer_keys),
-            analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::new(column_stats.into()),
-            column_stats_loaded: AtomicBool::new(true),
-            column_stats_dirty: AtomicBool::new(column_stats_dirty),
-            statistics_maintenance: parking_lot::Mutex::default(),
-            table_checks: crate::state::CatalogCell::new(constraints.checks),
-            foreign_keys: crate::state::CatalogCell::new(constraints.foreign_keys),
-            key_constraints: crate::state::CatalogCell::new(constraints.key_constraints),
-            hierarchy: crate::state::CatalogCell::new(constraints.hierarchy),
+            columns: CatalogCell::new(columns),
+            next_id: CatalogCell::new(next_id),
+            maps_integer_keys: CatalogCell::new(maps_integer_keys),
+            analyzer: CatalogCell::new(analyzer),
+            column_stats: CatalogCell::new(column_stats.into()),
+            column_stats_loaded: CatalogCell::new(true),
+            column_stats_dirty: CatalogCell::new(column_stats_dirty),
+            statistics_maintenance: CatalogCell::new(MaintenanceState::default()),
+            table_checks: CatalogCell::new(constraints.checks),
+            foreign_keys: CatalogCell::new(constraints.foreign_keys),
+            key_constraints: CatalogCell::new(constraints.key_constraints),
+            hierarchy: CatalogCell::new(constraints.hierarchy),
             value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 uqa_execution::catalog::index::value::ValueIndexes::default(),
             ),
@@ -258,8 +256,8 @@ impl Engine {
             persistence: constraints.persistence,
             on_commit: constraints.on_commit,
             catalog_oids: constraints.catalog_oids,
-            row_type_array_name: crate::state::CatalogCell::new(constraints.row_type_array_name),
-            dropped_attributes: crate::state::CatalogCell::new(constraints.dropped_attributes),
+            row_type_array_name: CatalogCell::new(constraints.row_type_array_name),
+            dropped_attributes: CatalogCell::new(constraints.dropped_attributes),
         }))
     }
 }

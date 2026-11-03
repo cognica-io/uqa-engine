@@ -392,7 +392,7 @@ impl Engine {
                     )?
                 };
                 table.column_stats.restore(&stats);
-                table.column_stats_loaded.store(true, Ordering::Release);
+                *table.column_stats_loaded.write() = true;
             }
             let dirty = (table.column_stats.read().is_empty() && !table.columns.read().is_empty())
                 || crate::statistics::MaintenanceState::load_for(
@@ -401,7 +401,7 @@ impl Engine {
                     table.object_id(),
                 )?
                 .invalidates_existing_statistics();
-            table.column_stats_dirty.store(dirty, Ordering::Release);
+            *table.column_stats_dirty.write() = dirty;
         }
         if partition_watermarks_changed {
             self.synchronize_partition_identity_watermarks()?;

@@ -11,14 +11,40 @@ use crate::{plan::copy::SyntaxProduction, SQLError};
 use std::collections::BTreeMap;
 use uqa_core::memory::{Produced, ProductionControl};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CapturedTablePrivileges {
     pub role_owner: RoleIdentity,
     acl: Option<Vec<BoundTableAclEntry>>,
     column_acls: Vec<(String, Vec<BoundTableAclEntry>)>,
 }
 
+/// Full stored relation authority includes ACL tuple identities as well as the paths consulted by privilege checks. Ordered vectors avoid unaccounted native-map allocation in retained images.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CapturedTableSecurity {
+    pub privileges: CapturedTablePrivileges,
+    pub relation_revision: Option<[u8; 16]>,
+    pub column_revisions: Vec<(String, [u8; 16])>,
+}
+
 impl BoundTableSecurity {
+    pub fn capture_security(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<CapturedTableSecurity>, SQLError> {
+        let output = SyntaxProduction::new(*control);
+        let privileges = output.take(self.capture_privileges(control)?);
+        let mut revisions = output.vector(self.acl_revisions.columns.len())?;
+        for (column, revision) in &self.acl_revisions.columns {
+            revisions.push((output.text(column)?, *revision))?;
+        }
+        let captured = CapturedTableSecurity {
+            privileges,
+            relation_revision: self.acl_revisions.relation,
+            column_revisions: revisions.finish()?,
+        };
+        output.finish(captured)
+    }
+
     /// Retain every ACL path used by authorization, preserving absence and lexical column order.
     pub fn capture_privileges(
         &self,
@@ -46,6 +72,14 @@ impl BoundTableSecurity {
 }
 
 impl CapturedTablePrivileges {
+    pub fn acl(&self) -> Option<&[BoundTableAclEntry]> {
+        self.acl.as_deref()
+    }
+
+    pub fn column_acls(&self) -> &[(String, Vec<BoundTableAclEntry>)] {
+        &self.column_acls
+    }
+
     pub fn resolve(
         &self,
         roles: &BTreeMap<String, RoleDefinition>,

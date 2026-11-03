@@ -9,7 +9,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use parking_lot::{Mutex, RwLock};
 use uqa_storage::{PersistentStorageProvider, PersistentStorageSession, StorageBackendResult};
 
 use crate::state::CatalogCell;
@@ -105,7 +104,7 @@ impl Engine {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
             security: CatalogCell::from_snapshot(source.security.snapshot()),
-            storage_generation: RwLock::new(source.storage_generation()),
+            storage_generation: crate::state::CatalogCell::new(source.storage_generation()),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 storage.backend.document_store(name),
             ),
@@ -119,15 +118,15 @@ impl Engine {
             fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
-            next_id: Mutex::new(*source.next_id.lock()),
-            maps_integer_keys: AtomicBool::new(source.maps_integer_keys.load(Ordering::Acquire)),
+            next_id: crate::state::CatalogCell::new(*source.next_id.read()),
+            maps_integer_keys: crate::state::CatalogCell::new(*source.maps_integer_keys.read()),
             analyzer: CatalogCell::from_snapshot(source.analyzer.snapshot()),
             column_stats: CatalogCell::from_snapshot(source.column_stats.snapshot()),
-            column_stats_loaded: AtomicBool::new(
-                source.column_stats_loaded.load(Ordering::Acquire),
+            column_stats_loaded: crate::state::CatalogCell::new(*source.column_stats_loaded.read()),
+            column_stats_dirty: crate::state::CatalogCell::new(*source.column_stats_dirty.read()),
+            statistics_maintenance: crate::state::CatalogCell::new(
+                source.statistics_maintenance.read().clone(),
             ),
-            column_stats_dirty: AtomicBool::new(source.column_stats_dirty.load(Ordering::Acquire)),
-            statistics_maintenance: Mutex::new(source.statistics_maintenance.lock().clone()),
             table_checks: CatalogCell::from_snapshot(source.table_checks.snapshot()),
             foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
             key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),

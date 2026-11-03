@@ -350,7 +350,7 @@ impl Engine {
             )
         })?;
         let next_candidate = || {
-            allocator.allocate(&mut t.next_id.lock()).map_err(|error| {
+            allocator.allocate(&mut t.next_id.write()).map_err(|error| {
                 uqa_execution::mutation::errors::identifier_storage_error(
                     &format!("allocate document id for `{table}`"),
                     &error,
@@ -378,7 +378,7 @@ impl Engine {
                 .try_table(table)
                 .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
                 .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
-            let mut next = state.next_id.lock();
+            let mut next = state.next_id.write();
             *next = (*next).max(u128::from(
                 uqa_sql::semantics::key_identity::KEY_IDENTITY_LIMIT,
             ));
@@ -444,7 +444,7 @@ impl Engine {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
-        let mut next = t.next_id.lock();
+        let mut next = t.next_id.write();
         DocumentIdAllocator::observe(&mut next, doc_id)
     }
 
@@ -458,7 +458,7 @@ impl Engine {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
-        let mut next = t.next_id.lock();
+        let mut next = t.next_id.write();
         self.table_identifier_allocator(&t)?
             .persist(catalog.as_ref(), table, &mut next)
     }
@@ -491,7 +491,7 @@ impl Engine {
             None
         };
         let maximum = state.document_store.read().max_doc_id()?;
-        let mut current = state.next_id.lock();
+        let mut current = state.next_id.write();
         *current = restored_document_id_watermark(maximum, persisted.or(Some(*current)));
         Ok(())
     }

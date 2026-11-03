@@ -7,6 +7,7 @@
 //! Statistics sampling and publication preserve concurrent writes and newer changes.
 
 use super::*;
+use std::sync::atomic::Ordering;
 
 fn sessions() -> (tempfile::TempDir, Engine, Engine) {
     sessions_for(0)

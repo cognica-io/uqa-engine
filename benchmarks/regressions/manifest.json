@@ -37136,6 +37136,188 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_memory_values_keep_their_original_allowance_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Captured payload ownership",
+      "workload": "Attempt foreign-allowance rebinding and cancel a detached captured payload after source loss.",
+      "invariant": "Rebinding is rejected, original cancellation remains authoritative and the final payload release returns its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_statistics_maintenance_keeps_all_inline_state_without_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/tests.rs",
+      "capability": "Exact statistics maintenance state",
+      "workload": "Capture every statistics-maintenance field under a zero-byte payload allowance and repeat after cancellation.",
+      "invariant": "All inline counters and flags are identical without payload allocation; cancellation returns no candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_capture_keeps_deferred_errors_and_unresolved_source_paths",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/diagnostics/tests.rs",
+      "capability": "Unresolved analyzer configuration capture",
+      "workload": "Encode an invalid regular expression and a nonexistent synonym resource path without compiling or resolving either.",
+      "invariant": "Original configuration survives unchanged and capture performs no external file access or deferred validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_capture_admits_large_output_and_releases_interrupted_encoding",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/diagnostics/tests.rs",
+      "capability": "Bounded analyzer configuration encoding",
+      "workload": "Encode a one-MiB configuration with insufficient and sufficient allowances, then interrupt encoding.",
+      "invariant": "Output capacity is admitted before growth, successful bytes retain their lease and failure or cancellation releases partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_columns_detach_retained_literal_payloads_into_the_capture_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Independent retained catalog constants",
+      "workload": "Capture a one-MiB retained constant with independent allowances while an unrelated SQL statement is cancelled.",
+      "invariant": "Insufficient admission fails; successful capture owns exact value/type/declaration/collation independently, follows only its capture controls and retires all payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_capture_rejects_query_expressions_outside_stored_column_invariants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Stored definition capture domain",
+      "workload": "Attempt to capture a column default containing a query expression.",
+      "invariant": "Invalid stored-definition input returns an error and releases its complete partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_columns_keep_nested_value_representations_and_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Exact table column generations",
+      "workload": "Capture identity/default/check metadata, tag-shaped maps and payload-specific floating-point values, then destroy the source.",
+      "invariant": "Column identities, physical positions, expressions and exact evaluated representations survive independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_definitions_preserve_constraints_partitions_and_dropped_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Complete table definition components",
+      "workload": "Capture checks, foreign and unique keys, partition bounds, dropped attributes and optional names.",
+      "invariant": "Each component preserves its original stored definition and releases its complete admission after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_capture_admits_large_payloads_before_copying_and_releases_failed_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/tests.rs",
+      "capability": "Catalog payload admission",
+      "workload": "Attempt a one-MiB column name under four KiB, retry with sufficient admission and cancel an empty capture.",
+      "invariant": "Failed admission allocates below 64 KiB, complete output retains its name payload and all terminal paths release their allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_table_security_keeps_full_acl_tuple_identity_and_releases_failed_copies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests.rs",
+      "capability": "Full table authority generations",
+      "workload": "Capture relation and column privileges with relation/column ACL revisions including a removed-column tombstone.",
+      "invariant": "Privilege paths, owners and every ACL tuple identity remain exact; failed admission releases partial authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_capture_preserves_the_displaced_root_before_snapshot_restoration",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/catalog_cell.rs",
+      "capability": "Catalog rollback capture boundary",
+      "workload": "Capture a private metadata root, restore its predecessor and destroy the cell and registry.",
+      "invariant": "Restoration preserves the displaced selected root before replacement; detached output survives and retires its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_definition_capture_preserves_ddl_rollback_and_unread_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Actual Engine table metadata capture",
+      "workload": "Capture table definitions and inline lifecycle metadata before DDL, insertion, TRUNCATE, savepoint/transaction rollback, replacement and unread Engine closure.",
+      "invariant": "All selected metadata, analyzer configuration, generation and allocation/statistics state preserve their original values through final source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_definition_capture_failure_does_not_interrupt_schema_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Table capture failure isolation",
+      "workload": "Capture a one-MiB column value with independent insufficient and sufficient limits, then publish a column rename.",
+      "invariant": "Only the underfunded cut fails; DDL completes, the funded cut preserves the old name/value and original cancellation controls retained output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_capture_keeps_authority_and_statistics_before_later_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Actual Engine authority and statistics capture",
+      "workload": "Capture GRANT and ANALYZE output, then REVOKE, update and analyze again before Engine closure.",
+      "invariant": "Stored owner/ACL revisions, counts, histogram/MCV values and frequency bits retain their captured meaning and release their complete allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

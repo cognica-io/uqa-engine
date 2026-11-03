@@ -52,6 +52,25 @@ fn scalar(registry: &MemoryCaptureRegistry, value: u64) -> MemoryCaptureCell<Sca
 }
 
 #[test]
+fn captured_memory_values_keep_their_original_allowance_and_cancellation() {
+    let control = StorageReadControl::with_limit(4096);
+    let foreign = StorageReadControl::with_limit(4096);
+    let payload = || {
+        let memory = control.memory().reserve(1024).unwrap();
+        Budgeted::new(vec![7_u8; 1024], memory)
+    };
+    assert!(CapturedMemoryValue::new(payload(), &foreign).is_err());
+    assert_eq!(control.memory().used(), 0);
+    let value = CapturedMemoryValue::new(payload(), &control).unwrap();
+    assert_eq!(value.get().unwrap().as_slice(), &[7_u8; 1024]);
+    assert_eq!(control.memory().used(), 1024);
+    control.cancellation().cancel();
+    assert!(value.get().is_err());
+    drop(value);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn memory_capture_keys_preserve_retired_sources_without_retaining_live_owners() {
     let registry = MemoryCaptureRegistry::new();
     let cell = scalar(&registry, 7);

@@ -10,7 +10,7 @@ mod sampling;
 #[cfg(test)]
 mod tests;
 
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 
 use uqa_sql::ast::{ColumnDef, ColumnType, GeneratedColumnKind};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
@@ -230,10 +230,8 @@ impl Engine {
             published.save(catalog, name)?;
             engine.retain_statistics_sample(name, table.object_id(), analysis.data_generations);
             *table.column_stats.write() = analysis.statistics;
-            table.column_stats_loaded.store(true, Ordering::Release);
-            table
-                .column_stats_dirty
-                .store(published.dirty(), Ordering::Release);
+            *table.column_stats_loaded.write() = true;
+            *table.column_stats_dirty.write() = published.dirty();
             engine.note_table_data_changed();
             Ok(true)
         })

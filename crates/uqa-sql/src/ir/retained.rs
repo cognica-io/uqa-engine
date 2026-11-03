@@ -96,6 +96,17 @@ impl RetainedConstantValue {
         control.check()?;
         Ok(value)
     }
+
+    /// Capture an evaluated payload with the capture owner's controls. An unrelated invoking SQL statement does not own catalog retention performed during mutation or rollback.
+    pub(crate) fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>, SQLError> {
+        control.check()?;
+        let value = self.source.read_with_control(self.index, control)?;
+        control.check()?;
+        Ok(value)
+    }
 }
 
 impl fmt::Debug for RetainedConstantValue {

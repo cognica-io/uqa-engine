@@ -7,6 +7,7 @@
 //! Column-statistics visibility follows the caller's transaction and savepoints.
 
 use super::*;
+use std::sync::atomic::Ordering;
 
 mod locking;
 mod memory_threshold;

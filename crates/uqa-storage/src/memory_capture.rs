@@ -41,6 +41,32 @@ pub trait MemoryCaptureSource: Send + Sync {
     }
 }
 
+/// An admitted detached value keeps the original capture cancellation after its source or registry is gone. Payload allocation belongs to the producing owner; the capture registry admits this wrapper.
+pub struct CapturedMemoryValue<T> {
+    value: Budgeted<T>,
+    control: StorageReadControl,
+}
+
+impl<T> CapturedMemoryValue<T> {
+    pub fn new(value: Budgeted<T>, control: &StorageReadControl) -> StorageBackendResult<Self> {
+        control.check()?;
+        if !value.budget().shares_allowance(control.memory()) {
+            return Err(StorageBackendError::Other(
+                "captured value belongs to another allowance".into(),
+            ));
+        }
+        Ok(Self {
+            value,
+            control: control.clone(),
+        })
+    }
+
+    pub fn get(&self) -> StorageBackendResult<&T> {
+        self.control.check()?;
+        Ok(&self.value)
+    }
+}
+
 #[derive(Clone)]
 pub struct MemoryCaptureIdentity {
     registry: Weak<Registry>,
@@ -319,6 +345,11 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
 
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
         self.value.read()
+    }
+
+    /// Observe lock ownership for diagnostics without entering mutation admission.
+    pub fn is_locked(&self) -> bool {
+        self.value.is_locked()
     }
 
     /// Retain the registered identity without retaining or copying its source data.

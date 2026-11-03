@@ -138,7 +138,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, Value};
 use uqa_ml::{DeepLearnOutput, DeepModel, LearnOptions, TrainingSet};
@@ -599,9 +598,12 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<state::BoundTableSecurity>,
+    security: state::CatalogCell<
+        state::BoundTableSecurity,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
-    storage_generation: RwLock<[u8; 16]>,
+    storage_generation: state::CatalogCell<[u8; 16]>,
     pub(crate) document_store:
         uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
     inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
@@ -612,18 +614,18 @@ pub(crate) struct TableState {
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
     /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
-    next_id: parking_lot::Mutex<u128>,
+    next_id: state::CatalogCell<u128>,
     /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
-    maps_integer_keys: AtomicBool,
-    analyzer: state::CatalogCell<Analyzer>,
+    maps_integer_keys: state::CatalogCell<bool>,
+    analyzer: state::CatalogCell<Analyzer, Vec<u8>>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
     column_stats: state::CatalogCell<uqa_planner::ColumnStatistics>,
-    column_stats_loaded: AtomicBool,
-    column_stats_dirty: AtomicBool,
+    column_stats_loaded: state::CatalogCell<bool>,
+    column_stats_dirty: state::CatalogCell<bool>,
     /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.
-    statistics_maintenance: parking_lot::Mutex<statistics::MaintenanceState>,
+    statistics_maintenance: state::CatalogCell<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
     table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,

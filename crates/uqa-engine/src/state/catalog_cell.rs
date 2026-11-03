@@ -8,21 +8,85 @@
 
 use std::sync::Arc;
 
-use parking_lot::{MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock};
+use parking_lot::MappedRwLockReadGuard;
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_storage::{
+    memory_capture::{
+        CapturedMemoryValue, MemoryCaptureCell, MemoryCaptureRegistry, MemoryCaptureSource,
+        MemoryCaptureWriteGuard,
+    },
+    read_control::StorageReadControl,
+    StorageBackendError, StorageBackendResult,
+};
 
-pub(crate) struct CatalogCell<T>(RwLock<Arc<T>>);
+type Capture<T, F> = fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>;
 
-impl<T> CatalogCell<T> {
+struct CatalogRoot<T, F> {
+    value: Arc<T>,
+    capture: Option<Capture<T, F>>,
+}
+
+impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for CatalogRoot<T, F> {
+    type Frozen = CapturedMemoryValue<F>;
+
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        let capture = self.capture.ok_or_else(|| {
+            StorageBackendError::Other("catalog source has no capture producer".into())
+        })?;
+        let production = ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        );
+        let value = capture(&self.value, &production)
+            .map_err(|error| StorageBackendError::backend("catalog capture", error))?
+            .into_budgeted()
+            .unwrap_or_else(|_| unreachable!("catalog capture uses an admitted producer"));
+        CapturedMemoryValue::new(value, control)
+    }
+}
+
+pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T>(
+    MemoryCaptureCell<CatalogRoot<T, F>>,
+);
+
+impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn new(value: T) -> Self {
-        Self(RwLock::new(Arc::new(value)))
+        Self::from_snapshot(Arc::new(value))
     }
 
     pub(crate) fn from_snapshot(value: Arc<T>) -> Self {
-        Self(RwLock::new(value))
+        Self(MemoryCaptureCell::new(CatalogRoot {
+            value,
+            capture: None,
+        }))
+    }
+
+    pub(crate) fn capture_source(
+        value: Arc<T>,
+        registry: Option<&MemoryCaptureRegistry>,
+        capture: Capture<T, F>,
+    ) -> StorageBackendResult<Self> {
+        let mut cell = MemoryCaptureCell::new(CatalogRoot {
+            value,
+            capture: Some(capture),
+        });
+        if let Some(registry) = registry {
+            cell.register(registry)?;
+        }
+        Ok(Self(cell))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn key(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedMemoryValue<F>>>
+    {
+        self.0.key()
     }
 
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
-        parking_lot::RwLockReadGuard::map(self.0.read(), |value| value.as_ref())
+        parking_lot::RwLockReadGuard::map(self.0.read(), |root| root.value.as_ref())
     }
 
     #[cfg(test)]
@@ -31,24 +95,24 @@ impl<T> CatalogCell<T> {
     }
 
     pub(crate) fn snapshot(&self) -> Arc<T> {
-        Arc::clone(&self.0.read())
+        Arc::clone(&self.0.read().value)
     }
 
     pub(crate) fn restore(&self, snapshot: &Arc<T>) {
-        *self.0.write() = Arc::clone(snapshot);
+        self.0.write().value = Arc::clone(snapshot);
     }
 }
 
-impl<T: Clone> CatalogCell<T> {
-    pub(crate) fn write(&self) -> MappedRwLockWriteGuard<'_, T> {
-        parking_lot::RwLockWriteGuard::map(self.0.write(), Arc::make_mut)
+impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
+    pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
+        MemoryCaptureWriteGuard::map(self.0.write(), |root| Arc::make_mut(&mut root.value))
     }
 
     #[cfg(test)]
-    pub(crate) fn try_write(&self) -> Option<MappedRwLockWriteGuard<'_, T>> {
+    pub(crate) fn try_write(&self) -> Option<MemoryCaptureWriteGuard<'_, T>> {
         self.0
             .try_write()
-            .map(|guard| parking_lot::RwLockWriteGuard::map(guard, Arc::make_mut))
+            .map(|guard| MemoryCaptureWriteGuard::map(guard, |root| Arc::make_mut(&mut root.value)))
     }
 }
 
@@ -59,9 +123,9 @@ mod tests {
 
     #[test]
     fn snapshots_share_until_a_writer_detaches() {
-        let first = CatalogCell::new(vec![1]);
+        let first = CatalogCell::<Vec<i32>>::new(vec![1]);
         let saved = first.snapshot();
-        let second = CatalogCell::from_snapshot(Arc::clone(&saved));
+        let second = CatalogCell::<Vec<i32>>::from_snapshot(Arc::clone(&saved));
         assert!(Arc::ptr_eq(&saved, &second.snapshot()));
         first.write().push(2);
         assert_eq!(&*second.read(), &[1]);
@@ -69,5 +133,29 @@ mod tests {
         assert!(!Arc::ptr_eq(&first.snapshot(), &saved));
         first.restore(&saved);
         assert!(Arc::ptr_eq(&first.snapshot(), &second.snapshot()));
+    }
+
+    #[test]
+    fn catalog_capture_preserves_the_displaced_root_before_snapshot_restoration() {
+        let registry = uqa_storage::memory_capture::MemoryCaptureRegistry::new();
+        let original = Arc::new(vec!["original".to_owned()]);
+        let cell = CatalogCell::<Vec<String>>::capture_source(
+            original.clone(),
+            Some(&registry),
+            |value, control| uqa_sql::catalog::definition_capture::names(value, control),
+        )
+        .unwrap();
+        cell.write()[0] = "private".to_owned();
+        let key = cell.key().unwrap();
+        let control = uqa_storage::read_control::StorageReadControl::with_limit(4096);
+        let cut = registry.capture(&control).unwrap();
+        assert!(key.retained(&cut).unwrap().is_none());
+        cell.restore(&original);
+        assert!(Arc::ptr_eq(&cell.snapshot(), &original));
+        let captured = key.retained(&cut).unwrap().unwrap();
+        drop((cell, registry, cut));
+        assert_eq!(captured.get().unwrap(), &["private"]);
+        drop(captured);
+        assert_eq!(control.memory().used(), 0);
     }
 }

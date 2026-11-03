@@ -10,6 +10,8 @@ use crate::Engine;
 use std::sync::Arc;
 use uqa_storage::read_control::StorageReadControl;
 
+mod metadata;
+
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
 }
@@ -295,6 +297,9 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
     assert!(table.inverted_index.key().is_err());
     assert!(table.vector_indexes.key().is_err());
     assert!(table.value_indexes.key().is_err());
+    assert!(table.columns.key().is_err());
+    assert!(table.hierarchy.key().is_err());
+    assert!(table.dropped_attributes.key().is_err());
     let control = StorageReadControl::with_limit(4096);
     let cut = engine
         .storage

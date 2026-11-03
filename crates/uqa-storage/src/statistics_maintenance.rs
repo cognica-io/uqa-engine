@@ -42,6 +42,26 @@ pub struct StatisticsMaintenance {
 }
 
 impl StatisticsMaintenance {
+    /// Capture the complete inline maintenance record without allocating or recomputing its eligibility or clock state.
+    pub fn clone_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, uqa_core::ValueRetentionError> {
+        control.finish(
+            Self {
+                object_id: self.object_id,
+                generation: self.generation,
+                changes: self.changes,
+                dirty_since_ms: self.dirty_since_ms,
+                analyzed_rows: self.analyzed_rows,
+                statistics_format: self.statistics_format,
+                analyzed_at: self.analyzed_at,
+                analysis_generation: self.analysis_generation,
+            },
+            control.empty_reservation(),
+        )
+    }
+
     pub const KEY_PREFIX: &'static str = "uqa.statistics.maintenance.v1:";
 
     pub fn key(table: &str) -> String {

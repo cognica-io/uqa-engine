@@ -5,7 +5,7 @@
 //
 
 use crate::Engine;
-use parking_lot::{MappedRwLockWriteGuard, Mutex};
+use parking_lot::Mutex;
 use std::{
     cell::Cell,
     ops::{Deref, DerefMut},
@@ -25,6 +25,7 @@ use uqa_sql::{
     },
     SQLError,
 };
+use uqa_storage::memory_capture::MemoryCaptureWriteGuard;
 
 struct Publication<'a> {
     engine: &'a Engine,
@@ -45,7 +46,7 @@ impl Publication<'_> {
 }
 // Track the lifetime of the real Engine write guards without changing CatalogCell's API.
 struct TrackedWrite<'a, T> {
-    guard: Option<MappedRwLockWriteGuard<'a, T>>,
+    guard: Option<MemoryCaptureWriteGuard<'a, T>>,
     held: &'a Cell<bool>,
 }
 impl<T> Deref for TrackedWrite<'_, T> {

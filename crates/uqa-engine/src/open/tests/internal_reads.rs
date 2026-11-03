@@ -566,10 +566,7 @@ fn statistics_workers_keep_the_parent_statement_and_memory_lazy_collection() {
         root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT id FROM t", &[])
             .unwrap();
         if provider == 3 {
-            root.require_table("t")
-                .unwrap()
-                .column_stats_dirty
-                .store(true, Ordering::Release);
+            *root.require_table("t").unwrap().column_stats_dirty.write() = true;
         }
         std::thread::scope(|scope| {
             let statement = root.runtime.statement_gate.lock();

@@ -47,6 +47,16 @@ impl<'a> SyntaxProduction<'a> {
         Ok(self.take(copy_syntax_with_control(value, &self.control)?))
     }
 
+    pub(crate) fn capture_definition<T: SyntaxCopy + Clone>(
+        &self,
+        value: &T,
+    ) -> Result<T, SQLError> {
+        Ok(self.take(super::capture_definition_with_control(
+            value,
+            &self.control,
+        )?))
+    }
+
     pub(crate) fn text(&self, value: &str) -> Result<String, SQLError> {
         Ok(self.take(self.control.copy_text(value)?))
     }

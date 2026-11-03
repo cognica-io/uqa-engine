@@ -7,7 +7,6 @@
 //! Bind physical scans to the selected table generation.
 
 use crate::TableState;
-use std::sync::atomic::Ordering;
 use uqa_execution::query::table_read::TableRead;
 impl TableRead for TableState {
     fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
@@ -20,7 +19,7 @@ impl TableRead for TableState {
     }
 
     fn maps_integer_keys(&self) -> bool {
-        self.maps_integer_keys.load(Ordering::Acquire)
+        *self.maps_integer_keys.read()
     }
 
     fn for_each_indexed_fields(

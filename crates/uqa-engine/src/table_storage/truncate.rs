@@ -88,7 +88,7 @@ impl Engine {
         })?;
         if allocator.is_durable() {
             allocator
-                .synchronize(&mut t.next_id.lock())
+                .synchronize(&mut t.next_id.write())
                 .map_err(|error| {
                     uqa_execution::mutation::errors::identifier_storage_error(
                         "retain TRUNCATE document watermark",
@@ -147,7 +147,7 @@ impl Engine {
             uqa_execution::storage_errors::storage_error("replace TRUNCATE storage", &error)
         })?;
         if restart_identity {
-            *t.next_id.lock() = 1;
+            *t.next_id.write() = 1;
             self.persist_next_id(table_name).map_err(|error| {
                 uqa_execution::mutation::errors::identifier_storage_error(
                     "persist TRUNCATE identity",

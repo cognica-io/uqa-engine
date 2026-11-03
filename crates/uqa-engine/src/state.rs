@@ -15,6 +15,7 @@ use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 mod catalog_cell;
+mod table_capture;
 pub(crate) use catalog_cell::CatalogCell;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};

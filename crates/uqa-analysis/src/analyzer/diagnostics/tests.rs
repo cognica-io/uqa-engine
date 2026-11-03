@@ -7,6 +7,81 @@
 use super::*;
 
 #[test]
+fn configuration_capture_keeps_deferred_errors_and_unresolved_source_paths() {
+    let source = Analyzer {
+        tokenizer: crate::Tokenizer::Pattern {
+            pattern: "[".into(),
+        },
+        token_filters: vec![crate::TokenFilter::Synonym {
+            synonyms: std::collections::BTreeMap::new(),
+            synonyms_path: Some(std::path::PathBuf::from(
+                "unavailable-during-capture/synonyms.txt",
+            )),
+        }],
+        ..Analyzer::default()
+    };
+    let memory = MemoryBudget::new(4096);
+    let captured = source
+        .encode_configuration_budgeted(&memory, || Ok(()))
+        .unwrap();
+    drop(source);
+    let restored: Analyzer = serde_json::from_slice(&captured).unwrap();
+    assert!(
+        matches!(restored.tokenizer, crate::Tokenizer::Pattern { ref pattern } if pattern == "[")
+    );
+    assert!(
+        matches!(&restored.token_filters[0], crate::TokenFilter::Synonym { synonyms_path: Some(path), .. } if path == std::path::Path::new("unavailable-during-capture/synonyms.txt"))
+    );
+    assert!(restored.compile().is_err());
+    assert!(memory.used() >= captured.len());
+    drop(captured);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn configuration_capture_admits_large_output_and_releases_interrupted_encoding() {
+    let source = Analyzer {
+        tokenizer: crate::Tokenizer::Pattern {
+            pattern: "x".repeat(1 << 20),
+        },
+        ..Analyzer::default()
+    };
+    let memory = MemoryBudget::new(4096);
+    let allocation = allocation_counter::measure(|| {
+        assert!(matches!(
+            source.encode_configuration_budgeted(&memory, || Ok(())),
+            Err(AnalysisError::Memory(_))
+        ));
+    });
+    assert!(allocation.bytes_max < 64 * 1024);
+    assert_eq!(memory.used(), 0);
+    let memory = MemoryBudget::new(4 << 20);
+    let captured = source
+        .encode_configuration_budgeted(&memory, || Ok(()))
+        .unwrap();
+    let restored: Analyzer = serde_json::from_slice(&captured).unwrap();
+    assert!(
+        matches!(restored.tokenizer, crate::Tokenizer::Pattern { ref pattern } if pattern.len() == 1 << 20)
+    );
+    drop(captured);
+    assert_eq!(memory.used(), 0);
+    let mut polls = 0;
+    assert!(matches!(
+        source.encode_configuration_budgeted(&memory, || {
+            polls += 1;
+            if polls == 3 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        }),
+        Err(AnalysisError::Cancelled)
+    ));
+    assert_eq!(polls, 3);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn diagnostics_preserve_the_complete_typed_result_and_revision() {
     let mut analyzers = vec![
         crate::keyword_analyzer(),

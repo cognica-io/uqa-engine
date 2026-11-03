@@ -57,16 +57,12 @@ impl Engine {
                     fts_fields: table.fts_fields.snapshot(),
                     columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),
-                    next_id: *table.next_id.lock(),
+                    next_id: *table.next_id.read(),
                     analyzer: table.analyzer.snapshot(),
                     column_stats: table.column_stats.snapshot(),
-                    column_stats_loaded: table
-                        .column_stats_loaded
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    column_stats_dirty: table
-                        .column_stats_dirty
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    statistics_maintenance: table.statistics_maintenance.lock().clone(),
+                    column_stats_loaded: *table.column_stats_loaded.read(),
+                    column_stats_dirty: *table.column_stats_dirty.read(),
+                    statistics_maintenance: table.statistics_maintenance.read().clone(),
                     table_checks: table.table_checks.snapshot(),
                     foreign_keys: table.foreign_keys.snapshot(),
                     key_constraints: table.key_constraints.snapshot(),
@@ -117,20 +113,14 @@ impl Engine {
             table.fts_fields.restore(&table_snapshot.fts_fields);
             table.columns.restore(&table_snapshot.columns);
             *table.columns_declared.write() = table_snapshot.columns_declared;
-            *table.next_id.lock() = table_snapshot.next_id;
+            *table.next_id.write() = table_snapshot.next_id;
             table.analyzer.restore(&table_snapshot.analyzer);
             table.column_stats.restore(&table_snapshot.column_stats);
-            table.column_stats_loaded.store(
-                table_snapshot.column_stats_loaded,
-                std::sync::atomic::Ordering::Release,
-            );
-            table.column_stats_dirty.store(
-                table_snapshot.column_stats_dirty,
-                std::sync::atomic::Ordering::Release,
-            );
+            *table.column_stats_loaded.write() = table_snapshot.column_stats_loaded;
+            *table.column_stats_dirty.write() = table_snapshot.column_stats_dirty;
             table
                 .statistics_maintenance
-                .lock()
+                .write()
                 .clone_from(&table_snapshot.statistics_maintenance);
             table.table_checks.restore(&table_snapshot.table_checks);
             table.foreign_keys.restore(&table_snapshot.foreign_keys);

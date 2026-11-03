@@ -13,8 +13,8 @@ mod tests;
 use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
-    CatalogFacade, ColumnStatsInput, Engine, Ordering, StorageBackendError, StorageBackendResult,
-    TableState, Value,
+    CatalogFacade, ColumnStatsInput, Engine, StorageBackendError, StorageBackendResult, TableState,
+    Value,
 };
 use uqa_core::memory::{ProductionControl, ProductionVec};
 use uqa_planner::ColumnStatistics;
@@ -209,7 +209,7 @@ impl Engine {
                 Some(_) => {}
                 None => state.discard_document_count(),
             }
-            state.column_stats_dirty.store(true, Ordering::Release);
+            *state.column_stats_dirty.write() = true;
         }
         self.note_table_data_changed();
         Ok(())
@@ -306,9 +306,9 @@ impl Engine {
             }
         }
         *t.column_stats.write() = stats_out;
-        t.column_stats_loaded.store(true, Ordering::Release);
-        t.column_stats_dirty.store(false, Ordering::Release);
-        t.statistics_maintenance.lock().analyzed(
+        *t.column_stats_loaded.write() = true;
+        *t.column_stats_dirty.write() = false;
+        t.statistics_maintenance.write().analyzed(
             t.object_id(),
             row_count,
             crate::statistics::value_size::FORMAT_VERSION,
@@ -509,14 +509,14 @@ impl Engine {
         let t = self
             .try_table(&canonical_name)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        if t.column_stats_dirty.load(Ordering::Acquire) {
+        if *t.column_stats_dirty.read() {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and
                 // must not invalidate the statement currently being planned.
                 let due = match refresh {
                     StatisticsRefresh::Current => true,
                     StatisticsRefresh::Maintained => {
-                        let maintenance = t.statistics_maintenance.lock();
+                        let maintenance = t.statistics_maintenance.write();
                         maintenance.due(
                             maintenance.missing(t.column_stats.read().is_empty()),
                             crate::statistics::now_ms(),

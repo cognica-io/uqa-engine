@@ -255,7 +255,7 @@ impl Engine {
                 })?;
             }
             if participates {
-                let watermark = *table.next_id.lock();
+                let watermark = *table.next_id.read();
                 root_watermarks
                     .entry(current)
                     .and_modify(|current| *current = (*current).max(watermark))
@@ -268,7 +268,7 @@ impl Engine {
                     "partition hierarchy references missing root `{root}`"
                 ))
             })?;
-            let mut current = table.next_id.lock();
+            let mut current = table.next_id.write();
             *current = (*current).max(watermark);
         }
         Ok(())

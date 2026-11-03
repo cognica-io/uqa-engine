@@ -184,10 +184,39 @@ macro_rules! share_input {
 // These immutable descriptors already retain their payload owners; cloning only shares those handles.
 share_input!(
     crate::ast::RetainedRowSource,
-    crate::ast::RetainedInputLiteral,
     crate::ast::WindowDefinitionSyntax,
     crate::RowSchema
 );
+
+impl SyntaxCopy for crate::ast::RetainedInputLiteral {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if !copying.detach_constants {
+            return Ok(self.clone());
+        }
+        let control = &copying.control;
+        let value = self.0.value.capture_with_control(control)?;
+        let value = crate::ir::RetainedConstantValue::from_produced(value, control)?;
+        let ty = self
+            .0
+            .ty
+            .as_ref()
+            .map(|ty| ty.clone_with_control(control))
+            .transpose()?;
+        let declaration = self
+            .0
+            .declaration
+            .as_ref()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        Ok(Self(crate::ir::RetainedScalarLiteral::with_control(
+            value,
+            ty,
+            declaration,
+            self.0.collation_oid,
+            control,
+        )?))
+    }
+}
 
 syntax_enum!(crate::SQLParam {
     Scalar(value), TypedScalar { value, ty }, DeferredError { ty, error },
