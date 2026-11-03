@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Preserve memory views and evaluated materialized-view rows through rollback, replacement and closure. Captures retain exact stored query bindings, authority and value representations without executing the query or retaining execution-only analysis owners.
+
 - Preserve memory trigger definitions, bound routine identities, enable modes and constraint metadata through rollback, replacement and closure, with independently admitted WHEN literals and argument payloads.
 
 - Retain resolved memory analyzer images and independent field bindings through replacement, rollback and closure. Captures preserve exact descriptor/dictionary bytes and historical index/search revisions without retaining compiled pipelines or source import allowances.

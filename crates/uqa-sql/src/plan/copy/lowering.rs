@@ -46,7 +46,7 @@ impl crate::plan::ExpressionPlan {
         let mut arena = QueryArena::new(*control, None);
         let scalar = lower_scalar_with_arena(expression, aggregates, &mut arena, *control)?;
         let (queries, memory) = arena.queries.into_parts();
-        arena.copying.memory.absorb(memory);
+        arena.copying.absorb(Some(memory));
         let arena = crate::plan::ScalarQueryArena::from_rewrite_parts(
             queries,
             Some(arena.copying.into_rewrite_memory()),
@@ -180,7 +180,7 @@ impl Copying<'_> {
         self.check()?;
         self.fields.as_mut().expect("query fields").reserve(1)?;
         let (queries, memory) = arena.queries.into_parts();
-        arena.copying.memory.absorb(memory);
+        arena.copying.absorb(Some(memory));
         self.fields
             .as_mut()
             .expect("query fields")

@@ -164,7 +164,10 @@ pub(super) struct DurableCatalogState {
         resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
     >,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>, Vec<(String, String)>>,
-    pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
+    pub(super) views: CatalogCell<
+        BTreeMap<RelationIdentity, StoredView>,
+        uqa_sql::catalog::definition_capture::views::CapturedViews,
+    >,
     pub(super) catalog_indexes: CatalogCell<
         BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
         Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,

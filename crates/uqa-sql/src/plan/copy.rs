@@ -47,10 +47,7 @@ pub(crate) fn capture_definition_with_control<T: syntax::SyntaxCopy + Clone>(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<T>> {
     control.check()?;
-    let Some(mut copying) = Copying::new(*control) else {
-        return Ok(control.finish(value.clone(), None)?);
-    };
-    copying.detach_constants = true;
+    let mut copying = Copying::capture(*control, CopyPurpose::Definition);
     let value = value.copy_syntax(&mut copying)?;
     copying.finish(value)
 }
@@ -222,10 +219,27 @@ fn require_mutation(command: &CommandPlan) -> Result<()> {
 
 type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + 'a;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyPurpose {
+    Executable,
+    Definition,
+    Stored,
+}
+
+pub(crate) fn capture_stored_with_control<T: syntax::SyntaxCopy>(
+    value: &T,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<T>> {
+    control.check()?;
+    let mut copying = Copying::capture(*control, CopyPurpose::Stored);
+    let value = value.copy_syntax(&mut copying)?;
+    copying.finish(value)
+}
+
 pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
-    detach_constants: bool,
-    memory: MemoryReservation,
+    purpose: CopyPurpose,
+    memory: Option<MemoryReservation>,
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
@@ -240,14 +254,31 @@ mod owned_scalar;
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
-        control.empty_reservation().map(|memory| Self {
+        control
+            .budget()
+            .map(|_| Self::capture(control, CopyPurpose::Executable))
+    }
+
+    fn capture(control: ProductionControl<'a>, purpose: CopyPurpose) -> Self {
+        Self {
             control,
-            detach_constants: false,
-            memory,
+            purpose,
+            memory: control.empty_reservation(),
             fields: None,
             scalar_items: None,
             parameters: None,
-        })
+        }
+    }
+
+    fn reserve(&mut self, bytes: usize) -> Result<()> {
+        if let Some(memory) = &mut self.memory {
+            memory.grow(bytes)?;
+        }
+        Ok(())
+    }
+
+    fn absorb(&mut self, memory: Option<MemoryReservation>) {
+        self.memory = self.control.combine(self.memory.take(), memory);
     }
 
     pub(super) fn for_rewrite(control: ProductionControl<'a>) -> Option<Self> {
@@ -259,26 +290,21 @@ impl<'a> Copying<'a> {
     }
 
     pub(super) fn into_rewrite_memory(self) -> RewriteMemory {
+        let direct = self.memory.expect("controlled rewrite");
         let mut fields = self.fields.expect("mutable copy records fields");
         if let Some(items) = self.scalar_items {
             assert!(fields.is_empty(), "scalar vectors have indexed ownership");
-            return RewriteMemory::Scalars {
-                direct: self.memory,
-                items,
-            };
+            return RewriteMemory::Scalars { direct, items };
         }
         // A scalar-only field already owns its complete payload. Keep that owner directly instead of retaining a second one-element field vector for every cell.
-        if self.memory.bytes() == 0 && fields.len() == 1 && fields[0].name == "scalar" {
+        if direct.bytes() == 0 && fields.len() == 1 && fields[0].name == "scalar" {
             return fields
                 .pop()
                 .expect("single scalar field")
                 .memory
                 .expect("scalar owner");
         }
-        RewriteMemory::Fields {
-            direct: self.memory,
-            fields,
-        }
+        RewriteMemory::Fields { direct, fields }
     }
 
     fn field<T>(
@@ -313,12 +339,12 @@ impl<'a> Copying<'a> {
     }
 
     fn finish<T>(self, value: T) -> Result<Produced<T>> {
-        Ok(self.control.finish(value, Some(self.memory))?)
+        Ok(self.control.finish(value, self.memory)?)
     }
 
     pub(in crate::plan) fn take<T>(&mut self, output: Produced<T>) -> T {
         let (value, memory) = output.into_parts();
-        self.memory.absorb(memory.expect("controlled plan copy"));
+        self.absorb(memory);
         value
     }
 
@@ -328,7 +354,15 @@ impl<'a> Copying<'a> {
         mut copy: impl FnMut(&mut Self, I::Item) -> Result<T>,
     ) -> Result<Vec<T>> {
         self.check()?;
-        let mut output = BudgetedVec::new(self.control.budget().expect("controlled plan copy"));
+        let Some(budget) = self.control.budget() else {
+            return items
+                .map(|item| {
+                    self.check()?;
+                    copy(self, item)
+                })
+                .collect();
+        };
+        let mut output = BudgetedVec::new(budget);
         output.reserve(items.len())?;
         if let Some(fields) = &mut self.fields {
             fields.reserve(items.len())?;
@@ -338,7 +372,7 @@ impl<'a> Copying<'a> {
             output.push(self.field("item", |copying| copy(copying, item))?)?;
         }
         let (output, memory) = output.into_parts();
-        self.memory.absorb(memory);
+        self.absorb(Some(memory));
         Ok(output)
     }
 
@@ -350,7 +384,7 @@ impl<'a> Copying<'a> {
         let mut output = OwnedSet::new();
         for key in keys {
             self.check()?;
-            self.memory.grow(OwnedSet::<K>::entry_bytes())?;
+            self.reserve(OwnedSet::<K>::entry_bytes())?;
             output.insert(copy(self, key)?);
         }
         Ok(output)
@@ -358,7 +392,7 @@ impl<'a> Copying<'a> {
 
     fn boxed<T>(&mut self, copy: impl FnOnce(&mut Self) -> Result<T>) -> Result<Box<T>> {
         self.check()?;
-        self.memory.grow(size_of::<T>())?;
+        self.reserve(size_of::<T>())?;
         let value = copy(self)?;
         self.check()?;
         Ok(Box::new(value))
@@ -392,7 +426,11 @@ impl<'a> Copying<'a> {
                 })?;
             return Ok(expression);
         }
-        let output = expression.clone_with_control(&self.control)?;
+        let output = if self.purpose == CopyPurpose::Executable {
+            expression.clone_with_control(&self.control)?
+        } else {
+            expression.capture_with_control(&self.control)?
+        };
         Ok(self.take(output))
     }
 

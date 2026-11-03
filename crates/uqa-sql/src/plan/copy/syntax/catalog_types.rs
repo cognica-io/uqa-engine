@@ -87,7 +87,7 @@ syntax_struct!(crate::catalog::shell_type::StoredShellType {
 impl SyntaxCopy for uqa_core::EnumLabelKey {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         copying.check()?;
-        copying.memory.grow(self.as_bytes().len())?;
+        copying.reserve(self.as_bytes().len())?;
         Ok(self.clone())
     }
 }

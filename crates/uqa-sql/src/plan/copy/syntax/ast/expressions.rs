@@ -24,7 +24,7 @@ macro_rules! syntax_expression {
         impl SyntaxCopy for crate::ast::Expr {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
-                if copying.detach_constants && matches!(self, Self::WindowCall { .. } | Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. }) {
+                if copying.purpose == crate::plan::copy::CopyPurpose::Definition && matches!(self, Self::WindowCall { .. } | Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. }) {
                     return Err(crate::SQLError::Internal("stored definition contains a query or window expression".into()));
                 }
                 if let Some(number) = copying.parameters.and_then(|parameters| parameters(self)) { return Ok(Self::Param(number)); }

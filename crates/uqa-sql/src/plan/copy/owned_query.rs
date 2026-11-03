@@ -183,7 +183,7 @@ impl Copying<'_> {
         else {
             unreachable!("metadata field constructor");
         };
-        self.memory.absorb(direct);
+        self.absorb(Some(direct));
         self.fields = Some(fields);
         Ok(value)
     }

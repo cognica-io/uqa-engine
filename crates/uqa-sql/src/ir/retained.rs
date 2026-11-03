@@ -292,6 +292,28 @@ impl RetainedScalarLiteral {
         ))
     }
 
+    /// Copy an evaluated literal and its selected metadata into independent capture ownership without consulting an unrelated statement's cancellation.
+    pub(crate) fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let value = RetainedConstantValue::from_produced(
+            self.value.capture_with_control(control)?,
+            control,
+        )?;
+        let ty = self
+            .ty
+            .as_ref()
+            .map(|ty| ty.clone_with_control(control))
+            .transpose()?;
+        let declaration = self
+            .declaration
+            .as_ref()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        Self::with_control(value, ty, declaration, self.collation_oid, control)
+    }
+
     /// Materialize one value only at an interface that requires an owned literal. Cloning plans retains the shared owner instead.
     pub fn materialize(&self) -> Result<crate::ScalarExpr, SQLError> {
         let value = self.value.read()?;

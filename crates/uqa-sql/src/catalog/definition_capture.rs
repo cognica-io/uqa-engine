@@ -13,6 +13,7 @@ pub mod events;
 pub mod foreign;
 pub mod identities;
 pub mod types;
+pub mod views;
 
 macro_rules! capture_list {
     ($($name:ident: $ty:ty),* $(,)?) => {$ (

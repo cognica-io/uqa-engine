@@ -21,6 +21,7 @@ mod resources;
 mod roles;
 mod triggers;
 mod types;
+mod views;
 
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();

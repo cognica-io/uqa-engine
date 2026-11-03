@@ -22,6 +22,14 @@ impl ScalarExpr {
         iterative::immutable(self, *control)
     }
 
+    /// Capture scalar syntax and evaluated literals under independent ownership; query-arena references keep their original positions.
+    pub(crate) fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>> {
+        iterative::capture(self, *control)
+    }
+
     /// Copy into a mutable scalar owner with independent direct and child reservations. Iterative constructors preserve field order, destination admission and query-arena identities in both ordinary and controlled modes.
     pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
         iterative::mutable(self, *control)

@@ -111,7 +111,7 @@ impl<K: SyntaxCopy + Ord, V: SyntaxCopy> SyntaxCopy for OwnedMap<K, V> {
         let mut output = Self::new();
         for (key, value) in self {
             copying.check()?;
-            copying.memory.grow(Self::entry_bytes())?;
+            copying.reserve(Self::entry_bytes())?;
             output.insert(key.copy_syntax(copying)?, value.copy_syntax(copying)?);
         }
         Ok(output)
@@ -190,31 +190,10 @@ share_input!(
 
 impl SyntaxCopy for crate::ast::RetainedInputLiteral {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
-        if !copying.detach_constants {
+        if copying.purpose == super::CopyPurpose::Executable {
             return Ok(self.clone());
         }
-        let control = &copying.control;
-        let value = self.0.value.capture_with_control(control)?;
-        let value = crate::ir::RetainedConstantValue::from_produced(value, control)?;
-        let ty = self
-            .0
-            .ty
-            .as_ref()
-            .map(|ty| ty.clone_with_control(control))
-            .transpose()?;
-        let declaration = self
-            .0
-            .declaration
-            .as_ref()
-            .map(|name| control.copy_text(name))
-            .transpose()?;
-        Ok(Self(crate::ir::RetainedScalarLiteral::with_control(
-            value,
-            ty,
-            declaration,
-            self.0.collation_oid,
-            control,
-        )?))
+        Ok(Self(self.0.capture_with_control(&copying.control)?))
     }
 }
 
