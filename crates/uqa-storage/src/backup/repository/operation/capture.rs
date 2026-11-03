@@ -4,44 +4,87 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 
-use sha2::{Digest, Sha256};
 use uqa_core::memory::BudgetedVec;
 
 use crate::{
     backup::{
         BackupError, BackupImageSource, BackupLimits, BackupResult, BackupSourceStatistics,
-        BackupSourceStep, BackupSourceUnit, FrameKind, ImageDigest, InventoryEntry,
-        InventorySummary, InventoryWriter, NamespaceId, UnitAddress, UnitKind,
+        BackupSourceStep, FrameKind, ImageDigest, InventoryEntry, InventorySummary,
+        InventoryWriter, NamespaceId, ObjectSpan, UnitAddress, UnitKind,
     },
     read_control::StorageReadControl,
     temporary_file::{FileBudget, FileLimit, TemporaryFile},
 };
 
 use super::{BackupOperation, PackObject, PackRange, State};
+use parent::ParentInventory;
+use selected::{SelectedImage, SelectedUnit};
+
+mod parent;
+mod selected;
+
+/// Logical capture work. Payload counters exclude repository framing and parent-inventory verification; written object bytes include new packs and the complete child inventory, not the publication descriptor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BackupImageStatistics {
+    pub parent_units: u64,
+    pub hashed_payload_bytes: u64,
+    pub reused_units: u64,
+    pub reused_payload_bytes: u64,
+    pub written_units: u64,
+    pub written_payload_bytes: u64,
+    pub written_object_bytes: u64,
+}
+
+impl BackupImageStatistics {
+    fn payload(&mut self, bytes: u64, reused: bool) -> BackupResult<()> {
+        add(&mut self.hashed_payload_bytes, bytes)?;
+        if reused {
+            add(&mut self.reused_units, 1)?;
+            add(&mut self.reused_payload_bytes, bytes)
+        } else {
+            add(&mut self.written_units, 1)?;
+            add(&mut self.written_payload_bytes, bytes)
+        }
+    }
+}
+
+fn add(value: &mut u64, increment: u64) -> BackupResult<()> {
+    *value = value
+        .checked_add(increment)
+        .ok_or(BackupError::Invalid("image statistics overflow"))?;
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackupCaptureReport {
     pub inventory: InventorySummary,
     pub source: BackupSourceStatistics,
+    pub image: BackupImageStatistics,
 }
 
-struct Pending {
+struct UnitMetadata {
     namespace: NamespaceId,
     generation: u64,
     family: u16,
     key: BudgetedVec<u8>,
     kind: UnitKind,
     bytes: u64,
-    digest: ImageDigest,
-    range: PackRange,
 }
 
-impl Pending {
+impl UnitMetadata {
+    fn charge(&self) -> BackupResult<usize> {
+        self.key
+            .len()
+            .checked_add(size_of::<Pending>())
+            .ok_or(BackupError::Invalid("image metadata size overflow"))
+    }
+
     fn entry(
         &self,
-        object: PackObject,
+        digest: ImageDigest,
+        span: ObjectSpan,
         limits: BackupLimits,
         control: &StorageReadControl,
     ) -> BackupResult<InventoryEntry> {
@@ -54,44 +97,42 @@ impl Pending {
             },
             self.kind,
             self.bytes,
-            self.digest,
-            object.span(self.range)?,
+            digest,
+            span,
             limits,
             control,
         )
     }
 }
 
-struct Payload<'a, S> {
-    source: &'a mut S,
-    hash: Sha256,
-    bytes: u64,
-    expected: u64,
+enum Reference {
+    Written(PackRange),
+    Reused(ObjectSpan),
 }
 
-impl<S: BackupImageSource> Read for Payload<'_, S> {
-    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        let result = (|| {
-            let read = self.source.read_current(output)?;
-            if read > output.len() {
-                return Err(BackupError::Invalid("source read exceeds output buffer"));
-            }
-            self.bytes = self
-                .bytes
-                .checked_add(read as u64)
-                .ok_or(BackupError::Integrity)?;
-            if self.bytes > self.expected || (read == 0 && self.bytes != self.expected) {
-                return Err(BackupError::Integrity);
-            }
-            self.hash.update(&output[..read]);
-            Ok(read)
-        })();
-        result.map_err(io::Error::other)
+struct Pending {
+    metadata: UnitMetadata,
+    digest: ImageDigest,
+    reference: Reference,
+}
+
+impl Pending {
+    fn entry(
+        &self,
+        object: PackObject,
+        limits: BackupLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<InventoryEntry> {
+        let span = match self.reference {
+            Reference::Written(range) => object.span(range)?,
+            Reference::Reused(span) => span,
+        };
+        self.metadata.entry(self.digest, span, limits, control)
     }
 }
 
 impl BackupOperation<'_> {
-    /// Consume and prepare a complete image with bounded source windows, shared packs and an encrypted inventory spool. This synchronous operation owns the source until success or failure. Publication remains explicit and can be resolved through this operation's existing identity. `maximum_workspace_bytes` limits the spool's physical ciphertext; the operation's encoded staging limit separately bounds repository objects and verification.
+    /// Consume a complete image with bounded source windows and encrypted workspace. A retained parent is merge-scanned by exact address, kind, length and SHA-256 image digest; equal units inherit immutable object ranges. Without a source fingerprint, comparison reads and hashes the current payload and temporarily spools possible matches. Publication remains explicit and owns its original operation identity.
     pub fn prepare_image(
         &mut self,
         source: impl BackupImageSource,
@@ -120,89 +161,77 @@ impl BackupOperation<'_> {
                 "image source differs from capture cut",
             ));
         }
-        let limits = self.repository.limits;
+        let repository = self.repository;
+        let limits = repository.limits;
+        let mut parent = self
+            .parent_lease
+            .as_ref()
+            .map(|lease| ParentInventory::new(repository, lease.root(), control))
+            .transpose()?;
         let files = FileBudget::new(maximum_workspace_bytes);
         let spool = TemporaryFile::with_file_budget(&files)?;
         let mut inventory = InventoryWriter::new(spool, self.cut().format, limits, control)?;
+        let mut statistics = BackupImageStatistics::default();
         let mut selected = select(&mut source, control)?;
         while selected {
+            let mut unit =
+                SelectedUnit::new(&mut source, parent.as_mut(), &files, limits, control)?;
+            if let SelectedImage::Reused { digest, span } = &unit.image {
+                inventory.append(&unit.metadata.entry(*digest, *span, limits, control)?)?;
+                statistics.payload(unit.metadata.bytes, true)?;
+                selected = select(&mut source, control)?;
+                continue;
+            }
             let mut pack = self.begin_pack(control)?;
             let mut pending = BudgetedVec::new(control.memory());
             let retention_limit = (control.memory().available() / 4).min(64 * 1024);
             let mut retained = 0_usize;
             let mut decoded = 0_u64;
             loop {
-                let unit = source
+                pending.reserve(1)?;
+                retained = retained
+                    .checked_add(unit.metadata.charge()?)
+                    .ok_or(BackupError::Invalid("image metadata size overflow"))?;
+                decoded = decoded
+                    .checked_add(unit.metadata.bytes)
+                    .ok_or(BackupError::Invalid("pack size overflow"))?;
+                pending.push(unit.append(&mut pack, &mut source, &mut statistics, control)?)?;
+                selected = select(&mut source, control)?;
+                if !selected || pending.len() >= 32 || decoded >= 64 * 1024 {
+                    break;
+                }
+                let charge = source
                     .current_unit()
-                    .ok_or(BackupError::Invalid("source has no selected image unit"))?;
-                let charge = unit
+                    .ok_or(BackupError::Invalid("source has no selected image unit"))?
                     .address
                     .key
                     .len()
                     .checked_add(size_of::<Pending>())
                     .ok_or(BackupError::Invalid("image metadata size overflow"))?;
-                if !pending.is_empty() && charge > retention_limit.saturating_sub(retained) {
+                if charge > retention_limit.saturating_sub(retained) {
                     break;
                 }
-                limits.check_key(unit.address.key.len())?;
-                let mut key = BudgetedVec::new(control.memory());
-                key.extend_from_slice(unit.address.key)?;
-                let BackupSourceUnit {
-                    address,
-                    kind,
-                    decoded_bytes,
-                } = unit;
-                let (namespace, generation, family) =
-                    (address.namespace, address.generation, address.family);
-                pending.reserve(1)?;
-                let mut input = Payload {
-                    source: &mut source,
-                    hash: Sha256::new(),
-                    bytes: 0,
-                    expected: decoded_bytes,
-                };
-                let range = pack.append(FrameKind::Unit, &mut input, control)?;
-                if input.bytes != decoded_bytes {
-                    return Err(BackupError::Integrity);
-                }
-                let digest = ImageDigest::from_bytes(input.hash.finalize().into());
-                pending.push(Pending {
-                    namespace,
-                    generation,
-                    family,
-                    key,
-                    kind,
-                    bytes: decoded_bytes,
-                    digest,
-                    range,
-                })?;
-                retained = retained
-                    .checked_add(charge)
-                    .ok_or(BackupError::Invalid("image metadata size overflow"))?;
-                decoded = decoded
-                    .checked_add(decoded_bytes)
-                    .ok_or(BackupError::Invalid("pack size overflow"))?;
-                selected = select(&mut source, control)?;
-                if !selected || pending.len() >= 32 || decoded >= 64 * 1024 {
-                    break;
-                }
+                unit = SelectedUnit::new(&mut source, parent.as_mut(), &files, limits, control)?;
             }
             let object = pack.finish(control)?;
+            add(&mut statistics.written_object_bytes, object.encoded_bytes())?;
             for unit in pending.iter() {
-                let entry = unit.entry(object, limits, control)?;
-                inventory.append(&entry)?;
+                inventory.append(&unit.entry(object, limits, control)?)?;
             }
         }
-        let statistics = source.statistics();
+        let source_statistics = source.statistics();
         drop(source);
+        statistics.parent_units = parent.map_or(Ok(0), ParentInventory::finish)?;
         let (mut spool, summary) = inventory.finish()?;
         spool.seek(SeekFrom::Start(0))?;
         let span = self.write_object(FrameKind::Inventory, &mut spool, control)?;
+        add(&mut statistics.written_object_bytes, span.object_bytes())?;
         drop(spool);
         self.prepare(span, summary, control)?;
         Ok(BackupCaptureReport {
             inventory: summary,
-            source: statistics,
+            source: source_statistics,
+            image: statistics,
         })
     }
 }

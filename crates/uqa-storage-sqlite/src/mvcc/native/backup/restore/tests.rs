@@ -18,6 +18,8 @@ use uqa_storage::{
     PersistentStorageProvider, StorageEncryptionKey,
 };
 
+mod incremental;
+
 fn open(path: &Path, mode: usize) -> crate::Result<ManagedConnection> {
     match mode {
         0 => ManagedConnection::open(path),

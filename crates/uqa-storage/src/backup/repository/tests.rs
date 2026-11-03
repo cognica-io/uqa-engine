@@ -15,6 +15,7 @@ use super::*;
 mod admission;
 mod capture;
 mod failures;
+mod incremental;
 mod integrity;
 mod resources;
 mod streaming;

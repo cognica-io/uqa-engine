@@ -30,6 +30,10 @@ pub struct PackObject {
 }
 
 impl PackObject {
+    pub(super) const fn encoded_bytes(self) -> u64 {
+        self.bytes
+    }
+
     pub fn span(self, range: PackRange) -> BackupResult<ObjectSpan> {
         if range.object != self.object {
             return Err(BackupError::Invalid("foreign pack range"));
