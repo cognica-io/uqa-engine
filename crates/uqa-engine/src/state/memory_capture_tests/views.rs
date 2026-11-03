@@ -134,3 +134,53 @@ fn denied_view_capture_preserves_ddl_and_independently_funded_materialized_rows(
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
 }
+
+#[test]
+fn memory_view_membership_excludes_temporary_definitions_through_rollback_and_closure() {
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE VIEW saved AS SELECT 1 AS value");
+        let original = engine.durable.views.snapshot();
+        sql(
+            &engine,
+            &format!(
+                "CREATE TEMP VIEW saved AS SELECT '{}' AS payload",
+                "x".repeat(1 << 20)
+            ),
+        );
+        assert_eq!(engine.durable.views.read().len(), 2);
+        let key = engine.durable.views.key().unwrap();
+        let control = StorageReadControl::with_limit(32768);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; DROP VIEW public.saved; CREATE VIEW public.saved AS SELECT 2 AS value; SAVEPOINT private; DROP VIEW pg_temp.saved; ROLLBACK TO private; ROLLBACK");
+            assert_eq!(engine.durable.views.read().len(), 2);
+            assert_eq!(
+                engine.durable.views.read()[&RelationIdentity::new("public", "saved")].object_id,
+                original[&RelationIdentity::new("public", "saved")].object_id
+            );
+            sql(
+                &engine,
+                "DROP VIEW pg_temp.saved; CREATE TEMP VIEW saved AS SELECT 3 AS value",
+            );
+        }
+        drop(engine);
+        let saved = key.captured(&cut).unwrap();
+        same(saved.get().unwrap(), &original);
+        cut.check().unwrap();
+        drop(cut);
+        control.cancellation().cancel();
+        assert!(matches!(
+            saved.get(),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        drop(saved);
+        assert_eq!(control.memory().used(), 0);
+    }
+}

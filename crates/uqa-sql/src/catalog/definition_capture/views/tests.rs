@@ -12,6 +12,8 @@ use crate::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod durable;
+
 fn view(sql: &str) -> StoredView {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
     else {
@@ -184,7 +186,8 @@ fn view_capture_releases_prior_rows_and_catalog_entries_on_denial_or_cancellatio
         if cancelled {
             token.cancel();
         }
-        let error = views(&source, &ProductionControl::new(&memory, &token, &token)).unwrap_err();
+        let error =
+            durable_views(&source, &ProductionControl::new(&memory, &token, &token)).unwrap_err();
         if cancelled {
             assert!(matches!(error, SQLError::Cancelled(_)));
         } else {

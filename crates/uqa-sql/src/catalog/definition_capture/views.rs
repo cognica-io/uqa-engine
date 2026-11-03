@@ -89,13 +89,24 @@ impl StoredView {
     }
 }
 
-pub fn views(
+/// Select durable definitions before admitting names, syntax, authority or evaluated rows. Individual definition capture remains independent of persistence; this catalog boundary excludes session-owned views.
+pub fn durable_views(
     values: &BTreeMap<RelationIdentity, StoredView>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CapturedViews>, SQLError> {
     let output = SyntaxProduction::new(*control);
-    let mut entries = output.vector(values.len())?;
+    let count = values.values().try_fold(0, |count, view| {
+        output.check()?;
+        Ok::<_, SQLError>(
+            count + usize::from(view.persistence != crate::ast::RelationPersistence::Temporary),
+        )
+    })?;
+    let mut entries = output.vector(count)?;
     for (relation, view) in values {
+        output.check()?;
+        if view.persistence == crate::ast::RelationPersistence::Temporary {
+            continue;
+        }
         entries.push((
             output.copy(relation)?,
             output.take(view.capture_definition(control)?),

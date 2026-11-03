@@ -38657,6 +38657,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_view_capture_excludes_temporary_payloads_before_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests/durable.rs",
+      "capability": "Durable view payload admission",
+      "workload": "Compare capture allocation with permanent/unlogged views alone and with three MiB of temporary names and payloads.",
+      "invariant": "Temporary entries add no output allocation or retained bytes; selected identities, syntax, order and persistence remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporary_only_view_capture_skips_session_owners_with_zero_payload_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests/durable.rs",
+      "capability": "Temporary view exclusion",
+      "workload": "Capture a temporary-only catalog containing an execution-scoped row source with zero payload allowance, then cancel it.",
+      "invariant": "Excluded session owners are never copied or validated as durable syntax; empty and temporary-only captures still observe cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_view_membership_excludes_temporary_definitions_through_rollback_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/views.rs",
+      "capability": "Memory Engine durable view membership",
+      "workload": "Capture a permanent view beside a one-MiB same-name temporary view under 32 KiB; replace and roll back definitions and close the source unread.",
+      "invariant": "Only the selected permanent incarnation survives, temporary payloads consume no backup admission, and cancellation and final release remain attached to the original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
