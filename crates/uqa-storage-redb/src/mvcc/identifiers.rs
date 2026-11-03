@@ -102,6 +102,7 @@ pub(super) fn allocate(
     let allocation = {
         let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
         codec::validate_metadata(&metadata, store.identity)?;
+        let metadata_epoch = codec::read_u64(&metadata, super::backup_metadata::EPOCH)?;
         let mut present = false;
         for table in transaction.list_tables().map_err(redb_error)? {
             present |= table.name() == TABLE.name();
@@ -119,6 +120,12 @@ pub(super) fn allocate(
             .transpose()?;
         let allocation = request.prepare(previous)?;
         if previous != Some(allocation.watermark()) {
+            super::backup_metadata::retain_previous(
+                &transaction,
+                namespace,
+                previous,
+                metadata_epoch,
+            )?;
             identifiers
                 .insert(namespace, allocation.watermark().to_be_bytes().as_slice())
                 .map_err(redb_error)?;

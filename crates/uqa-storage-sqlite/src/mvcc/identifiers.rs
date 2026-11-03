@@ -114,6 +114,7 @@ pub(super) fn allocate(
     let previous = watermark(&transaction, namespace)?;
     let allocation = request.prepare(previous)?;
     if previous != Some(allocation.watermark()) {
+        super::backup_metadata::retain_previous(&transaction, namespace, previous)?;
         transaction
             .prepare_cached("INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark")?
             .execute(params![namespace, allocation.watermark().to_be_bytes().as_slice()])?;

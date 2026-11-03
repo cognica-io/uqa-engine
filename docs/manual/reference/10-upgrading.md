@@ -1,6 +1,12 @@
 # Upgrading UQA Engine
 
-This page describes UQA Engine 0.6.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.3/docs/manual/reference/10-upgrading.md) when installing the 0.6.3 packages.
+This page records unreleased migration requirements and UQA Engine 0.6.3 and earlier releases. Use the [version-tagged guide](https://github.com/cognica-io/uqa-engine/blob/v0.6.3/docs/manual/reference/10-upgrading.md) when installing the 0.6.3 packages.
+
+## Unreleased
+
+SQLite record format 68 and redb record format 64 add retained autonomous identifier generations for joint backup snapshots. Opening an earlier supported database atomically initializes every existing allocation at metadata epoch zero while preserving its database identity, records, commit sequence, identifier watermarks and receipts. Upgrade all owners before using the new format; older binaries reject it. Both native SQLite and SQLite Key/Value use the new guarded metadata tables. This provider snapshot interface does not yet expose complete Engine backup or restore.
+
+`VersionedPersistence::capture_backup_snapshot` defaults to unsupported (`Ok(None)`). A supporting adapter returns `CommittedBackupSnapshot`, which owns one committed record view and the identifier watermarks from the same physical boundary. Its bounded visitor reports physical cursor positions, including `None` for coordination metadata and namespaces created after capture; advance the cursor for every visited position and emit only `Some` watermarks. The visitor runs inside one short provider read and cannot perform repository I/O, reenter the provider or invoke application callbacks. `SnapshotRegistry`, `SnapshotLease` and `SnapshotLeaseTransport` accept a typed boundary with `CommitSequence` as their default, preserving existing record-retention adapter types.
 
 ## 0.6.3
 

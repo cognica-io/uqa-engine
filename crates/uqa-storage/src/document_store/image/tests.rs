@@ -9,6 +9,72 @@ use crate::{document_store::Document, DocumentStore, MemoryDocumentStore, ReadOn
 use std::collections::BTreeMap;
 use uqa_core::{DatumValue, RecordValue};
 
+#[test]
+fn document_image_headers_keep_typed_cancellation_between_io_attempts() {
+    struct Interrupted {
+        token: uqa_core::CancellationToken,
+        calls: usize,
+        partial: bool,
+    }
+    impl Read for Interrupted {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            if self.calls == 1 {
+                self.token.cancel();
+                if self.partial {
+                    output[0] = b'U';
+                    return Ok(1);
+                }
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            output.fill(0);
+            Ok(output.len())
+        }
+    }
+    impl Write for Interrupted {
+        fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            if self.calls == 1 {
+                self.token.cancel();
+                if self.partial {
+                    return Ok(1);
+                }
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            Ok(input.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    for partial in [false, true] {
+        let control = StorageReadControl::with_limit(1024);
+        let mut io = Interrupted {
+            token: control.cancellation().clone(),
+            calls: 0,
+            partial,
+        };
+        assert!(matches!(
+            read_document_image(&mut io, &control),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert_eq!(io.calls, 1);
+        control.cancellation().reset();
+        io.calls = 0;
+        assert!(matches!(
+            write(
+                std::iter::empty(),
+                DocumentMetadata::default(),
+                &mut io,
+                &control,
+            ),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert_eq!(io.calls, 1);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
 fn encode(store: &dyn DocumentStore, id: u64, control: &StorageReadControl) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     let written = store

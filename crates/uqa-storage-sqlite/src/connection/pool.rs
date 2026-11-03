@@ -32,6 +32,12 @@ pub(super) struct ConnectionPool {
             std::sync::Weak<uqa_storage::mvcc::SnapshotRegistry>,
         )>,
     >,
+    pub(super) metadata_snapshot_registry: Mutex<
+        Option<(
+            uqa_storage::mvcc::DatabaseId,
+            std::sync::Weak<uqa_storage::mvcc::SnapshotRegistry<uqa_storage::mvcc::MetadataEpoch>>,
+        )>,
+    >,
     pub(super) spec: ConnectionSpec,
     max_connections: usize,
     state: Mutex<PoolState>,
@@ -76,6 +82,7 @@ impl ConnectionPool {
             receipt_state: Arc::default(),
             serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
+            metadata_snapshot_registry: Mutex::new(None),
             #[cfg(not(target_os = "emscripten"))]
             checkpoint,
             spec,

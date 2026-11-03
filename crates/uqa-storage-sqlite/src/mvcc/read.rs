@@ -6,7 +6,9 @@
 
 //! Historical reads probe encoded lengths and reserve before materializing keys or values.
 
+mod chunk;
 mod last;
+pub(super) use last::ceiling as key_ceiling;
 mod ordered;
 pub(crate) mod row_presence;
 pub(crate) mod table_owners;
@@ -74,6 +76,16 @@ impl Snapshot {
 }
 
 impl CommittedRecordSnapshot for Snapshot {
+    fn read_value_chunk(
+        &self,
+        key: &[u8],
+        offset: usize,
+        output: &mut [u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_storage::mvcc::RecordValueChunk>> {
+        control.cancellation().check()?;
+        self.read(|connection| chunk::read(connection, key, self.sequence, offset, output, control))
+    }
     fn reclamation_epoch(&self) -> Option<u64> {
         Some(self.reclamation_epoch)
     }
