@@ -36,11 +36,9 @@ pub(super) fn write(
     let Some(document) = index.state.document(id)? else {
         return Ok(None);
     };
-    crate::document_store::image::with_retained_control(
-        output,
-        index.read_control.as_ref(),
-        |output| output::write(index, id, document, output, control).map(Some),
-    )
+    crate::image_io::with_retained_control(output, index.read_control.as_ref(), |output| {
+        output::write(index, id, document, output, control).map(Some)
+    })
 }
 
 pub(super) fn read(

@@ -69,9 +69,17 @@ impl Engine {
             session.state.io_timing(),
         );
         session.state.attach_cancellation(&runtime.cancellation);
+        let storage = super::StorageContext::memory();
+        let durable = super::DurableCatalogState::memory(
+            storage
+                .memory_capture
+                .as_ref()
+                .expect("memory source domain"),
+        )
+        .expect("a fresh memory source domain has available registry identities");
         Self {
-            storage: super::StorageContext::memory(),
-            durable: Arc::new(super::DurableCatalogState::new()),
+            storage,
+            durable: Arc::new(durable),
             extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
             epochs: Arc::new(super::EpochCoordinator::new()),

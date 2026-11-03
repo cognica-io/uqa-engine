@@ -15,6 +15,7 @@ use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 mod catalog_cell;
+mod resource_capture;
 mod table_capture;
 pub(crate) use catalog_cell::CatalogCell;
 mod session_state_lock;
@@ -135,8 +136,14 @@ pub(super) struct DurableCatalogState {
     pub(super) shells: CatalogCell<uqa_execution::catalog::shell_type::ShellRegistry>,
     pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: CatalogCell<BTreeMap<String, Arc<DeepModel>>>,
+    pub(super) graphs: CatalogCell<
+        BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>,
+        resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,
+    >,
+    pub(super) models: CatalogCell<
+        BTreeMap<String, Arc<DeepModel>>,
+        resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
+    >,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes:

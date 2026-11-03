@@ -37318,6 +37318,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_images_keep_immutable_sources_and_release_their_complete_allowance",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Immutable graph resource images",
+      "workload": "Retain the same graph with independent controls, mutate its live successor and release the original source.",
+      "invariant": "Exact image bytes survive and each lease retires only after its final image handle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_capture_rejects_insufficient_payload_allowance_without_retaining_source_records",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Graph source retention admission",
+      "workload": "Capture a one-MiB graph under insufficient and sufficient allowances.",
+      "invariant": "Denied capture retains no source or reservation; admitted capture shares the original immutable allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_output_checks_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Graph image cancellation ownership",
+      "workload": "Cancel output through the invoking control and then the original control at the first write.",
+      "invariant": "Typed cancellation stops output, and a new invoking control cannot revive original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "retained_graph_payload_admission_counts_unused_source_capacity",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/capture.rs",
+      "capability": "Graph capacity retention bounds",
+      "workload": "Retain a one-byte graph property with one MiB of unused owned capacity.",
+      "invariant": "The original capacity is admitted; a four-KiB budget rejects without leaking its partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "captured_model_images_preserve_every_layer_after_source_replacement_and_loss",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Immutable model resource images",
+      "workload": "Capture every layer variant, detach the live model and drop its source.",
+      "invariant": "All original image bytes survive without training or parameter reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_capture_admits_buffer_capacity_without_copying_weights_and_retires_independent_leases",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Model source retention bounds",
+      "workload": "Capture a model with over two MiB of unused weight capacity under denied and independent admitted allowances.",
+      "invariant": "Capture allocates less than four KiB, admits original capacity and releases each lease with its final image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "captured_model_output_observes_both_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/capture.rs",
+      "capability": "Model image cancellation ownership",
+      "workload": "Cancel either original or invoking control at the first output write and retry with a fresh invocation.",
+      "invariant": "Both stop after one write; only an invocation cancellation permits a later independent output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_capture_preserves_rollback_replacement_and_unread_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Actual Engine graph and model capture",
+      "workload": "Capture large resources before savepoint/transaction rollback, replacement, later names and unread Engine closure.",
+      "invariant": "Selected images preserve their exact names and contents, and extracted children retain admission after catalog retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_capture_failure_preserves_writes_and_independent_capture_allowances",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Resource capture failure isolation",
+      "workload": "Capture large Engine resources with independent insufficient and sufficient allowances before ordinary replacement.",
+      "invariant": "Only the underfunded cut fails; writes complete and the funded cut preserves exact original images.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_children_keep_original_cancellation_after_registry_and_engine_loss",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Engine resource child cancellation",
+      "workload": "Extract graph and model images, destroy Engine and the capture, then cancel the original control.",
+      "invariant": "Both images report typed cancellation before output and release their remaining payload admission on final drop.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

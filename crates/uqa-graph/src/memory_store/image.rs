@@ -14,6 +14,7 @@ use uqa_storage::{
     StorageBackendError, StorageBackendResult,
 };
 
+mod capture;
 mod input;
 mod output;
 mod retention;

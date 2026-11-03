@@ -33,7 +33,7 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         output: &mut dyn std::io::Write,
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
-        crate::document_store::image::with_retained_control(output, self.2.as_ref(), |output| {
+        crate::image_io::with_retained_control(output, self.2.as_ref(), |output| {
             self.0.write_image(output, control)
         })
     }

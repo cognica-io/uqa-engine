@@ -8,6 +8,7 @@ use super::*;
 use crate::{DeepLayerSpec, GatingSpec};
 use std::io::Cursor;
 
+mod capture;
 mod fixtures;
 
 fn model(layers: Vec<DeepLayerSpec>) -> DeepModel {

@@ -15,7 +15,9 @@ use uqa_storage::{
     StorageBackendError, StorageBackendResult,
 };
 
+mod capture;
 mod layers;
+pub use capture::ModelImageSnapshot;
 #[cfg(test)]
 mod tests;
 

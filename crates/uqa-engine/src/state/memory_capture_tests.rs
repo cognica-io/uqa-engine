@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_storage::read_control::StorageReadControl;
 
 mod metadata;
+mod resources;
 
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
@@ -290,6 +291,20 @@ fn memory_engine_capture_failure_preserves_transaction_progress_and_other_cuts()
 
 #[test]
 fn memory_engine_capture_excludes_temporary_source_retention() {
+    let empty = Engine::new();
+    let baseline = StorageReadControl::with_limit(4096);
+    let empty_cut = empty
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&baseline)
+        .unwrap();
+    drop(empty);
+    empty_cut.check().unwrap();
+    let empty_peak = baseline.memory().peak();
+    drop(empty_cut);
+    assert_eq!(baseline.memory().used(), 0);
     let engine = Engine::new();
     sql(&engine, "CREATE TEMP TABLE temp_docs(id integer, body text, embedding vector(2)); CREATE INDEX temp_text ON temp_docs USING gin(body); INSERT INTO temp_docs VALUES(1,repeat('x',65536),ARRAY[1.0,0.0])");
     let table = engine.table("temp_docs").unwrap().unwrap();
@@ -308,11 +323,10 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
         .unwrap()
         .capture(&control)
         .unwrap();
-    let retained = control.memory().used();
     sql(&engine, "UPDATE temp_docs SET body='changed',embedding=ARRAY[0.0,1.0]; TRUNCATE temp_docs; DROP TABLE temp_docs");
     drop((table, engine));
     cut.check().unwrap();
-    assert_eq!(control.memory().peak(), retained);
+    assert_eq!(control.memory().peak(), empty_peak);
     drop(cut);
     assert_eq!(control.memory().used(), 0);
 }

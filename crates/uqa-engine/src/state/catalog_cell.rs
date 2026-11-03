@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use parking_lot::MappedRwLockReadGuard;
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 use uqa_storage::{
     memory_capture::{
         CapturedMemoryValue, MemoryCaptureCell, MemoryCaptureRegistry, MemoryCaptureSource,
@@ -19,7 +19,10 @@ use uqa_storage::{
     StorageBackendError, StorageBackendResult,
 };
 
-type Capture<T, F> = fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>;
+enum Capture<T, F> {
+    Definition(fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>),
+    Resource(fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>),
+}
 
 struct CatalogRoot<T, F> {
     value: Arc<T>,
@@ -30,7 +33,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for
     type Frozen = CapturedMemoryValue<F>;
 
     fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
-        let capture = self.capture.ok_or_else(|| {
+        let capture = self.capture.as_ref().ok_or_else(|| {
             StorageBackendError::Other("catalog source has no capture producer".into())
         })?;
         let production = ProductionControl::new(
@@ -38,10 +41,13 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for
             control.cancellation(),
             control.cancellation(),
         );
-        let value = capture(&self.value, &production)
-            .map_err(|error| StorageBackendError::backend("catalog capture", error))?
-            .into_budgeted()
-            .unwrap_or_else(|_| unreachable!("catalog capture uses an admitted producer"));
+        let value = match capture {
+            Capture::Definition(capture) => capture(&self.value, &production)
+                .map_err(|error| StorageBackendError::backend("catalog capture", error))?
+                .into_budgeted()
+                .unwrap_or_else(|_| unreachable!("catalog capture uses an admitted producer")),
+            Capture::Resource(capture) => capture(&self.value, control)?,
+        };
         CapturedMemoryValue::new(value, control)
     }
 }
@@ -63,6 +69,22 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     }
 
     pub(crate) fn capture_source(
+        value: Arc<T>,
+        registry: Option<&MemoryCaptureRegistry>,
+        capture: fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>,
+    ) -> StorageBackendResult<Self> {
+        Self::with_source(value, registry, Capture::Definition(capture))
+    }
+
+    pub(crate) fn capture_resource(
+        value: Arc<T>,
+        registry: &MemoryCaptureRegistry,
+        capture: fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>,
+    ) -> StorageBackendResult<Self> {
+        Self::with_source(value, Some(registry), Capture::Resource(capture))
+    }
+
+    fn with_source(
         value: Arc<T>,
         registry: Option<&MemoryCaptureRegistry>,
         capture: Capture<T, F>,

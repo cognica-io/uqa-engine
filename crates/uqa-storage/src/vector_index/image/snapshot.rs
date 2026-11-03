@@ -42,7 +42,7 @@ impl<T: VectorImageSource> VectorImageSource for Retained<T> {
         output: &mut dyn std::io::Write,
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
-        crate::document_store::image::with_retained_control(output, Some(&self.control), |output| {
+        crate::image_io::with_retained_control(output, Some(&self.control), |output| {
             self.source.write_image(output, control)
         })
     }

@@ -16,6 +16,9 @@ use std::sync::Arc;
 use uqa_core::{Edge, Vertex};
 use uqa_storage::{CatalogFacade, PersistentStorageBackend};
 
+mod image;
+pub use image::GraphImageSnapshot;
+
 #[derive(Debug, Clone)]
 pub enum GraphStoreHandle {
     Memory(MemoryGraphStore),

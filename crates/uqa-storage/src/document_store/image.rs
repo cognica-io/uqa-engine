@@ -18,50 +18,6 @@ use uqa_core::{
 
 const MAGIC: &[u8; 8] = b"UQADOC01";
 
-pub(crate) fn with_retained_control<T>(
-    output: &mut dyn Write,
-    original: Option<&StorageReadControl>,
-    write: impl FnOnce(&mut dyn Write) -> StorageBackendResult<T>,
-) -> StorageBackendResult<T> {
-    if let Some(original) = original {
-        original.check()?;
-    }
-    let mut output = ImageOutput {
-        output,
-        original,
-        error: None,
-    };
-    let result = write(&mut output);
-    if let Some(error) = output.error {
-        return Err(error);
-    }
-    let result = result?;
-    if let Some(original) = original {
-        original.check()?;
-    }
-    Ok(result)
-}
-
-struct ImageOutput<'a> {
-    output: &'a mut dyn Write,
-    original: Option<&'a StorageReadControl>,
-    error: Option<StorageBackendError>,
-}
-
-impl Write for ImageOutput<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if let Some(error) = self.original.and_then(|control| control.check().err()) {
-            self.error = Some(error);
-            return Err(std::io::Error::other("retained document image cancelled"));
-        }
-        self.output.write(bytes)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.output.flush()
-    }
-}
-
 pub(super) fn write<'a>(
     fields: impl ExactSizeIterator<Item = (&'a str, &'a Value)>,
     metadata: DocumentMetadata,

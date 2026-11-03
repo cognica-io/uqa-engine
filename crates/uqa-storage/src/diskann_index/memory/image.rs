@@ -33,7 +33,7 @@ pub(super) fn write(
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    crate::document_store::image::with_retained_control(writer, Some(original), |writer| {
+    crate::image_io::with_retained_control(writer, Some(original), |writer| {
         let manifest = index.manifest();
         let generation = manifest.input().generation;
         let mut out = ImageOutput {

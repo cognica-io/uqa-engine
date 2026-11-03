@@ -140,7 +140,7 @@ impl DocumentStore for MemoryDocumentStore {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<u64>> {
         control.check()?;
-        super::image::with_retained_control(
+        crate::image_io::with_retained_control(
             output,
             self.retention.as_ref().map(|retention| &retention.control),
             |output| {
