@@ -16,6 +16,7 @@ impl DurableCatalogState {
     ) -> StorageBackendResult<()> {
         self.register_type_sources(registry)?;
         self.register_metadata_sources(registry)?;
+        self.register_foreign_sources(registry)?;
         self.register_authority_sources(registry)
     }
 
@@ -47,6 +48,28 @@ impl DurableCatalogState {
             self.shells.snapshot(),
             Some(registry),
             uqa_sql::catalog::definition_capture::types::shells,
+        )?;
+        Ok(())
+    }
+
+    fn register_foreign_sources(
+        &mut self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<()> {
+        self.foreign_wrappers = CatalogCell::capture_source(
+            self.foreign_wrappers.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::foreign::wrappers,
+        )?;
+        self.foreign_servers = CatalogCell::capture_source(
+            self.foreign_servers.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::foreign::servers,
+        )?;
+        self.foreign_tables = CatalogCell::capture_source(
+            self.foreign_tables.snapshot(),
+            Some(registry),
+            uqa_execution::catalog::foreign::capture::tables,
         )?;
         Ok(())
     }

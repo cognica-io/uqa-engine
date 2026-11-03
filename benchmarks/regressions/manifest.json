@@ -37825,6 +37825,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_wrapper_capture_preserves_every_handler_and_bound_callback_without_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign wrapper descriptor capture",
+      "workload": "Capture native, missing and bound-function handlers with validator references and ordered options.",
+      "invariant": "Exact names, handler variants, bound identities and options survive with actual allocation equal to admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_server_capture_keeps_option_order_legacy_absence_and_original_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign server descriptor capture",
+      "workload": "Capture current and legacy server metadata with distinct optional fields and option declaration order.",
+      "invariant": "Captured server identities, wrapper references, option bytes and absent fields exactly match the originals.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_descriptor_capture_rejects_unfunded_options_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign descriptor admission",
+      "workload": "Capture large late wrapper/server options under insufficient memory and cancel the original control.",
+      "invariant": "Denied or cancelled construction retains no partial descriptor or memory lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_keeps_complete_declarations_slots_references_and_option_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign table definition capture",
+      "workload": "Capture a qualified table with a dropped slot, constraints, noncanonical float bits, public OIDs and server binding.",
+      "invariant": "Every declaration, identity and option remains exact and actual live allocation matches admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_detaches_retained_defaults_from_the_source_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign default ownership",
+      "workload": "Capture a retained large default after cancelling its source control and then destroy the source.",
+      "invariant": "The source allowance retires independently while the captured original default remains owned by its capture allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_rejects_late_options_and_cancellation_without_partial_retention",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign table admission",
+      "workload": "Capture a large late option under a small allowance and repeat after original cancellation.",
+      "invariant": "Both failures release all copied declarations and option reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Memory foreign catalog lifecycle",
+      "workload": "Use actual wrapper/server/table SQL, dropped columns, rollback, same-name replacement and unread Engine closure.",
+      "invariant": "Captured definitions and original identity links survive; independently retained children keep original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_foreign_capture_keeps_ordinary_ddl_and_independent_cuts_usable",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Foreign catalog failure isolation",
+      "workload": "Drop and recreate a wrapper with large options under independent denied and funded captures.",
+      "invariant": "Ordinary DDL succeeds, the denied cut stays failed and the funded cut retains the original descriptor.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

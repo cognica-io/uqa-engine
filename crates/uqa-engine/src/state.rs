@@ -204,11 +204,27 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
-    pub(super) foreign_wrappers: CatalogCell<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub(super) foreign_servers:
-        CatalogCell<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
-    pub(super) foreign_tables:
-        CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
+    pub(super) foreign_wrappers: CatalogCell<
+        uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
+        Vec<(
+            String,
+            uqa_sql::catalog::foreign_wrapper::ForeignWrapperDefinition,
+        )>,
+    >,
+    pub(super) foreign_servers: CatalogCell<
+        BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+        Vec<(
+            String,
+            uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer,
+        )>,
+    >,
+    pub(super) foreign_tables: CatalogCell<
+        BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>,
+        Vec<(
+            RelationIdentity,
+            uqa_execution::catalog::foreign::capture::CapturedForeignTable,
+        )>,
+    >,
     pub(super) foreign_table_security: CatalogCell<
         BTreeMap<RelationIdentity, BoundTableSecurity>,
         Vec<(
