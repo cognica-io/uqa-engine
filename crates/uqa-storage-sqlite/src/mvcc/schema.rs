@@ -13,6 +13,7 @@ use super::{codec, connection_functions::ConnectionFunctions, PhysicalResult};
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(super) mod backup_import;
+pub(super) mod image_binding;
 
 /// Identifier generations share durable capture with committed records.
 pub(super) const RECORD_FORMAT: i64 = 68;

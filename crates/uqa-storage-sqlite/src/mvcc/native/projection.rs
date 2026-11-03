@@ -19,11 +19,13 @@ use super::{
 };
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) mod image;
 #[cfg(test)]
 mod tests;
 
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
-const ORDER: [Family; 63] = [
+pub(super) const ORDER: [Family; 63] = [
     Family::StandaloneGraphScopes,
     Family::StandaloneGraphMetadata,
     Family::StandaloneGraphCatalog,

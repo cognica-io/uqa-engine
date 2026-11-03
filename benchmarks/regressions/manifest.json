@@ -35511,6 +35511,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_preserves_projection_history_artifacts_and_allocators",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite fresh image preservation",
+      "workload": "Restore actual DiskANN artifacts, standalone graph scopes, sequence state and a 512 KiB row after deleting the source, across all sixteen source/destination protection combinations.",
+      "invariant": "Every row and revision, stable namespace and allocator maximum matches the captured source; restored queries/writes and repeated recovery preserve later commits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_interrupted_and_underfunded_projection_remains_unavailable",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite image admission and bounded memory",
+      "workload": "Drop before input, during projection and before publication; cancel input/projection or exhaust value and original row-buffer limits.",
+      "invariant": "Only verified complete imports enter history publication; every partial file rejects ordinary open and image recovery and releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_rejects_valid_archives_with_invalid_physical_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests.rs",
+      "capability": "Native SQLite physical image integrity",
+      "workload": "Import ten structurally valid archives containing invalid rows, mismatched keys, absent or changed owners, aliased physical keys, missing sequence pairs/schema marker and invalid DiskANN states.",
+      "invariant": "Archive authentication alone cannot activate an inconsistent physical image; typed projection, owner and dependency checks retain the unavailable format on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_backup_import_recovers_exact_image_after_each_history_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "Native SQLite image history recovery",
+      "workload": "Lose replies after intent, coordinator and completed history publication in all four file modes; attempt mismatched roots/targets, then resume and write new data.",
+      "invariant": "Only the exact verified image and retained target enter the owning history transition; recovery never reimports rows or overwrites later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_sqlite_repository_restore_publishes_verified_private_images_once",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_repository.rs",
+      "capability": "Native SQLite private repository restore",
+      "workload": "Import actual DiskANN state after source deletion into pinned private files in all four destination modes, lose the import reply, resume, reject an existing destination and retry after later writes.",
+      "invariant": "The original root and history request recover the closed verified image; exclusive directory publication occurs once and completed resolution never reimports or replaces later writes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

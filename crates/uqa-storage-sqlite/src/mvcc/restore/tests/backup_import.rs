@@ -665,3 +665,107 @@ fn sqlite_backup_import_process_exit_keeps_partial_images_unavailable() {
         unavailable(&target, mode, request);
     }
 }
+
+#[test]
+fn native_backup_import_recovers_exact_image_after_each_history_boundary() {
+    use crate::{SQLiteNativeBackupImport, SQLiteStorageProvider};
+    use uqa_storage::PersistentStorageProvider;
+    let directory = tempfile::tempdir().unwrap();
+    let setup = control();
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    let session = provider.open_session().unwrap();
+    session.catalog.set_metadata("row", "original").unwrap();
+    let image = provider.capture_backup_image(&setup).unwrap();
+    let repository = LocalRepository::create(
+        directory.path().join("backup"),
+        protection(),
+        limits(),
+        &setup,
+    )
+    .unwrap();
+    let root = {
+        let mut operation = repository
+            .begin_backup(image.cut(), None, 16 << 20, &setup)
+            .unwrap();
+        operation.prepare_image(image, 2 << 20, &setup).unwrap();
+        operation.publish(&setup).unwrap()
+    };
+    let lease = repository.open_backup(root.backup(), &setup).unwrap();
+    let other_root = BackupRoot::new(
+        root.repository(),
+        BackupId::new().unwrap(),
+        root.parent(),
+        root.cut(),
+        root.inventory(),
+        root.summary(),
+    )
+    .unwrap();
+    for mode in 0..4 {
+        for boundary in [
+            super::Boundary::IntentPublished,
+            super::Boundary::CoordinatorPublished,
+            super::Boundary::Completed,
+        ] {
+            let path = directory.path().join(format!("native-{mode}-{boundary:?}"));
+            empty_file(&path);
+            let request = DatabaseRestore::new(root.cut().source).unwrap();
+            let mut import =
+                SQLiteNativeBackupImport::new(&path, &lease, request, options(mode), &setup)
+                    .unwrap();
+            let _injection = super::inject(boundary, || {
+                Err(VersionError::InvalidEncoding("lost native image history reply").into())
+            });
+            loop {
+                match import.advance() {
+                    Ok(SQLiteBackupImportStep::Pending) => (),
+                    Ok(SQLiteBackupImportStep::Complete) => {
+                        panic!("lost history reply was reported complete")
+                    }
+                    Err(error) => {
+                        assert!(error
+                            .to_string()
+                            .contains("lost native image history reply"));
+                        break;
+                    }
+                }
+            }
+            assert_eq!(setup.memory().used(), 0);
+            assert!(matches!(
+                SQLiteKeyValueBackupImport::recover(&path, root, request, options(mode), &setup),
+                Err(BackupError::Invalid("Key/Value image recovery mapping"))
+            ));
+            for (root, request) in [
+                (other_root, request),
+                (root, DatabaseRestore::new(root.cut().source).unwrap()),
+            ] {
+                assert!(SQLiteNativeBackupImport::recover(
+                    &path,
+                    root,
+                    request,
+                    options(mode),
+                    &setup
+                )
+                .is_err());
+            }
+            if boundary != super::Boundary::Completed {
+                assert!(open(&path, mode).is_err());
+            }
+            SQLiteNativeBackupImport::recover(&path, root, request, options(mode), &setup).unwrap();
+            let provider = SQLiteStorageProvider::new(open(&path, mode).unwrap());
+            let session = provider.open_session().unwrap();
+            assert_eq!(
+                session.catalog.get_metadata("row").unwrap().as_deref(),
+                Some("original")
+            );
+            session.catalog.set_metadata("later", "preserved").unwrap();
+            drop((session, provider));
+            SQLiteNativeBackupImport::recover(&path, root, request, options(mode), &setup).unwrap();
+            let provider = SQLiteStorageProvider::new(open(&path, mode).unwrap());
+            let session = provider.open_session().unwrap();
+            assert_eq!(
+                session.catalog.get_metadata("later").unwrap().as_deref(),
+                Some("preserved")
+            );
+        }
+    }
+}

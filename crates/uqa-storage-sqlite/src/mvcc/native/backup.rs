@@ -32,7 +32,15 @@ const HEADER_BYTES: usize = 56;
 mod import;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use import::SQLiteNativeImageImportReader;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod restore;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use restore::SQLiteNativeBackupImport;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) mod validation;
 
+#[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
+mod test_image;
 #[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
 mod tests;
 

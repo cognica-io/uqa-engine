@@ -334,6 +334,30 @@ pub(super) fn visit(
     Ok(())
 }
 
+/// Read one physical row after a retained primary key, using the same charged size probe as point reads.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) fn next(
+    connection: &Connection,
+    layout: &'static NativeRecordLayout,
+    after: Option<&[u8]>,
+    control: &StorageReadControl,
+) -> PhysicalResult<Option<BudgetedVec<u8>>> {
+    let key = after
+        .map(|bytes| decode_row(bytes, layout.primary_key.len(), control))
+        .transpose()?;
+    read(
+        connection,
+        layout,
+        if key.is_some() {
+            Bound::After
+        } else {
+            Bound::First
+        },
+        key.as_deref().unwrap_or(&[]),
+        control,
+    )
+}
+
 pub(super) fn reserve_values(
     values: &[ValueRef<'_>],
     control: &StorageReadControl,

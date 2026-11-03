@@ -22,7 +22,7 @@ use uqa_storage::{
     },
     mvcc::{DatabaseRestore, VersionedPersistence},
     read_control::StorageReadControl,
-    KeyValueStore,
+    KeyValueStore, PersistentStorageProvider,
 };
 
 use super::{
@@ -31,7 +31,7 @@ use super::{
 };
 use crate::{
     ManagedConnection, SQLiteBackupImportStep, SQLiteError, SQLiteKeyValueBackupImport,
-    SQLiteKeyValueStorage, SQLiteRecordStore,
+    SQLiteKeyValueStorage, SQLiteNativeBackupImport, SQLiteRecordStore, SQLiteStorageProvider,
 };
 
 fn sqlite_error(error: SQLiteError) -> BackupError {
@@ -41,6 +41,7 @@ fn sqlite_error(error: SQLiteError) -> BackupError {
 #[derive(Clone)]
 struct FixtureImporter {
     mode: usize,
+    native: bool,
     generation: DiskANNGeneration,
     imported: Arc<AtomicUsize>,
     recovered: Arc<AtomicUsize>,
@@ -56,12 +57,22 @@ impl FixtureImporter {
         control: &StorageReadControl,
     ) -> BackupResult<()> {
         let connection = open(path, self.mode).map_err(sqlite_error)?;
-        let records = SQLiteRecordStore::for_key_value(&connection, control)?;
+        let records = if self.native {
+            SQLiteRecordStore::for_native(&connection, control)?
+        } else {
+            SQLiteRecordStore::for_key_value(&connection, control)?
+        };
         if records.database_id() != request.target() {
             return Err(BackupError::Integrity);
         }
-        let owner = SQLiteKeyValueStorage::from_connection(connection).map_err(sqlite_error)?;
-        verify_diskann_restored(&owner.backend(), self.generation)?;
+        if self.native {
+            let provider = SQLiteStorageProvider::new(connection);
+            let session = provider.open_session()?;
+            verify_diskann_restored(&*session.backend, self.generation)?;
+        } else {
+            let owner = SQLiteKeyValueStorage::from_connection(connection).map_err(sqlite_error)?;
+            verify_diskann_restored(&owner.backend(), self.generation)?;
+        }
         Ok(())
     }
 }
@@ -77,15 +88,26 @@ impl BackupRestoreImporter for FixtureImporter {
         self.imported.fetch_add(1, Ordering::SeqCst);
         drop(directory.create_file("database")?);
         directory.with_file_path("database", control, |path| {
-            let mut import = SQLiteKeyValueBackupImport::new(
-                path,
-                backup,
-                request,
-                options(self.mode),
-                control,
-            )?;
-            while import.advance()? != SQLiteBackupImportStep::Complete {}
-            drop(import);
+            if self.native {
+                let mut import = SQLiteNativeBackupImport::new(
+                    path,
+                    backup,
+                    request,
+                    options(self.mode),
+                    control,
+                )?;
+                while import.advance()? != SQLiteBackupImportStep::Complete {}
+            } else {
+                let mut import = SQLiteKeyValueBackupImport::new(
+                    path,
+                    backup,
+                    request,
+                    options(self.mode),
+                    control,
+                )?;
+                while import.advance()? != SQLiteBackupImportStep::Complete {}
+                drop(import);
+            }
             self.validate(path, request, control)?;
             if let Some((before, after)) = &self.movement {
                 std::fs::rename(before, after)?;
@@ -108,13 +130,23 @@ impl BackupRestoreImporter for FixtureImporter {
     ) -> BackupResult<()> {
         self.recovered.fetch_add(1, Ordering::SeqCst);
         directory.with_file_path("database", control, |path| {
-            SQLiteKeyValueBackupImport::recover(
-                path,
-                backup.root(),
-                request,
-                options(self.mode),
-                control,
-            )?;
+            if self.native {
+                SQLiteNativeBackupImport::recover(
+                    path,
+                    backup.root(),
+                    request,
+                    options(self.mode),
+                    control,
+                )?;
+            } else {
+                SQLiteKeyValueBackupImport::recover(
+                    path,
+                    backup.root(),
+                    request,
+                    options(self.mode),
+                    control,
+                )?;
+            }
             self.validate(path, request, control)
         })
     }
@@ -142,6 +174,7 @@ fn sqlite_repository_restore_recovers_closed_import_and_preserves_published_writ
         let target = temporary.path().join("restored");
         let importer = FixtureImporter {
             mode,
+            native: false,
             generation,
             imported: Arc::default(),
             recovered: Arc::default(),
@@ -226,6 +259,7 @@ fn sqlite_repository_restore_tracks_parent_movement_before_and_during_import() {
             let id = restore.id();
             let importer = FixtureImporter {
                 mode,
+                native: false,
                 generation,
                 imported: Arc::default(),
                 recovered: Arc::default(),
@@ -268,5 +302,91 @@ fn sqlite_repository_restore_tracks_parent_movement_before_and_during_import() {
             drop(restore);
             assert_eq!(control.memory().used(), 0);
         }
+    }
+}
+
+#[test]
+fn native_sqlite_repository_restore_publishes_verified_private_images_once() {
+    use uqa_storage::backup::{BackupLimits, LocalRepository, Protection};
+    for mode in 0..4 {
+        let temporary = tempfile::tempdir().unwrap();
+        let source_path = temporary.path().join("source");
+        std::fs::create_dir(&source_path).unwrap();
+        let provider = SQLiteStorageProvider::new(
+            ManagedConnection::open(&source_path.join("database")).unwrap(),
+        );
+        let session = provider.open_session().unwrap();
+        let generation = verify_diskann_restore_source(&*session.backend).unwrap();
+        session
+            .catalog
+            .set_metadata("literal", "source-independent bytes")
+            .unwrap();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let image = provider.capture_backup_image(&control).unwrap();
+        let repository = LocalRepository::create(
+            temporary.path().join("repository"),
+            Protection::Plaintext,
+            BackupLimits::new(4096, 4096).unwrap(),
+            &control,
+        )
+        .unwrap();
+        let root = {
+            let mut operation = repository
+                .begin_backup(image.cut(), None, 16 << 20, &control)
+                .unwrap();
+            operation.prepare_image(image, 2 << 20, &control).unwrap();
+            operation.publish(&control).unwrap()
+        };
+        drop((session, provider));
+        std::fs::remove_dir_all(source_path).unwrap();
+        let target = temporary.path().join("restored");
+        let importer = FixtureImporter {
+            mode,
+            native: true,
+            generation,
+            imported: Arc::default(),
+            recovered: Arc::default(),
+            lose_reply: true,
+            movement: None,
+        };
+        let mut restore = repository
+            .begin_restore(root.backup(), &target, &control)
+            .unwrap();
+        let id = restore.id();
+        let request = restore.request();
+        assert!(restore.prepare(importer.clone()).is_err());
+        assert!(!target.exists());
+        drop(restore);
+        assert_eq!(control.memory().used(), 0);
+        let mut restore = repository.resume_restore(id, &target, &control).unwrap();
+        restore.prepare(importer.clone()).unwrap();
+        assert!(!target.exists());
+        std::fs::create_dir(&target).unwrap();
+        assert!(restore.publish().is_err());
+        std::fs::remove_dir(&target).unwrap();
+        let receipt = restore.publish().unwrap();
+        assert_eq!(receipt.database, request.target());
+        let provider = SQLiteStorageProvider::new(open(&target.join("database"), mode).unwrap());
+        let session = provider.open_session().unwrap();
+        assert_eq!(
+            session.catalog.get_metadata("literal").unwrap().as_deref(),
+            Some("source-independent bytes")
+        );
+        verify_diskann_restored_writes(&*session.backend, generation).unwrap();
+        session.catalog.set_metadata("later", "preserve").unwrap();
+        drop((session, provider, restore));
+        control.cancellation().cancel();
+        let mut restore = repository.resume_restore(id, &target, &control).unwrap();
+        assert_eq!(restore.publish().unwrap(), receipt);
+        restore.prepare(importer.clone()).unwrap();
+        let provider = SQLiteStorageProvider::new(open(&target.join("database"), mode).unwrap());
+        let session = provider.open_session().unwrap();
+        assert_eq!(
+            session.catalog.get_metadata("later").unwrap().as_deref(),
+            Some("preserve")
+        );
+        assert_eq!(importer.imported.load(Ordering::SeqCst), 1);
+        assert_eq!(importer.recovered.load(Ordering::SeqCst), 1);
+        assert_eq!(control.memory().used(), 0);
     }
 }

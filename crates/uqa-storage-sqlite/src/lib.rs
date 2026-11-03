@@ -59,7 +59,7 @@ pub use key_value::{
 };
 pub use mvcc::native::SQLiteNativeBackupImage;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub use mvcc::native::SQLiteNativeImageImportReader;
+pub use mvcc::native::{SQLiteNativeBackupImport, SQLiteNativeImageImportReader};
 pub use mvcc::SQLiteRecordStore;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use mvcc::{SQLiteBackupImportOptions, SQLiteBackupImportStep, SQLiteKeyValueBackupImport};

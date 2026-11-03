@@ -105,23 +105,10 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
         options: SQLiteBackupImportOptions,
         control: &StorageReadControl,
     ) -> BackupResult<()> {
-        control.check()?;
-        if request.source() != root.cut().source || request.target().as_bytes() == [0; 16] {
-            return Err(BackupError::Invalid("SQLite import restore identity"));
+        if root.cut().format.provider() != ImageProvider::SQLiteKV {
+            return Err(BackupError::Invalid("Key/Value image recovery mapping"));
         }
-        let connection =
-            ImageConnection::reopen(path, options.compression, options.encryption_key, control)
-                .map_err(sqlite_error)?;
-        schema::backup_import::validate_image(
-            connection.physical().map_err(sqlite_error)?,
-            root,
-            request,
-            control,
-        )
-        .map_err(physical_error)?;
-        connection
-            .publish_history(request, control)
-            .map_err(sqlite_error)
+        recover_image(path, root, request, options, control)
     }
 
     pub const fn imported_records(&self) -> u64 {
@@ -160,7 +147,7 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
                 )
                 .map_err(physical_error)?;
                 connection
-                    .publish_history(self.request, &self.control)
+                    .publish_history(self.root, self.request, &self.control)
                     .map_err(sqlite_error)?;
                 self.input = None;
                 self.complete = true;
@@ -202,7 +189,7 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
                     &owned_key,
                     revision.as_u64(),
                     value_bytes as i32,
-                    input,
+                    |output| input.read_current(output),
                     &self.control,
                 )?;
                 self.records += 1;
@@ -212,7 +199,7 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
     }
 }
 
-fn insert_identifier(
+pub(super) fn insert_identifier(
     connection: &Connection,
     namespace: &[u8],
     watermark: u64,
@@ -234,12 +221,12 @@ fn insert_identifier(
     admission::commit(transaction, control).map_err(physical_error)
 }
 
-fn insert_record(
+pub(super) fn insert_record(
     connection: &Connection,
     key: &[u8],
     revision: u64,
     length: i32,
-    input: &mut KeyValueImageImportReader<'_>,
+    mut read: impl FnMut(&mut [u8]) -> BackupResult<usize>,
     control: &StorageReadControl,
 ) -> BackupResult<()> {
     let _bindings = crate::read_control::reserve_bindings(control, &[key, &revision.to_be_bytes()])
@@ -263,14 +250,14 @@ fn insert_record(
         let mut buffer = [0; 16 * 1024];
         while remaining != 0 {
             control.cancellation().check()?;
-            let n = input.read_current(&mut buffer[..remaining.min(16 * 1024)])?;
+            let n = read(&mut buffer[..remaining.min(16 * 1024)])?;
             if n == 0 {
                 return Err(BackupError::Invalid("truncated SQLite image value"));
             }
             blob.write_all(&buffer[..n])?;
             remaining -= n;
         }
-        if input.read_current(&mut buffer[..1])? != 0 {
+        if read(&mut buffer[..1])? != 0 {
             return Err(BackupError::Invalid("oversized SQLite image value"));
         }
         blob.close().map_err(driver_error)?;
@@ -284,12 +271,31 @@ fn insert_record(
     admission::commit(transaction, control).map_err(physical_error)
 }
 
-fn sqlite_error(error: SQLiteError) -> BackupError {
+pub(super) fn sqlite_error(error: SQLiteError) -> BackupError {
     uqa_storage::StorageBackendError::from(error).into()
 }
 fn driver_error(error: rusqlite::Error) -> BackupError {
     sqlite_error(error.into())
 }
-fn physical_error(error: super::Error) -> BackupError {
+pub(super) fn physical_error(error: super::Error) -> BackupError {
     error.into_version().into()
+}
+
+pub(super) fn recover_image(
+    path: &Path,
+    root: BackupRoot,
+    request: DatabaseRestore,
+    options: SQLiteBackupImportOptions,
+    control: &StorageReadControl,
+) -> BackupResult<()> {
+    control.check()?;
+    if request.source() != root.cut().source || request.target().as_bytes() == [0; 16] {
+        return Err(BackupError::Invalid("SQLite import restore identity"));
+    }
+    let connection =
+        ImageConnection::reopen(path, options.compression, options.encryption_key, control)
+            .map_err(sqlite_error)?;
+    connection
+        .publish_history(root, request, control)
+        .map_err(sqlite_error)
 }

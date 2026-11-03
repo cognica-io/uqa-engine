@@ -9,7 +9,10 @@
 use std::{path::Path, sync::Arc};
 
 use rusqlite::Connection;
-use uqa_storage::{mvcc::DatabaseRestore, read_control::StorageReadControl, StorageEncryptionKey};
+use uqa_storage::{
+    backup::BackupRoot, mvcc::DatabaseRestore, read_control::StorageReadControl,
+    StorageEncryptionKey,
+};
 
 use super::{
     compressed_vfs,
@@ -114,6 +117,7 @@ impl ImageConnection {
 
     pub(crate) fn publish_history(
         self,
+        root: BackupRoot,
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> Result<()> {
@@ -131,7 +135,7 @@ impl ImageConnection {
                 session: Arc::new(SessionState::new()),
                 record_access: false,
             };
-            crate::mvcc::restore::publish(&connection, request, control)?;
+            crate::mvcc::restore::publish_image(&connection, root, request, control)?;
             Ok(())
         })();
         drop(source);

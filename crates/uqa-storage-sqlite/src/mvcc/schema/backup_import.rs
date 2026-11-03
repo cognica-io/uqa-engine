@@ -8,7 +8,7 @@
 
 use rusqlite::{params, Connection};
 use uqa_storage::{
-    backup::BackupRoot,
+    backup::{BackupRoot, ImageProvider},
     mvcc::{DatabaseRestore, VersionError},
     read_control::StorageReadControl,
 };
@@ -18,29 +18,14 @@ use super::{
     PhysicalResult, RECORD_FORMAT, TABLES,
 };
 
-const IMAGE: (&str, &str) = ("_uqa_backup_import", "CREATE TABLE _uqa_backup_import (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), root BLOB NOT NULL CHECK(typeof(root) = 'blob' AND length(root) = 240), target BLOB NOT NULL CHECK(typeof(target) = 'blob' AND length(target) = 16))");
+use super::image_binding::IMAGE;
 
-/// Recovery checks the immutable archive binding before the existing history owner can mutate either main or auxiliary state. No ordinary-file handle is opened beside the `SQLite` connection.
-pub(in crate::mvcc) fn validate_image(
-    connection: &Connection,
-    root: BackupRoot,
-    request: DatabaseRestore,
-    control: &StorageReadControl,
-) -> PhysicalResult<()> {
-    control.check().map_err(VersionError::from)?;
-    let _bindings = control
-        .memory()
-        .reserve(BackupRoot::ENCODED_BYTES + 16)
-        .map_err(VersionError::from)?;
-    let matches: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM _uqa_backup_import WHERE singleton = 1 AND root = ?1 AND target = ?2)",
-        params![root.encode().as_slice(), request.target().as_bytes().as_slice()],
-        |row| row.get(0),
-    )?;
-    if !matches {
-        return Err(VersionError::InvalidEncoding("image recovery binding mismatch").into());
+fn key_value_mapping(root: BackupRoot) -> PhysicalResult<bool> {
+    match root.cut().format.provider() {
+        ImageProvider::SQLiteKV => Ok(true),
+        ImageProvider::SQLiteNative => Ok(false),
+        _ => Err(VersionError::InvalidEncoding("non-SQLite image mapping").into()),
     }
-    Ok(())
 }
 
 fn metadata_definition() -> String {
@@ -68,14 +53,17 @@ pub(in crate::mvcc) fn initialize(
         return Err(VersionError::InvalidEncoding("image import destination has a schema").into());
     }
     super::create_tables(&transaction, &metadata_definition())?;
-    key_value::create_mapping_guards(&transaction)?;
+    let key_value = key_value_mapping(root)?;
+    if key_value {
+        key_value::create_mapping_guards(&transaction)?;
+    }
     let sequence = root
         .cut()
         .sequence
         .ok_or(VersionError::InvalidEncoding("missing image sequence"))?;
     transaction.execute(
-        "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence, mapping, restore_target, sequence_durable) VALUES (1, 0, ?1, x'0000000000000000', ?2, 1, ?3, ?2)",
-        params![request.source().as_bytes().as_slice(), sequence.as_u64().to_be_bytes().as_slice(), request.target().as_bytes().as_slice()],
+        "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence, mapping, restore_target, sequence_durable) VALUES (1, 0, ?1, x'0000000000000000', ?2, ?4, ?3, ?2)",
+        params![request.source().as_bytes().as_slice(), sequence.as_u64().to_be_bytes().as_slice(), request.target().as_bytes().as_slice(), key_value],
     )?;
     transaction.execute_batch(IMAGE.1)?;
     transaction.execute(
@@ -102,8 +90,8 @@ pub(in crate::mvcc) fn complete(
     let _permit = admission::permit(connection, control)?;
     let transaction = admission::begin(connection, control)?;
     let matches: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM _uqa_backup_import WHERE singleton = 1 AND root = ?1 AND target = ?2) AND EXISTS(SELECT 1 FROM _uqa_mvcc_metadata WHERE singleton = 1 AND format = 0 AND database_id = ?3 AND restore_target = ?2 AND mapping = 1 AND allocated = x'0000000000000000' AND sequence = ?4 AND sequence_durable = sequence)",
-        params![root.encode().as_slice(), request.target().as_bytes().as_slice(), request.source().as_bytes().as_slice(), root.cut().sequence.unwrap().as_u64().to_be_bytes().as_slice()],
+        "SELECT EXISTS(SELECT 1 FROM _uqa_backup_import WHERE singleton = 1 AND root = ?1 AND target = ?2) AND EXISTS(SELECT 1 FROM _uqa_mvcc_metadata WHERE singleton = 1 AND format = 0 AND database_id = ?3 AND restore_target = ?2 AND mapping = ?5 AND allocated = x'0000000000000000' AND sequence = ?4 AND sequence_durable = sequence)",
+        params![root.encode().as_slice(), request.target().as_bytes().as_slice(), request.source().as_bytes().as_slice(), root.cut().sequence.unwrap().as_u64().to_be_bytes().as_slice(), key_value_mapping(root)?],
         |row| row.get(0),
     )?;
     if !matches {

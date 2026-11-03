@@ -18,6 +18,32 @@ use crate::mvcc::{
     read, Error, PhysicalResult,
 };
 
+/// A restored source row requires every selector it normally publishes atomically. The fixed projection contains at most three records.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(in crate::mvcc::native) fn validate_image_source(
+    connection: &Connection,
+    namespace: uqa_storage::mvcc::DatabaseId,
+    sequence: CommitSequence,
+    family: Family,
+    values: &[ValueRef<'_>],
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    for record in super::records(namespace, family, values, control)?
+        .iter()
+        .flatten()
+    {
+        read::value(connection, record.key(), sequence, control, &mut |stored| {
+            if stored.and_then(|stored| stored.value) != Some(record.row()) {
+                return Err(invalid(
+                    "native image graph source lacks its evaluated selector",
+                ));
+            }
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
 pub(in crate::mvcc::native) fn validate_row(
     connection: &Connection,
     family: Family,
