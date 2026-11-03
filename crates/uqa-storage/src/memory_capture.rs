@@ -19,6 +19,9 @@ use uqa_core::memory::{Budgeted, MemoryReservation, OwnedMap};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
 mod failure;
+mod selection;
+pub use selection::MemoryCaptureSources;
+use selection::SelectedSources;
 #[cfg(test)]
 mod tests;
 
@@ -108,6 +111,23 @@ impl MemoryCaptureRegistry {
 
     /// Register one cut without enumerating cells or copying source data. Admission waits observe the original cancellation. The returned cut is unavailable if any required source later cannot preserve it; such failure does not fail the source's ordinary write.
     pub fn capture(&self, control: &StorageReadControl) -> StorageBackendResult<MemoryCapture> {
+        self.register_capture(SelectedSources::All, control)
+    }
+
+    /// Register an immutable selection without visiting its sources. Unselected writes and retirement do not preserve payloads for this cut. The transaction owner supplies the matching source generation and publication boundary.
+    pub fn capture_selected(
+        &self,
+        sources: &MemoryCaptureSources,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<MemoryCapture> {
+        self.register_capture(sources.admit(self, control)?, control)
+    }
+
+    fn register_capture(
+        &self,
+        sources: SelectedSources,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<MemoryCapture> {
         control.check()?;
         let memory = control.memory().reserve(size_of::<Capture>())?;
         let _admission = loop {
@@ -122,7 +142,10 @@ impl MemoryCaptureRegistry {
             registry: Arc::downgrade(&self.0),
             id,
             control: control.clone(),
-            state: Mutex::new(State::Active(OwnedMap::new())),
+            state: Mutex::new(State::Active {
+                sources,
+                values: OwnedMap::new(),
+            }),
             _memory: memory,
         });
         // The registration lock is gone before a failed insertion can drop the capture and retire its registration.
@@ -234,7 +257,10 @@ struct Capture {
 }
 
 enum State {
-    Active(OwnedMap<u64, Erased>),
+    Active {
+        sources: SelectedSources,
+        values: OwnedMap<u64, Erased>,
+    },
     Failed(Arc<StorageBackendError>),
 }
 
@@ -274,9 +300,12 @@ impl Capture {
     ) -> StorageBackendResult<Option<Arc<Budgeted<F>>>> {
         let mut state = self.state.lock();
         self.admit(&mut state)?;
-        let State::Active(values) = &*state else {
+        let State::Active { sources, values } = &*state else {
             unreachable!("failed cuts do not admit values")
         };
+        if !sources.contains(id) {
+            return Err(selection::not_selected());
+        }
         Ok(values.get(&id).map(|value| {
             value
                 .clone()
@@ -289,12 +318,15 @@ impl Capture {
         &self,
         id: u64,
         value: &T,
-    ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
+    ) -> StorageBackendResult<Option<Arc<Budgeted<T::Frozen>>>> {
         let mut state = self.state.lock();
         self.admit(&mut state)?;
-        let State::Active(values) = &mut *state else {
+        let State::Active { sources, values } = &mut *state else {
             unreachable!("failed cuts do not admit values")
         };
+        if !sources.contains(id) {
+            return Ok(None);
+        }
         if !values.contains_key(&id) {
             let result = values.insert_budgeted_with(id, self.control.memory(), || {
                 let memory = self
@@ -316,10 +348,12 @@ impl Capture {
                 return Err(self.fail(&mut state, error));
             }
         }
-        Ok(values[&id]
-            .clone()
-            .downcast::<Budgeted<T::Frozen>>()
-            .unwrap_or_else(|_| unreachable!("cell identities retain one frozen type")))
+        Ok(Some(
+            values[&id]
+                .clone()
+                .downcast::<Budgeted<T::Frozen>>()
+                .unwrap_or_else(|_| unreachable!("cell identities retain one frozen type")),
+        ))
     }
 }
 
@@ -521,7 +555,10 @@ impl<T: MemoryCaptureSource> CaptureRead<T::Frozen> for RegisteredCell<T> {
             #[cfg(test)]
             tests::source_wait();
         };
-        capture.0.frozen(registration.id, &*value)
+        capture
+            .0
+            .frozen(registration.id, &*value)?
+            .ok_or_else(selection::not_selected)
     }
 }
 

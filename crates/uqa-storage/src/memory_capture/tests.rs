@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, sync::atomic::AtomicUsize, sync::mpsc, thread};
 use uqa_core::{memory::MemoryError, Value};
 
 mod keys;
+mod selection;
 
 thread_local! {
     static ON_SOURCE_LOCKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };

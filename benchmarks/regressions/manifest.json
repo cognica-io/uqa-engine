@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_sources_ignore_unselected_writes_retirement_and_failed_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Exact memory capture source selection",
+      "workload": "Capture a committed source beside an excluded source whose freeze cannot fit; read, write, hold and retire the excluded owner before closing all sources.",
+      "invariant": "Excluded preservation performs no allocation or freeze and cannot invalidate the selected cut; the original selected value remains readable after source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selection_successors_preserve_exact_incarnations_and_independent_cuts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Immutable source membership generations",
+      "workload": "Add and remove source identities between independent captures, create a later source and capture an empty selection before mutation and source closure.",
+      "invariant": "Each cut reads only its original source incarnations; successor membership cannot alter older selections, and all construction/capture leases release at final close.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selection_domain_and_construction_failures_preserve_the_original_root",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Atomic memory source membership publication",
+      "workload": "Exhaust the membership allowance during insertion and removal, repeat unchanged updates and submit foreign-domain keys/selections and denied captures.",
+      "invariant": "Failed operations publish no replacement or registration; unchanged updates allocate nothing, and the original exact membership remains capturable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selection_failure_and_cancellation_release_membership_without_affecting_peers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Independent selected capture retention",
+      "workload": "Retain the same membership under insufficient, sufficient and cancelled controls, then mutate the selected source and cancel the remaining funded cut.",
+      "invariant": "Ordinary writes and the funded peer succeed; failures remain terminal, retire registrations and release both selected membership and archive leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_cut_registration_has_constant_allocation_and_visits_no_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Bounded selected capture registration",
+      "workload": "Register selections containing one and 8,192 source identities under separate membership and capture allowances.",
+      "invariant": "Heap allocation counts and bytes are identical and no source freezes; admitted membership bytes grow with the selected root footprint and release completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_registration_releases_every_incomplete_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Complete selected registration admission",
+      "workload": "Try every allowance below the measured complete registration footprint, then exactly that allowance and an already cancelled control.",
+      "invariant": "Every insufficient attempt leaves zero capture charges and registrations without changing the source membership; exact admission succeeds without freezing any source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-ml",
       "kind": "lib",
       "test": "model_image_matches_literal_tags_counts_and_ieee_bits",
