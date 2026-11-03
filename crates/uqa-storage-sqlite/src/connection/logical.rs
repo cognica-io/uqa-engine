@@ -118,6 +118,26 @@ impl ManagedConnection {
         Ok(registry)
     }
 
+    pub(crate) fn metadata_snapshot_registry(
+        &self,
+        identity: DatabaseId,
+    ) -> uqa_storage::mvcc::VersionResult<
+        Arc<uqa_storage::mvcc::SnapshotRegistry<uqa_storage::mvcc::MetadataEpoch>>,
+    > {
+        let mut retained = self.pool.metadata_snapshot_registry.lock();
+        if let Some((old_identity, registry)) = retained.as_ref() {
+            if let Some(registry) = registry.upgrade() {
+                if *old_identity != identity {
+                    return Err(VersionError::WrongDatabase);
+                }
+                return Ok(registry);
+            }
+        }
+        let registry = Arc::new(uqa_storage::mvcc::SnapshotRegistry::default());
+        *retained = Some((identity, Arc::downgrade(&registry)));
+        Ok(registry)
+    }
+
     /// Create an independent logical session over the same database pool.
     /// Explicit transactions started on either session are isolated and never
     /// capture operations issued through the other session.

@@ -78,3 +78,9 @@ impl From<crate::StorageBackendError> for BackupError {
         }
     }
 }
+
+impl From<crate::mvcc::VersionError> for BackupError {
+    fn from(error: crate::mvcc::VersionError) -> Self {
+        error.into_storage_error().into()
+    }
+}

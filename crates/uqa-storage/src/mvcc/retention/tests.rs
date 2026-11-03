@@ -93,6 +93,42 @@ fn physical_reader_can_release_its_lease_while_collection_waits_for_write() {
 }
 
 #[test]
+fn autonomous_metadata_boundaries_reuse_retention_without_advancing_records() {
+    use crate::mvcc::MetadataEpoch;
+    let records = Arc::new(SnapshotRegistry::<CommitSequence>::default());
+    let metadata = Arc::new(SnapshotRegistry::<MetadataEpoch>::default());
+    let control = StorageReadControl::with_limit(1024);
+    let record = records
+        .capture(&control, || Ok(CommitSequence::from_u64(7)))
+        .unwrap();
+    let old = metadata
+        .capture(&control, || Ok(MetadataEpoch::INITIAL))
+        .unwrap();
+    let next = metadata
+        .capture(&control, || old.sequence().successor())
+        .unwrap();
+    assert_eq!(record.sequence(), CommitSequence::from_u64(7));
+    assert_eq!(
+        metadata.reclaim(&control, Ok).unwrap(),
+        Some(MetadataEpoch::INITIAL)
+    );
+    drop(old);
+    assert_eq!(
+        metadata.reclaim(&control, Ok).unwrap(),
+        Some(next.sequence())
+    );
+    drop(next);
+    assert_eq!(metadata.reclaim(&control, Ok).unwrap(), None);
+    assert_eq!(
+        records.reclaim(&control, Ok).unwrap(),
+        Some(record.sequence())
+    );
+    drop(record);
+    assert_eq!(control.memory().used(), 0);
+    assert!(MetadataEpoch::from_u64(u64::MAX).successor().is_err());
+}
+
+#[test]
 fn live_clones_retain_the_oldest_boundary_and_collection_allows_drop() {
     let registry = Arc::new(SnapshotRegistry::default());
     let control = StorageReadControl::with_limit(1 << 20);

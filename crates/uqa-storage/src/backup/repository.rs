@@ -204,9 +204,8 @@ impl LocalRepository {
     }
 
     fn admission(&self, control: &StorageReadControl) -> BackupResult<directory::Lease> {
-        directory::lock(
+        directory::admission(
             directory::open_file(&self.root, "admission", true)?,
-            false,
             control,
         )
     }

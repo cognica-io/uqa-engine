@@ -14,6 +14,7 @@
 mod error;
 mod frame;
 mod inventory;
+mod records;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod repository;
 mod root;
@@ -27,6 +28,7 @@ pub use repository::{
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
+pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,

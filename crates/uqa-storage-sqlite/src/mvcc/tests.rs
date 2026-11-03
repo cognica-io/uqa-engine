@@ -10,7 +10,9 @@ use uqa_storage::mvcc::{CommitFailure, CommitSequence, CommitStatus, RecordWrite
 use super::*;
 
 mod admission;
+mod backup_metadata;
 mod batch_metadata;
+mod chunks;
 mod commit_cache;
 mod diskann;
 mod identifiers;
@@ -75,6 +77,9 @@ fn records_require_a_connection_local_permit_that_closes_after_every_operation()
         "DELETE FROM _uqa_mvcc_metadata",
         "DELETE FROM _uqa_mvcc_transactions",
         "DELETE FROM _uqa_mvcc_identifiers",
+        "DELETE FROM _uqa_mvcc_backup_metadata",
+        "INSERT INTO _uqa_mvcc_identifier_epochs VALUES (x'61', x'0000000000000000', x'0000000000000000')",
+        "INSERT INTO _uqa_mvcc_identifier_history VALUES (x'61', x'0000000000000000', x'0000000000000001')",
     ] {
         assert!(connection
             .with(|connection| {
@@ -126,6 +131,12 @@ fn incomplete_or_altered_formats_are_rejected_without_recreation() {
         "DROP TABLE _uqa_mvcc_runs",
         "DROP TRIGGER _uqa_mvcc_runs_UPDATE_guard",
         "DROP TABLE _uqa_mvcc_identifiers",
+        "DROP TABLE _uqa_mvcc_backup_metadata",
+        "DROP TABLE _uqa_mvcc_identifier_epochs",
+        "DROP TABLE _uqa_mvcc_identifier_history",
+        "DROP TRIGGER _uqa_mvcc_backup_metadata_UPDATE_guard",
+        "DROP TRIGGER _uqa_mvcc_identifier_epochs_INSERT_guard",
+        "DROP TRIGGER _uqa_mvcc_identifier_history_DELETE_guard",
         "DROP TRIGGER _uqa_mvcc_identifiers_UPDATE_guard",
         "DROP TRIGGER _uqa_mvcc_heads_INSERT_guard",
         "ALTER TABLE _uqa_mvcc_heads ADD COLUMN unrecognized INTEGER",
@@ -173,6 +184,11 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
         let current_format = format!("CHECK(format = {})", schema::RECORD_FORMAT);
         assert!(definition.contains(&current_format));
+        if format < 68 {
+            for (name, _) in super::backup_metadata::TABLES {
+                connection.execute_batch(&format!("DROP TABLE {name}"))?;
+            }
+        }
         if format < 59 { super::version_metadata::install_predecessor(connection, format)?; }
         let definition = if format < 60 { definition.split(", sequence_durable BLOB").next().unwrap().to_owned() + ")" } else { definition };
         let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };

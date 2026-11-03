@@ -4,6 +4,19 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "repository_admission_preserves_a_waiting_pack_and_observes_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/admission.rs",
+      "capability": "Backup repository admission",
+      "workload": "Hold the actual repository admission lease while a synchronized pack finalizes; release it or cancel the waiting invocation after observing real OS contention.",
+      "invariant": "Admission contention preserves the existing pack until it can publish; cancellation returns before the competing owner releases admission and leaves capture terminally failed. Live operation-lease contention remains Busy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "backup_leases_retire_their_description_without_unlocking_independent_readers",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/repository/directory.rs",
@@ -56,6 +69,45 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "record_chunks_preserve_large_committed_values_across_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/view/chunk/tests.rs",
+      "capability": "Committed record chunk retention",
+      "workload": "Read a 1 MiB plus 17-byte value through 1 KiB chunks under a 2 KiB read allowance, replacing the current value after the first chunk.",
+      "invariant": "Every chunk retains the original revision, length and bytes; EOF and overflow bounds are exact and all destination charges are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "record_chunks_bound_memory_and_close_each_redb_read_window",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/read/chunks.rs",
+      "capability": "redb bounded image payload reads",
+      "workload": "Read a 1 MiB plus 17-byte committed value under a 2 KiB allowance while an independent writer replaces and reclaims after the first chunk.",
+      "invariant": "A full-value read exceeds the allowance; each 1 KiB chunk uses one physical read window, preserves the old value and releases all snapshot and buffer charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "record_chunks_keep_large_values_and_writer_progress_in_every_mapping_and_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/chunks.rs",
+      "capability": "SQLite bounded image payload reads",
+      "workload": "Read native encoded views and KV values larger than 512 KiB in 1 KiB chunks with a 4 KiB allowance across both mappings and all four file modes.",
+      "invariant": "A full-value read exceeds the allowance; independent writers commit between chunks, old bytes and revisions survive reclamation, and every charge retires after the cut and buffer drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "ordered_inventory_streams_large_state_under_a_fixed_allowance",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/tests/inventories.rs",
@@ -75,6 +127,58 @@
       "capability": "Backup frame resource admission",
       "workload": "Protected encoding and plain frame decoding with no available heap allowance, followed by an input advertising a 4 GiB decoded frame.",
       "invariant": "Reject protected encoding before output and reject invalid or inadmissible decoding after only the 96-byte header, without allocating or reading a payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "large_metadata_cut_streams_under_a_fixed_retention_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata.rs",
+      "capability": "Joint backup metadata retention",
+      "workload": "Capture 4,096 allocator namespaces with a 512-byte retained allowance, then visit 32 physical positions per read window.",
+      "invariant": "Export every original watermark in order without changing the record sequence or retaining namespace-sized workspace; release all snapshot charges on final drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "watermark_history_coalesces_between_captures_and_scans_bound_absent_positions",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata.rs",
+      "capability": "Online backup metadata windows",
+      "workload": "One hundred allocator updates after capture, eight new namespaces and two-position reads interleaved with a writer on another thread.",
+      "invariant": "Keep one historical value per captured epoch, bound absent physical positions, allow writers between reads and return the original allocation without advancing the record sequence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "large_metadata_capture_uses_fixed_retained_memory_and_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_metadata/admission.rs",
+      "capability": "SQLite backup metadata retention",
+      "workload": "Capture 4,096 allocator namespaces with a 2 KiB retained allowance and visit at most 32 physical positions per window.",
+      "invariant": "Preserve every original watermark in byte order with constant retained snapshot memory and release all charged memory after the final owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "independent_native_and_kv_writers_progress_between_backup_windows_in_all_file_modes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_metadata/providers.rs",
+      "capability": "SQLite online backup writer progress",
+      "workload": "Retain a joint cut while an independent native or Key/Value owner writes in plain, encrypted, compressed and compressed-encrypted mode.",
+      "invariant": "The writer completes before cut release; the snapshot keeps the old record set and watermark, while current reads observe the new publications.",
       "case_names": [
         ""
       ]
@@ -34585,6 +34689,84 @@
       "capability": "Large statement plan ownership",
       "workload": "Edit the compact child metadata owner of a nested scalar under an exhausted allowance and interrupted mutation.",
       "invariant": "Reattach the original child buffer and exact reservations on rejection and unwind; freezing releases only temporary metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "record_image_cursor_streams_exact_units_under_a_fixed_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/records.rs",
+      "capability": "Bounded joint-record image input",
+      "workload": "Stream exact allocator and record units, including an empty key, tombstone, empty value and a 1 MiB payload, through one-position windows and 1 KiB chunks.",
+      "invariant": "The 4 KiB allowance bounds all retained buffers, every expected byte and revision is preserved, physical positions are counted exactly and completion immediately releases the cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "record_image_cursor_preserves_redb_records_and_watermarks_with_bounded_memory",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/images.rs",
+      "capability": "redb joint-image cursor",
+      "workload": "Export a 1 MiB payload, an empty record and a captured allocator watermark with a 2 KiB allowance while an independent writer updates and reclaims.",
+      "invariant": "At most two physical positions are delivered per advance; output contains the exact original records and watermark, and completion releases all retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "record_image_cursor_preserves_native_and_kv_cuts_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/chunks/images.rs",
+      "capability": "SQLite joint-image cursor",
+      "workload": "Export every captured raw record and watermark across native/KV mappings and all four file modes with 1 KiB payload chunks and a 4 KiB allowance.",
+      "invariant": "Each advance examines at most two physical positions, independent writers progress between chunks, all captured bytes match the existing full-read oracle and source retention retires at completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "record_image_cursor_includes_compacted_run_keys_and_completes_empty_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/chunks/images.rs",
+      "capability": "Compacted SQLite backup input",
+      "workload": "Complete an empty source, then export 128 physically compacted record keys through one-position windows and split value reads.",
+      "invariant": "The physical key ceiling and ordered traversal include every compacted record exactly once, preserve literal bytes/revisions and release the 4 KiB allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "backup_record_positions_bound_absent_keys_and_retain_the_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/positions.rs",
+      "capability": "redb bounded backup positions",
+      "workload": "Visit an empty key, live record and tombstone surrounded by 180 post-capture keys, then add a key beyond the initial ceiling.",
+      "invariant": "Every seven-position window includes excluded keys in its limit, all 184 physical positions are accounted for and only the three original captured positions have visible revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "backup_record_positions_bound_absent_keys_and_retain_the_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/backup_metadata/positions.rs",
+      "capability": "sqlite bounded backup positions",
+      "workload": "Visit an empty key, live record and tombstone surrounded by 180 post-capture keys, then add a key beyond the initial ceiling.",
+      "invariant": "Every seven-position window includes excluded keys in its limit, all 184 physical positions are accounted for and only the three original captured positions have visible revisions.",
       "case_names": [
         ""
       ]

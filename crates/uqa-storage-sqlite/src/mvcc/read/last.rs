@@ -108,3 +108,17 @@ fn previous_point(
     }
     Ok(Some(copy_bytes(key, 0, control)?))
 }
+
+/// Bound a backup traversal by the current physical domain, without scanning past post-capture keys.
+pub(in crate::mvcc) fn ceiling(
+    connection: &Connection,
+    control: &StorageReadControl,
+) -> PhysicalResult<Option<BudgetedVec<u8>>> {
+    let point = previous_point(connection, b"", None, control)?;
+    let run = runs::previous_key(connection, b"", None, control)?;
+    Ok(match (point, run) {
+        (Some(point), Some(run)) if point[..] >= run[..] => Some(point),
+        (_, Some(run)) => Some(run),
+        (point, None) => point,
+    })
+}

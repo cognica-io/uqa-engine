@@ -138,6 +138,30 @@ pub(super) fn lock(file: File, shared: bool, control: &StorageReadControl) -> Ba
     }
 }
 
+/// Repository mutations wait for their short shared admission boundary. Operation leases instead use nonblocking `lock` so a live operation cannot be adopted by a second owner.
+pub(super) fn admission(file: File, control: &StorageReadControl) -> BackupResult<Lease> {
+    loop {
+        control.cancellation().check()?;
+        match file.try_lock() {
+            Ok(()) => return Ok(Lease(file)),
+            Err(TryLockError::Error(error)) => return Err(error.into()),
+            Err(TryLockError::WouldBlock) => {
+                #[cfg(test)]
+                if let Some(observe) = ON_ADMISSION_CONTENTION.with(|slot| slot.borrow_mut().take())
+                {
+                    observe();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static ON_ADMISSION_CONTENTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 pub(super) fn name(bytes: [u8; 16]) -> [u8; 32] {
     let mut name = [0; 32];
     for (output, byte) in name.chunks_exact_mut(2).zip(bytes) {

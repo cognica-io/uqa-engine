@@ -68,6 +68,7 @@ fn diskann_population_redb_predecessor_upgrade_keeps_undo_late_writes_and_cold_r
             .unwrap()
             .insert("format", 52_u64.to_be_bytes().as_slice())
             .unwrap();
+        super::super::remove_backup_metadata_for_predecessor(&transaction);
         transaction.commit().unwrap();
         generation
     };

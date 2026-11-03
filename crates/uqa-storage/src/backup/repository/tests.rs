@@ -12,6 +12,7 @@ use crate::read_control::{CancellationToken, StorageReadControl};
 
 use super::*;
 
+mod admission;
 mod failures;
 mod integrity;
 mod resources;

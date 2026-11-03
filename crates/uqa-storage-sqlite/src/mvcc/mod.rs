@@ -7,6 +7,7 @@
 //! `SQLite` persistence for shared logical records, with short physical transactions and durable receipts.
 
 mod admission;
+mod backup_metadata;
 mod codec;
 mod commit_cache;
 mod connection_functions;
@@ -90,6 +91,7 @@ pub struct SQLiteRecordStore {
     native: Option<native::NativeRecordNamespace>,
     sequence_publication: Option<uqa_storage::mvcc::SequencePublicationLease>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
+    metadata_snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry<uqa_storage::mvcc::MetadataEpoch>>,
     managed_allocations: receipts::ManagedAllocations,
     /// Evidence from a successful physical commit, bounded independently of receipt retention.
     data_commit: Arc<parking_lot::Mutex<Option<CommitReceipt>>>,
@@ -125,6 +127,7 @@ impl SQLiteRecordStore {
             data_commit: Arc::default(),
             sequence_publication: None,
             snapshots: retention::registry(connection, identity)?,
+            metadata_snapshots: retention::metadata_registry(connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection: connection.record_connection(),
@@ -155,6 +158,7 @@ impl SQLiteRecordStore {
             data_commit: Arc::default(),
             sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
+            metadata_snapshots: retention::metadata_registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
@@ -189,6 +193,7 @@ impl SQLiteRecordStore {
             data_commit: Arc::default(),
             sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
+            metadata_snapshots: retention::metadata_registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
@@ -214,6 +219,7 @@ impl SQLiteRecordStore {
             data_commit: Arc::default(),
             sequence_publication: None,
             snapshots: retention::registry(&connection, identity)?,
+            metadata_snapshots: retention::metadata_registry(&connection, identity)?,
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             receipt_leases: receipts::ReceiptLeaseFile::default(),
             connection,
@@ -480,6 +486,12 @@ impl VersionedPersistence for SQLiteRecordStore {
             control,
         )
     }
+    fn capture_backup_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<Arc<dyn uqa_storage::mvcc::CommittedBackupSnapshot>>> {
+        backup_metadata::capture(self, control).map(Some)
+    }
     fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
         self.connection
             .commit_monitor_version()
@@ -487,8 +499,17 @@ impl VersionedPersistence for SQLiteRecordStore {
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
-            self.with_write(control, |connection| {
-                reclamation::reclaim(connection, self.identity, self.native, oldest, control)
+            self.metadata_snapshots.reclaim(control, |metadata_oldest| {
+                self.with_write(control, |connection| {
+                    reclamation::reclaim(
+                        connection,
+                        self.identity,
+                        self.native,
+                        oldest,
+                        metadata_oldest,
+                        control,
+                    )
+                })
             })
         })
     }

@@ -146,10 +146,12 @@ fn payload_reads_do_not_hold_repository_admission() {
     );
     impl Read for Reader<'_> {
         fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-            let _admission = self
-                .0
-                .admission(self.1)
-                .expect("repository gate is free during source reads");
+            let _admission = directory::lock(
+                directory::open_file(&self.0.root, "admission", true).unwrap(),
+                false,
+                self.1,
+            )
+            .expect("repository gate is free during source reads");
             self.2.read(output)
         }
     }
