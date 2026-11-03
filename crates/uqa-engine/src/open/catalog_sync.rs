@@ -813,7 +813,7 @@ impl Engine {
             self.durable
                 .models
                 .write()
-                .insert(name, serde_json::from_str::<DeepModel>(&json)?);
+                .insert(name, Arc::new(serde_json::from_str::<DeepModel>(&json)?));
         }
         for (name, json) in catalog.load_all_scoring_params()? {
             self.durable.scoring_params.write().insert(name, json);
