@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain sequence positions and identities, graph catalog OIDs, comments, index definitions and stored scoring parameters in memory captures, preserving original names, allocation generations and encoded payloads through mutation, rollback and closure. Complete committed Engine selection and autonomous overlays remain in progress.
 - Preserve complete domain, enum, composite, range and shell type definitions in memory catalog captures, including exact OIDs, enum order keys, dropped attributes, support routine identities and independently owned default values. Complete committed Engine capture remains in progress.
 - Retain system-relation, built-in routine and foreign-table authority in memory catalog captures, including absent/empty ACLs, grant paths and relation/column tuple revisions. Permission changes, rollback and same-name foreign-table replacement preserve the selected values; joint committed Engine capture remains in progress.
 - Preserve role incarnations, tuple revisions, attributes and complete membership grant paths in retained memory catalog generations. Role rename, same-name replacement, rollback and Engine closure keep the selected authority under independent capture limits; complete committed Engine capture remains in progress.

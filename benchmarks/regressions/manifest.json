@@ -37010,10 +37010,10 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
-      "test": "memory_engine_capture_excludes_temporary_source_retention",
+      "test": "memory_engine_capture_excludes_temporary_table_payloads",
       "cases": 1,
       "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
-      "capability": "Temporary source capture exclusion",
+      "capability": "Temporary table payload capture exclusion",
       "workload": "Capture while a large temporary table exists, then update, truncate, drop it and close the Engine.",
       "invariant": "Temporary document, text and vector owners stay unregistered; their mutation and retirement add no backup retention.",
       "case_names": [
@@ -37705,6 +37705,123 @@
       "capability": "Type capture failure isolation",
       "workload": "Alter and replace a domain with independent underfunded and funded captures.",
       "invariant": "DDL completes, only the underfunded cut fails and all admitted capture memory retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_sequence_identities_preserve_exact_names_oid_claims_and_persistence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Sequence identity generations",
+      "workload": "Capture quoted sequence names, distinct incarnations, maximal OID claims and each persistence kind.",
+      "invariant": "Every original name, identity, claim and persistence value remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_graph_catalog_identities_keep_every_allocated_label_object",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Graph catalog identity capture",
+      "workload": "Capture a named graph with every label companion OID and constraint entry.",
+      "invariant": "All source fields survive source loss and measured retained bytes equal admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "identity_capture_rejects_denied_names_nested_constraints_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Catalog identity admission",
+      "workload": "Capture large qualified names and late graph constraint names under denied and cancelled controls.",
+      "invariant": "Partial reservations retire and the original cancellation remains authoritative.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_capture_preserves_extreme_positions_definition_and_owner_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture.rs",
+      "capability": "Selected sequence state capture",
+      "workload": "Retain extreme positions, an uncalled value, cache/log state and immutable owner/definition identities.",
+      "invariant": "Exact state survives while denied large names and cancellation release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "comment_capture_preserves_addresses_and_exact_text_with_independent_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/capture.rs",
+      "capability": "Object comment capture",
+      "workload": "Capture descriptions with shared OIDs but different catalog classes and subobjects.",
+      "invariant": "Address distinctions and text bytes remain exact, with no leak on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_capture_keeps_original_encoded_index_and_scoring_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/capture.rs",
+      "capability": "Encoded catalog capture",
+      "workload": "Capture complete index rows and opaque scoring strings with significant formatting and repeated JSON keys.",
+      "invariant": "Original payloads survive without normalization and measured live allocation equals admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_capture_rejects_large_late_payloads_and_cancellation_without_leaks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/capture.rs",
+      "capability": "Encoded metadata admission",
+      "workload": "Capture large late index definitions and scoring strings under denied and cancelled controls.",
+      "invariant": "No partial output or retained reservation survives either failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_metadata_capture_preserves_identity_position_and_encoded_values_across_lifecycle",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/identities.rs",
+      "capability": "Actual Engine catalog metadata",
+      "workload": "Capture eight metadata owners through real SQL, graph and scoring changes, rollback, replacement and unread closure.",
+      "invariant": "Every original identity, position and encoded value survives with original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_metadata_capture_does_not_prevent_scoring_parameter_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/identities.rs",
+      "capability": "Metadata failure isolation",
+      "workload": "Replace large scoring parameters with independent denied and funded captures.",
+      "invariant": "Normal publication succeeds, only the denied cut fails and all capture memory retires.",
       "case_names": [
         ""
       ]

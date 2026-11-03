@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_storage::read_control::StorageReadControl;
 
 mod catalog_authority;
+mod identities;
 mod metadata;
 mod relation_authority;
 mod resources;
@@ -294,23 +295,22 @@ fn memory_engine_capture_failure_preserves_transaction_progress_and_other_cuts()
 }
 
 #[test]
-fn memory_engine_capture_excludes_temporary_source_retention() {
-    let empty = Engine::new();
-    let baseline = StorageReadControl::with_limit(4096);
-    let empty_cut = empty
+fn memory_engine_capture_excludes_temporary_table_payloads() {
+    let definition = "CREATE TEMP TABLE temp_docs(id integer, body text, embedding vector(2)); CREATE INDEX temp_text ON temp_docs USING gin(body)";
+    let engine = Engine::new();
+    sql(&engine, definition);
+    let baseline = StorageReadControl::with_limit(1 << 20);
+    let empty_cut = engine
         .storage
         .memory_capture
         .as_ref()
         .unwrap()
         .capture(&baseline)
         .unwrap();
-    drop(empty);
-    empty_cut.check().unwrap();
-    let empty_peak = baseline.memory().peak();
-    drop(empty_cut);
-    assert_eq!(baseline.memory().used(), 0);
-    let engine = Engine::new();
-    sql(&engine, "CREATE TEMP TABLE temp_docs(id integer, body text, embedding vector(2)); CREATE INDEX temp_text ON temp_docs USING gin(body); INSERT INTO temp_docs VALUES(1,repeat('x',65536),ARRAY[1.0,0.0])");
+    sql(
+        &engine,
+        "INSERT INTO temp_docs VALUES(1,repeat('x',65536),ARRAY[1.0,0.0])",
+    );
     let table = engine.table("temp_docs").unwrap().unwrap();
     assert!(table.document_store.key().is_err());
     assert!(table.inverted_index.key().is_err());
@@ -319,7 +319,8 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
     assert!(table.columns.key().is_err());
     assert!(table.hierarchy.key().is_err());
     assert!(table.dropped_attributes.key().is_err());
-    let control = StorageReadControl::with_limit(4096);
+    // Both cuts contain the same catalog definitions; populated temporary stores must add no capture retention.
+    let control = StorageReadControl::with_limit(1 << 20);
     let cut = engine
         .storage
         .memory_capture
@@ -329,8 +330,10 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
         .unwrap();
     sql(&engine, "UPDATE temp_docs SET body='changed',embedding=ARRAY[0.0,1.0]; TRUNCATE temp_docs; DROP TABLE temp_docs");
     drop((table, engine));
+    empty_cut.check().unwrap();
     cut.check().unwrap();
-    assert_eq!(control.memory().peak(), empty_peak);
-    drop(cut);
+    assert_eq!(control.memory().used(), baseline.memory().used());
+    drop((cut, empty_cut));
+    assert_eq!(baseline.memory().used(), 0);
     assert_eq!(control.memory().used(), 0);
 }

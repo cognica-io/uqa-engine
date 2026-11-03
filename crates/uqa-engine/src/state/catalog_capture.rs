@@ -14,6 +14,15 @@ impl DurableCatalogState {
         &mut self,
         registry: &MemoryCaptureRegistry,
     ) -> StorageBackendResult<()> {
+        self.register_type_sources(registry)?;
+        self.register_metadata_sources(registry)?;
+        self.register_authority_sources(registry)
+    }
+
+    fn register_type_sources(
+        &mut self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<()> {
         self.domains = CatalogCell::capture_source(
             self.domains.snapshot(),
             Some(registry),
@@ -39,6 +48,13 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::definition_capture::types::shells,
         )?;
+        Ok(())
+    }
+
+    fn register_authority_sources(
+        &mut self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<()> {
         self.database_security = CatalogCell::capture_source(
             self.database_security.snapshot(),
             Some(registry),
@@ -78,6 +94,53 @@ impl DurableCatalogState {
             self.system_relation_security.snapshot(),
             Some(registry),
             uqa_sql::catalog::security::capture::relations::system_relations,
+        )?;
+        Ok(())
+    }
+
+    fn register_metadata_sources(
+        &mut self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<()> {
+        self.comments = CatalogCell::capture_source(
+            self.comments.snapshot(),
+            Some(registry),
+            uqa_execution::catalog::comments::capture::comments,
+        )?;
+        self.sequences = CatalogCell::capture_source(
+            self.sequences.snapshot(),
+            Some(registry),
+            uqa_execution::catalog::sequence::capture::sequences,
+        )?;
+        self.sequence_object_ids = CatalogCell::capture_source(
+            self.sequence_object_ids.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::identities::sequence_objects,
+        )?;
+        self.sequence_catalog_oids = CatalogCell::capture_source(
+            self.sequence_catalog_oids.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::identities::sequence_oids,
+        )?;
+        self.sequence_persistence = CatalogCell::capture_source(
+            self.sequence_persistence.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::identities::sequence_persistence,
+        )?;
+        self.graph_catalog_oids = CatalogCell::capture_source(
+            self.graph_catalog_oids.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::definition_capture::identities::graph_oids,
+        )?;
+        self.catalog_indexes = CatalogCell::capture_resource(
+            self.catalog_indexes.snapshot(),
+            registry,
+            uqa_storage::catalog::capture::indexes,
+        )?;
+        self.scoring_params = CatalogCell::capture_resource(
+            self.scoring_params.snapshot(),
+            registry,
+            uqa_storage::catalog::capture::scoring_params,
         )?;
         Ok(())
     }

@@ -147,7 +147,10 @@ pub(super) struct DurableCatalogState {
         uqa_execution::catalog::shell_type::ShellRegistry,
         Vec<(String, uqa_sql::catalog::shell_type::StoredShellType)>,
     >,
-    pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
+    pub(super) comments: CatalogCell<
+        uqa_execution::catalog::comments::CommentRegistry,
+        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+    >,
     pub(super) composites: CatalogCell<
         uqa_execution::catalog::composite_type::CompositeRegistry,
         Vec<(String, uqa_sql::catalog::composite_type::StoredComposite)>,
@@ -160,23 +163,41 @@ pub(super) struct DurableCatalogState {
         BTreeMap<String, Arc<DeepModel>>,
         resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
     >,
-    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
+    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>, Vec<(String, String)>>,
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
-    pub(super) catalog_indexes:
-        CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub(super) catalog_indexes: CatalogCell<
+        BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
+        Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
+    >,
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
     pub(super) schemas:
         CatalogCell<BTreeMap<String, BoundSchemaSecurity>, Vec<(String, BoundSchemaSecurity)>>,
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
-    pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
-    pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
+    pub(super) sequences: CatalogCell<
+        BTreeMap<RelationIdentity, SequenceState>,
+        Vec<(RelationIdentity, SequenceState)>,
+    >,
+    pub(super) sequence_object_ids: CatalogCell<
+        BTreeMap<RelationIdentity, [u8; 16]>,
+        uqa_sql::catalog::definition_capture::identities::CapturedSequenceObjects,
+    >,
     /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub(super) sequence_catalog_oids: CatalogCell<BTreeMap<[u8; 16], u32>>,
+    pub(super) sequence_catalog_oids: CatalogCell<
+        BTreeMap<[u8; 16], u32>,
+        uqa_sql::catalog::definition_capture::identities::CapturedSequenceOids,
+    >,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub(super) graph_catalog_oids:
-        CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
-    pub(super) sequence_persistence:
-        CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
+    pub(super) graph_catalog_oids: CatalogCell<
+        BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>,
+        Vec<(
+            String,
+            uqa_sql::catalog::definition_capture::identities::CapturedGraphCatalogOids,
+        )>,
+    >,
+    pub(super) sequence_persistence: CatalogCell<
+        BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
+        Vec<(RelationIdentity, uqa_sql::ast::RelationPersistence)>,
+    >,
     pub(super) sequence_security: CatalogCell<
         BTreeMap<RelationIdentity, BoundSequenceSecurity>,
         Vec<(RelationIdentity, BoundSequenceSecurity)>,
