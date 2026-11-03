@@ -37929,6 +37929,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_keeps_exact_sequences_and_evaluated_pairs_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Materialized path capture",
+      "workload": "Capture built indexes containing empty, absent and separator-bearing label sequences, then destroy their graph and source.",
+      "invariant": "Every evaluated pair and sequence boundary survives without retaining the source map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_admits_large_labels_and_pairs_before_copy_and_retires_failures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Path capture admission",
+      "workload": "Copy 32 KiB labels or 20,000 pairs under denied and independent funded allowances, then cancel and retire owners.",
+      "invariant": "Large payloads cannot escape admission; failures and final owners release their exact independent charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_rejects_query_views_without_evaluating_the_graph",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Path capture storage boundary",
+      "workload": "Attempt memory capture of a query view bound to a nonexistent graph.",
+      "invariant": "The owner rejects the representation without graph evaluation or retained payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_path_capture_preserves_evaluated_pairs_through_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Memory path registry lifecycle",
+      "workload": "Build an actual path index, invalidate it through graph mutation, roll back, replace its graph and close the Engine.",
+      "invariant": "Original materialized pairs remain exact and retained children keep original cancellation after cut retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_path_capture_preserves_ordinary_updates_and_independent_cuts",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Memory path failure isolation",
+      "workload": "Drop and recreate a large-definition index under denied and funded captures.",
+      "invariant": "Ordinary publication succeeds while only the denied cut fails and funded capture retains original pairs.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

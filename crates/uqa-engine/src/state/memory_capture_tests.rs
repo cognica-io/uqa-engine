@@ -14,6 +14,7 @@ mod catalog_authority;
 mod foreign;
 mod identities;
 mod metadata;
+mod paths;
 mod relation_authority;
 mod resources;
 mod roles;

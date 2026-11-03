@@ -15,6 +15,9 @@ use uqa_storage::{CatalogFacade, PersistentStorageBackend};
 type Pairs = BTreeSet<(u64, u64)>;
 type MemoryPaths = BTreeMap<Vec<String>, Pairs>;
 
+mod capture;
+pub use capture::{CapturedPath, CapturedPathIndex};
+
 #[derive(Clone)]
 enum PathStorage {
     Memory(Arc<MemoryPaths>),

@@ -172,7 +172,12 @@ pub(super) struct DurableCatalogState {
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
     pub(super) schemas:
         CatalogCell<BTreeMap<String, BoundSchemaSecurity>, Vec<(String, BoundSchemaSecurity)>>,
-    pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
+    pub(super) path_indexes: CatalogCell<
+        BTreeMap<String, uqa_graph::PathIndex>,
+        resource_capture::CapturedResources<
+            uqa_core::memory::Budgeted<uqa_graph::CapturedPathIndex>,
+        >,
+    >,
     pub(super) sequences: CatalogCell<
         BTreeMap<RelationIdentity, SequenceState>,
         Vec<(RelationIdentity, SequenceState)>,
