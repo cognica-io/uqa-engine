@@ -39,12 +39,6 @@ pub enum BackupError {
 
 pub type BackupResult<T> = Result<T, BackupError>;
 
-impl From<crate::mvcc::VersionError> for BackupError {
-    fn from(error: crate::mvcc::VersionError) -> Self {
-        error.into_storage_error().into()
-    }
-}
-
 impl From<std::io::Error> for BackupError {
     fn from(error: std::io::Error) -> Self {
         if error
@@ -82,5 +76,11 @@ impl From<crate::StorageBackendError> for BackupError {
             crate::StorageBackendError::Cancelled(error) => Self::Cancelled(error),
             error => Self::Storage(error),
         }
+    }
+}
+
+impl From<crate::mvcc::VersionError> for BackupError {
+    fn from(error: crate::mvcc::VersionError) -> Self {
+        error.into_storage_error().into()
     }
 }
