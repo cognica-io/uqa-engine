@@ -14,6 +14,7 @@ use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
+mod catalog_capture;
 mod catalog_cell;
 mod resource_capture;
 mod table_capture;
@@ -149,7 +150,8 @@ pub(super) struct DurableCatalogState {
     pub(super) catalog_indexes:
         CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
-    pub(super) schemas: CatalogCell<BTreeMap<String, BoundSchemaSecurity>>,
+    pub(super) schemas:
+        CatalogCell<BTreeMap<String, BoundSchemaSecurity>, Vec<(String, BoundSchemaSecurity)>>,
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
@@ -160,7 +162,10 @@ pub(super) struct DurableCatalogState {
         CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
+    pub(super) sequence_security: CatalogCell<
+        BTreeMap<RelationIdentity, BoundSequenceSecurity>,
+        Vec<(RelationIdentity, BoundSequenceSecurity)>,
+    >,
     pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: CatalogCell<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,

@@ -37448,6 +37448,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_catalog_authority_preserves_acl_absence_grant_paths_and_namespace_tuple_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Exact captured catalog authority",
+      "workload": "Capture absent, empty and multiple-path database/schema/sequence ACLs with explicit namespace tuple identities.",
+      "invariant": "All role incarnations, masks, grantors, optional states and namespace identities remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_authority_capture_rejects_unfunded_or_cancelled_payload_without_partial_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Authority payload admission",
+      "workload": "Copy a 32,768-entry ACL under denied and sufficient allowances, then cancel capture.",
+      "invariant": "Denial and cancellation publish no partial value or leaked reservation; admitted output owns its complete ACL payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_authority_registries_preserve_exact_names_order_and_independent_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/tests.rs",
+      "capability": "Authority registry identity",
+      "workload": "Capture mixed-case, dotted and non-ASCII schema names and qualified sequence names before source loss.",
+      "invariant": "Registry order and exact name components survive without reparsing or role rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/catalog_authority.rs",
+      "capability": "Actual Engine authority generations",
+      "workload": "Capture SQL grants before revoke, savepoint/transaction rollback, object drop and unread Engine closure.",
+      "invariant": "Database/schema/sequence authority preserves its original names, role incarnations and tuple identities under original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_catalog_authority_capture_does_not_change_grant_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/catalog_authority.rs",
+      "capability": "Authority capture failure isolation",
+      "workload": "Revoke a real schema grant with independent insufficient and sufficient capture limits.",
+      "invariant": "The grant mutation completes, only the unfunded cut fails and the other capture retains the original authority.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

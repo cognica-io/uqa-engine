@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 pub mod acl_command;
 pub mod acl_warning;
+pub mod capture;
 pub mod columns;
 pub mod dependencies;
 mod role_bindings;

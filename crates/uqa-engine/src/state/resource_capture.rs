@@ -18,6 +18,7 @@ pub(crate) type CapturedResources<T> = BudgetedMap<String, T>;
 impl DurableCatalogState {
     pub(crate) fn memory(registry: &MemoryCaptureRegistry) -> StorageBackendResult<Self> {
         let mut state = Self::new();
+        state.register_catalog_sources(registry)?;
         state.graphs =
             CatalogCell::capture_resource(state.graphs.snapshot(), registry, |values, control| {
                 resources(
