@@ -14,6 +14,7 @@ mod capture;
 mod catalogs;
 mod comments;
 mod events;
+mod identifiers;
 mod resources;
 mod sequence_values;
 mod sequences;

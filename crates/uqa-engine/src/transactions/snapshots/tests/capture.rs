@@ -21,7 +21,7 @@ pub(super) fn capture(engine: &Engine, control: &StorageReadControl) -> Snapshot
         .sources
         .as_ref()
         .unwrap()
-        .capture(control)
+        .capture(engine.row_locks.catalog_oids(), control)
         .unwrap()
 }
 

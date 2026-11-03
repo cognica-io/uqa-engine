@@ -143,6 +143,7 @@ type CommentKey = uqa_storage::memory_capture::MemoryCaptureKey<
 #[cfg(test)]
 pub(crate) struct SnapshotCut {
     pub(crate) tables: super::SnapshotTableCut,
+    pub(crate) catalog_oids: uqa_execution::catalog::identity::CapturedCatalogOidPosition,
     pub(crate) sequences: uqa_core::memory::Budgeted<SequenceKey>,
     pub(crate) foreign: uqa_core::memory::Budgeted<ForeignKey>,
     pub(crate) metadata: uqa_core::memory::Budgeted<MetadataKey>,
@@ -164,6 +165,7 @@ impl std::ops::Deref for SnapshotCut {
 impl SnapshotSources {
     pub(crate) fn capture(
         &self,
+        catalog_oids: &uqa_execution::catalog::identity::CatalogOidCounter,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> StorageBackendResult<SnapshotCut> {
         let key = self.sequences.key()?;
@@ -184,9 +186,11 @@ impl SnapshotSources {
         let comment_memory = control
             .memory()
             .reserve(size_of::<CommentKey>() + comments.retained_source_bytes())?;
-        let tables = self.tables.capture(control)?;
+        let (tables, catalog_oids) =
+            catalog_oids.capture_with(control, || self.tables.capture(control))?;
         Ok(SnapshotCut {
             tables,
+            catalog_oids,
             sequences: uqa_core::memory::Budgeted::new(key, memory),
             foreign: uqa_core::memory::Budgeted::new(foreign, foreign_memory),
             metadata: uqa_core::memory::Budgeted::new(metadata, metadata_memory),

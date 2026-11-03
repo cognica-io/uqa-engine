@@ -39293,6 +39293,85 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "memory_catalog_oid_capture_preserves_uninitialized_wrapped_and_exhausted_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/counter/capture/tests.rs",
+      "capability": "Catalog OID position preservation",
+      "workload": "Capture uninitialized, ordinary, 32-bit wrapped and 64-bit exhausted counters under exact admission; construct independent counters and reject invalid positions.",
+      "invariant": "Exact absolute positions retain native next-OID and exhaustion behavior, remain independent of later reservations, and obey original cancellation with complete lease release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "memory_catalog_oid_capture_orders_joint_registration_with_reservations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/counter/capture/tests.rs",
+      "capability": "Joint counter and source registration",
+      "workload": "Coordinate a concurrent reservation with capture registration, retain another cut after publication, then retire the source and cancel one cut.",
+      "invariant": "The allocation owner remains held through registration; earlier and later cuts keep their own exact counter positions, controls and admitted lifetime.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "memory_catalog_oid_capture_failures_leave_reservations_usable",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/counter/capture/tests.rs",
+      "capability": "OID capture failure admission",
+      "workload": "Deny scalar admission, fail the registration callback and cancel after callback completion before another native reservation.",
+      "invariant": "No failed capture consumes an OID or publishes a completed pair; every partial lease and allocation guard is released and native allocation remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "memory_catalog_oid_capture_cancels_while_allocation_admission_is_busy",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/counter/capture/tests.rs",
+      "capability": "Cancellable OID capture admission",
+      "workload": "Hold allocation admission until capture reserves its scalar allowance, cancel the blocked capture and observe completion before releasing the owner.",
+      "invariant": "Cancellation returns while the counter is still held, releases the capture allowance and leaves the original next-OID transition unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_identifier_cuts_preserve_autonomous_oids_and_original_document_floors",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/identifiers.rs",
+      "capability": "Memory identifier ownership at the data cut",
+      "workload": "Capture after private rows, cached nextval, rolled-back DDL and an autonomous OID reservation; COMMIT or ROLLBACK, replace objects and close the Engine.",
+      "invariant": "The cut retains the exact autonomous catalog position, original transactional document floor/table identity, committed row and reserved sequence endpoint; a fresh counter continues from the selected absolute position.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_identifier_capture_does_not_wait_for_a_private_callback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/identifiers.rs",
+      "capability": "Identifier capture during private callbacks",
+      "workload": "Hold a callback after private definitions and sequence/OID reservations, capture original data and reservations, then finish and close.",
+      "invariant": "Capture does not wait for the application statement gate and pairs original table membership with the current autonomous OID and matching sequence positions under the original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
