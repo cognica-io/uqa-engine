@@ -10,6 +10,14 @@ use super::{Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot};
 use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 
+mod table;
+
+impl Drop for crate::EngineSnapshotData {
+    fn drop(&mut self) {
+        // Retire immutable membership while its component source owners still exist.
+        drop(self.table_sources.take());
+    }
+}
 #[cfg(test)]
 mod tests;
 
@@ -19,74 +27,33 @@ impl Engine {
     ) -> Result<Option<std::sync::Arc<EngineDataSnapshot>>, SQLError> {
         let mut tables = BTreeMap::new();
         let mut owners = BTreeMap::new();
+        let generation = self
+            .storage
+            .backend
+            .is_none()
+            .then(uqa_storage::memory_capture::MemoryCaptureRegistry::new);
         for (name, table) in self.storage.tables.read().iter() {
             if self.storage.backend.is_some()
                 && table.persistence != uqa_sql::ast::RelationPersistence::Temporary
             {
                 continue;
             }
-            // Capture an independent writable view once. Its storage owner may share an immutable root until mutation; probing a separate read snapshot first would duplicate retention or copying before the statement starts.
-            let document_store: std::sync::Arc<dyn uqa_storage::DocumentStore> =
-                std::sync::Arc::from(table.document_store.read().writable_snapshot().map_err(
-                    |err| Self::storage_tx_error("snapshot writable document store", &err),
-                )?);
-            let inverted_index: std::sync::Arc<dyn uqa_storage::InvertedIndex> =
-                std::sync::Arc::from(table.inverted_index.read().writable_snapshot().map_err(
-                    |err| Self::storage_tx_error("snapshot writable inverted index", &err),
-                )?);
-            let mut vector_indexes = BTreeMap::new();
-            for (field, index) in table.vector_indexes.read().iter() {
-                let snapshot: std::sync::Arc<dyn uqa_storage::VectorIndex> =
-                    std::sync::Arc::from(index.writable_snapshot().map_err(|err| {
-                        Self::storage_tx_error("snapshot writable vector index", &err)
-                    })?);
-                vector_indexes.insert(field.clone(), snapshot);
-            }
-            tables.insert(
-                name.clone(),
-                TableDataSnapshot {
-                    security: table.security.snapshot(),
-                    storage_generation: table.storage_generation(),
-                    document_store,
-                    inverted_index,
-                    vector_indexes,
-                    value_indexes: table
-                        .value_indexes
-                        .read()
-                        .iter()
-                        .filter(|(key, _)| matches!(key, uqa_storage::ValueIndexKey::Index(_)))
-                        .map(|(key, index)| (key.clone(), index.clone()))
-                        .collect(),
-                    fts_fields: table.fts_fields.snapshot(),
-                    columns: table.columns.snapshot(),
-                    columns_declared: *table.columns_declared.read(),
-                    next_id: *table.next_id.read(),
-                    analyzer: table.analyzer.snapshot(),
-                    column_stats: table.column_stats.snapshot(),
-                    column_stats_loaded: *table.column_stats_loaded.read(),
-                    column_stats_dirty: *table.column_stats_dirty.read(),
-                    statistics_maintenance: table.statistics_maintenance.read().clone(),
-                    table_checks: table.table_checks.snapshot(),
-                    foreign_keys: table.foreign_keys.snapshot(),
-                    key_constraints: table.key_constraints.snapshot(),
-                    hierarchy: table.hierarchy.snapshot(),
-                    row_type_array_name: table.row_type_array_name.snapshot(),
-                    dropped_attributes: table.dropped_attributes.snapshot(),
-                    doc_count_cache: table
-                        .doc_count_cache
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    doc_count_dirty: table
-                        .doc_count_dirty
-                        .load(std::sync::atomic::Ordering::Acquire),
-                },
-            );
+            let registry = generation
+                .as_ref()
+                .filter(|_| table.persistence != uqa_sql::ast::RelationPersistence::Temporary);
+            tables.insert(name.clone(), TableDataSnapshot::capture(table, registry)?);
             owners.insert(name.clone(), table.clone());
         }
+        let table_sources = generation
+            .map(|registry| crate::state::SnapshotTableSources::new(registry, &tables))
+            .transpose()
+            .map_err(|error| Self::storage_tx_error("snapshot table source membership", &error))?;
         Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
             table_owners: owners,
             data: std::sync::Arc::new(crate::EngineSnapshotData {
                 tables,
                 memory_membership: self.storage.tables.memory_snapshot(),
+                table_sources,
                 durable: self.durable.snapshot(),
             }),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
@@ -132,12 +99,13 @@ impl Engine {
             table_snapshot.restore_stores(table)?;
             table.fts_fields.restore(&table_snapshot.fts_fields);
             table.columns.restore(&table_snapshot.columns);
-            *table.columns_declared.write() = table_snapshot.columns_declared;
-            *table.next_id.write() = table_snapshot.next_id;
+            *table.columns_declared.write() = **table_snapshot.columns_declared;
+            *table.next_id.write() = **table_snapshot.next_id;
+            *table.maps_integer_keys.write() = **table_snapshot.maps_integer_keys;
             table.analyzer.restore(&table_snapshot.analyzer);
             table.column_stats.restore(&table_snapshot.column_stats);
-            *table.column_stats_loaded.write() = table_snapshot.column_stats_loaded;
-            *table.column_stats_dirty.write() = table_snapshot.column_stats_dirty;
+            *table.column_stats_loaded.write() = **table_snapshot.column_stats_loaded;
+            *table.column_stats_dirty.write() = **table_snapshot.column_stats_dirty;
             table
                 .statistics_maintenance
                 .write()
@@ -157,7 +125,7 @@ impl Engine {
             table
                 .value_indexes
                 .write()
-                .clone_from(&table_snapshot.value_indexes);
+                .clone_from(&table_snapshot.value_indexes.read());
             table.doc_count_cache.store(
                 table_snapshot.doc_count_cache,
                 std::sync::atomic::Ordering::Release,
@@ -178,14 +146,16 @@ impl TableDataSnapshot {
     fn restore_stores(&self, table: &crate::TableState) -> Result<(), SQLError> {
         let document_store = self
             .document_store
+            .read()
             .writable_snapshot()
             .map_err(|err| Engine::storage_tx_error("ROLLBACK document restore", &err))?;
         let inverted_index = self
             .inverted_index
+            .read()
             .writable_snapshot()
             .map_err(|err| Engine::storage_tx_error("ROLLBACK FTS restore", &err))?;
         let mut vector_indexes = BTreeMap::new();
-        for (field, index) in &self.vector_indexes {
+        for (field, index) in self.vector_indexes.read().iter() {
             vector_indexes.insert(
                 field.clone(),
                 index
@@ -194,7 +164,7 @@ impl TableDataSnapshot {
             );
         }
         *table.document_store.write() = document_store;
-        *table.storage_generation.write() = self.storage_generation;
+        *table.storage_generation.write() = **self.storage_generation;
         *table.inverted_index.write() = inverted_index;
         table
             .vector_indexes

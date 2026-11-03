@@ -19,6 +19,7 @@ fn image(snapshot: &crate::EngineDataSnapshot) -> Vec<u8> {
     let mut bytes = Vec::new();
     assert!(table
         .document_store
+        .read()
         .write_image_document(1, &mut bytes, &StorageReadControl::with_limit(1 << 20))
         .unwrap()
         .is_some());

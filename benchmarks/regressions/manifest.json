@@ -38800,6 +38800,88 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_table_sources_capture_during_a_private_callback_without_retaining_undo",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Admitted committed table sources during callbacks",
+      "workload": "Hold a callback with a one-MiB private value, a one-MiB temporary payload and a savepoint; capture under 64 KiB, then commit, replace and close.",
+      "invariant": "The cut retains original rows, columns and table identity under all original wrapper allowances without retaining the live table; cancellation and final release preserve their controls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_table_sources_preserve_unread_indexes_across_savepoint_commit_and_closure",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Independent committed text and vector sources",
+      "workload": "Capture unread exact, IVF, HNSW and DiskANN indexes with text and an evaluated expression index; mutate, restore a savepoint, commit, replace and close.",
+      "invariant": "Original encoded text/vector bytes and evaluated index keys survive unread source retirement; a separately retained vector image keeps its original allowance and cancellation after the cut is dropped.",
+      "case_names": [
+        "case_1",
+        "case_2",
+        "case_3",
+        "case_4"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_source_limits_and_cancellation_do_not_consume_transaction_completion",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Independent committed source failure",
+      "workload": "Create underfunded, cancelled and funded cuts of a pre-private 32-KiB row, then COMMIT or ROLLBACK and close.",
+      "invariant": "Each failed cut is terminal without changing transaction completion or the funded cut; every final reservation is released.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_table_membership_preserves_renames_replacements_and_rollback_identities",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Committed table incarnation selection",
+      "workload": "Rename an unlogged table, replace another under the same name, create a private table, open a savepoint and capture before rollback and closure.",
+      "invariant": "Membership retains exactly the original durable names, object and catalog identities, persistence, columns and rows; private replacements and new definitions are absent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_table_capture_admission_does_not_walk_or_freeze_the_table_corpus",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Fixed-work committed table admission",
+      "workload": "Register cuts over transaction generations containing one and 128 tables while measuring allocations and inspecting retained-source state.",
+      "invariant": "Both captures allocate identical fixed bytes below 4 KiB, freeze none of the 22 table sources and independently admit the full membership footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_table_selection_excludes_definitions_created_in_the_outer_message",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/capture.rs",
+      "capability": "Outer transaction table membership",
+      "workload": "Create and populate a table before BEGIN within the same SQL message, then capture the outer generation before COMMIT.",
+      "invariant": "The cut contains no privately created definition while transaction completion still publishes both rows and final capture release frees all charges.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

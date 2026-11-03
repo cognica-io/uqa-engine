@@ -56,6 +56,32 @@ pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static
     MemoryCaptureCell<CatalogRoot<T, F>>,
 );
 
+/// Undo retains the immutable value; a registered source gives that exact generation its own capture identity.
+pub(crate) struct CatalogSnapshot<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
+    source: Option<MemoryCaptureCell<CatalogRoot<T, F>>>,
+    value: Arc<T>,
+}
+
+impl<T: Send + Sync + 'static, F: Send + Sync + 'static> std::ops::Deref for CatalogSnapshot<T, F> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogSnapshot<T, F> {
+    pub(crate) fn key(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedMemoryValue<F>>>
+    {
+        self.source
+            .as_ref()
+            .ok_or_else(|| StorageBackendError::Other("snapshot source is not registered".into()))?
+            .key()
+    }
+}
+
 impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn new(value: T) -> Self {
         Self::from_snapshot(Arc::new(value))
@@ -117,6 +143,32 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
 
     pub(crate) fn snapshot(&self) -> Arc<T> {
         Arc::clone(&self.0.read().value)
+    }
+
+    pub(crate) fn source_snapshot(
+        &self,
+        registry: Option<&MemoryCaptureRegistry>,
+    ) -> StorageBackendResult<CatalogSnapshot<T, F>> {
+        let root = self.0.read();
+        let value = root.value.clone();
+        let source = registry
+            .map(|registry| {
+                let capture = match root.capture.as_ref() {
+                    Some(Capture::Definition(copy)) => Capture::Definition(*copy),
+                    Some(Capture::Resource(copy)) => Capture::Resource(*copy),
+                    None => {
+                        return Err(StorageBackendError::Other(
+                            "snapshot source has no capture producer".into(),
+                        ));
+                    }
+                };
+                registry.cell(CatalogRoot {
+                    value: value.clone(),
+                    capture: Some(capture),
+                })
+            })
+            .transpose()?;
+        Ok(CatalogSnapshot { source, value })
     }
 
     pub(crate) fn restore(&self, snapshot: &Arc<T>) {

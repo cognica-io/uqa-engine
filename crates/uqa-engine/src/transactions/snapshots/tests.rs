@@ -9,12 +9,16 @@ use std::sync::{mpsc, Arc};
 use uqa_core::RelationIdentity;
 use uqa_storage::read_control::StorageReadControl;
 
+mod capture;
+
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();
 }
 
 fn document(snapshot: &EngineSnapshotData) -> Vec<u8> {
-    let source = &snapshot.tables[&RelationIdentity::new("public", "docs")].document_store;
+    let source = snapshot.tables[&RelationIdentity::new("public", "docs")]
+        .document_store
+        .read();
     let mut bytes = Vec::new();
     assert!(source
         .write_image_document(1, &mut bytes, &StorageReadControl::with_limit(1 << 20))
@@ -74,6 +78,7 @@ fn transaction_data_retention_releases_live_table_owners_after_replacement_and_c
     assert_eq!(
         private.tables[&name]
             .document_store
+            .read()
             .get_field(1, "body")
             .unwrap(),
         Some(Value::Str("x".repeat(1 << 20)))
@@ -112,9 +117,9 @@ fn outer_transaction_data_is_readable_while_a_long_callback_holds_private_savepo
     assert_eq!(allocation.bytes_total, 0);
     let selected = selected.unwrap();
     let table = &selected.tables[&RelationIdentity::new("public", "docs")];
-    assert_eq!(table.document_store.len().unwrap(), 1);
+    assert_eq!(table.document_store.read().len().unwrap(), 1);
     assert_eq!(
-        table.document_store.get_field(1, "body").unwrap(),
+        table.document_store.read().get_field(1, "body").unwrap(),
         Some(Value::Str("committed".into()))
     );
     let image = document(&selected);
