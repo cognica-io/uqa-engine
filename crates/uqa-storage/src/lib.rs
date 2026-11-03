@@ -9,6 +9,7 @@
 //! provider-neutral catalog and transaction contracts.
 
 pub mod analyzer_binding;
+pub mod analyzer_image;
 pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
 
 pub mod backend;

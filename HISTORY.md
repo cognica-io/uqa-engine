@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; joint Engine backup integration remains under implementation.
 - Add fresh native SQLite image import with dependency-ordered physical rows, exact revision/namespace/watermark preservation, bounded row verification and recovery of uncertain history publication. Partial images remain unavailable; full logical catalog validation and public Engine backup jobs remain in progress.
 - Add a bounded native SQLite image exporter preserving the stable data namespace, evaluated rows, committed revisions and autonomous watermarks in all four file modes. Capture reuses the initialized record owner without migrating the source or changing private transactions; notification delivery and unpublished/retired DiskANN payloads are excluded. Public Engine backup jobs remain in progress.
 - Add fresh-file SQLite Key/Value image import for plain, encrypted, compressed and encrypted-compressed destinations. Bounded BLOB writes preserve captured records and allocator watermarks; incomplete images remain unavailable until full verification and the existing history-restoration transition complete. Repository restore adapters can open private provider paths through pinned directories, and SQLite recovery checks the exact image and target before resuming without replaying data. Logical catalog validation and public Engine backup integration remain in progress.
@@ -21,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add controlled evaluated memory vector images for exact, IVF and HNSW indexes, preserving tensor bits, trained state, graph topology and pending persistence without rebuilding indexes. Complete Engine backup integration remains under implementation.
 - Add evaluated memory graph images with controlled fresh reconstruction, preserving exact properties, named memberships, label allocation history and unused IDs. Derived graph indexes are validated and reconstructed by Graph; complete Engine backup integration remains under implementation.
 
-- Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Complete analyzer-resource images and Engine backup integration remain under implementation.
+- Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Complete Engine backup integration remains under implementation.
 
 - Add a Common Storage memory-capture owner that preserves an immutable source before its first subsequent write, without walking sources at capture registration. Each cut retains its own allowance and terminal failure; a failed backup does not consume an ordinary source write. Complete Engine transaction integration remains under implementation.
 

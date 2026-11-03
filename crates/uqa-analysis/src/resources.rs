@@ -15,6 +15,9 @@ use crate::{
     AnalyzerLimits, CompiledAnalyzer, TokenLengthPolicy,
 };
 
+mod image;
+pub use image::AnalyzerResourceInput;
+
 struct Inner {
     limits: AnalyzerLimits,
     cache: Mutex<Cache<AnalyzerFingerprint, CompiledAnalyzer>>,

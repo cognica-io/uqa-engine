@@ -19,7 +19,9 @@ use crate::tokenizer::Tokenizer;
 
 mod compiled;
 mod diagnostics;
+mod resources;
 pub use compiled::CompiledAnalyzer;
+pub use resources::{AnalyzerResource, AnalyzerResourceKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analyzer {

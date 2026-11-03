@@ -2,6 +2,201 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ordinary_compiled_analyzers_have_no_external_dictionary_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources.rs",
+      "capability": "Inline analyzer dependencies",
+      "workload": "Compile the standard English pipeline and inspect its resource closure.",
+      "invariant": "No external dictionary is retained and stemmed output remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_restores_inline_inputs_without_resolving_a_resource",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Resolved analyzer image",
+      "workload": "Restore an ordinary descriptor with no dictionary artifacts.",
+      "invariant": "Canonical descriptor bytes and complete token observations remain equal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_preserves_resolved_synonyms_after_file_and_owner_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Resolved synonym image",
+      "workload": "Delete a synonym file and source owner before restoring the descriptor.",
+      "invariant": "Restored tokens retain the resolved synonyms while fresh path-based compilation fails.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_duplicate_resources_before_reconstruction",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests.rs",
+      "capability": "Analyzer identity admission",
+      "workload": "Supply duplicate language/hash identities.",
+      "invariant": "Duplicates fail before reconstruction or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_never_uses_the_original_cache_or_resolver_for_missing_artifacts",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Isolated analyzer restoration",
+      "workload": "Restore with a warm source cache and host resolver, first omitting and then supplying the exact artifact.",
+      "invariant": "Missing inputs cannot use host resolution; complete images return independent compiled revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_image_validates_hash_complete_resource_closure_and_destination_limits",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Analyzer closure validation",
+      "workload": "Supply corrupt bytes, an unused valid artifact and a dictionary above the destination limit.",
+      "invariant": "Each failure is private and returns all charged input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_korean_image_retains_exact_artifact_after_source_and_cache_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Korean analyzer image retention",
+      "workload": "Drop source and cache owners and restore from admitted captured bytes.",
+      "invariant": "Exact dictionary bytes and token observations survive; the final restored handle retires the input reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_korean_image_deduplicates_shared_tokenizer_and_profile_artifacts",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/resources/tests/images.rs",
+      "capability": "Shared dictionary identity",
+      "workload": "Compile a tokenizer and normalization profile sharing one artifact.",
+      "invariant": "The dependency closure contains the shared artifact exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_japanese_image_retains_exact_artifact_after_source_and_cache_loss",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/resources/tests/images.rs",
+      "capability": "Japanese analyzer image retention",
+      "workload": "Drop source and cache owners and restore from admitted captured bytes.",
+      "invariant": "Exact dictionary bytes and token observations survive; the final restored handle retires the input reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "japanese_expanded_stop_sets_require_no_original_dictionary_in_the_image",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/resources/tests/images.rs",
+      "capability": "Expanded stop-set closure",
+      "workload": "Freeze Japanese defaults and reconstruct with a resolver rejecting every call.",
+      "invariant": "Explicit descriptor sets need no original model and retain complete token observations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_matches_independent_outer_fields_and_restores_complete_token_observations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer image framing",
+      "workload": "Check literal outer fields, drop the source and restore an English pipeline.",
+      "invariant": "Descriptor framing, complete tokens and re-encoded bytes match exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_every_prefix_trailing_data_and_unfunded_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer input completeness",
+      "workload": "Read every proper prefix, trailing bytes, invalid magic, unfunded input and an excessive descriptor.",
+      "invariant": "Invalid inputs never publish a revision and release reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_rejects_invalid_resource_headers_before_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer resource header limits",
+      "workload": "Supply excessive counts, unknown tags, oversized payload lengths and unordered or duplicate identities.",
+      "invariant": "Header admission rejects before dictionary preparation and releases temporary memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_image_output_polls_between_short_writes_and_retains_cancellation_kind",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer image cancellation",
+      "workload": "Cancel after five three-byte partial writes and attempt input with the cancelled owner.",
+      "invariant": "Attempts stay within 4 KiB, stop at cancellation and retain its typed error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_dictionary_images_preserve_enabled_languages_and_release_import_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests.rs",
+      "capability": "Analyzer dictionary lifetime",
+      "workload": "Round-trip Korean/Japanese resources, omit required artifacts and close cloned restored handles.",
+      "invariant": "Tokens and bytes survive; missing images cannot use installed dictionaries, and final close releases input memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "native_backup_import_reader_preserves_literal_namespace_revisions_and_bounded_payloads",

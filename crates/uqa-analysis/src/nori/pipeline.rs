@@ -25,6 +25,7 @@ pub(crate) use stages::PreparedNoriFilter;
 pub(crate) struct ResolvedNoriPipeline {
     pub tokenizer: Option<KoreanTokenizer>,
     pub normalizer: Option<Arc<ResolvedDictionary>>,
+    pub dictionaries: Vec<Arc<ResolvedDictionary>>,
     profiles: BTreeMap<String, Arc<ResolvedDictionary>>,
 }
 
@@ -34,6 +35,7 @@ impl ResolvedNoriPipeline {
         let mut snapshot = Snapshot::default();
         if let Tokenizer::Nori(tokenizer) = &mut config.tokenizer {
             let dictionary = load(&mut snapshot, request(&tokenizer.dictionary)?, resources)?;
+            resolved.dictionaries.push(dictionary.clone());
             resolved.tokenizer = Some(prepare_tokenizer(tokenizer, &dictionary, resources)?);
             tokenizer.dictionary = exact_name(dictionary.sha256());
             if config.normalization.is_none() {
@@ -51,6 +53,7 @@ impl ResolvedNoriPipeline {
                     resources,
                 )?;
                 let name = exact_name(profile.sha256());
+                resolved.dictionaries.push(profile.clone());
                 config
                     .unicode_profile
                     .nori_dictionary_mut()
@@ -65,10 +68,15 @@ impl ResolvedNoriPipeline {
             .and_then(|value| value.profile_mut())
         {
             let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+            resolved.dictionaries.push(profile.clone());
             *dictionary = exact_name(profile.sha256());
             resolved.normalizer = Some(profile);
         }
         canonicalize(config);
+        resolved
+            .dictionaries
+            .sort_unstable_by_key(|item| item.sha256());
+        resolved.dictionaries.dedup_by_key(|item| item.sha256());
         Ok(resolved)
     }
 

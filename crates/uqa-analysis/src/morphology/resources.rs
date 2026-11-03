@@ -20,6 +20,8 @@ use crate::cache::Cache;
 pub enum DictionaryBytes {
     Static(&'static [u8]),
     Shared(Arc<[u8]>),
+    /// Imported encoded payload retains its admission until the final compiled/resource owner drops.
+    Retained(Arc<uqa_core::memory::Budgeted<Vec<u8>>>),
 }
 
 impl AsRef<[u8]> for DictionaryBytes {
@@ -27,6 +29,7 @@ impl AsRef<[u8]> for DictionaryBytes {
         match self {
             Self::Static(bytes) => bytes,
             Self::Shared(bytes) => bytes,
+            Self::Retained(bytes) => bytes,
         }
     }
 }

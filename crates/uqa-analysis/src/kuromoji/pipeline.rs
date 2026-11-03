@@ -27,6 +27,7 @@ mod tests;
 pub(crate) struct ResolvedKuromojiPipeline {
     pub tokenizer: Option<JapaneseTokenizer>,
     pub normalizer: Option<Arc<ResolvedDictionary>>,
+    pub dictionaries: Vec<Arc<ResolvedDictionary>>,
     filters: Vec<Option<Arc<PreparedKuromojiFilter>>>,
 }
 
@@ -45,6 +46,7 @@ impl ResolvedKuromojiPipeline {
             tokenizer.n_best_cost = prepared.n_best_cost();
             tokenizer.n_best_examples = None;
             resolved.tokenizer = Some(prepared);
+            resolved.dictionaries.push(dictionary);
         }
         for index in 0..config.token_filters.len() {
             let filter = &mut config.token_filters[index];
@@ -58,6 +60,13 @@ impl ResolvedKuromojiPipeline {
             let stage = configuration::native_filter(filter)?;
             let prepared = Arc::new(PreparedKuromojiFilter::new(&stage, profile.clone())?);
             let expanded = configuration::freeze(filter, profile.as_deref())?;
+            if configuration::dictionary_name(filter)?.is_some() {
+                resolved
+                    .dictionaries
+                    .push(profile.ok_or(AnalysisError::Descriptor(
+                        "missing resolved Japanese resource",
+                    ))?);
+            }
             if expanded {
                 crate::descriptor::check_configuration(config, limits)?;
             }
@@ -69,9 +78,14 @@ impl ResolvedKuromojiPipeline {
             .and_then(|value| value.profile_mut())
         {
             let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+            resolved.dictionaries.push(profile.clone());
             *dictionary = format!("sha256:{}", profile.sha256());
             resolved.normalizer = Some(profile);
         }
+        resolved
+            .dictionaries
+            .sort_unstable_by_key(|item| item.sha256());
+        resolved.dictionaries.dedup_by_key(|item| item.sha256());
         Ok(resolved)
     }
 

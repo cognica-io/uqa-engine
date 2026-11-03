@@ -7,6 +7,8 @@
 use parking_lot::Mutex;
 
 use super::*;
+
+mod images;
 use crate::kuromoji::{DictionaryError, DictionaryLimits, UserDictionaryLimits};
 
 fn artifact(bytes: Arc<[u8]>) -> DictionaryArtifact {
