@@ -24,8 +24,7 @@ jobs:
   build:
     name: Build regression archive (${{ inputs.os }})
     runs-on: ${{ inputs.os }}
-    # Use the workspace's compilation job bound; execution keeps its own deadline below.
-    timeout-minutes: 60
+    timeout-minutes: ${{ inputs.os == 'macos-15' && 120 || 60 }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
