@@ -19,14 +19,11 @@ impl DurableCatalogState {
     pub(crate) fn memory(registry: &MemoryCaptureRegistry) -> StorageBackendResult<Self> {
         let mut state = Self::new();
         state.register_catalog_sources(registry)?;
-        state.graphs =
-            CatalogCell::capture_resource(state.graphs.snapshot(), registry, |values, control| {
-                resources(
-                    values,
-                    control,
-                    uqa_graph::GraphStoreHandle::capture_image_with_control,
-                )
-            })?;
+        state.graphs = CatalogCell::capture_resource(
+            state.graphs.snapshot(),
+            registry,
+            uqa_graph::GraphCatalog::capture,
+        )?;
         state.models = CatalogCell::capture_resource(
             state.models.snapshot(),
             registry,

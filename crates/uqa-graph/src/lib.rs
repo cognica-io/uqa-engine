@@ -15,6 +15,7 @@
 pub mod adapters;
 pub mod age_names;
 pub use uqa_core::agtype;
+mod catalog;
 mod centrality;
 mod cross_paradigm;
 pub mod cypher;
@@ -38,6 +39,7 @@ mod types;
 mod versioned_store;
 
 pub use adapters::{GraphPostingCodec, PostingToGraphAdapter, TextTfScoreNormalizer};
+pub use catalog::{CapturedGraphCatalog, GraphCatalog};
 pub use centrality::{BetweennessCentrality, PageRank, HITS};
 pub use cross_paradigm::{
     CrossParadigmError, CrossParadigmResult, Document, SemanticGraphSearch, TextToGraph, ToGraph,

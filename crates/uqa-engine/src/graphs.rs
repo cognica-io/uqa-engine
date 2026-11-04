@@ -33,10 +33,7 @@ impl Engine {
         }
         candidate.create_graph(name).map_err(graph_store_error)?;
         let published = self.publish_graph_candidate(candidate)?;
-        self.durable
-            .graphs
-            .write()
-            .insert(name.to_string(), published);
+        self.durable.graphs.write().insert(name, published)?;
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -67,7 +64,7 @@ impl Engine {
         self.invalidate_graph_path_indexes(name)?;
         self.publish_graph_candidate(store)?;
         self.forget_graph_oids(name)?;
-        self.durable.graphs.write().remove(name);
+        self.durable.graphs.write().remove(name)?;
         self.durable
             .path_indexes
             .write()
@@ -87,7 +84,7 @@ impl Engine {
             uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
             None,
         )?;
-        Ok(self.visible_graph_handles().keys().cloned().collect())
+        Ok(self.visible_graph_handles()?.keys().cloned().collect())
     }
 
     /// Return `true` when a graph with `name` is registered.
@@ -117,7 +114,7 @@ impl Engine {
             )?;
             let context = engine.graph_read_context()?;
             engine
-                .visible_graph_handles()
+                .visible_graph_handles()?
                 .iter()
                 .map(|(name, store)| {
                     let labels = match (store.as_ref(), context.as_ref()) {
@@ -196,10 +193,7 @@ impl Engine {
             return Ok(false);
         }
         let published = self.publish_graph_candidate(candidate)?;
-        self.durable
-            .graphs
-            .write()
-            .insert(graph.to_string(), published);
+        self.durable.graphs.write().insert(graph, published)?;
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -253,10 +247,7 @@ impl Engine {
         self.invalidate_graph_path_indexes(graph)?;
         let published = self.publish_graph_candidate(candidate)?;
         self.forget_graph_label_oids(graph, &[label_id])?;
-        self.durable
-            .graphs
-            .write()
-            .insert(graph.to_string(), published);
+        self.durable.graphs.write().insert(graph, published)?;
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -299,8 +290,7 @@ impl Engine {
         self.rename_graph_oids(from, to)?;
         let published = self.publish_graph_candidate(candidate)?;
         let mut graphs = self.durable.graphs.write();
-        graphs.remove(from);
-        graphs.insert(to.to_string(), published);
+        graphs.rename(from, to, published)?;
         drop(graphs);
         self.note_catalog_registry_changed();
         Ok(true)
@@ -661,10 +651,7 @@ impl Engine {
             })
             .map_err(graph_store_error)?;
         let published = self.publish_graph_candidate(candidate)?;
-        self.durable
-            .graphs
-            .write()
-            .insert(name.to_owned(), published);
+        self.durable.graphs.write().insert(name, published)?;
         self.note_catalog_registry_changed();
         Ok(Some(result))
     }
@@ -748,7 +735,8 @@ impl Engine {
         self.durable
             .graphs
             .write()
-            .insert(graph.to_owned(), published);
+            .insert(graph, published)
+            .map_err(CypherError::from)?;
         self.note_catalog_registry_changed();
         Ok(result)
     }

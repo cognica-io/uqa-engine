@@ -41068,6 +41068,87 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_capture_and_selected_publication_retain_native_roots_without_enumeration",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph-resource membership",
+      "workload": "Capture 1, 64 and 4,096 registered graph handles, replace one selected graph and retire every source.",
+      "invariant": "Capture allocates no membership nodes; selected publication stays below 16 KiB; exact admission, independent controls and escaping images retain original data and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_denial_preserves_membership_capability_and_original_child_control",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph-resource publication",
+      "workload": "Deny replacement, deletion and rename with no remaining native allowance, then publish and retire the source.",
+      "invariant": "Rejected candidates preserve every original entry and footprint; subsequent changes succeed and escaping children obey original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_provider_capability_and_child_admission_follow_their_owning_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Graph-resource capture admission",
+      "workload": "Replace a memory handle with a physical provider handle across failed and successful admission, then exhaust selected-child output allowance.",
+      "invariant": "The generation capability rejects physical sources without enumeration, failed child admission leaves the root allowance intact, repeated children allocate nothing and independent capture remains valid after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_graph_capture_keeps_original_membership_after_rename_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/graphs.rs",
+      "capability": "Committed graph membership",
+      "workload": "Capture 64 Engine graphs, rename and drop across savepoint rollback and commit, then close the Engine.",
+      "invariant": "Captured membership and image bytes remain original; an escaping selected image retains its source, unrelated graphs retire and final release returns every capture lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_graph_catalog_denial_rolls_back_entities_names_and_path_definitions",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/graphs.rs",
+      "capability": "Graph catalog transaction admission",
+      "workload": "Deny graph creation, deletion, rename and implicit/explicit entity publication on memory, native SQLite, SQLite KV and redb, then reuse and reopen persistent providers.",
+      "invariant": "Typed 53200 failure preserves names, entities and path definitions; rollback works under exhaustion and later successful publication persists without leaking native reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_restoration_reuses_unchanged_membership_and_discards_failed_successors",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph membership restoration",
+      "workload": "Restore unchanged physical graph names under zero native allowance, then add and remove names across denied node admission and a failed physical-handle factory.",
+      "invariant": "Unchanged membership needs no native node or new handle; failed successors preserve original membership and release temporary leases; successful restoration shares unselected handles.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

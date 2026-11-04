@@ -48,8 +48,8 @@ macro_rules! resource_sources {
 }
 
 resource_sources! {
-    graphs: BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>> => CapturedResources<uqa_graph::GraphImageSnapshot>,
-        |values, control| resources(values, control, uqa_graph::GraphStoreHandle::capture_image_with_control);
+    graphs: uqa_graph::GraphCatalog => uqa_graph::CapturedGraphCatalog,
+        uqa_graph::GraphCatalog::capture;
     models: uqa_ml::model_catalog::ModelCatalog => uqa_ml::model_catalog::CapturedModelCatalog,
         uqa_ml::model_catalog::ModelCatalog::capture;
     path_indexes: BTreeMap<String, uqa_graph::PathIndex> => CapturedResources<uqa_core::memory::Budgeted<uqa_graph::CapturedPathIndex>>,

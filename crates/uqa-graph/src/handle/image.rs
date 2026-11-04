@@ -21,6 +21,18 @@ struct RetainedGraph {
 pub struct GraphImageSnapshot(Arc<RetainedGraph>);
 
 impl GraphStoreHandle {
+    pub(crate) fn image_retained_bytes(&self) -> StorageBackendResult<usize> {
+        let Self::Memory(source) = self else {
+            return Err(StorageBackendError::Other(
+                "persistent graph images belong to their storage provider".into(),
+            ));
+        };
+        source
+            .image_retained_bytes()?
+            .checked_add(size_of::<Self>() - size_of::<MemoryGraphStore>())
+            .ok_or_else(|| uqa_core::memory::MemoryError::SizeOverflow.into())
+    }
+
     pub fn capture_image_with_control(
         self: &Arc<Self>,
         control: &StorageReadControl,
@@ -35,15 +47,31 @@ impl GraphStoreHandle {
         memory
             .grow(size_of::<Self>() - size_of::<MemoryGraphStore>() + size_of::<RetainedGraph>())?;
         control.check()?;
-        Ok(GraphImageSnapshot(Arc::new(RetainedGraph {
-            source: self.clone(),
-            control: control.clone(),
-            _memory: memory,
-        })))
+        Ok(GraphImageSnapshot::from_admitted(
+            self.clone(),
+            control,
+            memory,
+        ))
     }
 }
 
 impl GraphImageSnapshot {
+    pub(crate) const fn wrapper_bytes() -> usize {
+        size_of::<RetainedGraph>()
+    }
+
+    pub(crate) fn from_admitted(
+        source: Arc<GraphStoreHandle>,
+        control: &StorageReadControl,
+        memory: MemoryReservation,
+    ) -> Self {
+        Self(Arc::new(RetainedGraph {
+            source,
+            control: control.clone(),
+            _memory: memory,
+        }))
+    }
+
     pub fn write_image(
         &self,
         output: &mut dyn std::io::Write,

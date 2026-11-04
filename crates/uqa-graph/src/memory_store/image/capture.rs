@@ -12,12 +12,8 @@ use uqa_core::memory::{MemoryError, MemoryReservation};
 use uqa_core::{Value, Vertex};
 
 impl MemoryGraphStore {
-    pub(crate) fn image_retention(
-        &self,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<MemoryReservation> {
-        control.check()?;
-        let bytes = [
+    pub(crate) fn image_retained_bytes(&self) -> Result<usize, MemoryError> {
+        [
             self.vertices.retained_bytes()?,
             self.edges.retained_bytes()?,
             self.graphs.retained_bytes()?,
@@ -28,7 +24,15 @@ impl MemoryGraphStore {
         .into_iter()
         .try_fold(size_of::<Self>(), |sum, bytes| {
             sum.checked_add(bytes).ok_or(MemoryError::SizeOverflow)
-        })?;
+        })
+    }
+
+    pub(crate) fn image_retention(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<MemoryReservation> {
+        control.check()?;
+        let bytes = self.image_retained_bytes()?;
         let memory = control.memory().reserve(bytes)?;
         control.check()?;
         Ok(memory)

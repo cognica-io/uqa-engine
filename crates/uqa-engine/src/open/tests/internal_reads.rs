@@ -28,7 +28,7 @@ fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
         let directory = tempfile::tempdir().unwrap();
         let root = persistent_engine(provider, &directory.path().join("empty-graphs.db"));
         root.sql("BEGIN; CREATE TABLE t(v integer)", &[]).unwrap();
-        let original = root.visible_graph_handles();
+        let original = root.visible_graph_handles().unwrap();
         let retained = root.freeze_graph_read_handles(None, true).unwrap();
         assert!(
             Arc::ptr_eq(&original, &retained),
@@ -41,7 +41,7 @@ fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
             .unwrap()
             .is_empty());
         root.rollback().unwrap();
-        assert!(root.visible_graph_handles().is_empty());
+        assert!(root.visible_graph_handles().unwrap().is_empty());
     }
 }
 

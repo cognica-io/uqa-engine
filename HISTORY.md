@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Retain primary memory graph entities, membership and adjacency indexes, label definitions, allocation counters and tombstones in immutable native generations. Captures use cached footprints, selected changes share unrelated payloads, and failed admission preserves the complete graph and its identities. Imported graph generations retain their own allocation leases through cloning and source retirement; complete Engine backup remains under implementation.
+- Retain primary memory graph entities, membership and adjacency indexes, label definitions, allocation counters and tombstones in immutable native generations. Captures use cached footprints, selected changes share unrelated payloads, and failed admission preserves the complete graph and its identities. Imported graph generations retain their own allocation leases through cloning and source retirement. Native graph-resource membership retains cached image footprints and independently admitted child images through Engine publication, rollback and closure; complete Engine backup remains under implementation.
 
 - Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
 

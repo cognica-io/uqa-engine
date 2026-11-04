@@ -12,11 +12,7 @@ use crate::{
     schema::view_creation::context::ViewPlanBinding,
 };
 use context::*;
-use std::{
-    cell::{Cell, RefCell},
-    sync::Arc,
-};
-use uqa_graph::GraphStoreHandle;
+use std::cell::{Cell, RefCell};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnType, RelationPersistence},
@@ -76,7 +72,7 @@ struct Fixture {
     writes: Cell<usize>,
     roles: RoleDefinitions,
     foreign: crate::catalog::foreign::ForeignTables,
-    graphs: BTreeMap<String, Arc<GraphStoreHandle>>,
+    graphs: uqa_graph::GraphCatalog,
 }
 fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
     let UnifiedPlan::Query(query) =
@@ -156,7 +152,7 @@ impl Fixture {
             foreign: crate::catalog::foreign::ForeignCatalog::default()
                 .tables()
                 .clone(),
-            graphs: BTreeMap::new(),
+            graphs: uqa_graph::GraphCatalog::default(),
         }
     }
     fn context(&self) -> ViewRestoreContext<'_> {

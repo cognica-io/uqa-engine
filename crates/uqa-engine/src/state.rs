@@ -174,10 +174,7 @@ pub(super) struct DurableCatalogState {
         uqa_execution::catalog::composite_type::CompositeRegistry,
         CapturedTypeDefinitions<uqa_sql::catalog::composite_type::StoredComposite>,
     >,
-    pub(super) graphs: CatalogCell<
-        BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>,
-        resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,
-    >,
+    pub(super) graphs: CatalogCell<uqa_graph::GraphCatalog, uqa_graph::CapturedGraphCatalog>,
     pub(super) models: CatalogCell<
         uqa_ml::model_catalog::ModelCatalog,
         uqa_ml::model_catalog::CapturedModelCatalog,
@@ -283,7 +280,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) shells: Arc<uqa_execution::catalog::shell_type::ShellRegistry>,
     pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
+    pub(super) graphs: Arc<uqa_graph::GraphCatalog>,
     pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
@@ -323,7 +320,7 @@ impl DurableCatalogState {
             shells: CatalogCell::new(TypeDefinitions::new()),
             comments: CatalogCell::new(uqa_execution::catalog::comments::CommentRegistry::new()),
             composites: CatalogCell::new(TypeDefinitions::new()),
-            graphs: CatalogCell::new(BTreeMap::new()),
+            graphs: CatalogCell::new(uqa_graph::GraphCatalog::default()),
             models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
             scoring_params: CatalogCell::new(
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),

@@ -199,7 +199,7 @@ fn transaction_resource_sources_preserve_original_images_across_private_mutation
         .named_analyzers
         .captured(&selected.cut)
         .unwrap();
-    let graph = graphs.get().unwrap().get("g").unwrap().clone();
+    let graph = graphs.get().unwrap().image("g").unwrap().unwrap();
     let model = models.get().unwrap().image("saved").unwrap().unwrap();
     let analyzer = analyzers.get().unwrap().get("saved").unwrap().clone();
     assert_eq!(

@@ -95,7 +95,12 @@ fn memory_resource_capture_preserves_rollback_replacement_and_unread_engine_clos
         let captured_models = models.retained(&cut).unwrap().unwrap();
         assert_eq!(captured_graphs.get().unwrap().len(), 1);
         assert_eq!(captured_models.get().unwrap().len(), 1);
-        let graph = captured_graphs.get().unwrap().get("saved").unwrap().clone();
+        let graph = captured_graphs
+            .get()
+            .unwrap()
+            .image("saved")
+            .unwrap()
+            .unwrap();
         let model = captured_models
             .get()
             .unwrap()
@@ -135,7 +140,7 @@ fn memory_resource_capture_failure_preserves_writes_and_independent_capture_allo
     let graph = graphs.retained(&cut).unwrap().unwrap();
     let model = models.retained(&cut).unwrap().unwrap();
     assert_eq!(
-        graph_image(graph.get().unwrap().get("saved").unwrap()),
+        graph_image(&graph.get().unwrap().image("saved").unwrap().unwrap()),
         expected.0
     );
     assert_eq!(
@@ -168,9 +173,9 @@ fn memory_resource_children_keep_original_cancellation_after_registry_and_engine
         .unwrap()
         .get()
         .unwrap()
-        .get("saved")
+        .image("saved")
         .unwrap()
-        .clone();
+        .unwrap();
     let model = models
         .retained(&cut)
         .unwrap()

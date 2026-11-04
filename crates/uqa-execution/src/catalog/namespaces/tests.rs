@@ -35,8 +35,11 @@ pub(super) fn catalog() -> CatalogReadView {
         ])
         .unwrap(),
     );
-    snapshot.definitions.graphs =
-        Arc::new([("g".into(), Arc::new(uqa_graph::GraphStoreHandle::default()))].into());
+    let mut graphs = uqa_graph::GraphCatalog::default();
+    graphs
+        .insert("g", Arc::new(uqa_graph::GraphStoreHandle::default()))
+        .unwrap();
+    snapshot.definitions.graphs = Arc::new(graphs);
     CatalogReadView::new(snapshot)
 }
 
