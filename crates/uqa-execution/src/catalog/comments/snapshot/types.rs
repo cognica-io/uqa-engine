@@ -5,12 +5,12 @@
 //
 
 use super::{
-    is_temporary_schema_name, CommentCaptureSource, CommentTableSource, RelationIdentity,
-    RelationPersistence, SQLError, Scope, PROCEDURE_CLASS, TYPE_CLASS,
+    is_temporary_schema_name, CommentTableSource, RelationIdentity, RelationPersistence, SQLError,
+    Scope, Selection, PROCEDURE_CLASS, TYPE_CLASS,
 };
 
 impl Scope<'_, '_> {
-    pub(super) fn exclude_types(&self, source: &mut CommentCaptureSource) {
+    pub(super) fn exclude_types(&self, source: &mut Selection) {
         if source.has_class(TYPE_CLASS) {
             let relation_types = self
                 .tables
@@ -102,10 +102,7 @@ impl Scope<'_, '_> {
         }
     }
 
-    pub(super) fn exclude_routines(
-        &self,
-        source: &mut CommentCaptureSource,
-    ) -> Result<(), SQLError> {
+    pub(super) fn exclude_routines(&self, source: &mut Selection) -> Result<(), SQLError> {
         if !source.has_class(PROCEDURE_CLASS) {
             return Ok(());
         }

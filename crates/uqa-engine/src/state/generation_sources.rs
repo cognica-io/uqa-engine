@@ -136,7 +136,7 @@ type MetadataKey = uqa_storage::memory_capture::MemoryCaptureKey<
 #[cfg(test)]
 type CommentKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
-        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+        uqa_execution::catalog::comments::CapturedComments,
     >,
 >;
 

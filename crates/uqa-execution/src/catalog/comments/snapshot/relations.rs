@@ -5,15 +5,12 @@
 //
 
 use super::{
-    is_temporary_schema_name, CommentCaptureSource, RelationPersistence, SQLError, Scope,
+    is_temporary_schema_name, RelationPersistence, SQLError, Scope, Selection,
     ATTRIBUTE_DEFAULT_CLASS, CONSTRAINT_CLASS, RELATION_CLASS, REWRITE_CLASS,
 };
 
 impl Scope<'_, '_> {
-    pub(super) fn exclude_relations(
-        &self,
-        source: &mut CommentCaptureSource,
-    ) -> Result<(), SQLError> {
+    pub(super) fn exclude_relations(&self, source: &mut Selection) -> Result<(), SQLError> {
         if source.has_class(RELATION_CLASS) {
             self.exclude_relation_ids(source)?;
         }
@@ -115,7 +112,7 @@ impl Scope<'_, '_> {
         Ok(())
     }
 
-    fn exclude_relation_ids(&self, source: &mut CommentCaptureSource) -> Result<(), SQLError> {
+    fn exclude_relation_ids(&self, source: &mut Selection) -> Result<(), SQLError> {
         for table in self
             .tables
             .values()

@@ -167,7 +167,7 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) comments: CatalogCell<
         uqa_execution::catalog::comments::CommentRegistry,
-        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+        uqa_execution::catalog::comments::CapturedComments,
     >,
     pub(super) composites: CatalogCell<
         uqa_execution::catalog::composite_type::CompositeRegistry,
@@ -331,7 +331,7 @@ impl DurableCatalogState {
             enums: CatalogCell::new(TypeDefinitions::new()),
             ranges: CatalogCell::new(TypeDefinitions::new()),
             shells: CatalogCell::new(TypeDefinitions::new()),
-            comments: CatalogCell::new(BTreeMap::new()),
+            comments: CatalogCell::new(uqa_execution::catalog::comments::CommentRegistry::new()),
             composites: CatalogCell::new(TypeDefinitions::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),

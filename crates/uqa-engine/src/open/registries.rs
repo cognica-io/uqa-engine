@@ -24,7 +24,9 @@ impl Engine {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
         self.restore_ranges_from_catalog(catalog)?;
-        *self.durable.comments.write() = uqa_execution::catalog::comments::restore(catalog)?;
+        let comment_memory = self.durable.comments.read().budget().clone();
+        let comments = uqa_execution::catalog::comments::restore(catalog, &comment_memory)?;
+        *self.durable.comments.write() = comments;
         self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
@@ -283,3 +285,6 @@ impl Engine {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

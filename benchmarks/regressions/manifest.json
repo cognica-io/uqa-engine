@@ -40707,6 +40707,112 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_lower_bound_seeks_without_allocating_or_visiting_earlier_keys",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Bounded retained-map range",
+      "workload": "Seek included and excluded keys near the end of a 4,096-entry map.",
+      "invariant": "Returned entries equal the independent numeric interval, with zero heap allocations and fewer than 32 key comparisons.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_capture_shares_exact_roots_without_visiting_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/tests.rs",
+      "capability": "Native comment capture",
+      "workload": "Capture 1, 64 and 4,096 descriptions under independent exact and insufficient allowances.",
+      "invariant": "Capture allocates no heap object, shares original text addresses, rejects one-byte-insufficient admission and releases all native and capture leases after source replacement and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_changes_share_unrelated_text_and_preserve_failed_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/tests.rs",
+      "capability": "Selected comment publication",
+      "workload": "Change selected descriptions beside an unrelated four-MiB text, then deny replacement and deletion.",
+      "invariant": "Publication uses fewer than 16 KiB and 128 allocations, preserves unrelated payload identity and leaves the entire original root and footprint unchanged after failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_ranges_preserve_object_subobject_and_class_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/tests.rs",
+      "capability": "Exact comment addresses",
+      "workload": "Compare native address ranges with an independent ordered map containing colliding object OIDs, subobjects and catalog classes; cancel each capture owner.",
+      "invariant": "Every interval preserves exact address/text pairs and ordering; original or invoking cancellation retains no capture allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_admission_finishes_before_any_persistence_or_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Comment publication admission",
+      "workload": "Exhaust native admission before selected replacement and class-specific deletion, then repeat a funded replacement.",
+      "invariant": "Denied changes call no persistence adapter, leave native values and stored bytes unchanged and release all native leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_restoration_releases_failed_admission_without_changing_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Comment restoration admission",
+      "workload": "Restore three stored descriptions with funded and insufficient native allowances.",
+      "invariant": "Failed admission releases partial roots without changing stored metadata; subsequent funded restoration preserves all descriptions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_comment_roots_capture_original_text_with_bounded_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments.rs",
+      "capability": "Committed comment roots",
+      "workload": "Capture original descriptions beside 1, 32 and 128 types through private replacement, nested rollback, COMMIT, same-name replacement and Engine closure.",
+      "invariant": "Capture remains below 16 KiB and 64 allocations; original exact addresses/text survive closure, and cancellation/final release retire the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_comment_restore_preserves_original_root_and_metadata_on_admission_failure",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/registries/tests.rs",
+      "capability": "Native comment restoration",
+      "workload": "Deny original native admission during full registry restoration in native SQLite, SQLite KV and redb, then restore with funding.",
+      "invariant": "53200 leaves the original comment root identity and stored metadata unchanged; subsequent comment publication remains usable and retirement releases all native bytes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }
