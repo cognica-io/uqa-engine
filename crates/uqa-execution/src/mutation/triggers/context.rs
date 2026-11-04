@@ -11,12 +11,10 @@ use crate::{
     query::runtime::QueryRuntimeView,
     routines::{context::RoutineExpressions, TriggerRoutineContext},
 };
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType, TriggerEvent, TriggerTiming},
     catalog::events::StoredTrigger,
-    routines::SQLUserFunction,
     semantics::{partition::PartitionCatalog, referential::ReferentialCatalog},
     SQLError,
 };
@@ -67,10 +65,10 @@ pub trait TriggerRoutineInvoker {
         &self,
         name: &str,
         object_id: Option<[u8; 16]>,
-    ) -> Result<Arc<SQLUserFunction>, SQLError>;
+    ) -> Result<uqa_sql::routines::SQLRoutine, SQLError>;
     fn execute_trigger_routine(
         &self,
-        function: &Arc<SQLUserFunction>,
+        function: &uqa_sql::routines::SQLRoutine,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError>;
 }

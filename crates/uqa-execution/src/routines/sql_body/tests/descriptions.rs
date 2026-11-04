@@ -6,7 +6,7 @@
 
 use super::definition;
 use crate::routines::{descriptions::RoutineBodyDescriptions, sql_body::body_parameters};
-use std::{cell::Cell, sync::Arc};
+use std::cell::Cell;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken, Value,
@@ -75,7 +75,7 @@ fn repeated_sql_body_inputs_keep_all_parameter_positions_and_current_values() {
     definition.object_id = Some([11; 16]);
     definition.params[0].type_name = "pg_catalog.text".into();
     definition.params[1].type_name = "public.input_value".into();
-    let function = Arc::new(SQLUserFunction::new(definition, RoutineBody::Source));
+    let function = SQLUserFunction::new(definition, RoutineBody::Source).shared();
     let binding = FunctionBinding {
         name: function.def.name.clone(),
         object_id: function.def.object_id,

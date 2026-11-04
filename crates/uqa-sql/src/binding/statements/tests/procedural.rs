@@ -12,7 +12,7 @@ use crate::routines::{
 };
 use std::sync::Arc;
 
-struct Procedures(Vec<Arc<SQLUserFunction>>);
+struct Procedures(Vec<crate::routines::SQLRoutine>);
 
 #[test]
 fn procedural_analysis_keeps_its_first_query_schema_and_dependency_scope() {
@@ -54,10 +54,9 @@ impl Procedures {
             "CREATE PROCEDURE public.prepare_call(v integer) LANGUAGE plpgsql AS $$BEGIN NULL; END$$",
         ).unwrap().remove(0) else { panic!("procedure declaration") };
         definition.object_id = Some([23; 16]);
-        Self(vec![Arc::new(SQLUserFunction::new(
-            *definition,
-            RoutineBody::Source,
-        ))])
+        Self(vec![
+            SQLUserFunction::new(*definition, RoutineBody::Source).shared()
+        ])
     }
 }
 impl RoutineTypeCatalog for Procedures {
@@ -93,19 +92,19 @@ impl RoutineOverloadCatalog for Procedures {
     fn lookup_sql_routine_candidates(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok((name == "prepare_call" || name == "public.prepare_call").then(|| self.0.clone()))
     }
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         Some(self.0.clone())
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         None
     }
 }

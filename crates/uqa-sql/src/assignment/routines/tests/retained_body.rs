@@ -16,15 +16,12 @@ use crate::{
         result_check::SQLFunctionResultKind,
     },
 };
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 use uqa_core::memory::ProductionControl;
 
 mod table;
 
-fn bound_call() -> (
-    Arc<crate::routines::SQLUserFunction>,
-    crate::ast::FunctionBinding,
-) {
+fn bound_call() -> (crate::routines::SQLRoutine, crate::ast::FunctionBinding) {
     let (mut function, binding) = super::retained_invocation::bound_call();
     let specialized = crate::routines::invocation::specialized_definition(
         &function.def,
@@ -32,13 +29,22 @@ fn bound_call() -> (
     )
     .unwrap()
     .unwrap();
-    Arc::get_mut(&mut function).unwrap().def = specialized;
+    function = crate::routines::SQLUserFunction::new(specialized, function.body.clone()).shared();
     (function, binding)
 }
 
 struct Types<'a> {
     values: &'a Context,
     calls: Cell<usize>,
+}
+
+fn edit_definition(
+    function: &mut crate::routines::SQLRoutine,
+    edit: impl FnOnce(&mut crate::ast::CreateFunction),
+) {
+    let mut definition = function.def.clone();
+    edit(&mut definition);
+    *function = crate::routines::SQLUserFunction::new(definition, function.body.clone()).shared();
 }
 
 impl RoutineTypeCatalog for Types<'_> {
@@ -134,9 +140,11 @@ fn body_results_reuse_descriptions_while_values_and_domain_checks_stay_live() {
         calls: Cell::new(0),
     };
     let (mut function, mut binding) = bound_call();
-    Arc::get_mut(&mut function).unwrap().def.returns = FunctionReturns::Scalar {
-        type_name: "public.accepted_value".into(),
-    };
+    edit_definition(&mut function, |definition| {
+        definition.returns = FunctionReturns::Scalar {
+            type_name: "public.accepted_value".into(),
+        };
+    });
     binding.invocation.as_mut().unwrap().return_type = Some("public.accepted_value".into());
     let state = RoutineCallDescriptions::default();
     let initial = RoutineDescriptionScope::default();
@@ -273,9 +281,11 @@ fn output_callbacks_invalidate_later_values_and_do_not_publish_old_metadata() {
         calls: Cell::new(0),
     };
     let (mut function, mut binding) = bound_call();
-    Arc::get_mut(&mut function).unwrap().def.returns = FunctionReturns::Scalar {
-        type_name: "public.accepted_value".into(),
-    };
+    edit_definition(&mut function, |definition| {
+        definition.returns = FunctionReturns::Scalar {
+            type_name: "public.accepted_value".into(),
+        };
+    });
     binding.invocation.as_mut().unwrap().return_type = Some("public.accepted_value".into());
     let initial = RoutineDescriptionScope::default();
     let current = Rc::new(RefCell::new(initial.clone()));
@@ -413,13 +423,14 @@ fn tuple_result_targets_resolve_once_per_attribute_and_keep_each_domain_check() 
         calls: Cell::new(0),
     };
     let (mut function, mut binding) = bound_call();
-    let definition = &mut Arc::get_mut(&mut function).unwrap().def;
-    definition.returns = FunctionReturns::None;
-    definition.body = crate::ast::FunctionBody::Source("SELECT 1, 2".into());
-    for parameter in &mut definition.params {
-        parameter.mode = crate::ast::FunctionParamMode::Out;
-    }
-    definition.params[1].type_name = "pg_catalog.int4".into();
+    edit_definition(&mut function, |definition| {
+        definition.returns = FunctionReturns::None;
+        definition.body = crate::ast::FunctionBody::Source("SELECT 1, 2".into());
+        for parameter in &mut definition.params {
+            parameter.mode = crate::ast::FunctionParamMode::Out;
+        }
+        definition.params[1].type_name = "pg_catalog.int4".into();
+    });
     binding.argument_types.clear();
     let invocation = binding.invocation.as_mut().unwrap();
     invocation.argument_positions.clear();

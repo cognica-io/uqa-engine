@@ -8,7 +8,6 @@ use super::*;
 use crate::ast::{FunctionBinding, FunctionVolatility};
 use crate::schema::SchemaExpressionCatalog;
 use crate::{expr::EngineHook, routines::RoutineResolution, FunctionTypeResolver};
-use std::sync::Arc;
 use uqa_core::Value;
 
 struct Catalog;
@@ -70,7 +69,7 @@ impl RoutineResolution for Catalog {
         names: &[Option<String>],
         types: &[Option<ColumnType>],
         variadic: bool,
-    ) -> Result<Option<Arc<crate::routines::SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         if self
             .resolve_function_overload(name, binding, names, types, variadic)?
             .is_none()
@@ -84,10 +83,13 @@ impl RoutineResolution for Catalog {
             unreachable!("fixture routine declaration");
         };
         definition.object_id = Some([7; 16]);
-        Ok(Some(Arc::new(crate::routines::SQLUserFunction::new(
-            *definition,
-            crate::routines::RoutineBody::Source,
-        ))))
+        Ok(Some(
+            crate::routines::SQLUserFunction::new(
+                *definition,
+                crate::routines::RoutineBody::Source,
+            )
+            .shared(),
+        ))
     }
 }
 

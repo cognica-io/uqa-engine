@@ -20,17 +20,14 @@ use crate::{
     routines::{routine_signature_types, SQLUserFunction},
     SQLError,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::BTreeSet;
 
 /// Find the routines a DROP names, item by item as `RemoveObjects` does: each item's routine is looked up and then passed to `ensure_owner`, before the next item is looked up.
 pub fn resolve_sql_function_drop_targets(
     catalog: &dyn RoutineNameCatalog,
     types: &dyn crate::routines::declaration::RoutineTypeCatalog,
     stmt: &DropFunctionStmt,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &crate::routines::registry::RoutineRegistry,
     kind: &'static str,
     mut ensure_owner: impl FnMut(&SQLUserFunction, &DropFunctionItem) -> Result<(), SQLError>,
 ) -> Result<RoutineDropResolution, SQLError> {
@@ -108,7 +105,7 @@ pub fn resolve_sql_function_drop_targets(
 /// Find the routine a DROP item names; `requested_types` are its argument types resolved to catalog type names.
 pub fn resolve_sql_function_drop_target(
     catalog: &dyn RoutineNameCatalog,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &crate::routines::registry::RoutineRegistry,
     item: &DropFunctionItem,
     requested_types: Option<&[String]>,
     is_procedure: bool,
@@ -162,7 +159,7 @@ pub fn resolve_sql_function_drop_target(
 
 pub fn resolve_sql_routine_alter_target(
     catalog: &dyn RoutineNameCatalog,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &crate::routines::registry::RoutineRegistry,
     requested_name: &str,
     requested_types: Option<&[String]>,
     kind: AlterRoutineKind,

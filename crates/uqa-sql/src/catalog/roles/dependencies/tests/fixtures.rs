@@ -9,8 +9,7 @@ use super::*;
 use crate::catalog::security::database::BoundDatabaseSecurity;
 use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::security::BoundTableSecurity;
-use crate::routines::SQLUserFunction;
-use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
+use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 pub(super) type Events = Rc<RefCell<Vec<String>>>;
 pub(super) struct Table {
@@ -67,7 +66,7 @@ pub(super) struct Catalog {
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
     pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
-    pub routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    pub routines: crate::routines::registry::RoutineRegistry,
     pub domains:
         crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
     pub events: Events,
@@ -85,7 +84,7 @@ impl Catalog {
                 crate::catalog::security::system_relations::SystemRelationSecurities::new(),
             sequences: BTreeMap::new(),
             sequence_persistence: BTreeMap::new(),
-            routines: BTreeMap::new(),
+            routines: crate::routines::registry::RoutineRegistry::new(),
             domains: crate::catalog::type_definitions::TypeDefinitions::new(),
             events: Rc::default(),
         }
@@ -162,7 +161,7 @@ impl RoleDependencyCatalog for Catalog {
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         Box::new(self.read("sequences", &self.sequences))
     }
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
+    fn routines(&self) -> RoleDependencyRead<'_, crate::routines::registry::RoutineRegistry> {
         Box::new(self.read("routines", &self.routines))
     }
     fn domains(

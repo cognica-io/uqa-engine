@@ -87,6 +87,10 @@ pub(crate) mod sealed {
 pub trait StoredDefinition<K: ?Sized = str>: sealed::Definition + Clone {
     fn is_temporary(&self, key: &K) -> bool;
     fn copy_definition(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>, SQLError>;
+    /// Immutable child handles retain their own native leases; captures must also fund their complete payloads.
+    fn retained_children_bytes(&self) -> Result<usize, SQLError> {
+        Ok(0)
+    }
 }
 
 /// Native keys expose only separately allocated payloads; inline key storage belongs to the retained map node.
@@ -200,6 +204,12 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
         self.temporary.clear();
     }
 
+    pub fn temporary_only(&self) -> Self {
+        let mut temporary = self.clone();
+        temporary.durable.clear();
+        temporary
+    }
+
     pub fn remove<Q: Ord + ?Sized>(&mut self, name: &Q) -> Result<bool, SQLError>
     where
         K: Borrow<Q>,
@@ -247,9 +257,11 @@ impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
             .copy_definition(&control)?
             .into_budgeted()
             .unwrap_or_else(|_| unreachable!("native definitions use admitted construction"));
+        let children = value.retained_children_bytes()?;
         let bytes = name
             .payload_bytes()
             .checked_add(value.reserved_bytes())
+            .and_then(|bytes| bytes.checked_add(children))
             .ok_or(MemoryError::SizeOverflow)?;
         let mut durable = self.durable.clone();
         let mut session = self.temporary.clone();

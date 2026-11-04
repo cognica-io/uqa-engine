@@ -12,7 +12,6 @@ use crate::{
     routines::{routine_signature_types, SQLUserFunction},
     SQLError,
 };
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 
 pub struct RoutineRenameTarget {
@@ -64,7 +63,7 @@ fn routine_rename_destination(
     stmt: &RenameRoutineStmt,
     old_identity: &RelationIdentity,
     signature: &[String],
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &crate::routines::registry::RoutineRegistry,
 ) -> Result<String, SQLError> {
     let (new_schema, new_local_name) =
         RelationIdentity::parse_reference(&stmt.new_name).map_err(|error| SQLError::Routine {
@@ -96,10 +95,10 @@ fn routine_rename_destination(
 }
 
 pub fn move_routine_registry_entry(
-    mut registry: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    mut registry: crate::routines::registry::RoutineRegistry,
     target: &RoutineRenameTarget,
-) -> Result<BTreeMap<String, Vec<Arc<SQLUserFunction>>>, SQLError> {
-    let old_overloads = registry.get_mut(&target.old_name).ok_or_else(|| {
+) -> Result<crate::routines::registry::RoutineRegistry, SQLError> {
+    let mut old_overloads = registry.get(&target.old_name).cloned().ok_or_else(|| {
         SQLError::Internal(format!(
             "resolved ALTER routine registry entry `{}` disappeared before rename",
             target.old_name
@@ -107,20 +106,20 @@ pub fn move_routine_registry_entry(
     })?;
     let renamed = old_overloads.remove(target.position);
     if old_overloads.is_empty() {
-        registry.remove(&target.old_name);
+        registry.remove(&target.old_name)?;
+    } else {
+        registry.insert(target.old_name.clone(), old_overloads)?;
     }
     let mut renamed_definition = renamed.def.clone();
     renamed_definition.name.clone_from(&target.new_name);
-    let new_overloads = registry.entry(target.new_name.clone()).or_default();
-    new_overloads.push(Arc::new(SQLUserFunction::new(
-        renamed_definition,
-        renamed.body.clone(),
-    )));
+    let mut new_overloads = registry.get(&target.new_name).cloned().unwrap_or_default();
+    new_overloads.push(SQLUserFunction::new(renamed_definition, renamed.body.clone()).shared());
     new_overloads.sort_by(|left, right| {
         routine_signature_types(&left.def)
             .cmp(&routine_signature_types(&right.def))
             .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
     });
+    registry.insert(target.new_name.clone(), new_overloads)?;
     Ok(registry)
 }
 

@@ -23,7 +23,7 @@ pub trait RoutineInvocationSession {
         function: &uqa_sql::routines::SQLUserFunction,
         definition: &uqa_sql::ast::CreateFunction,
         relation: Option<i64>,
-    ) -> Result<std::sync::Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError>;
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError>;
     fn depth_limit(&self) -> usize;
     fn state_guard(
         &self,

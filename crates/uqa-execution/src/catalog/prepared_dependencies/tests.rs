@@ -11,7 +11,7 @@ use uqa_sql::{
     routines::{RoutineBody, SQLUserFunction},
 };
 
-fn function(identity: u8, revision: u8) -> Arc<SQLUserFunction> {
+fn function(identity: u8, revision: u8) -> uqa_sql::routines::SQLRoutine {
     let Statement::CreateFunction(mut definition) =
         uqa_sql::compile("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1'")
             .unwrap()
@@ -21,7 +21,7 @@ fn function(identity: u8, revision: u8) -> Arc<SQLUserFunction> {
     };
     definition.object_id = Some([identity; 16]);
     definition.catalog_revision = Some([revision; 16]);
-    Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source))
+    SQLUserFunction::new(*definition, RoutineBody::Source).shared()
 }
 
 #[test]
@@ -30,23 +30,28 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
         .snapshot()
         .clone();
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.f".into(), vec![function(1, 10)]);
+        .insert("public.f".into(), vec![function(1, 10)])
+        .unwrap();
     let dependencies = PreparedAnalysisDependencies {
         relations: uqa_core::memory::OwnedSet::new(),
         routines: uqa_core::memory::OwnedSet::from([[1; 16]]),
     };
     let original = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.other".into(), vec![function(2, 20)]);
+        .insert("public.other".into(), vec![function(2, 20)])
+        .unwrap();
     assert_eq!(
         capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap(),
         original
     );
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.f".into(), vec![function(1, 11)]);
+        .insert("public.f".into(), vec![function(1, 11)])
+        .unwrap();
     let replaced = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_ne!(replaced, original);
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions).remove("public.f");
+    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .remove("public.f")
+        .unwrap();
     let missing = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_eq!(missing.routines[&[1; 16]], None);
     Arc::make_mut(&mut snapshot.definitions.schemas)

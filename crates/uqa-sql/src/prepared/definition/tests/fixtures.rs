@@ -90,8 +90,7 @@ impl crate::catalog::analysis::AnalysisCatalog for NoRoutines {
         &self,
         _: &crate::catalog::resolution::RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>>, crate::SQLError>
-    {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, crate::SQLError> {
         Ok(None)
     }
 }
@@ -158,20 +157,19 @@ impl crate::routines::resolution::RoutineOverloadCatalog for NoRoutines {
     fn lookup_sql_routine_candidates(
         &self,
         _: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>>, crate::SQLError>
-    {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, crate::SQLError> {
         panic!("query fixture does not resolve procedures");
     }
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &crate::ast::FunctionBinding,
-    ) -> Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         panic!("query fixture does not resolve procedures");
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _: &crate::ast::FunctionBinding,
-    ) -> Option<Vec<std::sync::Arc<crate::routines::SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         panic!("query fixture does not resolve procedures");
     }
 }

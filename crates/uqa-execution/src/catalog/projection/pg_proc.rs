@@ -39,7 +39,7 @@ pub fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLEr
 
 /// Whether a routine holds `oid` in `pg_proc`: a user routine, or a registered function, whose OID derives from its name.
 pub fn routine_oid_in_use(
-    routines: &std::collections::BTreeMap<String, Vec<std::sync::Arc<SQLUserFunction>>>,
+    routines: &uqa_sql::routines::registry::RoutineRegistry,
     oid: i64,
 ) -> Result<bool, SQLError> {
     for function in routines.values().flatten() {

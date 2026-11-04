@@ -8,7 +8,6 @@
 
 use super::{AnalysisCatalog, TableDefinition, ViewDefinition};
 use crate::{catalog::resolution::RelationNameResolution, ColumnType, SQLError};
-use std::sync::Arc;
 use uqa_core::memory::Produced;
 
 impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
@@ -191,7 +190,7 @@ impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         (**self).sql_functions(resolution, name)
     }
 

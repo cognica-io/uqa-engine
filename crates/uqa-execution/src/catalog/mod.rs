@@ -131,7 +131,7 @@ pub struct CatalogDefinitionSnapshot {
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
     pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
+    pub sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub role_memberships: Arc<RoleMemberships>,
 
     pub domains: Arc<

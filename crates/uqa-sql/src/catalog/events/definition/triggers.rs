@@ -22,7 +22,6 @@ use crate::{
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
-use std::sync::Arc;
 use uqa_core::{RelationIdentity, Value};
 
 #[cfg(test)]
@@ -158,7 +157,7 @@ impl EventAnalysisContext<'_> {
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
-    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+    ) -> Result<crate::routines::SQLRoutine, SQLError> {
         let candidates = match lookup_mode {
             RelationLookupMode::Dynamic => self.routines.lookup_visible_sql_functions(name)?,
             RelationLookupMode::Bound => self.routines.lookup_bound_sql_functions(name),
@@ -212,7 +211,7 @@ impl EventAnalysisContext<'_> {
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
-    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+    ) -> Result<crate::routines::SQLRoutine, SQLError> {
         let function = self.resolve_trigger_function_candidate(name, lookup_mode)?;
         Self::validate_trigger_function(&function)?;
         Ok(function)
@@ -222,7 +221,7 @@ impl EventAnalysisContext<'_> {
         &self,
         name: &str,
         object_id: Option<[u8; 16]>,
-    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+    ) -> Result<crate::routines::SQLRoutine, SQLError> {
         let Some(object_id) = object_id else {
             return self.resolve_trigger_function(name, RelationLookupMode::Bound);
         };

@@ -12,13 +12,13 @@ use std::sync::Arc;
 use uqa_sql::{
     ast::GrantRoutineStmt,
     catalog::roles::resolve_role_specification,
-    routines::{lifecycle::RoutineRegistry, security::grants, SQLUserFunction},
+    routines::{lifecycle::RoutineRegistry, security::grants},
     SQLError,
 };
 
 #[derive(Clone)]
 pub(super) enum RoutineGrantTarget {
-    User(Arc<SQLUserFunction>),
+    User(uqa_sql::routines::SQLRoutine),
     Builtin(crate::catalog::projection::BuiltinRoutineIdentity),
 }
 pub(super) type RoutineGrantTargets = Vec<RoutineGrantTarget>;

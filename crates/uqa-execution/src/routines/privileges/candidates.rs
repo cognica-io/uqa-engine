@@ -79,8 +79,12 @@ impl GrantCandidateContext<'_> {
             self.dependencies,
         )?;
         // `ExecGrant_common` stores a new catalog tuple even when its ACL is unchanged.
-        next.get_mut(name).expect("resolved routine key")[position] =
-            super::super::catalog::revision::replacement(def, existing.body.clone())?;
+        next.edit(name, |overloads| {
+            overloads[position] =
+                super::super::catalog::revision::replacement(def, existing.body.clone())?;
+            Ok(())
+        })?
+        .expect("resolved routine key");
         Ok(())
     }
 }

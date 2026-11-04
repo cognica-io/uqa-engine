@@ -79,8 +79,7 @@ impl uqa_sql::catalog::analysis::AnalysisCatalog for NoRoutines {
         &self,
         _: &uqa_sql::catalog::resolution::RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>>, uqa_sql::SQLError>
-    {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, uqa_sql::SQLError> {
         Ok(None)
     }
 }

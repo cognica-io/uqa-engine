@@ -40417,6 +40417,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routines_preserve_exact_overloads_and_the_original_capture_encoding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Exact immutable routine capture",
+      "workload": "Capture overloaded SQL source, bound SQL and PL/pgSQL source definitions, empty overload sets and excluded temporary routines.",
+      "invariant": "The native image equals the independent legacy ordered definition/body encoding and preserves identities, revisions and definition hashes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_capture_has_constant_work_and_independent_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Bounded native routine capture",
+      "workload": "Capture 1, 64 and 4096 durable routine names beside a temporary definition under independent exact and one-byte-insufficient allowances.",
+      "invariant": "Capture allocates no heap object; denied admission retains no lease, successful cuts survive native retirement and all allowances release at final close.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_routine_publication_shares_unrelated_overloads_and_preserves_failed_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Selected routine publication",
+      "workload": "Replace one overload beside an unrelated megabyte source body and reject a later replacement that exceeds the native allowance.",
+      "invariant": "Selected replacement stays below 32 KiB and 256 allocations, shares unrelated overloads and preserves original roots and allowance usage on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "escaped_routine_and_bound_body_handles_keep_their_native_allowances_until_final_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Escaped routine ownership",
+      "workload": "Retain a routine and its bound SQL body, retire the native registry, then release the routine and body independently.",
+      "invariant": "Each escaped immutable handle keeps its complete native syntax allowance until that handle is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_checks_both_cancellation_owners_without_changing_native_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Independent routine cancellation",
+      "workload": "Cancel the original or invoking capture owner before native routine capture.",
+      "invariant": "Both cancellations report 57014, publish no capture, retain no allowance and leave the native definitions unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_admission_failure_precedes_persistence_and_preserves_authority",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/privileges/tests.rs",
+      "capability": "Atomic routine authority publication",
+      "workload": "Exhaust native admission before routine REVOKE, then release the allowance and repeat the command.",
+      "invariant": "Denied publication reports 53200 before persistence, preserves original routine handles and authority, and funded publication succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_restore_admission_keeps_original_definitions_and_metadata_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/routines/acl_persistence.rs",
+      "capability": "Admitted routine restoration",
+      "workload": "Deny placeholder and final-root admission while restoring persisted routines, then complete a funded restore on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Both failures restore the original registry and leave stored metadata unchanged; funded restoration preserves access semantics and releases all retained allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_routine_roots_preserve_original_bodies_and_authority_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/routine_roots.rs",
+      "capability": "Committed native routine roots",
+      "workload": "Capture 1, 32 and 128 routine names through private replacement, ACL changes, savepoint rollback, COMMIT, further replacement and engine closure.",
+      "invariant": "Committed capture stays below 32 KiB and 128 allocations, retains original ordered overloads and bound bodies, honors cancellation and releases its allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -109,8 +109,8 @@ fn user_sql_and_procedural_routines_join_the_same_language_identities() {
         definition.owner = Some(RoleIdentity::BOOTSTRAP);
         Arc::make_mut(&mut snapshot.definitions.sql_user_functions).insert(
             definition.name.clone(),
-            vec![Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source))],
-        );
+            vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
+        ).unwrap();
     }
     let catalog = CatalogReadView::new(snapshot);
     let resolution = RelationNameResolution {

@@ -5,10 +5,9 @@
 //
 
 use super::{sql, Engine, StorageReadControl};
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
-    catalog::definition_capture::routines::CapturedRoutines,
-    routines::{CompiledFunctionBody, RoutineBody, SQLUserFunction},
+    routines::registry::CapturedRoutines,
+    routines::{CompiledFunctionBody, RoutineBody},
 };
 use uqa_storage::StorageBackendError;
 
@@ -16,20 +15,23 @@ fn fixture(engine: &Engine) {
     sql(engine,"CREATE TABLE docs(id integer); CREATE FUNCTION bound(a integer DEFAULT 7) RETURNS integer LANGUAGE SQL STABLE SECURITY DEFINER RETURN a + 1; CREATE FUNCTION bound(a text) RETURNS text LANGUAGE SQL AS 'SELECT a'; CREATE PROCEDURE change() LANGUAGE SQL BEGIN ATOMIC INSERT INTO docs VALUES (1); END; SET check_function_bodies = off; CREATE FUNCTION deferred() RETURNS integer LANGUAGE plpgsql AS 'invalid until invoked'; RESET check_function_bodies");
 }
 
-fn same(saved: &CapturedRoutines, original: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>) {
+fn same(saved: &CapturedRoutines, original: &uqa_sql::routines::registry::RoutineRegistry) {
     assert_eq!(saved.len(), original.len());
     for ((name, entries), (old_name, old)) in saved.iter().zip(original) {
         assert_eq!(name, old_name);
         assert_eq!(entries.len(), old.len());
         for (value, old) in entries.iter().zip(old) {
             assert_eq!(
-                serde_json::to_value(&value.definition).unwrap(),
+                serde_json::to_value(&value.def).unwrap(),
                 serde_json::to_value(&old.def).unwrap()
             );
-            match (&value.bound_body, &old.body) {
-                (None, RoutineBody::Source) => {}
-                (Some(plans), RoutineBody::Bound(body)) => {
-                    let CompiledFunctionBody::SQL(old) = body.as_ref() else {
+            match (&value.body, &old.body) {
+                (RoutineBody::Source, RoutineBody::Source) => {}
+                (RoutineBody::Bound(plans), RoutineBody::Bound(body)) => {
+                    let CompiledFunctionBody::SQL(old) = &***body else {
+                        panic!("SQL")
+                    };
+                    let CompiledFunctionBody::SQL(plans) = &***plans else {
                         panic!("SQL")
                     };
                     assert_eq!(

@@ -26,7 +26,7 @@ impl uqa_sql::routines::RoutineResolution for Lookup<'_> {
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         self.0.lookup_bound_sql_functions_by_binding(binding)
     }
 }
@@ -102,10 +102,8 @@ fn projection_presence_does_not_pin_a_removed_routine() {
     let catalog = Catalog::new();
     let binding = catalog.binding();
     let descriptions = RoutineCallDescriptions::default();
-    let temporary = Arc::new(SQLUserFunction::new(
-        catalog.function.def.clone(),
-        RoutineBody::Source,
-    ));
+    let temporary =
+        SQLUserFunction::new(catalog.function.def.clone(), RoutineBody::Source).shared();
     let scope = || Some(catalog.scope.clone());
     let control = ProductionControl::uncontrolled();
     descriptions

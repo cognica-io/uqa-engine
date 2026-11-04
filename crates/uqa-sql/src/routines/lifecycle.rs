@@ -20,12 +20,9 @@ use crate::{
     ast::{AlterRoutineKind, CreateFunction, FunctionBinding},
     SQLError,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::BTreeSet;
 
-pub type RoutineRegistry = BTreeMap<String, Vec<Arc<SQLUserFunction>>>;
+pub use super::registry::RoutineRegistry;
 
 #[derive(Default)]
 pub struct RoutineDropResolution {

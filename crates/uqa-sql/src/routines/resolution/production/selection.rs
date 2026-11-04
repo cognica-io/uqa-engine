@@ -148,7 +148,7 @@ pub(super) fn signature_error(
 
 pub(super) fn collect(
     resolver: &RoutineOverloadContext<'_>,
-    overloads: &[std::sync::Arc<crate::routines::SQLUserFunction>],
+    overloads: &[crate::routines::SQLRoutine],
     call: RoutineCallDescriptor<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<
@@ -169,7 +169,7 @@ pub(super) fn collect(
 
 fn collect_kind(
     resolver: &RoutineOverloadContext<'_>,
-    overloads: &[std::sync::Arc<crate::routines::SQLUserFunction>],
+    overloads: &[crate::routines::SQLRoutine],
     call: RoutineCallDescriptor<'_>,
     kind: RoutineCallKind,
     control: &ProductionControl<'_>,

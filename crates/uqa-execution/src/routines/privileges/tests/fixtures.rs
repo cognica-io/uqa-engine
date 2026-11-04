@@ -52,7 +52,7 @@ impl Fixture {
             .attributes
             .remove(&uqa_sql::ast::RoleAttribute::Superuser);
         Self {
-            registry: RefCell::new(BTreeMap::new()),
+            registry: RefCell::new(RoutineRegistry::new()),
             builtins: RefCell::new(
                 uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
             ),
@@ -107,15 +107,17 @@ impl Fixture {
         def.owner = Some(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP);
         def.object_id = Some([oid as u8; 16]);
         def.catalog_oid = Some(oid);
-        self.registry.borrow_mut().insert(
-            name.into(),
-            vec![std::sync::Arc::new(
-                uqa_sql::routines::SQLUserFunction::new(
+        self.registry
+            .borrow_mut()
+            .insert(
+                name.into(),
+                vec![uqa_sql::routines::SQLUserFunction::new(
                     *def,
                     uqa_sql::routines::RoutineBody::Source,
-                ),
-            )],
-        );
+                )
+                .shared()],
+            )
+            .unwrap();
     }
     pub fn grant(&self, sql: &str) -> Result<(), SQLError> {
         let uqa_sql::Statement::GrantRoutine(stmt) = uqa_sql::compile(sql)?.remove(0) else {

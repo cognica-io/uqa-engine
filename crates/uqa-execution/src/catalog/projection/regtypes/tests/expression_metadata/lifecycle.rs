@@ -45,13 +45,15 @@ fn expression_output_metadata_follows_its_retained_generation() {
 fn failed_expression_output_metadata_is_not_published() {
     let catalog = fixture(0);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(
-        &mut Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .get_mut("hidden.echo")
-            .unwrap()[0],
-    )
-    .def
-    .catalog_oid = None;
+    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .edit("hidden.echo", |overloads| {
+            let mut definition = overloads[0].def.clone();
+            definition.catalog_oid = None;
+            overloads[0] = SQLUserFunction::new(definition, overloads[0].body.clone()).shared();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     let invalid = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     let before = OUTPUT_METADATA_BUILDS.get();

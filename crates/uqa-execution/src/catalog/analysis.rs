@@ -362,7 +362,7 @@ impl AnalysisCatalog for CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         CatalogReadView::sql_functions(self, resolution, name)
     }
 

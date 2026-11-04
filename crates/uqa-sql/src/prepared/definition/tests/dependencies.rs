@@ -90,7 +90,7 @@ impl AnalysisCatalog for Catalog {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         NoRoutines.sql_functions(resolution, name)
     }
 }

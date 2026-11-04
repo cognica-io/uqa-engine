@@ -10,7 +10,7 @@ use super::{
     catalog::{RoutineRegistryPublication, RoutineRegistryState, FUNCTIONS_METADATA_KEY},
     definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_sql::{
     ast::CreateFunction,
     routines::{
@@ -117,10 +117,11 @@ pub fn install_sql_function_restore_placeholders(
                 .iter()
                 .cloned()
                 .map(|def| {
-                    Arc::new(SQLUserFunction::new(
+                    SQLUserFunction::new(
                         def,
-                        RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
-                    ))
+                        RoutineBody::Bound(CompiledFunctionBody::SQL(Vec::new()).shared()),
+                    )
+                    .shared()
                 })
                 .collect::<Vec<_>>();
             overloads.sort_by(|left, right| {
@@ -130,11 +131,15 @@ pub fn install_sql_function_restore_placeholders(
             });
             (name.clone(), overloads)
         })
-        .collect();
+        .collect::<Vec<_>>();
     let mut registry = context.registry.routines_write();
-    let temporary = super::catalog::temporary_snapshot(&registry);
-    let previous = std::mem::replace(&mut **registry, placeholders);
-    registry.extend(temporary);
+    let mut restored = super::catalog::temporary_snapshot(&registry);
+    for (name, overloads) in placeholders {
+        restored.insert(name, overloads).map_err(|error| {
+            StorageBackendError::backend("admit routine restore placeholders", error)
+        })?;
+    }
+    let previous = std::mem::replace(&mut **registry, restored);
     Ok(Some(PendingSQLFunctionRestore {
         definitions: canonical_defs,
         migrated,
@@ -165,14 +170,16 @@ pub fn finalize_sql_function_restore(
                 )
                 .map_err(|err| StorageBackendError::Other(err.to_string()))?;
                 migrated |= bound.changed;
-                overloads.push(Arc::new(SQLUserFunction::new(def, bound.body)));
+                overloads.push(SQLUserFunction::new(def, bound.body).shared());
             }
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)
                     .cmp(&routine_signature_types(&right.def))
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
-            restored.insert(name, overloads);
+            restored.insert(name, overloads).map_err(|error| {
+                StorageBackendError::backend("admit restored routine definition", error)
+            })?;
         }
         Ok(restored)
     })();

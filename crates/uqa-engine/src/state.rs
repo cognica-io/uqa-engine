@@ -269,8 +269,8 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities,
     >,
     pub(super) sql_user_functions: CatalogCell<
-        BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>,
-        uqa_sql::catalog::definition_capture::routines::CapturedRoutines,
+        uqa_sql::routines::registry::RoutineRegistry,
+        uqa_sql::routines::registry::CapturedRoutines,
     >,
     pub(super) roles:
         CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
@@ -317,8 +317,7 @@ pub(super) struct DurableCatalogSnapshot {
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub(super) sql_user_functions:
-        Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
+    pub(super) sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub(super) roles: Arc<RoleDefinitions>,
     pub(super) role_memberships: Arc<RoleMemberships>,
     pub(super) triggers:
@@ -367,7 +366,9 @@ impl DurableCatalogState {
             system_relation_security: CatalogCell::new(
                 uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
             ),
-            sql_user_functions: CatalogCell::new(BTreeMap::new()),
+            sql_user_functions: CatalogCell::new(
+                uqa_sql::routines::registry::RoutineRegistry::new(),
+            ),
             roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
             role_memberships: CatalogCell::new(RoleMemberships::new()),
             triggers: CatalogCell::new(BTreeMap::new()),

@@ -26,7 +26,7 @@ use std::sync::{
 };
 
 pub(super) struct Catalog {
-    pub(super) functions: Vec<Arc<SQLUserFunction>>,
+    pub(super) functions: Vec<crate::routines::SQLRoutine>,
     pub(super) settings: Mutex<ParserSettings>,
     pub(super) notices: Mutex<Vec<SQLNotice>>,
     pub(super) evaluations: AtomicUsize,
@@ -53,7 +53,7 @@ impl Catalog {
                 definition.object_id = Some([u8::try_from(index + 1).unwrap(); 16]);
                 definition.owner = Some(RoleIdentity::BOOTSTRAP);
                 definition.name = format!("public.{}", definition.name);
-                Arc::new(SQLUserFunction::new(definition, RoutineBody::Source))
+                SQLUserFunction::new(definition, RoutineBody::Source).shared()
             })
             .collect();
         Self {
@@ -63,6 +63,17 @@ impl Catalog {
             evaluations: AtomicUsize::new(0),
             allowed: AtomicBool::new(true),
         }
+    }
+
+    pub(super) fn edit_definition(
+        &mut self,
+        index: usize,
+        edit: impl FnOnce(&mut crate::ast::CreateFunction),
+    ) {
+        let mut definition = self.functions[index].def.clone();
+        edit(&mut definition);
+        self.functions[index] =
+            SQLUserFunction::new(definition, self.functions[index].body.clone()).shared();
     }
 
     pub(super) fn context(&self) -> RoutineInliningContext<'_> {
@@ -199,7 +210,7 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_sql_routine_candidates(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         let functions = self
             .functions
             .iter()
@@ -213,13 +224,13 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         RoutineResolution::lookup_bound_sql_functions_by_binding(self, binding)
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         RoutineResolution::lookup_bound_sql_functions_by_binding(self, binding)
     }
 }
@@ -282,7 +293,7 @@ impl RoutineResolution for Catalog {
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         let functions = self
             .functions
             .iter()
@@ -294,7 +305,7 @@ impl RoutineResolution for Catalog {
     fn lookup_visible_sql_functions(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         self.lookup_sql_routine_candidates(name)
     }
 }

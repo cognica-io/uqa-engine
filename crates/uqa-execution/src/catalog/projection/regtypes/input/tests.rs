@@ -10,7 +10,7 @@ use crate::catalog::{
     security::BoundSchemaSecurity,
     test_support::{empty_catalog, CatalogServices},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleDefinitions;
@@ -37,10 +37,13 @@ fn fixture() -> CatalogReadView {
         *definition,
         uqa_sql::routines::RoutineBody::Source,
     );
-    snapshot.definitions.sql_user_functions = Arc::new(BTreeMap::from([(
-        "public.unrelated".into(),
-        vec![Arc::new(function)],
-    )]));
+    snapshot.definitions.sql_user_functions = Arc::new(
+        uqa_sql::routines::registry::RoutineRegistry::try_from_iter([(
+            "public.unrelated".into(),
+            vec![function.shared()],
+        )])
+        .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 

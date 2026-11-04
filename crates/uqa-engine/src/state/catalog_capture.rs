@@ -31,7 +31,7 @@ impl DurableCatalogState {
         self.sql_user_functions = CatalogCell::capture_source(
             self.sql_user_functions.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::routines::routines,
+            uqa_sql::routines::registry::RoutineRegistry::capture,
         )?;
         self.rules = CatalogCell::capture_source(
             self.rules.snapshot(),

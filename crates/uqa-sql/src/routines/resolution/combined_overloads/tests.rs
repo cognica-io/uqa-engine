@@ -13,7 +13,7 @@ use crate::routines::{
 use std::sync::Arc;
 
 struct Catalog {
-    routines: Vec<Arc<SQLUserFunction>>,
+    routines: Vec<crate::routines::SQLRoutine>,
     search_path: Vec<String>,
 }
 
@@ -26,10 +26,11 @@ impl Catalog {
                 else {
                     unreachable!()
                 };
-                Arc::new(SQLUserFunction::new(
+                SQLUserFunction::new(
                     *def,
-                    RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
-                ))
+                    RoutineBody::Bound(CompiledFunctionBody::SQL(Vec::new()).shared()),
+                )
+                .shared()
             })
             .collect();
         Self {
@@ -81,21 +82,21 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_sql_routine_candidates(
         &self,
         _: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(Some(self.routines.clone()))
     }
 
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         Some(self.routines.clone())
     }
 
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         self.lookup_bound_sql_routine_candidates_by_binding(binding)
     }
 }

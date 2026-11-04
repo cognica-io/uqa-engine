@@ -612,7 +612,7 @@ fn resolve_sql_function(
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
-) -> Result<Option<std::sync::Arc<crate::routines::SQLUserFunction>>, SQLError> {
+) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
     let (argument_names, argument_types, explicit_variadic) =
         crate::function_call_argument_signature(args, schema, params, Some(resolver))?;
     if binding.is_none() && routines.lookup_visible_sql_functions(name)?.is_none() {

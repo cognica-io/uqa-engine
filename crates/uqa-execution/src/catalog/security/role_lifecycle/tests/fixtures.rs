@@ -13,7 +13,6 @@ use std::{
     cell::{Cell, Ref, RefCell, RefMut},
     collections::BTreeMap,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::roles::RoleReference;
@@ -32,7 +31,6 @@ use uqa_sql::{
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
     },
-    routines::SQLUserFunction,
 };
 
 pub(super) struct Catalog {
@@ -55,7 +53,7 @@ pub(super) struct Catalog {
     foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
     sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
-    routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    routines: uqa_sql::routines::registry::RoutineRegistry,
     domains:
         uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
 }
@@ -85,7 +83,7 @@ impl Catalog {
             system_relations:
                 uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
             sequences: BTreeMap::new(),
-            routines: BTreeMap::new(),
+            routines: uqa_sql::routines::registry::RoutineRegistry::new(),
             domains: crate::catalog::domain::DomainRegistry::new(),
         }
     }
@@ -366,7 +364,7 @@ impl RoleDependencyCatalog for Catalog {
         self.event("sequences");
         Box::new(&self.sequences)
     }
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
+    fn routines(&self) -> RoleDependencyRead<'_, uqa_sql::routines::registry::RoutineRegistry> {
         self.event("routines");
         Box::new(&self.routines)
     }

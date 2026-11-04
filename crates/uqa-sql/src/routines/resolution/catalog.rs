@@ -8,9 +8,7 @@
 
 use super::{search_path_precedes_pg_catalog, RoutineCallKind};
 use crate::{
-    ast::FunctionBinding,
-    catalog::domain::StoredDomain,
-    routines::{declaration::RoutineTypeCatalog, SQLUserFunction},
+    ast::FunctionBinding, catalog::domain::StoredDomain, routines::declaration::RoutineTypeCatalog,
     SQLError,
 };
 use std::sync::Arc;
@@ -45,12 +43,13 @@ pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
     fn lookup_sql_routine_candidates(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError>;
     fn lookup_sql_routine_candidates_with_control(
         &self,
         name: &str,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<uqa_core::memory::Produced<Vec<Arc<SQLUserFunction>>>>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<crate::routines::SQLRoutine>>>, SQLError>
+    {
         control.check()?;
         let Some(candidates) = self.lookup_sql_routine_candidates(name)? else {
             return Ok(None);
@@ -68,18 +67,18 @@ pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>>;
+    ) -> Option<Vec<crate::routines::SQLRoutine>>;
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>>;
+    ) -> Option<Vec<crate::routines::SQLRoutine>>;
     /// Select a bound identity; native registries borrow their retained candidates.
     fn select_bound_routine_with_control(
         &self,
         binding: &FunctionBinding,
         kind: RoutineCallKind,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         control.check()?;
         let candidates = self.lookup_bound_sql_routine_candidates_by_binding(binding);
         crate::routines::lifecycle::lookup::select_bound_routine_with_control(

@@ -10,12 +10,10 @@ use crate::state::{
     CapturedDatabaseAuthority, CatalogCell, DatabaseAuthority, DurableCatalogSnapshot,
     SnapshotTableSources,
 };
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     composite_type::StoredComposite,
-    definition_capture::routines::CapturedRoutines,
     domain::StoredDomain,
     enum_type::StoredEnum,
     events::{RuleCatalog, TriggerCatalog},
@@ -69,7 +67,7 @@ catalog_sources! {
     shells: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredShellType> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredShellType>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
     schemas: SchemaRegistry => uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry, SchemaRegistry::capture;
     views: uqa_sql::catalog::stored_view::ViewDefinitions => uqa_sql::catalog::stored_view::CapturedViewDefinitions, uqa_sql::catalog::stored_view::ViewDefinitions::capture;
-    sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;
+    sql_user_functions: uqa_sql::routines::registry::RoutineRegistry => uqa_sql::routines::registry::CapturedRoutines, uqa_sql::routines::registry::RoutineRegistry::capture;
     roles: RoleDefinitions => uqa_sql::catalog::roles::CapturedRoleDefinitions, RoleDefinitions::capture;
     role_memberships: RoleMemberships => uqa_sql::catalog::roles::CapturedRoleMemberships, RoleMemberships::capture;
     database_security: DatabaseAuthority => CapturedDatabaseAuthority, DatabaseAuthority::capture;

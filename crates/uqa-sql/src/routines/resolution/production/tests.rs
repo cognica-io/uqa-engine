@@ -15,7 +15,7 @@ use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 struct Catalog {
-    function: Arc<SQLUserFunction>,
+    function: crate::routines::SQLRoutine,
     types: RoutineTypeSnapshot,
 }
 
@@ -29,10 +29,11 @@ impl Catalog {
         definition.object_id = Some([1; 16]);
         Self {
             types: Arc::default(),
-            function: Arc::new(SQLUserFunction::new(
+            function: SQLUserFunction::new(
                 *definition,
-                RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
-            )),
+                RoutineBody::Bound(CompiledFunctionBody::SQL(Vec::new()).shared()),
+            )
+            .shared(),
         }
     }
 }
@@ -85,14 +86,14 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_sql_routine_candidates(
         &self,
         _: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(Some(vec![Arc::clone(&self.function)]))
     }
     fn lookup_sql_routine_candidates_with_control(
         &self,
         _: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<Produced<Vec<Arc<SQLUserFunction>>>>, SQLError> {
+    ) -> Result<Option<Produced<Vec<crate::routines::SQLRoutine>>>, SQLError> {
         let mut candidates = uqa_core::memory::ProductionVec::new(*control);
         candidates.push_produced(
             control.finish(Arc::clone(&self.function), control.empty_reservation())?,
@@ -102,13 +103,13 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         panic!("selected native routine lookup must borrow the registry")
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         panic!("selected native routine lookup must borrow the registry")
     }
     fn select_bound_routine_with_control(
@@ -116,7 +117,7 @@ impl RoutineOverloadCatalog for Catalog {
         binding: &FunctionBinding,
         kind: RoutineCallKind,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         crate::routines::lifecycle::lookup::select_bound_routine_with_control(
             std::iter::once(&self.function),
             binding,

@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::catalog::test_support::{empty_catalog, CatalogServices};
+use std::sync::Arc;
+use uqa_sql::routines::SQLUserFunction;
 use uqa_sql::{routines::RoutineBody, Statement};
 
 fn fixture(unrelated: usize) -> CatalogReadView {
@@ -13,13 +15,12 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     for position in 0..=unrelated {
         let Statement::CreateFunction(mut definition) = uqa_sql::compile(&format!("CREATE FUNCTION public.routine_{position:03}() RETURNS integer LANGUAGE SQL AS 'SELECT 1'")).unwrap().remove(0) else { panic!("routine"); };
         definition.catalog_oid = Some(70_000 + u32::try_from(position).unwrap());
-        Arc::make_mut(&mut snapshot.definitions.sql_user_functions).insert(
-            definition.name.clone(),
-            vec![Arc::new(SQLUserFunction::new(
-                *definition,
-                RoutineBody::Source,
-            ))],
-        );
+        Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+            .insert(
+                definition.name.clone(),
+                vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
+            )
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }
@@ -72,9 +73,15 @@ fn routine_address_errors_preserve_earlier_matches_and_precede_builtin_fallback(
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
     let routines = Arc::make_mut(&mut snapshot.definitions.sql_user_functions);
-    Arc::make_mut(&mut routines.get_mut("public.routine_001").unwrap()[0])
-        .def
-        .catalog_oid = None;
+    routines
+        .edit("public.routine_001", |overloads| {
+            let mut definition = overloads[0].def.clone();
+            definition.catalog_oid = None;
+            overloads[0] = SQLUserFunction::new(definition, overloads[0].body.clone()).shared();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let output = crate::catalog::cache::RegtypeOutputCache::default();
@@ -100,11 +107,15 @@ fn routine_addresses_keep_overload_order_and_retained_generations() {
     let original = user_routine_by_oid(&catalog, 70_000).unwrap().unwrap();
     let mut snapshot = catalog.snapshot().clone();
     let routines = Arc::make_mut(&mut snapshot.definitions.sql_user_functions);
-    let mut first = routines.remove("public.routine_000").unwrap();
-    Arc::make_mut(&mut first[0]).def.name = "public.renamed".into();
-    let second = routines.remove("public.routine_001").unwrap();
+    let mut first = routines["public.routine_000"].clone();
+    routines.remove("public.routine_000").unwrap();
+    let mut definition = first[0].def.clone();
+    definition.name = "public.renamed".into();
+    first[0] = SQLUserFunction::new(definition, first[0].body.clone()).shared();
+    let second = routines["public.routine_001"].clone();
+    routines.remove("public.routine_001").unwrap();
     first.extend(second);
-    routines.insert("public.renamed".into(), first);
+    routines.insert("public.renamed".into(), first).unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     assert_eq!(
         user_routine_by_oid(&current, 70_000)

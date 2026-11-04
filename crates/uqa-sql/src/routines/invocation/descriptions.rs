@@ -54,7 +54,7 @@ impl std::fmt::Debug for RoutineCallDescriptions {
 pub struct RoutineCallDescription {
     scope: RoutineDescriptionScope,
     binding: Produced<FunctionBinding>,
-    function: Weak<SQLUserFunction>,
+    function: Weak<uqa_core::memory::Produced<SQLUserFunction>>,
     sources: Produced<Vec<Option<ColumnType>>>,
     arguments: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
     parameters: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
@@ -89,7 +89,7 @@ impl RoutineCallDescriptions {
     pub fn remember(
         &self,
         binding: &FunctionBinding,
-        function: &Arc<SQLUserFunction>,
+        function: &crate::routines::SQLRoutine,
         sources: &[Option<ColumnType>],
         scope: RoutineDescriptionScope,
         control: &ProductionControl<'_>,
@@ -154,7 +154,7 @@ fn conversion_slots<T>(
 impl RoutineCallDescription {
     fn new(
         binding: &FunctionBinding,
-        function: &Arc<SQLUserFunction>,
+        function: &crate::routines::SQLRoutine,
         sources: &[Option<ColumnType>],
         scope: RoutineDescriptionScope,
         control: &ProductionControl<'_>,
@@ -192,7 +192,7 @@ impl RoutineCallDescription {
         }))
     }
 
-    pub fn function(&self) -> Option<Arc<SQLUserFunction>> {
+    pub fn function(&self) -> Option<crate::routines::SQLRoutine> {
         self.function.upgrade()
     }
 

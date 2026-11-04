@@ -20,10 +20,7 @@ use crate::catalog::security::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
     locking::RoleLockContext,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
@@ -96,7 +93,7 @@ fn validate_registered_sql_body(
 }
 
 fn allocate_routine_object_id(
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &uqa_sql::routines::registry::RoutineRegistry,
     name: &str,
 ) -> Result<[u8; 16], SQLError> {
     loop {
@@ -280,7 +277,7 @@ pub fn register_sql_function(
             let mut next = registry.clone();
             let mut def = def.clone();
             def.body_origin = None;
-            let overloads = next.entry(name.clone()).or_default();
+            let mut overloads = next.get(&name).cloned().unwrap_or_default();
             let mut dependencies = BTreeSet::new();
             let published = if let Some(pos) = overloads
                 .iter()
@@ -312,6 +309,7 @@ pub fn register_sql_function(
                     .cmp(&routine_signature_types(&right.def))
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
+            next.insert(name.clone(), overloads)?;
             Ok(RoleDependencyCandidate {
                 value: (registry, next, published),
                 memberships,
@@ -343,7 +341,7 @@ fn finish_registration(
     retain_validated_body(context, published, bound.validated.as_ref())?;
     context.catalog.changes.catalog_registry_changed();
     let compiled = match &bound.body {
-        RoutineBody::Bound(body) => Some(body.as_ref()),
+        RoutineBody::Bound(body) => Some(&***body),
         RoutineBody::Source => bound.validated.as_ref(),
     };
     compiled.map_or(Ok(()), |compiled| {
@@ -424,12 +422,13 @@ pub fn alter_sql_routine(
     )?;
     configuration::apply_routine_config_actions(context.configuration, &mut def)?;
     let mut next = registry.clone();
-    let overloads = next.get_mut(&name).ok_or_else(|| {
+    let mut overloads = next.get(&name).cloned().ok_or_else(|| {
         SQLError::Internal(format!(
             "resolved ALTER routine registry entry `{name}` disappeared before mutation"
         ))
     })?;
     overloads[position] = super::catalog::revision::replacement(def, existing.body.clone())?;
+    next.insert(name, overloads)?;
     context
         .catalog
         .publication

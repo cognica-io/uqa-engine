@@ -250,10 +250,7 @@ fn table_inlining_respects_snapshot_strictness_configuration_and_security_bounda
     let mut catalog = Catalog::new(
         "CREATE FUNCTION bounded(x integer) RETURNS SETOF integer LANGUAGE sql STABLE AS $$SELECT x$$",
     );
-    Arc::get_mut(&mut catalog.functions[0])
-        .unwrap()
-        .def
-        .execute_acl = Some(Vec::new());
+    catalog.edit_definition(0, |definition| definition.execute_acl = Some(Vec::new()));
     let binding = catalog.binding("bounded", &[Some(ColumnType::Integer)]);
     catalog.allowed.store(false, Ordering::SeqCst);
     assert!(catalog

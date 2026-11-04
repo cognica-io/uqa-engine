@@ -7,10 +7,12 @@
 use super::*;
 use crate::routines::{context::RoutineExpressions, invocation::context::RoutineCallRetention};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
+use uqa_sql::routines::SQLUserFunction;
 use uqa_sql::{
     assignment::{routines::RoutineValueContext, AssignmentContext},
     ast::{ColumnDef, Expr},
@@ -30,7 +32,7 @@ mod prepared_zero_arguments;
 mod projection;
 
 struct Catalog {
-    function: Arc<SQLUserFunction>,
+    function: uqa_sql::routines::SQLRoutine,
     lookups: AtomicUsize,
     sources: AtomicUsize,
     targets: AtomicUsize,
@@ -48,7 +50,7 @@ impl Catalog {
         };
         def.object_id = Some([12; 16]);
         Self {
-            function: Arc::new(SQLUserFunction::new(*def, RoutineBody::Source)),
+            function: SQLUserFunction::new(*def, RoutineBody::Source).shared(),
             lookups: AtomicUsize::new(0),
             sources: AtomicUsize::new(0),
             targets: AtomicUsize::new(0),
@@ -180,20 +182,20 @@ impl RoutineOverloadCatalog for Catalog {
     fn lookup_sql_routine_candidates(
         &self,
         _: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         Ok(Some(vec![Arc::clone(&self.function)]))
     }
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         self.lookups.fetch_add(1, Ordering::Relaxed);
         Some(vec![Arc::clone(&self.function)])
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         self.lookup_bound_sql_routine_candidates_by_binding(binding)
     }
 }

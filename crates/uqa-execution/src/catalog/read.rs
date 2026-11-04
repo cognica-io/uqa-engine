@@ -588,7 +588,7 @@ impl CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         let (schema, local_name) =
             uqa_core::RelationIdentity::parse_reference(name).map_err(|error| {
                 SQLError::Routine {
@@ -627,7 +627,7 @@ impl CatalogReadView {
         Ok((!visible.is_empty()).then_some(visible))
     }
 
-    pub fn all_sql_functions(&self) -> Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>> {
+    pub fn all_sql_functions(&self) -> Vec<uqa_sql::routines::SQLRoutine> {
         self.snapshot
             .definitions
             .sql_user_functions

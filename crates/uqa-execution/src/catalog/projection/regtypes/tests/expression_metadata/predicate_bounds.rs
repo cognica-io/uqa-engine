@@ -137,13 +137,15 @@ fn defaults_fixture(unrelated: usize) -> CatalogReadView {
         })
         .unwrap()
         .unwrap();
-    let function = Arc::make_mut(
-        &mut Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .get_mut("hidden.echo")
-            .unwrap()[0],
-    );
-    function.def.params[0].default = Some(constant(60_000, "regtype"));
-    let function = function.clone();
+    let function = Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .edit("hidden.echo", |overloads| {
+            let mut function = (**overloads[0]).clone();
+            function.def.params[0].default = Some(constant(60_000, "regtype"));
+            overloads[0] = function.clone().shared();
+            Ok(function)
+        })
+        .unwrap()
+        .unwrap();
     for i in 0..unrelated {
         let mut domain = domain.clone();
         domain.identity.name = format!("unrelated_{i}");
@@ -158,7 +160,8 @@ fn defaults_fixture(unrelated: usize) -> CatalogReadView {
         function.def.name = format!("hidden.unrelated_{i}");
         function.def.catalog_oid = Some(90_000 + u32::try_from(i).unwrap());
         Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .insert(function.def.name.clone(), vec![Arc::new(function)]);
+            .insert(function.def.name.clone(), vec![function.shared()])
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }

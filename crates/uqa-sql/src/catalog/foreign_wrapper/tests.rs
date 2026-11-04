@@ -7,7 +7,6 @@
 use super::*;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeMap;
 
 fn roles() -> RoleDefinitions {
     RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
@@ -125,13 +124,15 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
         resolution_error: None,
         input_collation: None,
     };
-    let routines = BTreeMap::from([(
+    let routines = crate::routines::registry::RoutineRegistry::try_from_iter([(
         definition.name.clone(),
-        vec![std::sync::Arc::new(crate::routines::SQLUserFunction::new(
+        vec![crate::routines::SQLUserFunction::new(
             *definition,
             crate::routines::RoutineBody::Source,
-        ))],
-    )]);
+        )
+        .shared()],
+    )])
+    .unwrap();
     let mut wrapper = custom();
     wrapper.validator = Some(ForeignWrapperFunction {
         oid: 20_000,
@@ -139,7 +140,11 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
     });
     let mut wrappers = ForeignWrappers::try_from_iter([("custom".into(), wrapper)]).unwrap();
     validate_functions(&wrappers, &routines).unwrap();
-    validate_functions(&wrappers, &BTreeMap::new()).unwrap();
+    validate_functions(
+        &wrappers,
+        &crate::routines::registry::RoutineRegistry::new(),
+    )
+    .unwrap();
     wrappers
         .edit("custom", |wrapper| {
             wrapper.validator.as_mut().unwrap().oid += 1;

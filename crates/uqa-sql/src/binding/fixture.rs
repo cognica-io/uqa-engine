@@ -94,7 +94,7 @@ impl AnalysisCatalog for FixtureCatalog {
         &self,
         _: &RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
 }

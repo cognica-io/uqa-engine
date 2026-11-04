@@ -9,6 +9,38 @@ mod fixtures;
 use fixtures::Fixture;
 
 #[test]
+fn native_routine_admission_failure_precedes_persistence_and_preserves_authority() {
+    let fixture = Fixture::new();
+    let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+    *fixture.registry.borrow_mut() = RoutineRegistry::with_budget(&memory);
+    fixture.add("app.f", 101, false);
+    let original = fixture.registry.borrow()["app.f"][0].clone();
+    let exhausted = memory.reserve(memory.available()).unwrap();
+    let error = fixture
+        .grant("REVOKE EXECUTE ON FUNCTION app.f() FROM PUBLIC")
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert!(fixture.persisted.borrow().is_empty());
+    assert!(std::sync::Arc::ptr_eq(
+        &original,
+        &fixture.registry.borrow()["app.f"][0]
+    ));
+    assert!(fixture.allowed("app.f"));
+    drop(exhausted);
+    fixture
+        .grant("REVOKE EXECUTE ON FUNCTION app.f() FROM PUBLIC")
+        .unwrap();
+    assert_eq!(fixture.persisted.borrow().len(), 1);
+    assert!(!fixture.allowed("app.f"));
+    assert_ne!(
+        original.catalog_revision(),
+        fixture.registry.borrow()["app.f"][0].catalog_revision()
+    );
+    drop((fixture, original));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn all_schema_routine_privileges_share_atomic_acl_publication() {
     let fixture = Fixture::new();
     fixture.add("app.z", 101, false);
@@ -143,7 +175,8 @@ fn writer_wait_follows_original_routine_identity_without_rebinding_names_or_new_
         let fixture = Fixture::new();
         fixture.add("app.f", 101, false);
         let mut next = fixture.registry.borrow().clone();
-        let old = next.remove("app.f").unwrap().remove(0);
+        let old = next["app.f"][0].clone();
+        next.remove("app.f").unwrap();
         let mut def = old.def.clone();
         if replacement {
             def.object_id = Some([44; 16]);
@@ -153,10 +186,9 @@ fn writer_wait_follows_original_routine_identity_without_rebinding_names_or_new_
         }
         next.insert(
             def.name.clone(),
-            vec![std::sync::Arc::new(
-                uqa_sql::routines::SQLUserFunction::new(def, old.body.clone()),
-            )],
-        );
+            vec![uqa_sql::routines::SQLUserFunction::new(def, old.body.clone()).shared()],
+        )
+        .unwrap();
         *fixture.on_writer.borrow_mut() = Some(next);
         let result = fixture.grant("REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app FROM PUBLIC");
         if replacement {

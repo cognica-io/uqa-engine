@@ -27,7 +27,6 @@ use uqa_sql::{
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
     },
-    routines::SQLUserFunction,
     SQLError,
 };
 impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
@@ -207,7 +206,7 @@ impl RoleDependencyCatalog for Engine {
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         Box::new(self.durable.sequence_security.read())
     }
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
+    fn routines(&self) -> RoleDependencyRead<'_, uqa_sql::routines::registry::RoutineRegistry> {
         Box::new(self.durable.sql_user_functions.read())
     }
     fn domains(

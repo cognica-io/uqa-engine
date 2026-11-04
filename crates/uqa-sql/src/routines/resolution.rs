@@ -13,9 +13,7 @@ mod production;
 pub(crate) use production::selected_binding;
 pub use production::{search_path_precedes_pg_catalog, OwnedStaticFunctionMatch};
 
-use super::{
-    declaration::RoutineTypeCatalog, routine_signature_types, SQLUserFunction, StaticFunctionMatch,
-};
+use super::{declaration::RoutineTypeCatalog, routine_signature_types, StaticFunctionMatch};
 use crate::type_resolution::{
     canonical_routine_type_name, rank_function_matches, BuiltinFunctionOverload,
     FunctionTypeResolver, ResolvedFunctionOverload, RoutineCallDescriptor,
@@ -25,7 +23,6 @@ use crate::{
     ast::{ColumnType, CreateFunction, FunctionBinding, RoutineVariadicMode},
     SQLError,
 };
-use std::sync::Arc;
 use uqa_core::RelationIdentity;
 
 #[derive(Clone, Copy)]
@@ -279,7 +276,7 @@ impl RoutineOverloadContext<'_> {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         self.resolve_static_sql_function_match(
             name,
             binding,
@@ -416,7 +413,7 @@ impl RoutineOverloadContext<'_> {
 fn resolve_static_routine_overload(
     catalog: &dyn RoutineOverloadCatalog,
     name: &str,
-    overloads: Vec<Arc<SQLUserFunction>>,
+    overloads: Vec<crate::routines::SQLRoutine>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
@@ -498,7 +495,7 @@ pub(super) fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFu
 
 fn static_routine_match(
     catalog: &RoutineTypeSnapshot,
-    function: Arc<SQLUserFunction>,
+    function: crate::routines::SQLRoutine,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
