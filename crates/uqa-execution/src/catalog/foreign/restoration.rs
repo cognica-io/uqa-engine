@@ -29,36 +29,61 @@ pub struct ForeignRestoreContext<'a> {
 pub struct RestoredForeignCatalog {
     pub wrappers: uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
     pub servers: uqa_sql::catalog::foreign_server::ForeignServers,
-    pub tables: BTreeMap<RelationIdentity, super::StoredForeignTable>,
-    pub security: BTreeMap<RelationIdentity, BoundTableSecurity>,
+    pub relations: super::ForeignCatalog,
 }
 
 /// Keep session-owned definitions available while the durable registries are rebound.
 pub fn retain_session_registry(
     publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
-) {
-    retain_registry(publication, retain_in_session);
+) -> StorageBackendResult<()> {
+    retain_registry(publication, retain_in_session)
 }
 
-/// An independent session starts from durable foreign definitions, never another session's objects.
+/// An independent session retains only complete durable declarations.
 pub fn retain_durable_registry(
     publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
-) {
+) -> StorageBackendResult<()> {
     retain_registry(publication, |table| {
         table.persistence != uqa_sql::ast::RelationPersistence::Temporary
             && table.server_reference.is_some()
-    });
+    })
 }
 
 fn retain_registry(
     publication: &dyn crate::schema::foreign_table_alteration::ForeignTableAlterPublication,
     mut keep: impl FnMut(&super::StoredForeignTable) -> bool,
-) {
-    let mut tables = publication.tables_write();
-    tables.retain(|_, table| keep(table));
-    publication
-        .security_write()
-        .retain(|relation, _| tables.contains_key(relation));
+) -> StorageBackendResult<()> {
+    let mut next = publication.foreign_catalog();
+    next.retain(|_, table| keep(table))
+        .map_err(|error| StorageBackendError::backend("retain foreign definitions", error))?;
+    publication.publish_foreign_catalog(next);
+    Ok(())
+}
+
+pub(super) fn admit_restored(
+    tables: &BTreeMap<RelationIdentity, super::StoredForeignTable>,
+    security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
+    budget: &uqa_core::memory::MemoryBudget,
+) -> StorageBackendResult<super::ForeignCatalog> {
+    let mut next = super::ForeignCatalog::with_budget(budget);
+    for (relation, table) in tables {
+        let authority = security.get(relation).ok_or_else(|| {
+            StorageBackendError::Other(format!(
+                "foreign table `{}` has no authority metadata",
+                relation.qualified_name()
+            ))
+        })?;
+        next.insert(relation.clone(), table.clone(), authority.clone())
+            .map_err(|error| {
+                StorageBackendError::backend("admit restored foreign relation", error)
+            })?;
+    }
+    if security.len() != tables.len() {
+        return Err(StorageBackendError::Other(
+            "foreign authority has no matching definition".into(),
+        ));
+    }
+    Ok(next)
 }
 
 pub fn restore(
@@ -138,6 +163,9 @@ pub fn restore(
         }
     }
     drop(declarations);
+    let current = context.publication.foreign_catalog();
+    let mut relations = admit_restored(&tables, &securities, current.budget())?;
+    merge_session_relations(&current, &mut relations)?;
     restored_servers.persist_migrations(catalog)?;
     restored_wrappers.persist_migrations(catalog)?;
     for row in migrations {
@@ -146,14 +174,11 @@ pub fn restore(
     if reference_format != Some(2) && allow_migration {
         super::reference::initialize_format(catalog)?;
     }
-    let mut restored = RestoredForeignCatalog {
+    Ok(RestoredForeignCatalog {
         wrappers: restored_wrappers.definitions,
         servers: restored_servers.definitions,
-        tables,
-        security: securities,
-    };
-    restored.retain_session_relations(context.registry)?;
-    Ok(restored)
+        relations,
+    })
 }
 
 fn restore_schema(
@@ -201,34 +226,28 @@ fn restore_wrappers(
     Ok(restored)
 }
 
-impl RestoredForeignCatalog {
-    fn retain_session_relations(
-        &mut self,
-        registry: &dyn super::reads::ForeignRegistryReads,
-    ) -> StorageBackendResult<()> {
-        let tables = registry.tables();
-        let security = registry.security();
-        merge_session_relations(&tables, &security, &mut self.tables, &mut self.security)
-    }
-}
-
-/// Preserve temporary relations and unfinished declarations through a refresh in the same session. An unbound server occurs only during declaration in a live registry; legacy server identities are bound before restored definitions enter it.
+/// Session-local relations and incomplete declarations remain in the same paired generation.
 pub fn merge_session_relations(
-    current: &BTreeMap<RelationIdentity, super::StoredForeignTable>,
-    current_security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
-    tables: &mut BTreeMap<RelationIdentity, super::StoredForeignTable>,
-    security: &mut BTreeMap<RelationIdentity, BoundTableSecurity>,
+    current: &super::ForeignCatalog,
+    next: &mut super::ForeignCatalog,
 ) -> StorageBackendResult<()> {
-    for (relation, table) in current.iter().filter(|(_, table)| retain_in_session(table)) {
-        let retained = current_security.get(relation).ok_or_else(|| {
-            StorageBackendError::Other(format!(
-                "session foreign table `{}` has no security metadata",
-                relation.qualified_name()
-            ))
-        })?;
-        tables.insert(relation.clone(), table.clone());
-        security.insert(relation.clone(), retained.clone());
+    let mut candidate = next.clone();
+    for (relation, table) in current
+        .tables()
+        .iter()
+        .filter(|(_, table)| retain_in_session(table))
+    {
+        candidate
+            .insert(
+                relation.clone(),
+                table.clone(),
+                current.security()[relation].clone(),
+            )
+            .map_err(|error| {
+                StorageBackendError::backend("retain session foreign relation", error)
+            })?;
     }
+    *next = candidate;
     Ok(())
 }
 

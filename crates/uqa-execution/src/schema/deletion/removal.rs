@@ -360,7 +360,7 @@ fn routine_alias_rewrites(
 }
 
 fn storage_error(action: &str, error: &StorageBackendError) -> SQLError {
-    uqa_sql::catalog::errors::storage_error(action, error)
+    crate::storage_errors::storage_error(action, error)
 }
 
 fn disappeared(kind: &str, name: &str) -> SQLError {

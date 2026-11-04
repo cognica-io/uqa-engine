@@ -89,17 +89,20 @@ fn rule_definitions_use_pinned_catalog_without_replication_filtering() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
     let relation = RelationIdentity::new("public", "child");
-    partitions.rules.insert(
-        relation.clone(),
-        BTreeMap::from([(
-            "live".into(),
-            stored_rule("live", RuleEvent::Insert, EventEnableMode::Origin),
-        )])
-        .into(),
-    );
-    let pinned = BTreeMap::from([(
+    partitions
+        .rules
+        .insert(
+            relation.clone(),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "live".into(),
+                stored_rule("live", RuleEvent::Insert, EventEnableMode::Origin),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
+    let pinned = crate::catalog::events::EventCatalog::try_from_iter([(
         relation,
-        BTreeMap::from([
+        crate::catalog::events::EventDefinitions::try_from_iter([
             (
                 "disabled".into(),
                 stored_rule("disabled", RuleEvent::Insert, EventEnableMode::Disabled),
@@ -113,8 +116,9 @@ fn rule_definitions_use_pinned_catalog_without_replication_filtering() {
                 stored_rule("update", RuleEvent::Update, EventEnableMode::Always),
             ),
         ])
-        .into(),
-    )]);
+        .unwrap(),
+    )])
+    .unwrap();
     let state = Visibility {
         rules: Some(&pinned),
         ..visibility(&partitions)
@@ -159,7 +163,13 @@ fn executable_rules_read_live_catalog_and_current_replication_role() {
         "other_event".into(),
         stored_rule("other_event", RuleEvent::Update, EventEnableMode::Always),
     );
-    partitions.rules.insert(relation, entries.into());
+    partitions
+        .rules
+        .insert(
+            relation,
+            crate::catalog::events::EventDefinitions::try_from_iter(entries).unwrap(),
+        )
+        .unwrap();
     let pinned = RuleCatalog::new();
     for (replica, expected) in [
         (false, vec!["always", "origin"]),
@@ -187,14 +197,17 @@ fn executable_rules_read_live_catalog_and_current_replication_role() {
 fn rule_presence_uses_live_definitions_including_disabled_rules() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
-    partitions.rules.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([(
-            "disabled".into(),
-            stored_rule("disabled", RuleEvent::Insert, EventEnableMode::Disabled),
-        )])
-        .into(),
-    );
+    partitions
+        .rules
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "disabled".into(),
+                stored_rule("disabled", RuleEvent::Insert, EventEnableMode::Disabled),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let pinned = RuleCatalog::new();
     let state = Visibility {
         rules: Some(&pinned),
@@ -214,14 +227,23 @@ fn trigger_definition_checks_use_pinned_entries_without_execution_filters() {
     disabled.enabled = EventEnableMode::Disabled;
     disabled.definition.events = vec![TriggerEvent::Update];
     disabled.definition.update_columns = vec!["id".into()];
-    let pinned = TriggerCatalog::from([(
+    let pinned = TriggerCatalog::try_from_iter([(
         RelationIdentity::new("public", "child"),
-        BTreeMap::from([("disabled".into(), disabled)]),
-    )]);
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([("parent".into(), trigger("public.parent", "parent"))]),
-    );
+        crate::catalog::events::EventDefinitions::try_from_iter([("disabled".into(), disabled)])
+            .unwrap(),
+    )])
+    .unwrap();
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "parent".into(),
+                trigger("public.parent", "parent"),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let state = Visibility {
         triggers: Some(&pinned),
         replica: true,
@@ -277,22 +299,35 @@ fn trigger_definition_checks_use_pinned_entries_without_execution_filters() {
 fn trigger_listing_preserves_pinned_order_and_falls_back_to_live_catalog() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([("live".into(), trigger("public.child", "live"))]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "live".into(),
+                trigger("public.child", "live"),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let mut disabled = trigger("public.child", "first");
     disabled.enabled = EventEnableMode::Disabled;
-    let pinned = TriggerCatalog::from([
+    let pinned = TriggerCatalog::try_from_iter([
         (
             RelationIdentity::new("public", "parent"),
-            BTreeMap::from([("second".into(), trigger("public.parent", "second"))]),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "second".into(),
+                trigger("public.parent", "second"),
+            )])
+            .unwrap(),
         ),
         (
             RelationIdentity::new("public", "child"),
-            BTreeMap::from([("first".into(), disabled)]),
+            crate::catalog::events::EventDefinitions::try_from_iter([("first".into(), disabled)])
+                .unwrap(),
         ),
-    ]);
+    ])
+    .unwrap();
     let state = Visibility {
         triggers: Some(&pinned),
         ..visibility(&partitions)
@@ -318,18 +353,26 @@ fn inherited_trigger_candidates_preserve_local_priority_identity_and_name_order(
     let mut partitions = fixture();
     let mut local = trigger("public.child", "same");
     local.object_id = Some([8; 16]);
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([("same".into(), local)]),
-    );
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([
-            ("same".into(), trigger("public.parent", "same")),
-            ("alpha".into(), trigger("public.parent", "alpha")),
-            ("zeta".into(), trigger("public.parent", "zeta")),
-        ]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([("same".into(), local)])
+                .unwrap(),
+        )
+        .unwrap();
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([
+                ("same".into(), trigger("public.parent", "same")),
+                ("alpha".into(), trigger("public.parent", "alpha")),
+                ("zeta".into(), trigger("public.parent", "zeta")),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
     let pinned = TriggerCatalog::new();
     let state = Visibility {
         triggers: Some(&pinned),
@@ -374,14 +417,25 @@ fn local_trigger_names_shadow_ancestors_before_enable_filtering() {
     let mut partitions = fixture();
     let mut local = trigger("public.child", "same");
     local.enabled = EventEnableMode::Disabled;
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([("same".into(), local)]),
-    );
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([("same".into(), trigger("public.parent", "same"))]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([("same".into(), local)])
+                .unwrap(),
+        )
+        .unwrap();
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "same".into(),
+                trigger("public.parent", "same"),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let state = visibility(&partitions);
     let lookup = context(&catalog, &partitions, &state);
     assert!(lookup
@@ -414,14 +468,18 @@ fn statement_trigger_selection_skips_ancestry_and_applies_update_column_overlap(
     let mut after = statement.clone();
     after.definition.name = "after_only".into();
     after.definition.timing = TriggerTiming::After;
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([
-            ("statement".into(), statement),
-            ("row_only".into(), row),
-            ("after_only".into(), after),
-        ]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([
+                ("statement".into(), statement),
+                ("row_only".into(), row),
+                ("after_only".into(), after),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
     // A malformed ancestor chain must not be consulted for statement events.
     partitions
         .hierarchy
@@ -466,10 +524,17 @@ fn row_trigger_presence_observes_replication_mode_after_ancestry() {
     let mut partitions = fixture();
     let mut inherited = trigger("public.parent", "replica_only");
     inherited.enabled = EventEnableMode::Replica;
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([("replica_only".into(), inherited)]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "replica_only".into(),
+                inherited,
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let pinned = TriggerCatalog::new();
     for replica in [false, true] {
         let state = Visibility {
@@ -536,27 +601,37 @@ fn invalid_ancestry_fails_before_live_trigger_catalog_reads() {
 fn trigger_definitions_hold_every_enable_mode_and_do_not_read_the_replication_role() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
-    let local = [
-        ("always", EventEnableMode::Always),
-        ("disabled", EventEnableMode::Disabled),
-        ("origin", EventEnableMode::Origin),
-    ]
-    .into_iter()
-    .map(|(name, enabled)| {
-        let mut stored = trigger("public.child", name);
-        stored.enabled = enabled;
-        (name.to_owned(), stored)
-    })
-    .collect();
+    let local = crate::catalog::events::EventDefinitions::try_from_iter(
+        [
+            ("always", EventEnableMode::Always),
+            ("disabled", EventEnableMode::Disabled),
+            ("origin", EventEnableMode::Origin),
+        ]
+        .into_iter()
+        .map(|(name, enabled)| {
+            let mut stored = trigger("public.child", name);
+            stored.enabled = enabled;
+            (name.to_owned(), stored)
+        }),
+    )
+    .unwrap();
     partitions
         .triggers
-        .insert(RelationIdentity::new("public", "child"), local);
+        .insert(RelationIdentity::new("public", "child"), local)
+        .unwrap();
     let mut inherited = trigger("public.parent", "replica");
     inherited.enabled = EventEnableMode::Replica;
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([("replica".into(), inherited)]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "replica".into(),
+                inherited,
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     for (replica, fired) in [(false, ["always", "origin"]), (true, ["always", "replica"])] {
         let state = Visibility {
             replica,

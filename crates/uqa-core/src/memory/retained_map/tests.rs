@@ -7,6 +7,50 @@
 use super::*;
 
 #[test]
+fn retained_map_lower_bound_seeks_without_allocating_or_visiting_earlier_keys() {
+    use std::{
+        cmp::Ordering,
+        ops::Bound,
+        sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
+    };
+    static COMPARES: AtomicUsize = AtomicUsize::new(0);
+    #[derive(Eq, PartialEq)]
+    struct Key(u32);
+    impl Ord for Key {
+        fn cmp(&self, other: &Self) -> Ordering {
+            COMPARES.fetch_add(1, AtomicOrdering::Relaxed);
+            self.0.cmp(&other.0)
+        }
+    }
+    impl PartialOrd for Key {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    let mut map = RetainedMap::new(&MemoryBudget::new(1 << 20));
+    for key in 0..4096 {
+        map.insert(Key(key), key, 0).unwrap();
+    }
+    for excluded in [false, true] {
+        COMPARES.store(0, AtomicOrdering::Relaxed);
+        let allocation = allocation_counter::measure(|| {
+            let key = Key(4000);
+            let bound = if excluded {
+                Bound::Excluded(&key)
+            } else {
+                Bound::Included(&key)
+            };
+            assert!(map
+                .range_from(bound)
+                .map(|(key, value)| (key.0, *value))
+                .eq((4000 + u32::from(excluded)..4096).map(|key| (key, key))));
+        });
+        assert_eq!(allocation.count_total, 0);
+        assert!(COMPARES.load(AtomicOrdering::Relaxed) < 32);
+    }
+}
+
+#[test]
 fn retained_map_captures_nonclone_payloads_without_allocating_or_visiting_entries() {
     struct Payload(usize);
     for entries in [1, 64, 4096] {
@@ -81,6 +125,7 @@ fn retained_map_capture_admits_exact_root_and_releases_failed_admission() {
     source.insert("one", (), 512).unwrap();
     let first = source.capture(&MemoryBudget::new(4096)).unwrap();
     let bytes = first.reserved_bytes();
+    assert_eq!(source.retained_bytes().unwrap(), bytes);
     let denied = MemoryBudget::new(bytes - 1);
     assert!(source.capture(&denied).is_err());
     assert_eq!(denied.used(), 0);
@@ -92,9 +137,48 @@ fn retained_map_capture_admits_exact_root_and_releases_failed_admission() {
         source.capture(&MemoryBudget::new(usize::MAX)),
         Err(MemoryError::SizeOverflow)
     ));
+    assert!(matches!(
+        source.retained_bytes(),
+        Err(MemoryError::SizeOverflow)
+    ));
     assert_eq!(first.len(), 1);
     source.clear();
     assert!(source.capture(&MemoryBudget::new(0)).unwrap().is_empty());
     drop(second);
     assert_eq!(exact.used(), 0);
+}
+
+#[test]
+fn retained_map_both_ends_share_original_values_and_exact_footprint() {
+    let memory = MemoryBudget::new(1 << 20);
+    let capture = MemoryBudget::new(1 << 20);
+    let mut source = RetainedMap::new(&memory);
+    for key in 0..128 {
+        source.insert(key, key * 2, key).unwrap();
+    }
+    let mut saved = None;
+    let allocations = allocation_counter::measure(|| {
+        let footprint = source.retained_bytes().unwrap();
+        saved = Some(source.capture(&capture).unwrap());
+        assert_eq!(capture.used(), footprint);
+        assert!(source
+            .iter_bidirectional()
+            .rev()
+            .map(|(k, v)| (*k, *v))
+            .eq((0..128).rev().map(|k| (k, k * 2))));
+    });
+    assert_eq!(allocations.count_total, 0);
+    source.insert(0, 9, 9999).unwrap();
+    drop(source);
+    let saved = saved.unwrap();
+    let mut cursor = saved.iter_bidirectional();
+    assert_eq!(cursor.next(), Some((&0, &0)));
+    assert_eq!(cursor.next_back(), Some((&127, &254)));
+    assert_eq!(cursor.len(), 126);
+    assert!(cursor
+        .map(|(k, v)| (*k, *v))
+        .eq((1..127).map(|k| (k, k * 2))));
+    drop(saved);
+    assert_eq!(capture.used(), 0);
+    assert_eq!(memory.used(), 0);
 }

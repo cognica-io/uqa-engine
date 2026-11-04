@@ -32,7 +32,8 @@ fn relation(
     )?)
 }
 
-fn index(
+/// Copy the complete stored row without decoding or normalizing its encoded fields.
+pub fn index(
     value: &CatalogIndexRow,
     control: &ProductionControl<'_>,
 ) -> StorageBackendResult<Produced<CatalogIndexRow>> {

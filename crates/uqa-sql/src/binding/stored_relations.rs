@@ -159,9 +159,8 @@ pub fn bind_rule_action_relation_dependencies(
     }
     .bind_statement(statement)?;
     Ok(RuleDependencies {
-        relations: dependencies,
-        columns: BTreeSet::new(),
-        routines: BTreeSet::new(),
+        relations: dependencies.into_iter().collect(),
+        ..RuleDependencies::default()
     })
 }
 
@@ -195,9 +194,8 @@ pub fn bind_rule_condition_relation_dependencies(
     }
     .bind_expr(expression, &BTreeSet::new())?;
     Ok(RuleDependencies {
-        relations: dependencies,
-        columns: BTreeSet::new(),
-        routines: BTreeSet::new(),
+        relations: dependencies.into_iter().collect(),
+        ..RuleDependencies::default()
     })
 }
 

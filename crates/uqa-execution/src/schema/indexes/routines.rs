@@ -7,19 +7,19 @@
 //! Read bound index dependencies and publish rewritten catalog rows after releasing the read guard.
 
 use crate::catalog::index::index_definition;
-use std::{collections::BTreeMap, ops::Deref};
-use uqa_core::RelationIdentity;
+use crate::catalog::index::registry::CatalogIndexes;
+use std::ops::Deref;
 use uqa_sql::{
     ast::{FunctionBinding, IndexKey},
     schema::indexes::routines as analysis,
 };
-use uqa_storage::{CatalogFacade, CatalogIndexRow, StorageBackendError, StorageBackendResult};
+use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub type IndexRoutineRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, CatalogIndexRow>> + 'a>;
+    Box<dyn Deref<Target = crate::catalog::index::registry::CatalogIndexes> + 'a>;
 pub trait IndexRoutineRegistry {
     fn routine_index_rows(&self) -> IndexRoutineRead<'_>;
-    fn publish_routine_index_row(&self, row: CatalogIndexRow);
+    fn publish_routine_indexes(&self, rows: CatalogIndexes);
 }
 pub struct IndexRoutineContext<'a> {
     pub registry: &'a dyn IndexRoutineRegistry,
@@ -45,12 +45,22 @@ pub fn rewrite_index_routine_identity(
             updates.push(row);
         }
     }
-    drop(rows);
-    for row in updates {
-        if let Some(catalog) = context.catalog {
-            catalog.save_catalog_index_row(&row)?;
-        }
-        context.registry.publish_routine_index_row(row);
+    if updates.is_empty() {
+        return Ok(());
     }
+    let mut candidate = rows.clone();
+    for row in &updates {
+        candidate.replace(row.clone())?;
+    }
+    drop(rows);
+    for row in &updates {
+        if let Some(catalog) = context
+            .catalog
+            .filter(|_| candidate.is_durable(&row.relation))
+        {
+            catalog.save_catalog_index_row(row)?;
+        }
+    }
+    context.registry.publish_routine_indexes(candidate);
     Ok(())
 }

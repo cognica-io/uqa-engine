@@ -17,6 +17,11 @@ syntax_struct!(crate::catalog::events::StoredTrigger {
 });
 
 syntax_struct!(crate::catalog::events::RuleColumnDependency { relation, column });
+syntax_struct!(crate::catalog::events::RuleDependencies {
+    relations,
+    columns,
+    routines
+});
 syntax_struct!(crate::catalog::events::RuleRoutineDependency {
     object_id,
     name,

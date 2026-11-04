@@ -26,7 +26,7 @@ impl DurableCatalogState {
         self.triggers = CatalogCell::capture_source(
             self.triggers.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::events::triggers,
+            uqa_sql::catalog::events::TriggerCatalog::capture,
         )?;
         self.sql_user_functions = CatalogCell::capture_source(
             self.sql_user_functions.snapshot(),
@@ -36,7 +36,7 @@ impl DurableCatalogState {
         self.rules = CatalogCell::capture_source(
             self.rules.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::rules::rules,
+            uqa_sql::catalog::events::RuleCatalog::capture,
         )?;
         self.register_authority_sources(registry)
     }
@@ -87,10 +87,10 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::foreign_server::ForeignServers::capture,
         )?;
-        self.foreign_tables = CatalogCell::capture_source(
-            self.foreign_tables.snapshot(),
+        self.foreign_catalog = CatalogCell::capture_source(
+            self.foreign_catalog.snapshot(),
             Some(registry),
-            uqa_execution::catalog::foreign::capture::tables,
+            uqa_execution::catalog::foreign::ForeignCatalog::capture,
         )?;
         Ok(())
     }
@@ -123,11 +123,6 @@ impl DurableCatalogState {
             self.role_memberships.snapshot(),
             Some(registry),
             RoleMemberships::capture,
-        )?;
-        self.foreign_table_security = CatalogCell::capture_source(
-            self.foreign_table_security.snapshot(),
-            Some(registry),
-            uqa_sql::catalog::security::capture::relations::tables,
         )?;
         self.builtin_routine_security = CatalogCell::capture_source(
             self.builtin_routine_security.snapshot(),
@@ -179,7 +174,7 @@ impl DurableCatalogState {
         self.catalog_indexes = CatalogCell::capture_resource(
             self.catalog_indexes.snapshot(),
             registry,
-            uqa_storage::catalog::capture::indexes,
+            uqa_execution::catalog::index::registry::CatalogIndexes::capture,
         )?;
         self.scoring_params = CatalogCell::capture_resource(
             self.scoring_params.snapshot(),

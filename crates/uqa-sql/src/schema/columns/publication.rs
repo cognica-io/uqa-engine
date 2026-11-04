@@ -16,6 +16,21 @@ pub fn rename_column(columns: &mut [ColumnDef], from: &str, to: &str) {
     }
 }
 
+/// Keep key and included-column references aligned with a renamed declaration.
+pub fn rename_key_columns(keys: &mut [crate::ast::TableKeyConstraint], from: &str, to: &str) {
+    for constraint in keys {
+        for column in constraint
+            .columns
+            .iter_mut()
+            .chain(&mut constraint.included_columns)
+        {
+            if column == from {
+                *column = to.to_string();
+            }
+        }
+    }
+}
+
 /// Record a newly declared local column; recursively added parent columns retain their inherited origin.
 pub fn register_local_column(
     hierarchy: &mut crate::ast::TableHierarchy,

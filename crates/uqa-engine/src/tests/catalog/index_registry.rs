@@ -15,6 +15,7 @@ use uqa_sql::catalog::index::IndexDefinition;
 mod diskann;
 mod document_attributes;
 mod name_reservations;
+mod native;
 mod physical;
 mod renaming;
 mod restoration;

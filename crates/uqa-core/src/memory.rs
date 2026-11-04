@@ -30,16 +30,18 @@ pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter};
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
-    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter,
-    BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter,
-    OwnedSetIter, PreparedMapEntry,
+    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter,
+    BudgetedSharedMapIter, BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet,
+    OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry,
 };
 pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{
     OwnedProductionControl, Produced, ProductionControl, ProductionMap, ProductionSmallVec,
     ProductionString, ProductionVec,
 };
-pub use retained_map::{RetainedMap, RetainedMapIter, RetainedMapSnapshot};
+pub use retained_map::{
+    RetainedMap, RetainedMapBidirectionalIter, RetainedMapIter, RetainedMapSnapshot,
+};
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

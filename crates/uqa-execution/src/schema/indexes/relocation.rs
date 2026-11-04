@@ -9,9 +9,9 @@
 use super::registry::{IndexRegistryChange, IndexRegistryContext, IndexRegistryPublication};
 use crate::row_locks::RelationLockMode;
 use crate::schema::namespaces::relations::RelationCreationContext;
+use crate::storage_errors::storage_error;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
-    catalog::errors::storage_error,
     schema::relation_alteration::{relocation::ensure_name_available, RelationAlterNames},
     SQLError,
 };
@@ -24,11 +24,8 @@ pub struct PreparedIndexRelocations {
 impl PreparedIndexRelocations {
     /// Every identity and destination lock was retained before the owning relation moved. Publication must not reload the partly moved catalog.
     pub fn publish(self, publication: &dyn IndexRegistryPublication) -> Result<(), SQLError> {
-        for (current, renamed) in self.rows {
-            IndexRegistryChange::rename_with_publication(publication, &current, renamed)
-                .map_err(|error| storage_error("move index namespace", &error))?;
-        }
-        Ok(())
+        IndexRegistryChange::rename_with_publication(publication, &self.rows)
+            .map_err(|error| storage_error("move index namespace", &error))
     }
 }
 

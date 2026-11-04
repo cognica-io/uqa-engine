@@ -6,9 +6,12 @@
 
 //! Immutable ordered roots share entries and unchanged subtrees under one allowance.
 
+mod bidirectional;
 #[cfg(test)]
 mod tests;
 mod tree;
+
+pub use bidirectional::BudgetedSharedMapBidirectionalIter;
 
 use std::{borrow::Borrow, cmp::Ordering, ops::Bound, sync::Arc};
 
@@ -72,6 +75,11 @@ impl<K, V> BudgetedSharedMapSnapshot<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
+    /// Borrow both ends in constant space, seeking each next key in logarithmic time.
+    pub fn iter_bidirectional(&self) -> BudgetedSharedMapBidirectionalIter<'_, K, V> {
+        BudgetedSharedMapBidirectionalIter::new(&self.root, self.len)
+    }
+
     pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -139,6 +147,34 @@ impl<K, V> BudgetedSharedMap<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMap<K, V> {
+    /// Select the least entry at a lower bound without allocating a traversal cursor.
+    pub fn first_from<Q: Ord + ?Sized>(&self, start: Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        let mut link = &self.root;
+        let mut found = None;
+        while let Some(node) = link {
+            let included = match start {
+                Bound::Unbounded => true,
+                Bound::Included(key) => node.entry.0.borrow() >= key,
+                Bound::Excluded(key) => node.entry.0.borrow() > key,
+            };
+            if included {
+                found = Some((&node.entry.0, &node.entry.1));
+                link = &node.left;
+            } else {
+                link = &node.right;
+            }
+        }
+        found
+    }
+
+    /// Borrow both ends in constant space, seeking each next key in logarithmic time.
+    pub fn iter_bidirectional(&self) -> BudgetedSharedMapBidirectionalIter<'_, K, V> {
+        BudgetedSharedMapBidirectionalIter::new(&self.root, self.len)
+    }
+
     /// Select the greatest entry at an upper bound in logarithmic time, without allocating or traversing preceding entries.
     pub fn last_before<Q: Ord + ?Sized>(&self, end: Bound<&Q>) -> Option<(&K, &V)>
     where

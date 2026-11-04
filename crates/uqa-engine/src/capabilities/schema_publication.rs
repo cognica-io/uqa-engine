@@ -305,13 +305,8 @@ impl uqa_execution::schema::publication::dependencies::LoadedTableSchemas for En
     }
 }
 impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication for Engine {
-    fn foreign_tables(
-        &self,
-    ) -> std::collections::BTreeMap<
-        uqa_core::RelationIdentity,
-        uqa_execution::catalog::foreign::StoredForeignTable,
-    > {
-        self.durable.foreign_tables.read().clone()
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::ForeignCatalog {
+        self.durable.foreign_catalog.read().clone()
     }
     fn persist_foreign_table(
         &self,
@@ -323,19 +318,19 @@ impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication 
     }
     fn publish_foreign_tables(
         &self,
+        catalog: uqa_execution::catalog::foreign::ForeignCatalog,
         updates: Vec<(
             uqa_core::RelationIdentity,
             uqa_execution::catalog::foreign::StoredForeignTable,
         )>,
     ) {
-        let mut tables = self.durable.foreign_tables.write();
-        for (relation, table) in updates {
+        *self.durable.foreign_catalog.write() = catalog;
+        for (_, table) in updates {
             self.note_prepared_catalog_change(
                 uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                     table.relation_oids().relation,
                 ),
             );
-            tables.insert(relation, table);
         }
     }
 }

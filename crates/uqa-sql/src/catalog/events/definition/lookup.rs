@@ -15,7 +15,6 @@ use crate::{
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 
 pub trait EventPartitionCatalog {
@@ -169,7 +168,7 @@ impl EventLookupContext<'_> {
             .read_triggers()
             .get(&relation)
             .into_iter()
-            .flat_map(BTreeMap::values)
+            .flat_map(|entries| entries.values())
             .find(|trigger| {
                 trigger.definition.constraint
                     && trigger

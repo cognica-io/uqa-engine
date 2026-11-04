@@ -59,8 +59,7 @@ impl SnapshotSources {
         let catalogs = catalogs::CatalogSources::new(&registry, durable)?;
         let resources = resources::ResourceSources::new(&registry, durable)?;
         let foreign = registry.cell(ForeignTableCaptureSource {
-            tables: durable.foreign_tables.clone(),
-            security: durable.foreign_table_security.clone(),
+            catalog: durable.foreign_catalog.clone(),
         })?;
         let metadata = registry.cell(TableMetadataCaptureSource::new(
             tables
@@ -122,7 +121,7 @@ type SequenceKey = uqa_storage::memory_capture::MemoryCaptureKey<
 #[cfg(test)]
 type ForeignKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
-        Vec<uqa_execution::catalog::foreign::capture::CapturedForeignRelation>,
+        uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
     >,
 >;
 
@@ -136,7 +135,7 @@ type MetadataKey = uqa_storage::memory_capture::MemoryCaptureKey<
 #[cfg(test)]
 type CommentKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
-        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+        uqa_execution::catalog::comments::CapturedComments,
     >,
 >;
 

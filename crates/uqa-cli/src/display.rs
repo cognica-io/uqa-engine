@@ -189,7 +189,9 @@ pub(super) fn options_display<'a>(
         .join(" ")
 }
 
-pub(super) fn foreign_table_options_display(options: &BTreeMap<String, String>) -> String {
+pub(super) fn foreign_table_options_display(
+    options: &uqa_core::memory::OwnedMap<String, String>,
+) -> String {
     let mut out = Vec::new();
     if options
         .get("hive_partitioning")

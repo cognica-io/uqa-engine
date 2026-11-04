@@ -7,6 +7,7 @@
 //! Private view records take precedence without reverting another transaction's definitions.
 
 use super::*;
+use crate::catalog::foreign::StoredForeignTable;
 use std::collections::BTreeSet;
 use uqa_core::Value;
 use uqa_sql::{
@@ -126,63 +127,63 @@ fn foreign_table(identity: u8) -> StoredForeignTable {
         columns: Vec::new(),
         dropped_attributes: Vec::new(),
         checks: Vec::new(),
-        options: BTreeMap::from([("source".into(), identity.to_string())]),
+        options: [("source".into(), identity.to_string())]
+            .into_iter()
+            .collect(),
         option_order: vec!["source".into()],
     }
 }
 
+fn foreign_catalog(
+    values: impl IntoIterator<Item = (RelationIdentity, StoredForeignTable)>,
+) -> ForeignCatalog {
+    let mut result = ForeignCatalog::default();
+    for (name, table) in values {
+        let security = view(table.object_id[0]).security;
+        result.insert(name, table, security).unwrap();
+    }
+    result
+}
+
 #[test]
 fn private_foreign_records_preserve_definitions_security_and_peer_changes() {
-    let latest = Arc::new(BTreeMap::from([
+    let latest = foreign_catalog([
         (relation("dropped"), foreign_table(1)),
         (relation("renamed_from"), foreign_table(2)),
         (relation("replaced"), foreign_table(3)),
         (relation("peer"), foreign_table(4)),
         (relation("recreated"), foreign_table(5)),
-    ]));
+    ]);
     let mut replacement = foreign_table(3);
     replacement
         .options
         .insert("source".into(), "changed".into());
-    let current = BTreeMap::from([
+    let mut current = foreign_catalog([
         (relation("created"), foreign_table(6)),
         (relation("renamed_to"), foreign_table(2)),
         (relation("replaced"), replacement),
         (relation("peer"), foreign_table(7)),
         (relation("recreated"), foreign_table(8)),
     ]);
-    let security = |tables: &BTreeMap<RelationIdentity, StoredForeignTable>| {
-        tables
-            .iter()
-            .map(|(name, table)| (name.clone(), view(table.object_id[0]).security))
-            .collect::<BTreeMap<_, _>>()
-    };
-    let mut current_security = security(&current);
-    current_security.insert(relation("replaced"), view(9).security);
-    let latest_security = Arc::new(security(&latest));
+    current
+        .replace_security(&relation("replaced"), view(9).security)
+        .unwrap();
     let mut merged = latest.clone();
-    let mut merged_security = latest_security.clone();
     let mut visited = BTreeSet::new();
-    merge_private_foreign_definitions(
-        &current,
-        &current_security,
-        &mut merged,
-        &mut merged_security,
-        |name| {
-            assert!(
-                visited.insert(name.clone()),
-                "one provenance read per exact key"
-            );
-            Ok(name.name != "peer")
-        },
-    )
+    merge_private_foreign_definitions(&current, &mut merged, |name| {
+        assert!(
+            visited.insert(name.clone()),
+            "one provenance read per exact key"
+        );
+        Ok(name.name != "peer")
+    })
     .unwrap();
     assert_eq!(visited.len(), 7);
-    assert_eq!(merged.len(), 5);
-    assert_eq!(
-        merged.keys().collect::<Vec<_>>(),
-        merged_security.keys().collect::<Vec<_>>()
-    );
+    assert_eq!(merged.tables().len(), 5);
+    assert!(merged
+        .tables()
+        .keys()
+        .eq(merged.security().iter().map(|(key, _)| key)));
     let definition = |table: &StoredForeignTable| {
         (
             table.name.clone(),
@@ -194,61 +195,48 @@ fn private_foreign_records_preserve_definitions_security_and_peer_changes() {
     };
     for name in ["created", "renamed_to", "replaced", "recreated"] {
         let name = relation(name);
-        assert_eq!(definition(&merged[&name]), definition(&current[&name]));
-        assert_eq!(merged_security[&name], current_security[&name]);
+        assert_eq!(
+            definition(&merged.tables()[&name]),
+            definition(&current.tables()[&name])
+        );
+        assert_eq!(merged.security()[&name], current.security()[&name]);
     }
-    assert_eq!(merged[&relation("peer")].object_id, [4; 16]);
+    assert_eq!(merged.tables()[&relation("peer")].object_id, [4; 16]);
     assert_eq!(
-        merged_security[&relation("peer")],
-        latest_security[&relation("peer")]
+        merged.security()[&relation("peer")],
+        latest.security()[&relation("peer")]
     );
-    assert!(!merged.contains_key(&relation("dropped")));
-    assert!(!merged.contains_key(&relation("renamed_from")));
-    assert_eq!(latest[&relation("recreated")].object_id, [5; 16]);
+    assert!(!merged.tables().contains_key(&relation("dropped")));
+    assert!(!merged.tables().contains_key(&relation("renamed_from")));
+    assert_eq!(latest.tables()[&relation("recreated")].object_id, [5; 16]);
 }
 
 #[test]
-fn unchanged_foreign_maps_share_storage_and_invalid_private_security_is_rejected() {
+fn unchanged_foreign_generations_share_storage_and_failed_provenance_keeps_both_roots() {
     let name = relation("saved");
-    let original = Arc::new(BTreeMap::from([(name.clone(), foreign_table(1))]));
-    let original_security = Arc::new(BTreeMap::from([(name.clone(), view(1).security)]));
-    let current = BTreeMap::from([(name.clone(), foreign_table(2))]);
+    let original = foreign_catalog([(name.clone(), foreign_table(1))]);
+    let current = foreign_catalog([(name.clone(), foreign_table(2))]);
     let mut latest = original.clone();
-    let mut security = original_security.clone();
-    merge_private_foreign_definitions(
-        &current,
-        &BTreeMap::new(),
-        &mut latest,
-        &mut security,
-        |_| Ok(false),
-    )
-    .unwrap();
-    assert!(Arc::ptr_eq(&latest, &original));
-    assert!(Arc::ptr_eq(&security, &original_security));
-    let error = merge_private_foreign_definitions(
-        &current,
-        &BTreeMap::new(),
-        &mut latest,
-        &mut security,
-        |_| Ok(true),
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("has no security metadata"));
-    assert!(Arc::ptr_eq(&latest, &original));
-    assert!(Arc::ptr_eq(&security, &original_security));
-    let error = merge_private_foreign_definitions(
-        &current,
-        &BTreeMap::new(),
-        &mut latest,
-        &mut security,
-        |_| {
-            Err(uqa_storage::StorageBackendError::Other(
-                "provenance unavailable".into(),
-            ))
-        },
-    )
+    merge_private_foreign_definitions(&current, &mut latest, |_| Ok(false)).unwrap();
+    assert!(Arc::ptr_eq(
+        &latest.tables_snapshot(),
+        &original.tables_snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &latest.security_snapshot(),
+        &original.security_snapshot()
+    ));
+    let error = merge_private_foreign_definitions(&current, &mut latest, |_| {
+        Err(StorageBackendError::Other("provenance unavailable".into()))
+    })
     .unwrap_err();
     assert_eq!(error.to_string(), "provenance unavailable");
-    assert!(Arc::ptr_eq(&latest, &original));
-    assert!(Arc::ptr_eq(&security, &original_security));
+    assert!(Arc::ptr_eq(
+        &latest.tables_snapshot(),
+        &original.tables_snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &latest.security_snapshot(),
+        &original.security_snapshot()
+    ));
 }

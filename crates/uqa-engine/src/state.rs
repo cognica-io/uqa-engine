@@ -14,7 +14,7 @@ use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::database::{CapturedDatabaseAuthority, DatabaseAuthority};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
-    events::{RuleCatalog, StoredTrigger},
+    events::{RuleCatalog, StoredTrigger, TriggerCatalog},
     type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
 };
 
@@ -32,6 +32,7 @@ mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 #[cfg(test)]
 pub(crate) use table_membership::SnapshotTableCut;
+pub(crate) use table_membership::TableRegistrySnapshot;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
@@ -167,7 +168,7 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) comments: CatalogCell<
         uqa_execution::catalog::comments::CommentRegistry,
-        Vec<(uqa_execution::catalog::comments::CommentAddress, String)>,
+        uqa_execution::catalog::comments::CapturedComments,
     >,
     pub(super) composites: CatalogCell<
         uqa_execution::catalog::composite_type::CompositeRegistry,
@@ -190,8 +191,8 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::stored_view::CapturedViewDefinitions,
     >,
     pub(super) catalog_indexes: CatalogCell<
-        BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
-        Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
+        uqa_execution::catalog::index::registry::CatalogIndexes,
+        uqa_execution::catalog::index::registry::CapturedCatalogIndexes,
     >,
     pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
     pub(super) schemas: CatalogCell<
@@ -246,19 +247,9 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::foreign_server::ForeignServers,
         uqa_sql::catalog::foreign_server::CapturedForeignServers,
     >,
-    pub(super) foreign_tables: CatalogCell<
-        BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>,
-        Vec<(
-            RelationIdentity,
-            uqa_execution::catalog::foreign::capture::CapturedForeignTable,
-        )>,
-    >,
-    pub(super) foreign_table_security: CatalogCell<
-        BTreeMap<RelationIdentity, BoundTableSecurity>,
-        Vec<(
-            RelationIdentity,
-            uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
-        )>,
+    pub(super) foreign_catalog: CatalogCell<
+        uqa_execution::catalog::foreign::ForeignCatalog,
+        uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
     >,
     pub(super) builtin_routine_security: CatalogCell<
         uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
@@ -276,12 +267,12 @@ pub(super) struct DurableCatalogState {
         CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
     pub(super) role_memberships:
         CatalogCell<RoleMemberships, uqa_sql::catalog::roles::CapturedRoleMemberships>,
-    pub(super) triggers: CatalogCell<
-        BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>,
-        uqa_sql::catalog::definition_capture::events::CapturedTriggers,
+    pub(super) triggers:
+        CatalogCell<TriggerCatalog, uqa_sql::catalog::events::CapturedEventCatalog<StoredTrigger>>,
+    pub(super) rules: CatalogCell<
+        RuleCatalog,
+        uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredRule>,
     >,
-    pub(super) rules:
-        CatalogCell<RuleCatalog, uqa_sql::catalog::definition_capture::rules::CapturedRules>,
 }
 
 #[derive(Clone)]
@@ -296,7 +287,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub(super) catalog_indexes: Arc<uqa_execution::catalog::index::registry::CatalogIndexes>,
     pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
@@ -311,8 +302,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub(super) foreign_catalog: Arc<uqa_execution::catalog::foreign::ForeignCatalog>,
     pub(super) builtin_routine_security:
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
@@ -320,8 +310,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub(super) roles: Arc<RoleDefinitions>,
     pub(super) role_memberships: Arc<RoleMemberships>,
-    pub(super) triggers:
-        Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
+    pub(super) triggers: Arc<TriggerCatalog>,
     pub(super) rules: Arc<RuleCatalog>,
 }
 
@@ -332,7 +321,7 @@ impl DurableCatalogState {
             enums: CatalogCell::new(TypeDefinitions::new()),
             ranges: CatalogCell::new(TypeDefinitions::new()),
             shells: CatalogCell::new(TypeDefinitions::new()),
-            comments: CatalogCell::new(BTreeMap::new()),
+            comments: CatalogCell::new(uqa_execution::catalog::comments::CommentRegistry::new()),
             composites: CatalogCell::new(TypeDefinitions::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
@@ -340,7 +329,9 @@ impl DurableCatalogState {
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),
             ),
             views: CatalogCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
-            catalog_indexes: CatalogCell::new(BTreeMap::new()),
+            catalog_indexes: CatalogCell::new(
+                uqa_execution::catalog::index::registry::CatalogIndexes::default(),
+            ),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(BTreeMap::new()),
@@ -358,8 +349,9 @@ impl DurableCatalogState {
             foreign_servers: CatalogCell::new(
                 uqa_sql::catalog::foreign_server::ForeignServers::new(),
             ),
-            foreign_tables: CatalogCell::new(BTreeMap::new()),
-            foreign_table_security: CatalogCell::new(BTreeMap::new()),
+            foreign_catalog: CatalogCell::new(
+                uqa_execution::catalog::foreign::ForeignCatalog::default(),
+            ),
             builtin_routine_security: CatalogCell::new(
                 uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
             ),
@@ -371,8 +363,8 @@ impl DurableCatalogState {
             ),
             roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
             role_memberships: CatalogCell::new(RoleMemberships::new()),
-            triggers: CatalogCell::new(BTreeMap::new()),
-            rules: CatalogCell::new(BTreeMap::new()),
+            triggers: CatalogCell::new(TriggerCatalog::new()),
+            rules: CatalogCell::new(RuleCatalog::new()),
         }
     }
 
@@ -403,8 +395,7 @@ impl DurableCatalogState {
             table_field_analyzers: self.table_field_analyzers.snapshot(),
             foreign_wrappers: self.foreign_wrappers.snapshot(),
             foreign_servers: self.foreign_servers.snapshot(),
-            foreign_tables: self.foreign_tables.snapshot(),
-            foreign_table_security: self.foreign_table_security.snapshot(),
+            foreign_catalog: self.foreign_catalog.snapshot(),
             builtin_routine_security: self.builtin_routine_security.snapshot(),
             system_relation_security: self.system_relation_security.snapshot(),
             sql_user_functions: self.sql_user_functions.snapshot(),
@@ -440,9 +431,7 @@ impl DurableCatalogState {
             .restore(&snapshot.table_field_analyzers);
         self.foreign_wrappers.restore(&snapshot.foreign_wrappers);
         self.foreign_servers.restore(&snapshot.foreign_servers);
-        self.foreign_tables.restore(&snapshot.foreign_tables);
-        self.foreign_table_security
-            .restore(&snapshot.foreign_table_security);
+        self.foreign_catalog.restore(&snapshot.foreign_catalog);
         self.builtin_routine_security
             .restore(&snapshot.builtin_routine_security);
         self.system_relation_security

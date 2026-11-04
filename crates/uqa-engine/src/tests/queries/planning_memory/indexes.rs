@@ -90,13 +90,15 @@ fn native_planning_index_capture_reuses_catalog_payloads(#[case] provider: Provi
     let expected = estimate().unwrap();
     engine.synchronize_catalog_registries().unwrap();
     let identity = uqa_core::RelationIdentity::new("public", "capture_items_id");
-    engine
+    let mut row = engine
         .durable
         .catalog_indexes
-        .write()
-        .get_mut(&identity)
+        .read()
+        .get(&identity)
         .unwrap()
-        .parameters_json = "x".repeat(4 * 1024 * 1024);
+        .clone();
+    row.parameters_json = "x".repeat(4 * 1024 * 1024);
+    engine.durable.catalog_indexes.write().replace(row).unwrap();
     let retained = engine.durable.catalog_indexes.snapshot();
     let original = &retained[&identity];
     let mut output = None;

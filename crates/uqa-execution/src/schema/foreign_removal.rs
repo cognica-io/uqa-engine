@@ -45,6 +45,10 @@ impl ForeignTableRemovalContext<'_> {
                 "Foreign table `{name}` has no loaded security metadata"
             ));
         }
+        let mut next = self.publication.foreign_catalog();
+        let removed = next.tables().get(&relation).cloned();
+        next.remove(&relation)
+            .map_err(|error| format!("remove foreign definition: {error}"))?;
         self.events
             .drop_relation_events_inner(&relation)
             .map_err(|error| format!("drop foreign table `{name}` events: {error}"))?;
@@ -57,12 +61,7 @@ impl ForeignTableRemovalContext<'_> {
                 .map_err(|err| format!("drop foreign table `{name}`: {err}"))?;
         }
         self.publication.memory_tables_write().remove(&relation);
-        let mut tables = self.publication.tables_write();
-        let mut table_security = self.publication.security_write();
-        let removed = tables.remove(&relation);
-        table_security.remove(&relation);
-        drop(table_security);
-        drop(tables);
+        self.publication.publish_foreign_catalog(next);
         if let Some(table) = &removed {
             if let Some(catalog) = self
                 .catalog

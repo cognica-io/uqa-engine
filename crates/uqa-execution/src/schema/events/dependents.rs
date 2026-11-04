@@ -26,19 +26,23 @@ impl EventLifecycleContext<'_> {
                 target,
                 new_name,
             )?;
-        if triggers_changed {
-            self.catalog.publication.persist_triggers(&next_triggers)?;
-            **self.catalog.registry.triggers() = next_triggers;
-        }
-
         let mut next_rules = self.lookup.registry.read_rules().clone();
         let rules_changed = self.lookup.analysis.rewrite_rule_routine_references(
             &mut next_rules,
             target,
             new_name,
         )?;
+        if triggers_changed {
+            self.catalog.publication.persist_triggers(&next_triggers)?;
+        }
+
         if rules_changed {
             self.catalog.publication.persist_rules(&next_rules)?;
+        }
+        if triggers_changed {
+            **self.catalog.registry.triggers() = next_triggers;
+        }
+        if rules_changed {
             **self.catalog.registry.rules() = next_rules;
         }
         if triggers_changed || rules_changed {
@@ -59,7 +63,7 @@ impl EventLifecycleContext<'_> {
             constraints: removed_constraint_identities,
         }) =
             uqa_sql::catalog::events::removal::removed_relation_events(&triggers, &rules, relation)
-                .map_err(StorageBackendError::Other)?
+                .map_err(|error| StorageBackendError::backend("remove event catalog", error))?
         else {
             return Ok(());
         };
@@ -96,7 +100,7 @@ impl EventLifecycleContext<'_> {
             .lookup
             .analysis
             .renamed_event_column(&triggers, &rules, &relation, from, to)
-            .map_err(StorageBackendError::Other)?
+            .map_err(|error| StorageBackendError::backend("rename event column", error))?
         else {
             return Ok(());
         };
@@ -124,7 +128,7 @@ impl EventLifecycleContext<'_> {
         self.lookup
             .analysis
             .rebind_rule_column_drop(&mut prepared)
-            .map_err(StorageBackendError::Other)?;
+            .map_err(|error| StorageBackendError::backend("rebind event column", error))?;
         self.catalog
             .publication
             .persist_rules(&prepared.rules)

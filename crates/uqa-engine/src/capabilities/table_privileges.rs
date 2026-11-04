@@ -105,11 +105,14 @@ impl TablePrivilegeRegistry for Engine {
     fn views(&self) -> PrivilegeViewsRead<'_> {
         Box::new(self.durable.views.read())
     }
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        Box::new(self.durable.foreign_catalog.read())
+    }
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
     fn foreign_security(&self) -> PrivilegeForeignSecurityRead<'_> {
-        Box::new(self.durable.foreign_table_security.read())
+        Box::new(self.durable.foreign_catalog.security())
     }
 }
 impl Engine {

@@ -11,7 +11,7 @@ use uqa_execution::schema::indexes::routines::{
     self, IndexRoutineContext, IndexRoutineRead, IndexRoutineRegistry,
 };
 use uqa_sql::ast::FunctionBinding;
-use uqa_storage::{CatalogIndexRow, StorageBackendResult};
+use uqa_storage::StorageBackendResult;
 
 impl Engine {
     pub(crate) fn rewrite_index_routine_identity(
@@ -33,10 +33,10 @@ impl IndexRoutineRegistry for Engine {
     fn routine_index_rows(&self) -> IndexRoutineRead<'_> {
         Box::new(self.durable.catalog_indexes.read())
     }
-    fn publish_routine_index_row(&self, row: CatalogIndexRow) {
-        self.durable
-            .catalog_indexes
-            .write()
-            .insert(row.relation.clone(), row);
+    fn publish_routine_indexes(
+        &self,
+        rows: uqa_execution::catalog::index::registry::CatalogIndexes,
+    ) {
+        *self.durable.catalog_indexes.write() = rows;
     }
 }

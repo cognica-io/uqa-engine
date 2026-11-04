@@ -20,7 +20,7 @@ std::thread_local! {
 
 fn validated_addresses<'a>(
     catalog: &CatalogReadView,
-    rows: &'a BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &'a crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<ValidatedIndexes<'a>> {
     let mut objects = BTreeMap::new();
     let mut oids = BTreeSet::new();
@@ -212,7 +212,7 @@ type ValidatedIndexes<'a> = BTreeMap<[u8; 16], (&'a CatalogIndexRow, IndexDefini
 
 pub(crate) fn validate(
     catalog: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<()> {
     validate_parents(catalog, &validated_addresses(catalog, rows)?)
 }

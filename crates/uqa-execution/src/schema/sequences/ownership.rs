@@ -126,19 +126,28 @@ pub fn clear_auto_increment_owner_markers(
         context.changes.table_catalog_changed();
     }
     let mut foreign_updates = Vec::new();
-    for (relation, mut table) in context.foreign.foreign_tables() {
+    let foreign = context.foreign.foreign_catalog();
+    for (relation, table) in foreign.tables() {
+        let mut table = table.clone();
         if uqa_sql::schema::sequences::implicit_ownership::clear_auto_increment_owner_markers(
             &mut table.columns,
             &target,
         ) {
-            foreign_updates.push((relation, table));
+            foreign_updates.push((relation.clone(), table));
         }
     }
+    let foreign = foreign
+        .with_table_updates(&foreign_updates)
+        .map_err(|error| {
+            uqa_storage::StorageBackendError::backend("admit foreign sequence dependencies", error)
+        })?;
     for (relation, table) in &foreign_updates {
         context.foreign.persist_foreign_table(relation, table)?;
     }
     if !foreign_updates.is_empty() {
-        context.foreign.publish_foreign_tables(foreign_updates);
+        context
+            .foreign
+            .publish_foreign_tables(foreign, foreign_updates);
         context.changes.catalog_registry_changed();
     }
     Ok(())

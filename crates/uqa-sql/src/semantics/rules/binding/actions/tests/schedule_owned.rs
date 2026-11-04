@@ -59,17 +59,20 @@ impl Rules {
                 panic!("rule")
             };
             let table = RelationIdentity::from_legacy_name(&definition.table).unwrap();
-            Arc::make_mut(rules.entry(table).or_default()).insert(
-                definition.name.clone(),
-                StoredRule {
-                    definition,
-                    enabled: crate::ast::EventEnableMode::default(),
-                    condition_plan: None,
-                    condition_binding: None,
-                    dependencies: None,
-                    catalog_oid: None,
-                },
-            );
+            rules
+                .insert_event(
+                    table,
+                    definition.name.clone(),
+                    StoredRule {
+                        definition,
+                        enabled: crate::ast::EventEnableMode::default(),
+                        condition_plan: None,
+                        condition_binding: None,
+                        dependencies: None,
+                        catalog_oid: None,
+                    },
+                )
+                .unwrap();
         }
         Self(Arc::new(rules))
     }

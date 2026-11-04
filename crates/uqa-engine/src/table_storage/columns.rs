@@ -303,6 +303,12 @@ impl Engine {
         } else {
             None
         };
+        let indexes = uqa_execution::schema::indexes::references::column_rename(
+            &self.durable.catalog_indexes.read(),
+            &table_name,
+            from,
+            to,
+        )?;
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
         uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
@@ -312,17 +318,11 @@ impl Engine {
             from,
             to,
         );
-        for constraint in t.key_constraints.write().iter_mut() {
-            for column in constraint
-                .columns
-                .iter_mut()
-                .chain(&mut constraint.included_columns)
-            {
-                if column == from {
-                    *column = to.to_string();
-                }
-            }
-        }
+        uqa_sql::schema::columns::publication::rename_key_columns(
+            &mut t.key_constraints.write(),
+            from,
+            to,
+        );
         {
             let mut fts = t.fts_fields.write();
             for f in fts.iter_mut() {
@@ -358,7 +358,7 @@ impl Engine {
         } else if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
-        self.rename_catalog_index_column_refs(&table_name, from, to)?;
+        indexes.publish(self)?;
         if self.is_persistent() {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
@@ -455,6 +455,11 @@ impl Engine {
                     table.persistence != uqa_sql::ast::RelationPersistence::Temporary
                 })
         };
+        let indexes = uqa_execution::schema::indexes::references::table_rename(
+            &self.durable.catalog_indexes.read(),
+            &from,
+            &to,
+        )?;
         self.rewrite_table_rename_dependencies(&from, &to)?;
         if persist_catalog {
             if let Some(catalog) = self.storage.catalog.as_ref() {
@@ -468,7 +473,7 @@ impl Engine {
         drop(tables);
         *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
-        self.rename_catalog_index_table_refs(&from, &to);
+        *self.durable.catalog_indexes.write() = indexes;
         {
             let mut analyzers = self.durable.table_field_analyzers.write();
             let mut moved = Vec::new();

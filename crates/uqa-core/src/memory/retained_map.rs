@@ -7,8 +7,8 @@
 //! Immutable map generations with owner-supplied payload footprints and independent capture admission.
 
 use super::{
-    Budgeted, BudgetedSharedMap, BudgetedSharedMapIter, BudgetedSharedMapSnapshot, MemoryBudget,
-    MemoryError,
+    Budgeted, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
+    BudgetedSharedMapSnapshot, MemoryBudget, MemoryError,
 };
 use std::borrow::Borrow;
 
@@ -61,16 +61,22 @@ impl<K, V> RetainedMap<K, V> {
         self.payload_bytes = 0;
     }
 
+    /// Complete reachable node, entry and owner-supplied payload bytes, computed from cached cardinality and footprint without traversing the root.
+    pub fn retained_bytes(&self) -> Result<usize, MemoryError> {
+        self.values
+            .snapshot()
+            .structural_bytes()?
+            .checked_add(self.payload_bytes)
+            .ok_or(MemoryError::SizeOverflow)
+    }
+
     /// Capture takes constant work, allocates no tree nodes, and does not enumerate payloads. The returned lease must outlive its immutable root.
     pub fn capture(
         &self,
         memory: &MemoryBudget,
     ) -> Result<Budgeted<RetainedMapSnapshot<K, V>>, MemoryError> {
         let values = self.values.snapshot();
-        let bytes = values
-            .structural_bytes()?
-            .checked_add(self.payload_bytes)
-            .ok_or(MemoryError::SizeOverflow)?;
+        let bytes = self.retained_bytes()?;
         Ok(Budgeted::new(
             RetainedMapSnapshot { values },
             memory.reserve(bytes)?,
@@ -79,6 +85,39 @@ impl<K, V> RetainedMap<K, V> {
 }
 
 impl<K: Ord, V> RetainedMap<K, V> {
+    pub fn first_from<Q: Ord + ?Sized>(&self, start: std::ops::Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        self.values
+            .first_from(start)
+            .map(|(key, entry)| (key, &entry.value))
+    }
+
+    pub fn last_before<Q: Ord + ?Sized>(&self, end: std::ops::Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        self.values
+            .last_before(end)
+            .map(|(key, entry)| (key, &entry.value))
+    }
+
+    /// Seek a lower bound without visiting earlier entries or allocating a cursor.
+    pub fn range_from<Q: Ord + ?Sized>(
+        &self,
+        start: std::ops::Bound<&Q>,
+    ) -> RetainedMapIter<'_, K, V>
+    where
+        K: Borrow<Q>,
+    {
+        RetainedMapIter(self.values.range_from(start))
+    }
+
+    pub fn iter_bidirectional(&self) -> RetainedMapBidirectionalIter<'_, K, V> {
+        RetainedMapBidirectionalIter(self.values.iter_bidirectional())
+    }
+
     pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -148,6 +187,10 @@ impl<K, V> RetainedMapSnapshot<K, V> {
 }
 
 impl<K: Ord, V> RetainedMapSnapshot<K, V> {
+    pub fn iter_bidirectional(&self) -> RetainedMapBidirectionalIter<'_, K, V> {
+        RetainedMapBidirectionalIter(self.values.iter_bidirectional())
+    }
+
     pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -178,3 +221,29 @@ impl<'a, K, V> Iterator for RetainedMapIter<'a, K, V> {
 
 #[cfg(test)]
 mod tests;
+
+/// Ordered borrowed entries with constant cursor space and logarithmic work per step.
+pub struct RetainedMapBidirectionalIter<'a, K, V>(
+    BudgetedSharedMapBidirectionalIter<'a, K, Entry<V>>,
+);
+
+impl<'a, K: Ord, V> Iterator for RetainedMapBidirectionalIter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(key, entry)| (key, &entry.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl<K: Ord, V> DoubleEndedIterator for RetainedMapBidirectionalIter<'_, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().map(|(key, entry)| (key, &entry.value))
+    }
+}
+
+impl<K: Ord, V> ExactSizeIterator for RetainedMapBidirectionalIter<'_, K, V> {}
+impl<K: Ord, V> std::iter::FusedIterator for RetainedMapBidirectionalIter<'_, K, V> {}

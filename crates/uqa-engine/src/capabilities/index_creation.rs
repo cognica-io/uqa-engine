@@ -16,9 +16,10 @@ use uqa_execution::schema::indexes::{
     creation::{IndexCreationContext, IndexCreationNamespace, IndexCreationPublication},
     IndexBuildContext,
 };
+use uqa_execution::storage_errors::storage_error;
 use uqa_sql::{
     ast::{ColumnType, IndexKey},
-    catalog::{errors::storage_error, index::IndexDefinition},
+    catalog::index::IndexDefinition,
     schema::indexes::vectors::VectorIndexCatalog,
     SQLError,
 };
@@ -61,6 +62,26 @@ impl Engine {
 }
 
 impl IndexRegistryPublication for Engine {
+    fn index_catalog(
+        &self,
+    ) -> std::sync::Arc<uqa_execution::catalog::index::registry::CatalogIndexes> {
+        self.durable.catalog_indexes.snapshot()
+    }
+
+    fn index_table_persistence(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<uqa_sql::ast::RelationPersistence> {
+        let relation = uqa_core::RelationIdentity::from_legacy_name(name)
+            .map_err(StorageBackendError::Other)?;
+        self.storage
+            .tables
+            .read()
+            .get(&relation)
+            .map(|table| table.persistence)
+            .ok_or_else(|| StorageBackendError::Other(format!("index table `{name}` disappeared")))
+    }
+
     fn persist_index(
         &self,
         row: &CatalogIndexRow,
@@ -114,16 +135,8 @@ impl IndexRegistryPublication for Engine {
         Ok(())
     }
 
-    fn publish_index(&self, row: CatalogIndexRow) {
-        self.durable
-            .catalog_indexes
-            .write()
-            .insert(row.relation.clone(), row);
-        self.note_catalog_registry_changed();
-    }
-
-    fn forget_index(&self, relation: &uqa_core::RelationIdentity) {
-        self.durable.catalog_indexes.write().remove(relation);
+    fn publish_indexes(&self, indexes: uqa_execution::catalog::index::registry::CatalogIndexes) {
+        *self.durable.catalog_indexes.write() = indexes;
         self.note_catalog_registry_changed();
     }
 

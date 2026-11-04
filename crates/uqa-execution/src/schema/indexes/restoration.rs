@@ -158,11 +158,13 @@ fn candidate_catalog(
             )));
         }
     }
-    snapshot.definitions.catalog_indexes = rows
-        .iter()
-        .map(|row| (row.relation.clone(), row.clone()))
-        .collect::<BTreeMap<_, _>>()
-        .into();
+    let mut indexes = crate::catalog::index::registry::CatalogIndexes::with_budget(
+        snapshot.definitions.catalog_indexes.budget(),
+    );
+    for row in rows {
+        indexes.insert_in(row.clone(), &snapshot)?;
+    }
+    snapshot.definitions.catalog_indexes = std::sync::Arc::new(indexes);
     Ok((CatalogReadView::new(snapshot), names))
 }
 

@@ -99,7 +99,12 @@ struct FailedRemoval<'a> {
     reached: Cell<bool>,
 }
 impl TableRemovalPublication for FailedRemoval<'_> {
-    fn remove_state(&self, name: &str, _: &RelationIdentity) -> StorageBackendResult<()> {
+    fn remove_state(
+        &self,
+        name: &str,
+        _: &RelationIdentity,
+        _: uqa_execution::catalog::index::registry::CatalogIndexes,
+    ) -> StorageBackendResult<()> {
         assert_eq!(name, "public.parent");
         for child in self.children {
             assert_eq!(self.engine.try_foreign_keys(child).unwrap().len(), 0);

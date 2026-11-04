@@ -20,7 +20,7 @@ use uqa_storage::{CatalogIndexRow, StorageBackendResult};
 
 pub(in crate::schema::indexes) fn materialize(
     catalog: &CatalogReadView,
-    rows: &mut BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &mut crate::catalog::index::registry::CatalogIndexes,
     allocator: &mut dyn CatalogObjectAllocator,
 ) -> StorageBackendResult<()> {
     let mut pending = rows.keys().cloned().collect::<VecDeque<_>>();
@@ -106,7 +106,7 @@ pub(in crate::schema::indexes) fn materialize(
             definition.relationships.parent_index = Some(identity.identity.object_id);
             row.definition_json = Some(serde_json::to_string(&definition)?);
             pending.push_back(row.relation.clone());
-            rows.insert(row.relation.clone(), row);
+            rows.insert(row, child.persistence)?;
         }
     }
     Ok(())
@@ -134,12 +134,12 @@ pub(super) fn planned(
     row.definition_json = Some(serde_json::to_string(&definition)?);
     let root = row.relation.clone();
     let mut rows = previous.as_ref().clone();
-    rows.insert(root.clone(), row);
+    rows.insert_in(row, catalog.snapshot())?;
     materialize(catalog, &mut rows, &mut allocator)?;
     Ok(rows
-        .into_iter()
-        .filter(|(name, _)| *name != root && !previous.contains_key(name))
-        .map(|(name, row)| (row.table_name, name.name))
+        .iter()
+        .filter(|(name, _)| **name != root && !previous.contains_key(name))
+        .map(|(name, row)| (row.table_name.clone(), name.name.clone()))
         .collect())
 }
 
@@ -170,7 +170,7 @@ pub(in crate::schema::indexes) fn constraint_kind(
 pub(super) struct CandidateNames<'a> {
     pub catalog: &'a CatalogReadView,
     pub snapshot: &'a CatalogReadSnapshot,
-    pub rows: &'a BTreeMap<RelationIdentity, CatalogIndexRow>,
+    pub rows: &'a crate::catalog::index::registry::CatalogIndexes,
 }
 
 impl IndexNameCatalog for CandidateNames<'_> {
@@ -238,7 +238,7 @@ impl IndexNameCatalog for CandidateNames<'_> {
 /// Detachment retains the child's independent address and contents while removing only the severed inheritance edge.
 pub(super) fn detach(
     catalog: &CatalogReadView,
-    rows: &mut BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &mut crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<()> {
     let parents = rows
         .values()
@@ -253,7 +253,8 @@ pub(super) fn detach(
             ))
         })
         .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
-    for row in rows.values_mut() {
+    let mut candidate = rows.clone();
+    for row in rows.values() {
         let mut definition = index_definition(row)?;
         let Some(parent) = definition.relationships.parent_index else {
             continue;
@@ -265,15 +266,18 @@ pub(super) fn detach(
         let hierarchy = &catalog.snapshot().tables[&relation].hierarchy;
         if !hierarchy.is_partition() || hierarchy.parents.first() != Some(parent) {
             definition.relationships.parent_index = None;
+            let mut row = row.clone();
             row.definition_json = Some(serde_json::to_string(&definition)?);
+            candidate.replace(row)?;
         }
     }
+    *rows = candidate;
     Ok(())
 }
 
 fn matching_child(
     catalog: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     child: &RelationIdentity,
     parent_id: [u8; 16],
     parent: &IndexAttachmentShape<'_>,

@@ -178,7 +178,12 @@ impl Engine {
                 })
             } else if self.durable.sequences.read().contains_key(&relation) {
                 Some("sequence")
-            } else if self.durable.foreign_tables.read().contains_key(&relation) {
+            } else if self
+                .durable
+                .foreign_catalog
+                .tables()
+                .contains_key(&relation)
+            {
                 Some("foreign table")
             } else if self.durable.catalog_indexes.read().contains_key(&relation) {
                 Some("index")

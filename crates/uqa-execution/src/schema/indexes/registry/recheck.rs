@@ -16,7 +16,7 @@ pub(super) fn validate(
     context: &IndexRegistryContext<'_>,
     before: &CatalogReadView,
     candidate: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     root: &RelationIdentity,
 ) -> StorageBackendResult<CatalogReadView> {
     let current = context.identities.catalog.current_catalog_snapshot();
@@ -27,7 +27,7 @@ pub(super) fn validate(
 fn validate_snapshots(
     before: &CatalogReadView,
     candidate: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     root: &RelationIdentity,
     current: &CatalogReadView,
 ) -> StorageBackendResult<()> {
@@ -112,10 +112,10 @@ fn validate_snapshots(
         .as_ref()
         .clone();
     for row in change.removals {
-        rebased.remove(&row.relation);
+        rebased.remove(&row.relation)?;
     }
     for row in change.upserts {
-        rebased.insert(row.relation.clone(), row);
+        rebased.insert_in(row, &snapshot)?;
     }
     validation::validate(&CatalogReadView::new(snapshot), &rebased)
 }

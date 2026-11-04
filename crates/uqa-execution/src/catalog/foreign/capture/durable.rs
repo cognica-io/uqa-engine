@@ -4,79 +4,33 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Original table membership selects its matching authority before payload admission.
+//! Capture retains a paired native generation; durable membership is established at publication.
 
-use super::{table, BTreeMap, CapturedForeignTable, RelationIdentity, StoredForeignTable};
+use crate::catalog::foreign::{registry::CapturedForeignCatalog, ForeignCatalog};
 use std::sync::Arc;
-use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
-use uqa_sql::{
-    ast::RelationPersistence,
-    catalog::security::{table_binding::CapturedTableSecurity, BoundTableSecurity},
-    SQLError,
-};
+use uqa_core::memory::{Produced, ProductionControl};
+use uqa_sql::SQLError;
 use uqa_storage::{
     memory_capture::{CapturedMemoryValue, MemoryCaptureSource},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
 
-#[derive(Debug)]
-pub struct CapturedForeignRelation {
-    pub relation: RelationIdentity,
-    pub definition: CapturedForeignTable,
-    pub security: CapturedTableSecurity,
-}
-
 pub struct ForeignTableCaptureSource {
-    pub tables: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
-    pub security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub catalog: Arc<ForeignCatalog>,
 }
 
 impl ForeignTableCaptureSource {
-    /// Temporary membership is excluded before authority lookup, output capacity or payload copying.
     pub fn capture(
         &self,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<Vec<CapturedForeignRelation>>, SQLError> {
-        let count = self.tables.values().try_fold(0, |count, table| {
-            control.check()?;
-            Ok::<_, SQLError>(
-                count + usize::from(table.persistence != RelationPersistence::Temporary),
-            )
-        })?;
-        let mut output = ProductionVec::new(*control);
-        output.reserve(count)?;
-        for (relation, definition) in self.tables.as_ref() {
-            control.check()?;
-            if definition.persistence == RelationPersistence::Temporary {
-                continue;
-            }
-            let security = self.security.get(relation).ok_or_else(|| {
-                SQLError::Internal("captured foreign table has no authority metadata".into())
-            })?;
-            let (schema, schema_memory) = control.copy_text(&relation.schema)?.into_parts();
-            let (name, name_memory) = control.copy_text(&relation.name)?.into_parts();
-            let (definition, definition_memory) = table(definition, control)?.into_parts();
-            let (security, security_memory) = security.capture_security(control)?.into_parts();
-            output.push_produced(control.finish(
-                CapturedForeignRelation {
-                    relation: RelationIdentity { schema, name },
-                    definition,
-                    security,
-                },
-                control.combine(
-                    control.combine(schema_memory, name_memory),
-                    control.combine(definition_memory, security_memory),
-                ),
-            )?)?;
-        }
-        Ok(output.finish()?)
+    ) -> Result<Produced<CapturedForeignCatalog>, SQLError> {
+        self.catalog.capture(control)
     }
 }
 
 impl MemoryCaptureSource for ForeignTableCaptureSource {
-    type Frozen = CapturedMemoryValue<Vec<CapturedForeignRelation>>;
-
+    type Frozen = CapturedMemoryValue<CapturedForeignCatalog>;
     fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
         let production = ProductionControl::new(
             control.memory(),

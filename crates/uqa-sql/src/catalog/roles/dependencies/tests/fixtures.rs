@@ -61,8 +61,7 @@ pub(super) struct Catalog {
     pub schemas: SchemaRegistry,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: crate::catalog::stored_view::ViewDefinitions,
-    pub foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
-    pub foreign_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
+    pub foreign_tables: crate::catalog::security::foreign_tables::ForeignTableSecurities,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
     pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
@@ -78,8 +77,8 @@ impl Catalog {
             schemas: SchemaRegistry::new(),
             tables: BTreeMap::new(),
             views: crate::catalog::stored_view::ViewDefinitions::new(),
-            foreign_tables: BTreeMap::new(),
-            foreign_persistence: BTreeMap::new(),
+            foreign_tables:
+                crate::catalog::security::foreign_tables::ForeignTableSecurities::default(),
             system_relations:
                 crate::catalog::security::system_relations::SystemRelationSecurities::new(),
             sequences: BTreeMap::new(),
@@ -110,25 +109,7 @@ impl Catalog {
     }
 }
 
-impl super::super::context::RoleForeignPersistenceRead
-    for Read<'_, BTreeMap<RelationIdentity, crate::ast::RelationPersistence>>
-{
-    fn iter(
-        &self,
-    ) -> Box<dyn Iterator<Item = (&RelationIdentity, crate::ast::RelationPersistence)> + '_> {
-        Box::new(
-            self.value
-                .iter()
-                .map(|(relation, persistence)| (relation, *persistence)),
-        )
-    }
-}
 impl super::super::context::TemporaryRoleDependencyCatalog for Catalog {
-    fn foreign_table_persistence(
-        &self,
-    ) -> Box<dyn super::super::context::RoleForeignPersistenceRead + '_> {
-        Box::new(self.read("foreign persistence", &self.foreign_persistence))
-    }
     fn temporary_namespace_allocated(&self) -> bool {
         true
     }
@@ -153,7 +134,8 @@ impl RoleDependencyCatalog for Catalog {
     }
     fn foreign_tables(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
+    ) -> RoleDependencyRead<'_, crate::catalog::security::foreign_tables::ForeignTableSecurities>
+    {
         Box::new(self.read("foreign", &self.foreign_tables))
     }
     fn sequences(

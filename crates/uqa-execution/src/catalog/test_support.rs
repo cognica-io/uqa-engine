@@ -129,3 +129,38 @@ pub(crate) fn empty_scope() -> crate::query::CteScope {
         None,
     )
 }
+
+/// Projection fixtures use the complete native relation publisher.
+pub(crate) fn foreign_tables(
+    values: impl IntoIterator<
+        Item = (
+            uqa_core::RelationIdentity,
+            super::foreign::StoredForeignTable,
+        ),
+    >,
+) -> std::sync::Arc<super::foreign::ForeignTables> {
+    let mut catalog = super::foreign::ForeignCatalog::default();
+    for (relation, table) in values {
+        catalog
+            .insert(
+                relation,
+                table,
+                uqa_sql::catalog::security::BoundTableSecurity::owner(
+                    uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+                ),
+            )
+            .unwrap();
+    }
+    catalog.tables_snapshot()
+}
+pub(crate) fn index_rows(
+    rows: impl IntoIterator<Item = uqa_storage::CatalogIndexRow>,
+) -> crate::catalog::index::registry::CatalogIndexes {
+    let mut indexes = crate::catalog::index::registry::CatalogIndexes::default();
+    for row in rows {
+        indexes
+            .insert(row, uqa_sql::ast::RelationPersistence::Permanent)
+            .unwrap();
+    }
+    indexes
+}

@@ -292,15 +292,12 @@ impl Engine {
             &current.views,
             snapshot.views,
         )?;
-        let foreign = uqa_execution::catalog::security::relation_authority::merge_private_foreign(
-            self.storage.catalog.as_deref(),
-            &current.foreign_tables,
-            &current.foreign_table_security,
-            snapshot.foreign_tables,
-            snapshot.foreign_table_security,
-        )?;
-        snapshot.foreign_tables = foreign.definitions;
-        snapshot.foreign_table_security = foreign.security;
+        snapshot.foreign_catalog =
+            uqa_execution::catalog::security::relation_authority::merge_private_foreign(
+                self.storage.catalog.as_deref(),
+                &current.foreign_catalog,
+                snapshot.foreign_catalog,
+            )?;
         Ok(snapshot)
     }
 
@@ -469,7 +466,7 @@ impl Engine {
         {
             return Ok(());
         }
-        self.reload_table_catalog(target_epoch)
+        self.reload_catalog_snapshot(Some(target_epoch), None)
     }
 
     /// Reload the table catalog and the registries after a rollback, pushing their failures to `cleanup_errors`. Both read one snapshot: the open transaction's, or else a read transaction pinned for them, since separate captures would leave the reloaded tables at different states when another session commits in between. When both succeed, the cache revisions and the read view they read are recorded, as a refresh records them, so the next statement refreshes only what other sessions committed since instead of reloading every table again.
@@ -494,15 +491,32 @@ impl Engine {
                 }
             }
         };
-        let tables = self.reload_table_catalog_after_rollback();
-        if let Err(error) = &tables {
-            cleanup_errors.push(format!("table catalog restore: {error}"));
+        self.discard_persistent_document_counts();
+        *self.epochs.storage_cache_revisions.lock() = None;
+        let tables = self
+            .epochs
+            .table_catalog
+            .published
+            .load(std::sync::atomic::Ordering::Acquire);
+        let registries = self
+            .epochs
+            .catalog_registry
+            .published
+            .load(std::sync::atomic::Ordering::Acquire);
+        let restored = self.reload_catalog_snapshot(Some(tables), Some(registries));
+        if let Err(error) = &restored {
+            cleanup_errors.push(format!("catalog restore: {error}"));
+        } else {
+            self.epochs
+                .table_catalog
+                .dirty
+                .store(false, std::sync::atomic::Ordering::Release);
+            self.epochs
+                .catalog_registry
+                .dirty
+                .store(false, std::sync::atomic::Ordering::Release);
         }
-        let registries = self.reload_catalog_registries_after_rollback();
-        if let Err(error) = &registries {
-            cleanup_errors.push(format!("registry restore: {error}"));
-        }
-        if tables.is_ok() && registries.is_ok() && (pinned || in_transaction) {
+        if restored.is_ok() && (pinned || in_transaction) {
             if let Err(error) = self.record_reloaded_snapshot(table_data_epoch, stable_version) {
                 cleanup_errors.push(format!("cache revision record: {error}"));
             }
@@ -566,17 +580,17 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
         // First, so that a failed reload cannot leave a count ahead of its store.
         self.discard_persistent_document_counts();
         *self.epochs.storage_cache_revisions.lock() = None;
-        self.clear_persistent_table_bindings_for_catalog_reload();
         let target_epoch = self
             .epochs
             .table_catalog
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_table_catalog(target_epoch)?;
+        self.reload_catalog_snapshot(Some(target_epoch), None)?;
         self.epochs
             .table_catalog
             .dirty
@@ -597,10 +611,7 @@ impl Engine {
                 crate::RelationIdentity::from_legacy_name(table)
                     .is_ok_and(|relation| relation.schema == temporary_schema)
             });
-        self.durable
-            .catalog_indexes
-            .write()
-            .retain(|relation, _| relation.schema == temporary_schema);
+        self.durable.catalog_indexes.write().clear_durable();
     }
 
     pub(super) fn reload_table_catalog(&self, target_epoch: u64) -> StorageBackendResult<()> {
@@ -745,21 +756,7 @@ impl Engine {
         {
             return Ok(());
         }
-        self.reload_catalog_registries(target_epoch)
-    }
-
-    pub(crate) fn reload_catalog_registries_after_rollback(&self) -> StorageBackendResult<()> {
-        let target_epoch = self
-            .epochs
-            .catalog_registry
-            .published
-            .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_catalog_registries(target_epoch)?;
-        self.epochs
-            .catalog_registry
-            .dirty
-            .store(false, std::sync::atomic::Ordering::Release);
-        Ok(())
+        self.reload_catalog_snapshot(None, Some(target_epoch))
     }
 
     pub(super) fn reload_catalog_registries(&self, target_epoch: u64) -> StorageBackendResult<()> {
@@ -780,13 +777,12 @@ impl Engine {
             .map_err(|error| {
                 StorageBackendError::backend("retain temporary views for catalog reload", error)
             })?;
-        self.clear_persistent_table_bindings_for_catalog_reload();
         self.durable.schemas.write().clear();
         self.durable.path_indexes.write().clear();
         self.durable.named_analyzers.write().clear();
         self.durable.foreign_wrappers.write().clear();
         self.durable.foreign_servers.write().clear();
-        uqa_execution::catalog::foreign::restoration::retain_session_registry(self);
+        uqa_execution::catalog::foreign::restoration::retain_session_registry(self)?;
         self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
         self.durable.models.write().clear();

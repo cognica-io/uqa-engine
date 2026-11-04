@@ -15,6 +15,7 @@ use super::{
 
 mod authenticated_session;
 mod cache_refresh;
+mod catalog_reload;
 mod catalog_sync;
 mod data_sync;
 mod graphs;

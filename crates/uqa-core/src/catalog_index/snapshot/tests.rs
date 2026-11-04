@@ -118,3 +118,40 @@ fn unwinding_a_catalog_reader_releases_its_retained_rows() {
     .is_err());
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn native_observations_keep_structural_order_cloned_positions_and_exact_length() {
+    let rows = Arc::new(BTreeMap::from([
+        (
+            RelationIdentity::new("a", "first"),
+            row("z", "first".into()),
+        ),
+        (
+            RelationIdentity::new("b", "middle"),
+            row("z", "middle".into()),
+        ),
+        (RelationIdentity::new("c", "last"), row("a", "last".into())),
+    ]));
+    let pointer = rows.values().next().unwrap().parameters_json.as_ptr();
+    let weak = Arc::downgrade(&rows);
+    let snapshot = CatalogIndexSnapshot::from_registry(rows);
+    let allocation = allocation_counter::measure(|| {
+        let mut iter = snapshot.iter();
+        assert_eq!(iter.len(), 3);
+        assert_eq!(iter.next().unwrap().parameters_json.as_ptr(), pointer);
+        let mut cloned = iter.clone();
+        assert_eq!(iter.next_back().unwrap().parameters_json, "last");
+        assert_eq!(iter.len(), 1);
+        assert_eq!(iter.next().unwrap().parameters_json, "middle");
+        assert!(iter.next_back().is_none());
+        assert!(iter.next().is_none());
+        assert_eq!(iter.len(), 0);
+        assert_eq!(cloned.len(), 2);
+        assert_eq!(cloned.next().unwrap().parameters_json, "middle");
+        assert_eq!(cloned.next_back().unwrap().parameters_json, "last");
+        assert!(cloned.next().is_none());
+    });
+    assert_eq!(allocation.count_total, 0);
+    drop(snapshot);
+    assert!(weak.upgrade().is_none());
+}

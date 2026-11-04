@@ -200,8 +200,8 @@ fn committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads() {
 }
 
 fn same_indexes(
-    saved: &[(uqa_core::RelationIdentity, uqa_storage::CatalogIndexRow)],
-    original: &std::collections::BTreeMap<uqa_core::RelationIdentity, uqa_storage::CatalogIndexRow>,
+    saved: &uqa_execution::catalog::index::registry::CapturedCatalogIndexes,
+    original: &uqa_execution::catalog::index::registry::CatalogIndexes,
 ) {
     assert_eq!(saved.len(), original.len());
     for ((key, after), (name, before)) in saved.iter().zip(original.iter()) {

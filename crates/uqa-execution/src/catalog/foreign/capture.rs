@@ -22,7 +22,7 @@ use uqa_sql::{
 };
 
 mod durable;
-pub use durable::{CapturedForeignRelation, ForeignTableCaptureSource};
+pub use durable::ForeignTableCaptureSource;
 
 #[derive(Debug)]
 pub struct CapturedForeignTable {
@@ -92,6 +92,59 @@ fn table(
     Ok(control.finish(value, memory)?)
 }
 
+pub(super) fn native_table(
+    value: &StoredForeignTable,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<StoredForeignTable>, SQLError> {
+    let StoredForeignTable {
+        name,
+        persistence,
+        object_id,
+        catalog_oids,
+        row_type_array_name,
+        server_name,
+        server_reference,
+        columns,
+        dropped_attributes,
+        checks,
+        options,
+        option_order,
+    } = value;
+    let mut memory = control.empty_reservation();
+    macro_rules! take {
+        ($produced:expr) => {{
+            let (value, lease) = $produced?.into_parts();
+            memory = control.combine(memory.take(), lease);
+            value
+        }};
+    }
+    let value = StoredForeignTable {
+        name: take!(control.copy_text(name)),
+        persistence: *persistence,
+        object_id: *object_id,
+        catalog_oids: *catalog_oids,
+        row_type_array_name: take!(definition_capture::optional_name(
+            row_type_array_name,
+            control
+        )),
+        server_name: take!(control.copy_text(server_name)),
+        server_reference: *server_reference,
+        columns: take!(definition_capture::foreign::stored_columns(
+            columns, control
+        )),
+        dropped_attributes: take!(definition_capture::dropped_attributes(
+            dropped_attributes,
+            control
+        )),
+        checks: take!(definition_capture::foreign::stored_checks(checks, control)),
+        options: take!(definition_capture::foreign::stored_options(
+            options, control
+        )),
+        option_order: take!(definition_capture::names(option_order, control)),
+    };
+    Ok(control.finish(value, memory)?)
+}
+
 pub fn tables(
     values: &BTreeMap<RelationIdentity, StoredForeignTable>,
     control: &ProductionControl<'_>,
@@ -110,4 +163,4 @@ pub fn tables(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

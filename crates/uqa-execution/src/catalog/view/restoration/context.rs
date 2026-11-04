@@ -6,9 +6,7 @@
 
 //! Live registry and catalog inputs for durable view restoration.
 use super::super::{StoredView, ViewIdentityAllocation, ViewRegistryState};
-use crate::{
-    catalog::foreign::StoredForeignTable, schema::view_creation::context::ViewPlanBinding,
-};
+use crate::schema::view_creation::context::ViewPlanBinding;
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_graph::GraphStoreHandle;
@@ -34,7 +32,7 @@ pub trait ViewRestoreTableNames {
     fn names(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;
 }
 pub type ViewRestoreForeignRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
+    Box<dyn Deref<Target = crate::catalog::foreign::ForeignTables> + 'a>;
 pub type ViewRestoreGraphsRead<'a> =
     Box<dyn Deref<Target = BTreeMap<String, Arc<GraphStoreHandle>>> + 'a>;
 pub trait ViewRestoreNamespace {

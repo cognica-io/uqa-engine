@@ -29,8 +29,13 @@ impl TableRemovalContext<'_> {
         if !self.catalog.contains_relation(&relation) {
             return Err(table_not_found(name));
         }
+        let indexes = self
+            .indexes
+            .publication
+            .index_catalog()
+            .without_table(name)?;
         self.events.drop_relation_events_inner(&relation)?;
         crate::schema::indexes::diskann::retire_table(&self.indexes, name)?;
-        self.publication.remove_state(name, &relation)
+        self.publication.remove_state(name, &relation, indexes)
     }
 }

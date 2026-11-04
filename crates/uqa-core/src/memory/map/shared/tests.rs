@@ -11,6 +11,7 @@ use proptest::prelude::*;
 
 use super::*;
 
+mod bidirectional;
 mod removal;
 
 fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {
@@ -186,6 +187,14 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
         assert_eq!(map.get(key), expected.get(key));
         for bound in [Bound::Included(key), Bound::Excluded(key)] {
             assert_eq!(
+                map.first_from(bound)
+                    .map(|(key, value)| (key.as_str(), value)),
+                expected
+                    .range::<str, _>((bound, Bound::Unbounded))
+                    .next()
+                    .map(|(key, value)| (*key, value))
+            );
+            assert_eq!(
                 map.last_before(bound)
                     .map(|(key, value)| (key.as_str(), value)),
                 expected
@@ -209,6 +218,12 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     let empty = BudgetedSharedMap::<String, usize>::new(&budget);
     assert!(empty.range_from(Bound::Included("a")).next().is_none());
     assert!(empty.last_before(Bound::Included("a")).is_none());
+    assert!(empty.first_from(Bound::Excluded("a")).is_none());
+    assert_eq!(
+        map.first_from::<str>(Bound::Unbounded)
+            .map(|(key, value)| (key.as_str(), *value)),
+        Some(("a", 1))
+    );
     assert_eq!(
         map.last_before::<str>(Bound::Unbounded)
             .map(|(key, value)| (key.as_str(), *value)),
@@ -217,7 +232,7 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
 }
 
 #[test]
-fn greatest_entry_seeks_without_linear_work_or_allocation() {
+fn bounded_entry_seeks_without_linear_work_or_allocation() {
     #[derive(Eq, PartialEq)]
     struct Key(usize);
     static COMPARISONS: AtomicUsize = AtomicUsize::new(0);
@@ -252,6 +267,25 @@ fn greatest_entry_seeks_without_linear_work_or_allocation() {
                 map.last_before(bound).map(|(_, value)| *value),
                 Some(expected)
             );
+        });
+        assert_eq!(allocated.count_total, 0);
+        assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);
+    }
+    for (bound, expected) in [
+        (Bound::Included(Key(2048)), Some(2048)),
+        (Bound::Excluded(Key(2048)), Some(2049)),
+        (Bound::Included(Key(0)), Some(0)),
+        (Bound::Excluded(Key(4095)), Some(4096)),
+        (Bound::Excluded(Key(8191)), None),
+    ] {
+        COMPARISONS.store(0, AtomicOrdering::Relaxed);
+        let allocated = allocation_counter::measure(|| {
+            let bound = match &bound {
+                Bound::Included(key) => Bound::Included(key),
+                Bound::Excluded(key) => Bound::Excluded(key),
+                Bound::Unbounded => unreachable!(),
+            };
+            assert_eq!(map.first_from(bound).map(|(_, value)| *value), expected);
         });
         assert_eq!(allocated.count_total, 0);
         assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);

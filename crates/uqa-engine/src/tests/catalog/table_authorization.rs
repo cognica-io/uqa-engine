@@ -83,6 +83,9 @@ impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
     }
 }
 impl TablePrivilegeRegistry for ObservedRegistry<'_> {
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        TablePrivilegeRegistry::foreign_catalog(self.engine)
+    }
     fn refresh_tables(&self) -> StorageBackendResult<()> {
         TablePrivilegeRegistry::refresh_tables(self.engine)
     }

@@ -56,8 +56,8 @@ impl MutationTupleMetadata for Engine {
         ordinary
             .or_else(|| {
                 self.durable
-                    .foreign_tables
-                    .read()
+                    .foreign_catalog
+                    .tables()
                     .get(&relation)
                     .map(|state| state.relation_oids().relation)
             })

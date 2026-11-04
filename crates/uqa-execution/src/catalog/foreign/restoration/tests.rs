@@ -5,24 +5,9 @@
 //
 
 use super::*;
-use crate::catalog::foreign::{reads::*, StoredForeignTable};
+use crate::catalog::foreign::{ForeignCatalog, StoredForeignTable};
 use uqa_sql::{ast::RelationPersistence, catalog::roles::RoleIdentity};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
-
-impl ForeignRegistryReads for RestoredForeignCatalog {
-    fn wrappers(&self) -> ForeignWrappersRead<'_> {
-        Box::new(&self.wrappers)
-    }
-    fn servers(&self) -> ForeignServersRead<'_> {
-        Box::new(&self.servers)
-    }
-    fn tables(&self) -> ForeignTablesRead<'_> {
-        Box::new(&self.tables)
-    }
-    fn security(&self) -> ForeignSecurityRead<'_> {
-        Box::new(&self.security)
-    }
-}
 
 fn table(name: &str, persistence: RelationPersistence) -> StoredForeignTable {
     let mut table = StoredForeignTable::from_catalog(
@@ -39,15 +24,6 @@ fn table(name: &str, persistence: RelationPersistence) -> StoredForeignTable {
         object_id: [8; 16],
     });
     table
-}
-
-fn registry() -> RestoredForeignCatalog {
-    RestoredForeignCatalog {
-        wrappers: uqa_sql::catalog::foreign_wrapper::native_wrappers(),
-        servers: uqa_sql::catalog::foreign_server::ForeignServers::new(),
-        tables: BTreeMap::new(),
-        security: BTreeMap::new(),
-    }
 }
 
 #[test]
@@ -87,51 +63,59 @@ fn temporary_foreign_publication_leaves_durable_definitions_unchanged() {
 
 #[test]
 fn durable_refresh_preserves_only_temporary_foreign_definitions_and_security() {
-    let mut current = registry();
+    let mut current = ForeignCatalog::default();
     let security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
     let temporary = RelationIdentity::new("pg_temp_1", "private");
-    current.tables.insert(
-        temporary.clone(),
-        table("pg_temp_1.private", RelationPersistence::Temporary),
-    );
-    current.security.insert(temporary.clone(), security.clone());
+    current
+        .insert(
+            temporary.clone(),
+            table("pg_temp_1.private", RelationPersistence::Temporary),
+            security.clone(),
+        )
+        .unwrap();
     let removed = RelationIdentity::new("public", "removed");
-    current.tables.insert(
-        removed.clone(),
-        table("public.removed", RelationPersistence::Permanent),
-    );
-    current.security.insert(removed.clone(), security);
-    let mut restored = registry();
-    restored.retain_session_relations(&current).unwrap();
-    assert_eq!(restored.tables.len(), 1);
+    current
+        .insert(
+            removed.clone(),
+            table("public.removed", RelationPersistence::Permanent),
+            security.clone(),
+        )
+        .unwrap();
+    let mut restored = ForeignCatalog::default();
+    merge_session_relations(&current, &mut restored).unwrap();
+    assert_eq!(restored.tables().len(), 1);
     assert_eq!(
-        restored.tables[&temporary].persistence,
+        restored.tables()[&temporary].persistence,
         RelationPersistence::Temporary
     );
-    assert_eq!(restored.security[&temporary], current.security[&temporary]);
-    assert!(!restored.tables.contains_key(&removed));
-    assert!(!restored.security.contains_key(&removed));
+    assert_eq!(
+        restored.security()[&temporary],
+        current.security()[&temporary]
+    );
+    assert!(!restored.tables().contains_key(&removed));
+    assert!(!restored.security().contains_key(&removed));
     let mut latest = table("public.latest", RelationPersistence::Permanent);
     latest.object_id = [9; 16];
     let latest_relation = RelationIdentity::new("public", "latest");
+    let mut latest_catalog = ForeignCatalog::default();
+    latest_catalog
+        .insert(latest_relation.clone(), latest, security)
+        .unwrap();
     let merged = crate::catalog::security::relation_authority::merge_private_foreign(
         None,
-        &current.tables,
-        &current.security,
-        BTreeMap::from([(latest_relation.clone(), latest)]).into(),
-        BTreeMap::from([(
-            latest_relation.clone(),
-            BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
-        )])
-        .into(),
+        &current,
+        latest_catalog.into(),
     )
     .unwrap();
-    assert_eq!(merged.definitions.len(), 2);
-    assert!(merged.definitions.contains_key(&latest_relation));
-    assert_eq!(merged.security[&temporary], current.security[&temporary]);
-    assert!(!merged.definitions.contains_key(&removed));
-    current.security.remove(&temporary);
-    assert!(restored.retain_session_relations(&current).is_err());
+    assert_eq!(merged.tables().len(), 2);
+    assert!(merged.tables().contains_key(&latest_relation));
+    assert_eq!(
+        merged.security()[&temporary],
+        current.security()[&temporary]
+    );
+    assert!(!merged.tables().contains_key(&removed));
+    let invalid = BTreeMap::from([(temporary.clone(), current.tables()[&temporary].clone())]);
+    assert!(admit_restored(&invalid, &BTreeMap::new(), current.budget()).is_err());
 }
 
 #[test]
@@ -141,17 +125,20 @@ fn refresh_retains_an_unbound_declaration_until_its_server_is_attached() {
     let mut declared = table("public.declared", RelationPersistence::Permanent);
     declared.server_reference = None;
     let object_id = declared.object_id;
-    let mut current = registry();
-    current.tables.insert(relation.clone(), declared);
-    current.security.insert(relation.clone(), security.clone());
-    let mut restored = registry();
-    restored.retain_session_relations(&current).unwrap();
-    assert_eq!(restored.tables[&relation].object_id, object_id);
-    assert_eq!(restored.security[&relation], security);
-    current.tables.get_mut(&relation).unwrap().server_reference =
+    let mut current = ForeignCatalog::default();
+    current
+        .insert(relation.clone(), declared, security.clone())
+        .unwrap();
+    let mut restored = ForeignCatalog::default();
+    merge_session_relations(&current, &mut restored).unwrap();
+    assert_eq!(restored.tables()[&relation].object_id, object_id);
+    assert_eq!(restored.security()[&relation], security);
+    let mut attached = current.tables()[&relation].clone();
+    attached.server_reference =
         table("public.declared", RelationPersistence::Permanent).server_reference;
-    let mut restored = registry();
-    restored.retain_session_relations(&current).unwrap();
-    assert!(restored.tables.is_empty());
-    assert!(restored.security.is_empty());
+    current.replace_table(relation.clone(), attached).unwrap();
+    let mut restored = ForeignCatalog::default();
+    merge_session_relations(&current, &mut restored).unwrap();
+    assert!(restored.tables().is_empty());
+    assert!(restored.security().is_empty());
 }

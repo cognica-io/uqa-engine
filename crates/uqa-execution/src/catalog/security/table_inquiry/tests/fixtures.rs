@@ -16,6 +16,7 @@ use crate::catalog::{
     test_support::{empty_catalog, NoRoutines},
     CatalogReadView, RelationLookupMode, RelationNameResolution,
 };
+use std::collections::BTreeMap;
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
@@ -40,6 +41,7 @@ pub(super) struct Fixture {
     pub refreshes: Cell<usize>,
     catalog: CatalogReadView,
     cache: RegtypeOutputCache,
+    foreign: crate::catalog::foreign::ForeignCatalog,
 }
 
 impl Fixture {
@@ -102,6 +104,7 @@ impl Fixture {
             refreshes: Cell::new(0),
             catalog: CatalogReadView::new(catalog),
             cache: RegtypeOutputCache::default(),
+            foreign: crate::catalog::foreign::ForeignCatalog::default(),
         }
     }
     pub fn context(&self) -> TablePrivilegeContext<'_> {
@@ -198,6 +201,9 @@ impl TablePrivilegeRegistry for Fixture {
     }
     fn views(&self) -> PrivilegeViewsRead<'_> {
         Box::new(self.catalog.snapshot().definitions.views.as_ref())
+    }
+    fn foreign_catalog(&self) -> crate::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        Box::new(&self.foreign)
     }
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_> {
         Box::new(self.catalog.snapshot().definitions.foreign_tables.as_ref())

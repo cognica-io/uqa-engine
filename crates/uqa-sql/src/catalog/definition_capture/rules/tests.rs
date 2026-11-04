@@ -10,7 +10,7 @@ use crate::{
     plan::UnifiedPlan,
     ScalarExpr,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 fn rule() -> StoredRule {
@@ -54,16 +54,18 @@ fn rule() -> StoredRule {
 
 #[test]
 fn durable_rules_exclude_temporary_relations_before_admitting_names_and_bodies() {
-    let mut source = RuleCatalog::from([
+    let mut source = RuleCatalog::try_from_iter([
         (
             RelationIdentity::new("Quoted.Schema", "Relation.Name"),
-            Arc::new(BTreeMap::from([("saved".into(), rule())])),
+            crate::catalog::events::EventDefinitions::try_from_iter([("saved".into(), rule())])
+                .unwrap(),
         ),
         (
             RelationIdentity::new("public", "pg_temp_local"),
-            Arc::new(BTreeMap::new()),
+            crate::catalog::events::EventDefinitions::new(),
         ),
-    ]);
+    ])
+    .unwrap();
     let memory = MemoryBudget::new(128 << 10);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -71,14 +73,19 @@ fn durable_rules_exclude_temporary_relations_before_admitting_names_and_bodies()
     let retained = memory.used();
     let mut temporary = rule();
     temporary.definition.name = "x".repeat(1 << 20);
-    source.insert(
-        RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
-        Arc::new(BTreeMap::from([("huge".into(), temporary)])),
-    );
-    source.insert(
-        RelationIdentity::new("pg_toast_temp_1", "toast"),
-        Arc::new(BTreeMap::new()),
-    );
+    source
+        .insert(
+            RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
+            crate::catalog::events::EventDefinitions::try_from_iter([("huge".into(), temporary)])
+                .unwrap(),
+        )
+        .unwrap();
+    source
+        .insert(
+            RelationIdentity::new("pg_toast_temp_1", "toast"),
+            crate::catalog::events::EventDefinitions::new(),
+        )
+        .unwrap();
     let saved = durable_rules(&source, &control).unwrap();
     assert_eq!(memory.used(), retained * 2);
     assert_eq!(saved.len(), 2);
@@ -158,13 +165,17 @@ fn rule_capture_preserves_actions_bindings_dependency_sets_and_enable_modes() {
         }
         entries.insert(index.to_string(), value);
     }
-    let source = RuleCatalog::from([
+    let source = RuleCatalog::try_from_iter([
         (
             RelationIdentity::new("s", "empty"),
-            Arc::new(BTreeMap::new()),
+            crate::catalog::events::EventDefinitions::new(),
         ),
-        (RelationIdentity::new("s", "rules"), Arc::new(entries)),
-    ]);
+        (
+            RelationIdentity::new("s", "rules"),
+            crate::catalog::events::EventDefinitions::try_from_iter(entries).unwrap(),
+        ),
+    ])
+    .unwrap();
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -257,10 +268,15 @@ fn rule_capture_releases_prior_entries_when_late_dependencies_are_denied_or_canc
             name: "x".repeat(65536),
             argument_types: Vec::new(),
         });
-    let source = RuleCatalog::from([(
+    let source = RuleCatalog::try_from_iter([(
         RelationIdentity::new("s", "table"),
-        Arc::new(BTreeMap::from([("a".into(), rule()), ("z".into(), large)])),
-    )]);
+        crate::catalog::events::EventDefinitions::try_from_iter([
+            ("a".into(), rule()),
+            ("z".into(), large),
+        ])
+        .unwrap(),
+    )])
+    .unwrap();
     for cancelled in [false, true] {
         let memory = MemoryBudget::new(if cancelled { 1 << 20 } else { 16384 });
         let token = CancellationToken::new();

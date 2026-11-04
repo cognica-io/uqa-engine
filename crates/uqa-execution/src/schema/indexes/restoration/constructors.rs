@@ -84,6 +84,10 @@ pub fn restore_constructors(
             updates.push(row);
         }
     }
+    let mut candidate = restored.catalog.clone();
+    for row in &updates {
+        candidate.replace(row.clone())?;
+    }
     for row in updates {
         storage.save_catalog_index_row(&row)?;
         for current in restored
@@ -95,5 +99,6 @@ pub fn restore_constructors(
             *current = row.clone();
         }
     }
+    restored.catalog = candidate;
     Ok(())
 }

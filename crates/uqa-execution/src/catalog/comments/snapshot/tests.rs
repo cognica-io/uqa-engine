@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::catalog::test_support::empty_catalog;
+use std::collections::BTreeMap;
 use uqa_storage::memory_capture::MemoryCaptureRegistry;
 
 fn address(class_id: u32, object_id: u32, sub_id: i32) -> CommentAddress {
@@ -22,35 +23,38 @@ fn fixture() -> CommentCaptureSource {
     let permanent = RelationIdentity::new("pg_temp_99", "permanent_membership");
     let unlogged = RelationIdentity::new("public", "unlogged_membership");
     let legacy = RelationCatalogOids::legacy(RelationOidKind::Table, &[1; 16]);
-    definitions.comments = Arc::new(CommentRegistry::from([
-        (
-            address(RELATION_CLASS, legacy.relation, 0),
-            "x".repeat(1 << 20),
-        ),
-        (
-            address(RELATION_CLASS, legacy.relation, 3),
-            "temporary column".into(),
-        ),
-        (
-            address(TYPE_CLASS, legacy.row_type.unwrap(), 0),
-            "temporary row".into(),
-        ),
-        (
-            address(999, legacy.relation, 3),
-            "opaque class 한글\n".into(),
-        ),
-        (address(RELATION_CLASS, 90_001, 0), "permanent".into()),
-        (address(RELATION_CLASS, 90_002, 1), "unlogged column".into()),
-        (address(RELATION_CLASS, 90_003, 0), "dangling".into()),
-        (
-            address(NAMESPACE_CLASS, 90_004, 0),
-            "temporary namespace".into(),
-        ),
-        (
-            address(NAMESPACE_CLASS, 90_005, 0),
-            "temporary toast namespace".into(),
-        ),
-    ]));
+    definitions.comments = Arc::new(
+        CommentRegistry::try_from_iter([
+            (
+                address(RELATION_CLASS, legacy.relation, 0),
+                "x".repeat(1 << 20),
+            ),
+            (
+                address(RELATION_CLASS, legacy.relation, 3),
+                "temporary column".into(),
+            ),
+            (
+                address(TYPE_CLASS, legacy.row_type.unwrap(), 0),
+                "temporary row".into(),
+            ),
+            (
+                address(999, legacy.relation, 3),
+                "opaque class 한글\n".into(),
+            ),
+            (address(RELATION_CLASS, 90_001, 0), "permanent".into()),
+            (address(RELATION_CLASS, 90_002, 1), "unlogged column".into()),
+            (address(RELATION_CLASS, 90_003, 0), "dangling".into()),
+            (
+                address(NAMESPACE_CLASS, 90_004, 0),
+                "temporary namespace".into(),
+            ),
+            (
+                address(NAMESPACE_CLASS, 90_005, 0),
+                "temporary toast namespace".into(),
+            ),
+        ])
+        .unwrap(),
+    );
     let hierarchy = TableHierarchy::default();
     let tables = [
         (&relation, RelationPersistence::Temporary, None),
@@ -103,10 +107,13 @@ fn comment_selection_excludes_original_temporary_addresses_before_payload_admiss
     assert!(selected
         .iter()
         .any(|(address, _)| address.object_id == 90_003));
-    let expected = selected.clone();
-    let mut selected_only = fixture();
-    Arc::make_mut(&mut selected_only.comments)
-        .retain(|address, _| !selected_only.excluded.contains(address));
+    let expected = selected
+        .iter()
+        .map(|(address, text)| (*address, text.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let selected_only = CommentCaptureSource {
+        comments: Arc::new(CommentRegistry::try_from_iter(expected.clone()).unwrap()),
+    };
     let other = StorageReadControl::with_limit(4096);
     let mut value = None;
     let without_excluded =
@@ -123,9 +130,9 @@ fn comment_selection_excludes_original_temporary_addresses_before_payload_admiss
     assert_eq!(denied.memory().used(), 0);
     let exact = StorageReadControl::with_limit(required);
     let value = source.freeze(&exact).unwrap();
-    assert_eq!(*value.get().unwrap(), expected);
+    assert!(value.get().unwrap().iter().eq(expected.iter()));
     drop(source);
-    assert_eq!(*value.get().unwrap(), expected);
+    assert!(value.get().unwrap().iter().eq(expected.iter()));
     drop(value);
     assert_eq!(exact.memory().used(), 0);
 }

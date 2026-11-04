@@ -5,13 +5,12 @@
 //
 
 use super::{
-    BTreeSet, CommentCaptureSource, RelationPersistence, SQLError, Scope, CONSTRAINT_CLASS,
-    TRIGGER_CLASS,
+    BTreeSet, RelationPersistence, SQLError, Scope, Selection, CONSTRAINT_CLASS, TRIGGER_CLASS,
 };
 use uqa_sql::catalog::events::StoredTrigger;
 
 fn exclude(
-    source: &mut CommentCaptureSource,
+    source: &mut Selection,
     trigger: &StoredTrigger,
     table: &str,
     relation_oid: u32,
@@ -41,7 +40,7 @@ fn exclude(
 }
 
 impl Scope<'_, '_> {
-    pub(super) fn exclude_events(&self, source: &mut CommentCaptureSource) -> Result<(), SQLError> {
+    pub(super) fn exclude_events(&self, source: &mut Selection) -> Result<(), SQLError> {
         let classes = [
             source.has_class(TRIGGER_CLASS),
             source.has_class(CONSTRAINT_CLASS),

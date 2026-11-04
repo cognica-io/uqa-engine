@@ -6,7 +6,7 @@
 
 //! Comment eligibility follows the addressed objects of the original transaction generation.
 
-use super::{CommentAddress, CommentRegistry};
+use super::{CapturedComments, CommentAddress, CommentRegistry};
 use crate::catalog::CatalogDefinitionSnapshot;
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_core::{
@@ -62,6 +62,10 @@ impl CommentTableSource<'_> {
 
 pub struct CommentCaptureSource {
     comments: Arc<CommentRegistry>,
+}
+
+struct Selection {
+    comments: Arc<CommentRegistry>,
     excluded: BTreeSet<CommentAddress>,
 }
 
@@ -72,12 +76,14 @@ impl CommentCaptureSource {
         tables: impl IntoIterator<Item = CommentTableSource<'a>>,
         temporary_namespace: Option<TemporaryNamespaceOids>,
     ) -> Result<Self, SQLError> {
-        let mut source = Self {
+        let mut source = Selection {
             comments: definitions.comments.clone(),
             excluded: BTreeSet::new(),
         };
         if source.comments.is_empty() {
-            return Ok(source);
+            return Ok(Self {
+                comments: source.comments,
+            });
         }
         let mut original_tables = OwnedMap::new();
         for table in tables {
@@ -93,11 +99,17 @@ impl CommentCaptureSource {
         scope.exclude_events(&mut source)?;
         scope.exclude_routines(&mut source)?;
         scope.exclude_namespaces(&mut source);
-        Ok(source)
+        let mut comments = (*source.comments).clone();
+        for address in source.excluded {
+            comments.remove(&address)?;
+        }
+        Ok(Self {
+            comments: Arc::new(comments),
+        })
     }
 }
 
-impl CommentCaptureSource {
+impl Selection {
     fn has_class(&self, class_id: u32) -> bool {
         self.comments
             .keys()
@@ -125,7 +137,7 @@ impl CommentCaptureSource {
 }
 
 impl MemoryCaptureSource for CommentCaptureSource {
-    type Frozen = CapturedMemoryValue<Vec<(CommentAddress, String)>>;
+    type Frozen = CapturedMemoryValue<CapturedComments>;
 
     fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
         let production = ProductionControl::new(
@@ -133,14 +145,12 @@ impl MemoryCaptureSource for CommentCaptureSource {
             control.cancellation(),
             control.cancellation(),
         );
-        let value = super::capture::selected_comments(
-            &self.comments,
-            |address| !self.excluded.contains(address),
-            &production,
-        )
-        .map_err(|error| StorageBackendError::backend("comment catalog capture", error))?
-        .into_budgeted()
-        .unwrap_or_else(|_| unreachable!("comment capture owns its allowance"));
+        let value = self
+            .comments
+            .capture(&production)
+            .map_err(|error| StorageBackendError::backend("comment catalog capture", error))?
+            .into_budgeted()
+            .unwrap_or_else(|_| unreachable!("comment capture owns its allowance"));
         CapturedMemoryValue::new(value, control)
     }
 }
@@ -152,7 +162,7 @@ struct Scope<'a, 'd> {
 }
 
 impl Scope<'_, '_> {
-    fn exclude_namespaces(&self, source: &mut CommentCaptureSource) {
+    fn exclude_namespaces(&self, source: &mut Selection) {
         if let Some(namespace) = self.temporary_namespace {
             source.exclude(NAMESPACE_CLASS, namespace.namespace);
             source.exclude(NAMESPACE_CLASS, namespace.toast_namespace);

@@ -52,7 +52,7 @@ fn fixture() -> CatalogReadView {
             },
         )
         .unwrap();
-    Arc::make_mut(&mut snapshot.definitions.foreign_tables).insert(
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
         RelationIdentity::new("public", "remote"),
         StoredForeignTable {
             name: "public.remote".into(),
@@ -66,9 +66,11 @@ fn fixture() -> CatalogReadView {
             dropped_attributes: vec![],
             checks: vec![],
             option_order: vec!["opaque".into()],
-            options: [("opaque".into(), "x".repeat(4 << 20))].into(),
+            options: [("opaque".into(), "x".repeat(4 << 20))]
+                .into_iter()
+                .collect(),
         },
-    );
+    )]);
     CatalogReadView::new(snapshot)
 }
 

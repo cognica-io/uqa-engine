@@ -182,6 +182,25 @@ impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, 
     }
 }
 
+impl
+    CatalogCell<
+        uqa_execution::catalog::foreign::ForeignCatalog,
+        uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
+    >
+{
+    pub(crate) fn tables(
+        &self,
+    ) -> MappedRwLockReadGuard<'_, uqa_execution::catalog::foreign::ForeignTables> {
+        MappedRwLockReadGuard::map(self.read(), |catalog| catalog.tables())
+    }
+    pub(crate) fn security(
+        &self,
+    ) -> MappedRwLockReadGuard<'_, uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>
+    {
+        MappedRwLockReadGuard::map(self.read(), |catalog| catalog.security())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CatalogCell;

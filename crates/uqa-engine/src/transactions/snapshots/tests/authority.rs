@@ -81,43 +81,29 @@ fn same_authority(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
 
 fn same_foreign(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
     let saved = selected.foreign.captured(&selected.cut).unwrap();
-    assert_eq!(saved.get().unwrap().len(), 1);
-    let saved = &saved.get().unwrap()[0];
-    let definition = &original.foreign_tables[&saved.relation];
-    let authority = &original.foreign_table_security[&saved.relation];
-    assert_eq!(saved.definition.object_id, definition.object_id);
-    assert_eq!(saved.definition.catalog_oids, definition.catalog_oids);
+    let saved = saved.get().unwrap();
+    assert_eq!(saved.tables.len(), 1);
+    assert_eq!(saved.security.len(), 1);
+    let (relation, definition) = saved.tables.iter().next().unwrap();
+    let original_definition = &original.foreign_catalog.tables()[relation];
+    assert_eq!(definition.object_id, original_definition.object_id);
+    assert_eq!(definition.catalog_oids, original_definition.catalog_oids);
     assert_eq!(
-        saved.definition.server_reference,
-        definition.server_reference
+        definition.server_reference,
+        original_definition.server_reference
     );
     assert_eq!(
-        saved.definition.dropped_attributes,
-        definition.dropped_attributes
+        definition.dropped_attributes,
+        original_definition.dropped_attributes
     );
     assert_eq!(
-        serde_json::to_value(&saved.definition.columns).unwrap(),
-        serde_json::to_value(&definition.columns).unwrap()
+        serde_json::to_value(&definition.columns).unwrap(),
+        serde_json::to_value(&original_definition.columns).unwrap()
     );
-    assert_eq!(saved.security.privileges.role_owner, authority.role_owner);
-    assert_eq!(saved.security.privileges.acl(), authority.acl.as_deref());
-    assert!(saved
-        .security
-        .privileges
-        .column_acls()
-        .iter()
-        .map(|(k, v)| (k, v))
-        .eq(authority.column_acls.iter()));
     assert_eq!(
-        saved.security.relation_revision,
-        authority.acl_revisions.relation
+        saved.security.get(relation).unwrap().security(),
+        &original.foreign_catalog.security()[relation]
     );
-    assert!(saved
-        .security
-        .column_revisions
-        .iter()
-        .map(|(k, v)| (k, v))
-        .eq(authority.acl_revisions.columns.iter()));
 }
 
 #[rstest::rstest]

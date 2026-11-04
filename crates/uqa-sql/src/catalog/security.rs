@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+pub mod foreign_tables;
+
 use std::collections::BTreeMap;
 pub mod acl_command;
 pub mod acl_warning;

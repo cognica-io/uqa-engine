@@ -5,8 +5,8 @@
 //
 
 use super::{capture::capture, *};
-use std::collections::BTreeSet;
-use uqa_execution::catalog::comments::{CommentAddress, CommentRegistry};
+use std::collections::{BTreeMap, BTreeSet};
+use uqa_execution::catalog::comments::CommentAddress;
 use uqa_sql::catalog::dependencies::*;
 
 fn addresses(engine: &Engine, class_id: u32, query: &str) -> Vec<CommentAddress> {
@@ -65,26 +65,30 @@ fn definitions(engine: &Engine) -> BTreeSet<CommentAddress> {
     );
     let mut comments = engine.durable.comments.write();
     for address in &excluded {
-        comments.insert(*address, "temporary".into());
+        comments.insert(*address, "temporary").unwrap();
     }
-    comments.insert(
-        ObjectAddress {
-            class_id: 999,
-            object_id: temp_relation,
-            sub_id: 1,
-        }
-        .into(),
-        "opaque class".into(),
-    );
-    comments.insert(
-        ObjectAddress {
-            class_id: RELATION_CLASS,
-            object_id: u32::MAX - 1,
-            sub_id: 7,
-        }
-        .into(),
-        "dangling".into(),
-    );
+    comments
+        .insert(
+            ObjectAddress {
+                class_id: 999,
+                object_id: temp_relation,
+                sub_id: 1,
+            }
+            .into(),
+            "opaque class",
+        )
+        .unwrap();
+    comments
+        .insert(
+            ObjectAddress {
+                class_id: RELATION_CLASS,
+                object_id: u32::MAX - 1,
+                sub_id: 7,
+            }
+            .into(),
+            "dangling",
+        )
+        .unwrap();
     excluded
 }
 
@@ -102,7 +106,7 @@ fn transaction_comment_sources_preserve_original_object_eligibility_after_closur
         .iter()
         .filter(|(address, _)| !excluded.contains(address))
         .map(|(address, text)| (*address, text.clone()))
-        .collect::<CommentRegistry>();
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(expected.len(), 3);
     drop(original);
     sql(&engine, "BEGIN; COMMENT ON TYPE saved_type IS 'private'; DROP TYPE pg_temp.temp_enum; CREATE TYPE pg_temp.temp_enum AS ENUM('replacement'); COMMENT ON TYPE pg_temp.temp_enum IS 'replacement'");
@@ -117,8 +121,8 @@ fn transaction_comment_sources_preserve_original_object_eligibility_after_closur
         .get()
         .unwrap()
         .iter()
-        .cloned()
-        .collect::<CommentRegistry>();
+        .map(|(address, text)| (*address, text.clone()))
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(saved, expected);
     assert!(saved.keys().all(|address| !excluded.contains(address)));
     drop(selected);
@@ -126,4 +130,42 @@ fn transaction_comment_sources_preserve_original_object_eligibility_after_closur
     assert!(captured.get().is_err());
     drop(captured);
     assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn committed_comment_roots_capture_original_text_with_bounded_work() {
+    for count in [1, 32, 128] {
+        let engine = Engine::new();
+        for index in 0..count {
+            sql(&engine, &format!("CREATE TYPE saved_{index:03} AS ENUM ('one'); COMMENT ON TYPE saved_{index:03} IS 'original 한글'"));
+        }
+        let original = engine.durable.comments.snapshot();
+        let weak = Arc::downgrade(&original);
+        let expected = original
+            .iter()
+            .map(|(address, text)| (*address, text.clone()))
+            .collect::<BTreeMap<_, _>>();
+        drop(original);
+        sql(&engine, "BEGIN; COMMENT ON TYPE saved_000 IS 'private'; SAVEPOINT nested; COMMENT ON TYPE saved_000 IS 'nested'; ROLLBACK TO nested");
+        let control = StorageReadControl::with_limit(8 << 20);
+        let selected = capture(&engine, &control);
+        let mut retained = None;
+        let allocated = allocation_counter::measure(|| {
+            retained = Some(selected.comments.captured(&selected.cut).unwrap());
+        });
+        assert!(
+            allocated.bytes_total < 16 << 10 && allocated.count_total < 64,
+            "count={count}: {allocated:?}"
+        );
+        let retained = retained.unwrap();
+        sql(&engine, "COMMIT; DROP TYPE saved_000; CREATE TYPE saved_000 AS ENUM ('replacement'); COMMENT ON TYPE saved_000 IS 'replacement'");
+        drop(engine);
+        assert!(weak.upgrade().is_none());
+        assert!(retained.get().unwrap().iter().eq(expected.iter()));
+        drop(selected);
+        control.cancellation().cancel();
+        assert!(retained.get().is_err());
+        drop(retained);
+        assert_eq!(control.memory().used(), 0);
+    }
 }

@@ -17,27 +17,44 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
     let relation = RelationIdentity::new("public", "docs");
     let trigger = engine.durable.triggers.read()[&relation]["saved"].clone();
     let rule = engine.durable.rules.read()[&relation]["changed"].clone();
-    for (name, entries) in engine.durable.triggers.write().iter_mut() {
-        if uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&name.schema) {
-            for entry in entries.values_mut() {
-                entry.definition.arguments.push("t".repeat(1 << 20));
+    engine
+        .durable
+        .triggers
+        .write()
+        .rewrite(|relation, _, entry| {
+            if !uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&relation.schema) {
+                return Ok(None);
             }
-        }
-    }
-    for (name, entries) in engine.durable.rules.write().iter_mut() {
-        if uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&name.schema) {
-            for entry in Arc::make_mut(entries).values_mut() {
-                entry.definition.name = "t".repeat(1 << 20);
+            let mut entry = entry.clone();
+            entry.definition.arguments.push("t".repeat(1 << 20));
+            Ok(Some(entry))
+        })
+        .unwrap();
+    engine
+        .durable
+        .rules
+        .write()
+        .rewrite(|relation, _, entry| {
+            if !uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&relation.schema) {
+                return Ok(None);
             }
-        }
-    }
-    for definition in engine.durable.foreign_tables.write().values_mut() {
+            let mut entry = entry.clone();
+            entry.definition.name = "t".repeat(1 << 20);
+            Ok(Some(entry))
+        })
+        .unwrap();
+    let mut foreign = engine.durable.foreign_catalog.read().clone();
+    let original = foreign.clone();
+    for (relation, definition) in original.tables() {
         if definition.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            let mut definition = definition.clone();
             definition
                 .options
                 .insert("large".into(), "t".repeat(1 << 20));
+            foreign.replace_table(relation.clone(), definition).unwrap();
         }
     }
+    *engine.durable.foreign_catalog.write() = foreign;
     sql(&engine, "BEGIN; UPDATE docs SET id=2; ALTER TABLE docs DISABLE TRIGGER saved; CREATE OR REPLACE RULE changed AS ON UPDATE TO docs DO INSTEAD NOTHING; SAVEPOINT nested; DROP TRIGGER saved ON docs; ROLLBACK TO nested");
     let control = StorageReadControl::with_limit(64 << 10);
     let selected = capture(&engine, &control);
@@ -61,14 +78,14 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
     drop(engine);
     let triggers = selected.catalogs.triggers.captured(&selected.cut).unwrap();
     assert_eq!(triggers.get().unwrap().len(), 1);
-    assert_eq!(triggers.get().unwrap()[0].0, relation);
+    assert_eq!(triggers.get().unwrap().iter().next().unwrap().0, &relation);
     assert_eq!(
-        serde_json::to_value(&triggers.get().unwrap()[0].1[0].1).unwrap(),
+        serde_json::to_value(&triggers.get().unwrap().get(&relation).unwrap()["saved"]).unwrap(),
         serde_json::to_value(&trigger).unwrap()
     );
     let rules = selected.catalogs.rules.captured(&selected.cut).unwrap();
     assert_eq!(rules.get().unwrap().len(), 1);
-    let saved = &rules.get().unwrap()[0].1[0].1;
+    let saved = &rules.get().unwrap().get(&relation).unwrap()["changed"];
     assert_eq!(saved.catalog_oid, rule.catalog_oid);
     assert_eq!(saved.enabled, rule.enabled);
     assert_eq!(
@@ -76,9 +93,17 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
         serde_json::to_value(&rule.definition).unwrap()
     );
     let foreign = selected.foreign.captured(&selected.cut).unwrap();
-    assert_eq!(foreign.get().unwrap().len(), 1);
+    assert_eq!(foreign.get().unwrap().tables.len(), 1);
     assert_eq!(
-        foreign.get().unwrap()[0].relation,
+        foreign
+            .get()
+            .unwrap()
+            .tables
+            .iter()
+            .next()
+            .unwrap()
+            .0
+            .clone(),
         RelationIdentity::new("public", "remote_rows")
     );
     drop((triggers, rules, foreign, selected));

@@ -36,8 +36,8 @@ impl MutationCoordinator<'_> {
                 })
                 .or_else(|| {
                     self.durable
-                        .foreign_tables
-                        .read()
+                        .foreign_catalog
+                        .tables()
                         .get(relation)
                         .map(|table| table.relation_oids().relation)
                 })

@@ -7,18 +7,37 @@
 use crate::ast::{CreateRule, CreateTrigger, EventEnableMode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use uqa_core::memory::OwnedSet;
+
+mod registry;
+pub use registry::{CapturedEventCatalog, EventCatalog, EventDefinitions, EventValues};
+
+/// Dependency rewrites preserve their existing diagnostic text and keep native admission errors typed across storage publication.
+#[derive(Debug, thiserror::Error)]
+pub enum EventChangeError {
+    #[error("{0}")]
+    Definition(String),
+    #[error("{0}")]
+    SQL(#[from] crate::SQLError),
+}
+
+impl From<String> for EventChangeError {
+    fn from(message: String) -> Self {
+        Self::Definition(message)
+    }
+}
 
 mod rule_condition_binding;
 pub use rule_condition_binding::RuleConditionBinding;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleDependencies {
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub relations: BTreeSet<uqa_core::RelationIdentity>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub columns: BTreeSet<RuleColumnDependency>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub routines: BTreeSet<RuleRoutineDependency>,
+    #[serde(default, skip_serializing_if = "OwnedSet::is_empty")]
+    pub relations: OwnedSet<uqa_core::RelationIdentity>,
+    #[serde(default, skip_serializing_if = "OwnedSet::is_empty")]
+    pub columns: OwnedSet<RuleColumnDependency>,
+    #[serde(default, skip_serializing_if = "OwnedSet::is_empty")]
+    pub routines: OwnedSet<RuleRoutineDependency>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -112,14 +131,8 @@ impl StoredTrigger {
     }
 }
 
-pub type TriggerCatalog = std::collections::BTreeMap<
-    uqa_core::RelationIdentity,
-    std::collections::BTreeMap<String, StoredTrigger>,
->;
-pub type RuleCatalog = std::collections::BTreeMap<
-    uqa_core::RelationIdentity,
-    std::sync::Arc<std::collections::BTreeMap<String, StoredRule>>,
->;
+pub type TriggerCatalog = EventCatalog<StoredTrigger>;
+pub type RuleCatalog = EventCatalog<StoredRule>;
 pub mod dependencies;
 pub mod renames;
 

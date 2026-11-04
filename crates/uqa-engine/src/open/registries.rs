@@ -24,7 +24,9 @@ impl Engine {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
         self.restore_ranges_from_catalog(catalog)?;
-        *self.durable.comments.write() = uqa_execution::catalog::comments::restore(catalog)?;
+        let comment_memory = self.durable.comments.read().budget().clone();
+        let comments = uqa_execution::catalog::comments::restore(catalog, &comment_memory)?;
+        *self.durable.comments.write() = comments;
         self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
@@ -111,8 +113,7 @@ impl Engine {
         )?;
         *self.durable.foreign_wrappers.write() = restored.wrappers;
         *self.durable.foreign_servers.write() = restored.servers;
-        *self.durable.foreign_tables.write() = restored.tables;
-        *self.durable.foreign_table_security.write() = restored.security;
+        *self.durable.foreign_catalog.write() = restored.relations;
         Ok(())
     }
 
@@ -147,11 +148,8 @@ impl Engine {
             &self.index_registry_context(),
             &rows.builds,
         )?;
-        for row in rows.rows {
-            self.durable
-                .catalog_indexes
-                .write()
-                .insert(row.relation.clone(), row.clone());
+        *self.durable.catalog_indexes.write() = rows.catalog().clone();
+        for row in rows.iter() {
             let keys: Vec<uqa_sql::ast::IndexKey> = serde_json::from_str(&row.columns_json)?;
             let columns = keys
                 .iter()
@@ -181,7 +179,7 @@ impl Engine {
                             row.table_name
                         )));
                     };
-                    let spec = uqa_execution::catalog::index::vectors::stored_spec(&row, dim)?;
+                    let spec = uqa_execution::catalog::index::vectors::stored_spec(row, dim)?;
                     if !self.restore_vector_field_index(&row.table_name, col, dim, spec)? {
                         return Err(StorageBackendError::Other(format!(
                             "failed to restore vector index `{}` for table `{}`",
@@ -283,3 +281,6 @@ impl Engine {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

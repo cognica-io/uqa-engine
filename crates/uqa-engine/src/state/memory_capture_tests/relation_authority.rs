@@ -5,13 +5,10 @@
 //
 
 use super::{sql, Engine, StorageReadControl};
-use std::collections::BTreeMap;
 use uqa_sql::catalog::security::{
+    foreign_tables::{CapturedForeignTableSecurities, ForeignTableSecurities},
     system_relations::{CapturedSystemRelationSecurities, SystemRelationSecurities},
-    table_binding::CapturedTableSecurity,
-    BoundTableSecurity,
 };
-use uqa_storage::RelationIdentity;
 
 fn fixture(engine: &Engine) {
     sql(engine, "CREATE ROLE reader; GRANT UPDATE ON pg_class TO reader WITH GRANT OPTION; GRANT SELECT(relname,relnamespace,relkind) ON pg_class TO reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM PUBLIC; GRANT EXECUTE ON FUNCTION lower(text) TO reader WITH GRANT OPTION; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE \"Foreign.Name\"(v integer) SERVER remote; GRANT SELECT(v) ON \"Foreign.Name\" TO reader WITH GRANT OPTION");
@@ -26,27 +23,11 @@ fn same_system(saved: &CapturedSystemRelationSecurities, original: &SystemRelati
     }
 }
 
-fn same_foreign(
-    saved: &[(RelationIdentity, CapturedTableSecurity)],
-    original: &BTreeMap<RelationIdentity, BoundTableSecurity>,
-) {
+fn same_foreign(saved: &CapturedForeignTableSecurities, original: &ForeignTableSecurities) {
     assert_eq!(saved.len(), original.len());
-    for ((name, value), (expected_name, expected)) in saved.iter().zip(original) {
+    for ((name, value), (expected_name, expected)) in saved.iter().zip(original.iter()) {
         assert_eq!(name, expected_name);
-        assert_eq!(value.privileges.role_owner, expected.role_owner);
-        assert_eq!(value.privileges.acl(), expected.acl.as_deref());
-        assert!(value
-            .privileges
-            .column_acls()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(expected.column_acls.iter()));
-        assert_eq!(value.relation_revision, expected.acl_revisions.relation);
-        assert!(value
-            .column_revisions
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(expected.acl_revisions.columns.iter()));
+        assert_eq!(value.security(), expected);
     }
 }
 
@@ -57,10 +38,14 @@ fn memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_re
         fixture(&engine);
         let routines = engine.durable.builtin_routine_security.snapshot();
         let system = engine.durable.system_relation_security.snapshot();
-        let foreign = engine.durable.foreign_table_security.snapshot();
+        let foreign = engine
+            .durable
+            .foreign_catalog
+            .snapshot()
+            .security_snapshot();
         let routine_key = engine.durable.builtin_routine_security.key().unwrap();
         let system_key = engine.durable.system_relation_security.key().unwrap();
-        let foreign_key = engine.durable.foreign_table_security.key().unwrap();
+        let foreign_key = engine.durable.foreign_catalog.key().unwrap();
         let control = StorageReadControl::with_limit(1 << 20);
         let cut = engine
             .storage
@@ -74,7 +59,7 @@ fn memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_re
             sql(&engine, "BEGIN; REVOKE SELECT(relname) ON pg_class FROM reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM reader; SAVEPOINT changed; DROP FOREIGN TABLE \"Foreign.Name\"; ROLLBACK TO changed; ROLLBACK");
             assert_eq!(*engine.durable.builtin_routine_security.read(), *routines);
             assert_eq!(*engine.durable.system_relation_security.read(), *system);
-            assert_eq!(*engine.durable.foreign_table_security.read(), *foreign);
+            assert_eq!(*engine.durable.foreign_catalog.security(), *foreign);
             sql(&engine, "REVOKE UPDATE ON pg_class FROM reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM reader; DROP FOREIGN TABLE \"Foreign.Name\"; CREATE FOREIGN TABLE \"Foreign.Name\"(replacement text) SERVER remote");
         }
         drop(engine);
@@ -84,7 +69,7 @@ fn memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_re
         drop(cut);
         assert!(saved_routines.get().unwrap().iter().eq(routines.iter()));
         same_system(saved_system.get().unwrap(), &system);
-        same_foreign(saved_foreign.get().unwrap(), &foreign);
+        same_foreign(&saved_foreign.get().unwrap().security, &foreign);
         control.cancellation().cancel();
         assert!(saved_routines.get().is_err());
         assert!(saved_system.get().is_err());

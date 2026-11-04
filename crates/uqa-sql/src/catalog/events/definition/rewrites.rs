@@ -17,15 +17,15 @@ use crate::{
     plpgsql::{ResolvedVariable, VariableResolver},
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 pub fn rewrite_trigger_routine_references(
     next_triggers: &mut TriggerCatalog,
     target: &FunctionBinding,
     new_name: &str,
 ) -> Result<bool, SQLError> {
-    let mut triggers_changed = false;
-    for trigger in next_triggers.values_mut().flat_map(BTreeMap::values_mut) {
+    next_triggers.rewrite(|_, _, original| {
+        let mut trigger = original.clone();
+        let mut triggers_changed = false;
         let invokes_target = match (trigger.function_object_id, target.object_id) {
             (Some(stored), Some(target)) => stored == target,
             (None, None) => {
@@ -42,9 +42,8 @@ pub fn rewrite_trigger_routine_references(
                 condition, target, new_name,
             )?;
         }
-    }
-
-    Ok(triggers_changed)
+        Ok(triggers_changed.then_some(trigger))
+    })
 }
 impl EventAnalysisContext<'_> {
     pub fn rewrite_rule_routine_references(
@@ -53,67 +52,63 @@ impl EventAnalysisContext<'_> {
         target: &FunctionBinding,
         new_name: &str,
     ) -> Result<bool, SQLError> {
-        let mut rules_changed = false;
-        for (event_relation, entries) in next_rules {
-            for rule in std::sync::Arc::make_mut(entries).values_mut() {
-                let references_target = rule
-                    .dependencies
-                    .as_ref()
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "rule `{}` on `{}` has no bound dependency state",
-                            rule.definition.name,
-                            event_relation.qualified_name()
-                        ))
-                    })?
-                    .routines
-                    .iter()
-                    .any(
-                        |dependency| match (dependency.object_id, target.object_id) {
-                            (Some(dependency), Some(target)) => dependency == target,
-                            (None, None) => {
-                                dependency.name == target.name
-                                    && dependency.argument_types == target.argument_types
-                            }
-                            _ => false,
-                        },
-                    );
-                if !references_target {
-                    continue;
-                }
-                if let Some(condition) = &mut rule.definition.condition {
-                    crate::catalog::stored_ast::rewrite_expression_routine_identity(
-                        condition, target, new_name,
-                    )?;
-                }
-                for action in &mut rule.definition.actions {
-                    crate::catalog::stored_ast::rewrite_statement_routine_identity(
-                        action, target, new_name,
-                    )?;
-                }
-                let (validated_relation, condition_plan, condition_binding, dependencies) = self
-                    .validate_rule_definition(
-                        &mut rule.definition,
-                        RelationLookupMode::Bound,
-                        None,
-                        None,
-                    )?;
-                if &validated_relation != event_relation {
-                    return Err(SQLError::Internal(format!(
-                        "rewritten rule `{}` moved from `{}` to `{}`",
+        next_rules.rewrite(|event_relation, _, rule| {
+            let references_target = rule
+                .dependencies
+                .as_ref()
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
                         rule.definition.name,
-                        event_relation.qualified_name(),
-                        validated_relation.qualified_name()
-                    )));
-                }
-                rule.condition_plan = condition_plan;
-                rule.condition_binding = condition_binding;
-                rule.dependencies = Some(dependencies);
-                rules_changed = true;
+                        event_relation.qualified_name()
+                    ))
+                })?
+                .routines
+                .iter()
+                .any(
+                    |dependency| match (dependency.object_id, target.object_id) {
+                        (Some(dependency), Some(target)) => dependency == target,
+                        (None, None) => {
+                            dependency.name == target.name
+                                && dependency.argument_types == target.argument_types
+                        }
+                        _ => false,
+                    },
+                );
+            if !references_target {
+                return Ok(None);
             }
-        }
-
-        Ok(rules_changed)
+            let mut rule = rule.clone();
+            if let Some(condition) = &mut rule.definition.condition {
+                crate::catalog::stored_ast::rewrite_expression_routine_identity(
+                    condition, target, new_name,
+                )?;
+            }
+            for action in &mut rule.definition.actions {
+                crate::catalog::stored_ast::rewrite_statement_routine_identity(
+                    action, target, new_name,
+                )?;
+            }
+            let (validated_relation, condition_plan, condition_binding, dependencies) = self
+                .validate_rule_definition(
+                    &mut rule.definition,
+                    RelationLookupMode::Bound,
+                    None,
+                    None,
+                )?;
+            if &validated_relation != event_relation {
+                return Err(SQLError::Internal(format!(
+                    "rewritten rule `{}` moved from `{}` to `{}`",
+                    rule.definition.name,
+                    event_relation.qualified_name(),
+                    validated_relation.qualified_name()
+                )));
+            }
+            rule.condition_plan = condition_plan;
+            rule.condition_binding = condition_binding;
+            rule.dependencies = Some(dependencies);
+            Ok(Some(rule))
+        })
     }
     pub fn renamed_event_column(
         &self,
@@ -122,7 +117,8 @@ impl EventAnalysisContext<'_> {
         relation: &RelationIdentity,
         from: &str,
         to: &str,
-    ) -> Result<Option<(TriggerCatalog, RuleCatalog)>, String> {
+    ) -> Result<Option<(TriggerCatalog, RuleCatalog)>, crate::catalog::events::EventChangeError>
+    {
         let dependency = RuleColumnDependency {
             relation: relation.clone(),
             column: from.to_string(),
@@ -140,8 +136,10 @@ impl EventAnalysisContext<'_> {
         }
         let mut next_triggers = triggers.clone();
         let mut next_rules = rules.clone();
-        if let Some(entries) = next_triggers.get_mut(relation) {
-            for trigger in entries.values_mut() {
+        if let Some(original) = triggers.get(relation) {
+            let mut entries = original.clone();
+            for (name, trigger) in original {
+                let mut trigger = trigger.clone();
                 for column in &mut trigger.definition.update_columns {
                     if column == from {
                         *column = to.to_string();
@@ -152,7 +150,9 @@ impl EventAnalysisContext<'_> {
                         condition, from, to,
                     )?;
                 }
+                entries.insert(name.clone(), trigger)?;
             }
+            next_triggers.insert(relation.clone(), entries)?;
         }
         self.rewrite_rule_catalog_column(&mut next_rules, &dependency, relation, from, to)?;
 
@@ -165,9 +165,12 @@ impl EventAnalysisContext<'_> {
         relation: &RelationIdentity,
         from: &str,
         to: &str,
-    ) -> Result<(), String> {
-        for (event_relation, entries) in rules {
-            for rule in std::sync::Arc::make_mut(entries).values_mut() {
+    ) -> Result<(), crate::catalog::events::EventChangeError> {
+        let mut candidate = rules.clone();
+        for (event_relation, entries) in rules.iter() {
+            let mut next = entries.clone();
+            let mut changed = false;
+            for (name, rule) in entries {
                 let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
                     format!(
                         "rule `{}` on `{}` has no bound dependency state",
@@ -176,10 +179,17 @@ impl EventAnalysisContext<'_> {
                     )
                 })?;
                 if dependencies.columns.contains(dependency) {
-                    self.rewrite_stored_rule_column(rule, event_relation, relation, from, to)?;
+                    let mut rule = rule.clone();
+                    self.rewrite_stored_rule_column(&mut rule, event_relation, relation, from, to)?;
+                    next.insert(name.clone(), rule)?;
+                    changed = true;
                 }
             }
+            if changed {
+                candidate.insert(event_relation.clone(), next)?;
+            }
         }
+        *rules = candidate;
         Ok(())
     }
 
@@ -266,12 +276,14 @@ impl EventAnalysisContext<'_> {
     pub fn rebind_rule_column_drop(
         &self,
         prepared: &mut PreparedRuleColumnDrop,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::catalog::events::EventChangeError> {
+        let mut candidate = prepared.rules.clone();
         for (event_relation, name) in &prepared.rebind {
-            let rule = prepared
+            let mut rule = prepared
                 .rules
-                .get_mut(event_relation)
-                .and_then(|entries| std::sync::Arc::make_mut(entries).get_mut(name))
+                .get(event_relation)
+                .and_then(|entries| entries.get(name))
+                .cloned()
                 .ok_or_else(|| {
                     format!(
                         "rule `{name}` on `{}` disappeared while dropping a column",
@@ -295,13 +307,15 @@ impl EventAnalysisContext<'_> {
                 return Err(format!(
                     "rule `{}` changed event relation while rebinding column drop",
                     rule.definition.name
-                ));
+                )
+                .into());
             }
             rule.condition_plan = condition_plan;
             rule.condition_binding = condition_binding;
             rule.dependencies = Some(dependencies);
+            candidate.insert_event(event_relation.clone(), name.clone(), rule)?;
         }
-
+        prepared.rules = candidate;
         Ok(())
     }
 }

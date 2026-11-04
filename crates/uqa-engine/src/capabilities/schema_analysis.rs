@@ -7,7 +7,7 @@
 //! Catalog metadata adapters for SQL declaration analysis and physical index validation.
 
 use crate::Engine;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::constraints::names::catalog::{
     ConstraintNameCatalog, ConstraintTableMetadata,
@@ -61,10 +61,8 @@ impl ConstraintNameCatalog for Engine {
             .map(|table| constraint_table_metadata(table))
             .collect()
     }
-    fn constraint_foreign_tables(
-        &self,
-    ) -> Arc<BTreeMap<RelationIdentity, uqa_execution::catalog::foreign::StoredForeignTable>> {
-        self.durable.foreign_tables.snapshot()
+    fn constraint_foreign_tables(&self) -> Arc<uqa_execution::catalog::foreign::ForeignTables> {
+        self.durable.foreign_catalog.snapshot().tables_snapshot()
     }
     fn constraint_domains(&self) -> Arc<uqa_execution::catalog::domain::DomainRegistry> {
         self.durable.domains.snapshot()

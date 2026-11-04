@@ -7,10 +7,11 @@
 //! Convert the complete legacy index graph before publishing any converted metadata.
 
 use super::{
-    invalid, BTreeMap, BTreeSet, CatalogFacade, CatalogIndexRow, CatalogObjectIdentity,
-    CatalogReadView, RelationIdentity, RelationNameResolution, StorageBackendResult, VERSION,
+    invalid, BTreeSet, CatalogFacade, CatalogIndexRow, CatalogObjectIdentity, CatalogReadView,
+    RelationIdentity, RelationNameResolution, StorageBackendResult, VERSION,
 };
 use crate::catalog::index::index_definition;
+use crate::catalog::index::registry::CatalogIndexes;
 use crate::schema::indexes::registry::{constraints, foreign_keys, partitions, validation};
 use uqa_sql::{
     ast::{ColumnDef, TableConstraintSet},
@@ -23,9 +24,16 @@ pub(super) use crate::schema::indexes::constraint_names::REGISTRY_VERSION;
 
 #[derive(Debug)]
 pub struct RestoredIndexCatalog {
-    pub rows: Vec<CatalogIndexRow>,
+    pub(super) rows: Vec<CatalogIndexRow>,
+    pub(super) catalog: CatalogIndexes,
     pub schemas: Vec<(RelationIdentity, Vec<ColumnDef>, TableConstraintSet)>,
     pub builds: Vec<CatalogIndexRow>,
+}
+
+impl RestoredIndexCatalog {
+    pub fn catalog(&self) -> &CatalogIndexes {
+        &self.catalog
+    }
 }
 
 impl std::ops::Deref for RestoredIndexCatalog {
@@ -59,10 +67,11 @@ pub fn restore(
         }
     };
     let stored = storage.load_catalog_indexes()?;
-    let mut rows = super::restore_addresses(storage, catalog, resolution, allow_migration)?
-        .into_iter()
-        .map(|row| (row.relation.clone(), row))
-        .collect::<BTreeMap<_, _>>();
+    let mut rows =
+        CatalogIndexes::with_budget(catalog.snapshot().definitions.catalog_indexes.budget());
+    for row in super::restore_addresses(storage, catalog, resolution, allow_migration)? {
+        rows.insert_in(row, catalog.snapshot())?;
+    }
     let (mut candidate, _) =
         super::candidate_catalog(catalog, &rows.values().cloned().collect::<Vec<_>>())?;
     let mut schemas = Vec::new();
@@ -87,7 +96,17 @@ pub fn restore(
             schema_rows.push(table);
         }
     }
-    // No writes occur until addresses, table ownership, complete ancestry and every FK reference have passed validation.
+    let builds = if legacy {
+        let mut previous = CatalogIndexes::with_budget(rows.budget());
+        for row in stored.iter().cloned() {
+            previous.insert_in(row, catalog.snapshot())?;
+        }
+        crate::schema::indexes::registry::builds::new_physical_indexes(&previous, &rows)?
+    } else {
+        Vec::new()
+    };
+    let native = rows.with_temporary_from(&catalog.snapshot().definitions.catalog_indexes)?;
+    // No writes occur until addresses, table ownership, complete ancestry, FK references and native generation admission have succeeded.
     for row in rows.values() {
         if stored
             .iter()
@@ -106,20 +125,10 @@ pub fn restore(
     if names_migration {
         storage.set_metadata(REGISTRY_VERSION, "2")?;
     }
-    let builds = if legacy {
-        crate::schema::indexes::registry::builds::new_physical_indexes(
-            &stored
-                .into_iter()
-                .map(|row| (row.relation.clone(), row))
-                .collect(),
-            &rows,
-        )?
-    } else {
-        Vec::new()
-    };
     Ok(RestoredIndexCatalog {
         builds,
-        rows: rows.into_values().collect(),
+        rows: rows.values().cloned().collect(),
+        catalog: native,
         schemas,
     })
 }
@@ -132,10 +141,11 @@ impl MigrationAllocator {
     fn new(
         catalog: &CatalogReadView,
         resolution: &RelationNameResolution,
-        rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+        rows: &crate::catalog::index::registry::CatalogIndexes,
     ) -> StorageBackendResult<Self> {
         let mut empty = catalog.snapshot().clone();
-        empty.definitions.catalog_indexes = BTreeMap::new().into();
+        empty.definitions.catalog_indexes =
+            std::sync::Arc::new(CatalogIndexes::with_budget(rows.budget()));
         for table in empty.tables.values_mut() {
             table.keys = Vec::new().into();
         }
@@ -193,7 +203,7 @@ impl CatalogObjectAllocator for MigrationAllocator {
 fn materialize_legacy(
     mut candidate: CatalogReadView,
     resolution: &RelationNameResolution,
-    rows: &mut BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &mut crate::catalog::index::registry::CatalogIndexes,
     stored: &[CatalogIndexRow],
     tables: &mut super::tables::Tables,
 ) -> StorageBackendResult<CatalogReadView> {
@@ -215,13 +225,14 @@ fn materialize_legacy(
             &mut allocator,
         )?;
         for row in change.upserts {
-            rows.insert(row.relation.clone(), row);
+            rows.insert(row, table.persistence)?;
         }
     }
     super::legacy::preserve_derived_names(&candidate, rows, stored, &predecessor, &mut allocator)?;
     partitions::materialize(&candidate, rows, &mut allocator)?;
+    let mut converted = rows.clone();
     for row in rows
-        .values_mut()
+        .values()
         .filter(|row| !stored.iter().any(|old| old.relation == row.relation))
     {
         if let Some(old) = predecessor.iter().find(|old| old.relation == row.relation) {
@@ -236,8 +247,11 @@ fn materialize_legacy(
                     .remove(&(CatalogOidClass::Relation, identity.identity.oid));
                 identity.identity.oid = old.oid();
             }
+            let mut row = row.clone();
             row.definition_json = Some(serde_json::to_string(&definition)?);
+            converted.replace(row)?;
         }
     }
+    *rows = converted;
     Ok(candidate)
 }

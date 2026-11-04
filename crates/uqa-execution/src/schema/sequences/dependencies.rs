@@ -32,13 +32,20 @@ pub fn rewrite_sequence_schema_dependencies(
         }
     }
     let mut foreign_updates = Vec::new();
-    for (relation, mut table) in context.foreign.foreign_tables() {
+    let foreign = context.foreign.foreign_catalog();
+    for (relation, table) in foreign.tables() {
+        let mut table = table.clone();
         if rewrite_sequence_schema_references(&mut table.columns, &mut table.checks, from, to)
             .map_err(StorageBackendError::Other)?
         {
-            foreign_updates.push((relation, table));
+            foreign_updates.push((relation.clone(), table));
         }
     }
+    let foreign = foreign
+        .with_table_updates(&foreign_updates)
+        .map_err(|error| {
+            uqa_storage::StorageBackendError::backend("admit foreign sequence dependencies", error)
+        })?;
     for (state, columns, constraints) in &mut table_updates {
         constraints.columns_declared = Some(state.columns_declared());
         state.persist_candidate(columns, constraints)?;
@@ -51,7 +58,9 @@ pub fn rewrite_sequence_schema_dependencies(
     }
     let foreign_tables_changed = !foreign_updates.is_empty();
     if foreign_tables_changed {
-        context.foreign.publish_foreign_tables(foreign_updates);
+        context
+            .foreign
+            .publish_foreign_tables(foreign, foreign_updates);
     }
     if !table_updates.is_empty() {
         context.changes.table_catalog_changed();

@@ -186,7 +186,9 @@ impl ColumnDropRules for Engine {
     fn prepare(&self, table: &str, column: &str) -> StorageBackendResult<PreparedRuleColumnDrop> {
         self.event_lookup_context()
             .prepare_rule_column_drop(table, column)
-            .map_err(uqa_storage::StorageBackendError::Other)
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("prepare rule column removal", error)
+            })
     }
     fn finish(&self, prepared: PreparedRuleColumnDrop) -> StorageBackendResult<()> {
         self.event_lifecycle_context()

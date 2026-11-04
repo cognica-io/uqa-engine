@@ -16,6 +16,28 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl};
 
+/// Preserve all native column bindings and expression ownership during catalog publication.
+pub fn stored_columns(
+    values: &Vec<crate::ast::ColumnDef>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<crate::ast::ColumnDef>>, SQLError> {
+    crate::plan::copy::capture_stored_with_control(values, control)
+}
+
+pub fn stored_checks(
+    values: &Vec<crate::ast::TableCheck>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<crate::ast::TableCheck>>, SQLError> {
+    crate::plan::copy::capture_stored_with_control(values, control)
+}
+
+pub fn stored_options(
+    values: &uqa_core::memory::OwnedMap<String, String>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<uqa_core::memory::OwnedMap<String, String>>, SQLError> {
+    crate::plan::copy::capture_stored_with_control(values, control)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CapturedForeignServer {
     pub name: String,

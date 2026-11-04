@@ -26,7 +26,7 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{BoundSequenceSecurity, BoundTableSecurity};
+use security::BoundSequenceSecurity;
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -128,7 +128,7 @@ pub struct CatalogDefinitionSnapshot {
     pub builtin_routine_security:
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
+    pub foreign_tables: Arc<foreign::ForeignTables>,
     pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
     pub sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
@@ -144,7 +144,7 @@ pub struct CatalogDefinitionSnapshot {
     pub composites: Arc<composite_type::CompositeRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub catalog_indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
     pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
     pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
@@ -154,16 +154,12 @@ pub struct CatalogDefinitionSnapshot {
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
     pub graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub foreign_table_security:
+        Arc<uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>,
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub roles: Arc<RoleDefinitions>,
-    pub triggers: Arc<
-        BTreeMap<
-            uqa_storage::RelationIdentity,
-            BTreeMap<String, uqa_sql::catalog::events::StoredTrigger>,
-        >,
-    >,
+    pub triggers: Arc<uqa_sql::catalog::events::TriggerCatalog>,
     pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
 }
 

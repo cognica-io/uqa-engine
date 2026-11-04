@@ -157,13 +157,13 @@ fn add_relations(snapshot: &mut CatalogReadSnapshot, tables: u32) {
         server_reference: None,
         columns: Vec::new(),
         checks: Vec::new(),
-        options: BTreeMap::default(),
+        options: uqa_core::memory::OwnedMap::new(),
         option_order: Vec::new(),
     };
-    snapshot.definitions.foreign_tables = Arc::new(BTreeMap::from([(
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
         RelationIdentity::new("public", "external"),
         foreign,
-    )]));
+    )]);
 }
 
 fn projected_oids(catalog: &CatalogReadView) -> BTreeSet<i64> {
@@ -292,11 +292,11 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
             .unwrap()
             .unwrap();
     }
-    Arc::make_mut(&mut snapshot.definitions.foreign_tables)
-        .values_mut()
-        .next()
-        .unwrap()
-        .catalog_oids = Some(oids(80_020));
+    let (relation, table) = snapshot.definitions.foreign_tables.iter().next().unwrap();
+    let mut table = table.clone();
+    table.catalog_oids = Some(oids(80_020));
+    snapshot.definitions.foreign_tables =
+        crate::catalog::test_support::foreign_tables([(relation.clone(), table)]);
     snapshot.definitions.graph_catalog_oids = Arc::new(
         uqa_sql::catalog::graph_oids::GraphOidRegistry::try_from_iter([(
             "graph".into(),

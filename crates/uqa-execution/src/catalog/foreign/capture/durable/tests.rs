@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use uqa_core::{catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken};
+use uqa_core::{
+    catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken, RelationIdentity,
+};
+use uqa_sql::{ast::RelationPersistence, catalog::security::BoundTableSecurity};
 
 fn fixture() -> ForeignTableCaptureSource {
     let first = RelationIdentity::new("Quoted.Schema", "Foreign.Name");
@@ -20,20 +23,22 @@ fn fixture() -> ForeignTableCaptureSource {
         .acl_revisions
         .columns
         .insert("Removed.Name".into(), [4; 16]);
+    let mut catalog = ForeignCatalog::default();
+    catalog
+        .insert(
+            first,
+            super::super::tests::definition(),
+            BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
+    catalog.insert(second, unlogged, security).unwrap();
     ForeignTableCaptureSource {
-        tables: Arc::new(BTreeMap::from([
-            (first.clone(), super::super::tests::definition()),
-            (second.clone(), unlogged),
-        ])),
-        security: Arc::new(BTreeMap::from([
-            (first, BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
-            (second, security),
-        ])),
+        catalog: Arc::new(catalog),
     }
 }
 
 #[test]
-fn durable_foreign_capture_joins_original_authority_before_admitting_selected_payloads() {
+fn durable_foreign_capture_retains_paired_roots_without_visiting_temporary_payloads() {
     let mut source = fixture();
     let memory = MemoryBudget::new(64 << 10);
     let token = CancellationToken::new();
@@ -45,40 +50,43 @@ fn durable_foreign_capture_joins_original_authority_before_admitting_selected_pa
     temporary
         .options
         .insert("payload".into(), "x".repeat(1 << 20));
-    Arc::make_mut(&mut source.tables).insert(
-        RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
-        temporary,
-    );
-    // Temporary authority is deliberately absent: selection precedes the metadata join.
+    Arc::make_mut(&mut source.catalog)
+        .insert(
+            RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
+            temporary,
+            BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
     let mut saved = None;
     let allocation =
         allocation_counter::measure(|| saved = Some(source.capture(&control).unwrap()));
     let saved = saved.unwrap();
+    assert_eq!(allocation.count_total, 0);
     assert_eq!(memory.used(), retained * 2);
-    assert_eq!(allocation.bytes_current, i64::try_from(retained).unwrap());
-    assert_eq!(saved.len(), 2);
-    for (value, original) in saved.iter().zip(first.iter()) {
-        assert_eq!(value.relation, original.relation);
-        assert_eq!(value.definition.object_id, original.definition.object_id);
-        assert_eq!(
-            value.definition.catalog_oids,
-            original.definition.catalog_oids
-        );
-        assert_eq!(
-            value.definition.server_reference,
-            original.definition.server_reference
-        );
-        assert_eq!(value.security, original.security);
+    assert_eq!(saved.tables.len(), 2);
+    assert_eq!(saved.security.len(), 2);
+    for (relation, definition) in saved.tables.iter() {
+        assert!(std::ptr::eq(
+            definition,
+            first.tables.get(relation).unwrap()
+        ));
+        assert!(std::ptr::eq(
+            saved.security.get(relation).unwrap(),
+            first.security.get(relation).unwrap()
+        ));
     }
-    assert_eq!(saved[0].security.privileges.acl(), None);
-    assert_eq!(saved[1].security.privileges.acl(), Some([].as_slice()));
-    assert_eq!(saved[1].security.relation_revision, Some([3; 16]));
+    let first_key = RelationIdentity::new("Quoted.Schema", "Foreign.Name");
+    let second_key = RelationIdentity::new("public", "pg_temp_local");
+    assert_eq!(saved.security.get(&first_key).unwrap().security().acl, None);
+    let security = saved.security.get(&second_key).unwrap().security();
+    assert_eq!(security.acl, Some(vec![]));
+    assert_eq!(security.acl_revisions.relation, Some([3; 16]));
     assert_eq!(
-        saved[1].security.column_revisions,
-        [("Removed.Name".into(), [4; 16])]
+        security.acl_revisions.columns.get("Removed.Name"),
+        Some(&[4; 16])
     );
     assert_eq!(
-        saved[1].definition.persistence,
+        saved.tables.get(&second_key).unwrap().persistence,
         RelationPersistence::Unlogged
     );
     drop((source, first, saved));
@@ -86,16 +94,39 @@ fn durable_foreign_capture_joins_original_authority_before_admitting_selected_pa
 }
 
 #[test]
-fn durable_foreign_capture_rejects_missing_selected_authority_and_releases_partial_output() {
-    let mut source = fixture();
-    Arc::make_mut(&mut source.security).remove(&RelationIdentity::new("public", "pg_temp_local"));
+fn durable_foreign_capture_rejects_failed_pair_admission_without_changing_membership() {
     let memory = MemoryBudget::new(64 << 10);
-    let token = CancellationToken::new();
-    let control = ProductionControl::new(&memory, &token, &token);
-    assert!(matches!(
-        source.capture(&control),
-        Err(SQLError::Internal(_))
+    let mut catalog = ForeignCatalog::with_budget(&memory);
+    let relation = RelationIdentity::new("public", "t");
+    catalog
+        .insert(
+            relation.clone(),
+            super::super::tests::definition(),
+            BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
+    let before = catalog.clone();
+    let used = memory.used();
+    let reserved = memory.reserve(memory.available()).unwrap();
+    let error = catalog
+        .insert(
+            relation.clone(),
+            super::super::tests::definition(),
+            BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert!(std::ptr::eq(
+        catalog.tables().get(&relation).unwrap(),
+        before.tables().get(&relation).unwrap()
     ));
+    assert!(std::ptr::eq(
+        catalog.security().get(&relation).unwrap(),
+        before.security().get(&relation).unwrap()
+    ));
+    drop(reserved);
+    assert_eq!(memory.used(), used);
+    drop((before, catalog));
     assert_eq!(memory.used(), 0);
 }
 
@@ -115,7 +146,7 @@ fn durable_foreign_capture_retains_original_admission_and_independent_cancellati
     drop(source);
     control.cancellation().cancel();
     assert!(captured.get().is_err());
-    assert_eq!(independent.get().unwrap().len(), 2);
+    assert_eq!(independent.get().unwrap().tables.len(), 2);
     drop((captured, independent));
     assert_eq!(control.memory().used(), 0);
     assert_eq!(exact.memory().used(), 0);

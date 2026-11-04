@@ -95,13 +95,16 @@ fn concurrent_event_inquiries_derive_each_collection_once() {
 fn trigger_lookup_preserves_the_first_address_error_after_earlier_matches() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    let triggers = Arc::make_mut(&mut snapshot.definitions.triggers)
-        .get_mut(&RelationIdentity::new("public", "items"))
+    Arc::make_mut(&mut snapshot.definitions.triggers)
+        .rewrite(|_, name, trigger| {
+            let mut trigger = trigger.clone();
+            trigger.definition.table = "public.missing".into();
+            if name == "watch_001" {
+                trigger.catalog_oid = None;
+            }
+            Ok(Some(trigger))
+        })
         .unwrap();
-    for trigger in triggers.values_mut() {
-        trigger.definition.table = "public.missing".into();
-    }
-    triggers.get_mut("watch_001").unwrap().catalog_oid = None;
     let catalog = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     let before = TRIGGER_ADDRESSES.get();

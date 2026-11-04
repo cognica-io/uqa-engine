@@ -349,16 +349,13 @@ impl Engine {
             self.observe_read_view(read_view, stable_storage_version);
             return Ok(());
         }
-        self.clear_persistent_table_bindings_for_catalog_reload();
-        self.reload_table_catalog(table_catalog_epoch)?;
+        self.reload_catalog_snapshot(Some(table_catalog_epoch), Some(catalog_registry_epoch))?;
         // Newly restored table handles already include their statistics and
         // physical data snapshot. Do not decode the same statistics twice.
         self.epochs
             .table_data
             .seen
             .store(table_data_epoch, Ordering::Release);
-        self.synchronize_partition_identity_watermarks()?;
-        self.reload_catalog_registries(catalog_registry_epoch)?;
         self.observe_read_view(read_view, stable_storage_version);
         Ok(())
     }

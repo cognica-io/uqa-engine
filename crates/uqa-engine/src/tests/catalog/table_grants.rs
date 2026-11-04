@@ -42,7 +42,7 @@ fn setup(engine: &Engine, foreign_column: &str) {
 fn security(engine: &Engine) -> (BoundTableSecurity, BoundTableSecurity, BoundTableSecurity) {
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].security();
     let view = engine.durable.views.read()[&RelationIdentity::new("public", "visible")].security();
-    let foreign = engine.durable.foreign_table_security.read()
+    let foreign = engine.durable.foreign_catalog.security()
         [&RelationIdentity::new("public", "remote")]
         .clone();
     (table, view, foreign)

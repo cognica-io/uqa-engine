@@ -178,14 +178,15 @@ fn build_catalog_triggers(
     let mut resolution = resolution.clone();
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let resolution = &resolution;
-    let originals = catalog_view
-        .snapshot()
-        .definitions
-        .triggers
-        .values()
-        .flat_map(|triggers| triggers.values());
-    let mut catalog = originals
-        .clone()
+    let originals = || {
+        catalog_view
+            .snapshot()
+            .definitions
+            .triggers
+            .values()
+            .flat_map(|triggers| triggers.values())
+    };
+    let mut catalog = originals()
         .map(|trigger| {
             #[cfg(test)]
             cache::record_trigger_copy();
@@ -205,7 +206,7 @@ fn build_catalog_triggers(
             continue;
         };
         for source in sources.iter().skip(1) {
-            for original in originals.clone().filter(|trigger| {
+            for original in originals().filter(|trigger| {
                 trigger.definition.row && trigger.definition.table == source.qualified_name()
             }) {
                 // A partition's clone of a row trigger has OIDs of its own, derived from the trigger's identity and the partition; the recorded OIDs are those of the trigger on its own table.

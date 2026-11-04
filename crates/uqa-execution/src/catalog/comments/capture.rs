@@ -6,48 +6,27 @@
 
 //! Descriptions retain exact object/subobject addresses independently of current object names.
 
-use super::{CommentAddress, CommentRegistry};
-use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use super::{CapturedComments, CommentRegistry};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::SQLError;
 
 pub fn comments(
     values: &CommentRegistry,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<(CommentAddress, String)>>, SQLError> {
-    selected_comments(values, |_| true, control)
-}
-
-pub(super) fn selected_comments(
-    values: &CommentRegistry,
-    selected: impl Fn(&CommentAddress) -> bool,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<(CommentAddress, String)>>, SQLError> {
-    let count = values.keys().try_fold(0, |count, address| {
-        control.check()?;
-        Ok::<_, SQLError>(count + usize::from(selected(address)))
-    })?;
-    let mut entries = ProductionVec::new(*control);
-    entries.reserve(count)?;
-    for (address, description) in values {
-        control.check()?;
-        if !selected(address) {
-            continue;
-        }
-        let (description, memory) = control.copy_text(description)?.into_parts();
-        entries.push_produced(control.finish((*address, description), memory)?)?;
-    }
-    Ok(entries.finish()?)
+) -> Result<Produced<CapturedComments>, SQLError> {
+    values.capture(control)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::comments::CommentAddress;
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     use uqa_sql::catalog::dependencies::ObjectAddress;
 
     #[test]
     fn comment_capture_preserves_addresses_and_exact_text_with_independent_admission() {
-        let source = CommentRegistry::from([
+        let source = CommentRegistry::try_from_iter([
             (
                 CommentAddress::from(ObjectAddress {
                     class_id: 1259,
@@ -72,24 +51,26 @@ mod tests {
                 }),
                 "type".into(),
             ),
-        ]);
+        ])
+        .unwrap();
         let memory = MemoryBudget::new(4096);
         let token = CancellationToken::new();
         let control = ProductionControl::new(&memory, &token, &token);
         let captured = comments(&source, &control).unwrap();
-        assert!(captured.iter().map(|(k, v)| (k, v)).eq(source.iter()));
+        assert!(captured.iter().eq(source.iter()));
         drop(source);
         assert_eq!(captured.len(), 3);
         drop(captured);
         assert_eq!(memory.used(), 0);
-        let source = CommentRegistry::from([(
+        let source = CommentRegistry::try_from_iter([(
             CommentAddress::from(ObjectAddress {
                 class_id: 1259,
                 object_id: 20_002,
                 sub_id: 1,
             }),
             "x".repeat(32768),
-        )]);
+        )])
+        .unwrap();
         assert_eq!(
             comments(&source, &control).unwrap_err().sqlstate(),
             Some("53200")

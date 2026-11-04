@@ -5,11 +5,14 @@
 //
 
 use super::*;
+use crate::catalog::test_support::index_rows;
+use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{Expr, TableConstraintSet},
     catalog::index::{EnforcedKey, IndexCatalogIdentity, IndexDefinition},
     RowSchema, SQLParam,
 };
+use uqa_storage::CatalogIndexRow;
 
 struct Context;
 
@@ -71,7 +74,7 @@ fn rows(incarnation: u8, predicate: bool) -> Arc<IndexRows> {
             .unwrap(),
         ),
     };
-    BTreeMap::from([(row.relation.clone(), row)]).into()
+    Arc::new(index_rows([row]))
 }
 
 fn values(definitions: &PhysicalIndexDefinitions, key: &ValueIndexKey) -> Result<Value, SQLError> {
@@ -131,15 +134,17 @@ fn publication_barriers_follow_expression_predicate_and_catalog_replacement() {
     assert!(expressions.row_publication_uses_expressions("public.t"));
     assert!(!expressions.row_publication_uses_expressions("public.other"));
     let mut columns = source.as_ref().clone();
-    for row in columns.values_mut() {
+    for mut row in source.values().cloned() {
         row.columns_json = serde_json::to_string(&[IndexKey::Column("id".into())]).unwrap();
+        columns.replace(row).unwrap();
     }
     let predicates = cache.bind(Arc::new(columns.clone())).unwrap();
     assert!(predicates.row_publication_uses_expressions("public.t"));
-    for row in columns.values_mut() {
-        let mut definition = super::super::index_definition(row).unwrap();
+    for mut row in columns.clone().values().cloned() {
+        let mut definition = super::super::index_definition(&row).unwrap();
         definition.predicate = None;
         row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+        columns.replace(row).unwrap();
     }
     let plain = cache.bind(Arc::new(columns)).unwrap();
     assert!(!plain.row_publication_uses_expressions("public.t"));
@@ -164,7 +169,9 @@ fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
     definition.catalog.as_mut().unwrap().identity.oid = 17003;
     definition.catalog.as_mut().unwrap().table_object_id = [4; 16];
     second.definition_json = Some(serde_json::to_string(&definition).unwrap());
-    source.insert(second.relation.clone(), second);
+    source
+        .insert(second, uqa_sql::ast::RelationPersistence::Permanent)
+        .unwrap();
     let prepared = PhysicalIndexDefinitions::prepare(&source).unwrap();
     let key = ValueIndexKey::Index("opaque:2".into());
     assert_eq!(
@@ -217,7 +224,7 @@ fn column(name: &str) -> ValueIndexKey {
 
 #[test]
 fn every_plain_key_column_is_searched_and_included_columns_are_carried() {
-    let rows = [
+    let rows = index_rows([
         btree(
             "composite",
             1,
@@ -234,10 +241,7 @@ fn every_plain_key_column_is_searched_and_included_columns_are_carried() {
             &["a"],
         ),
         btree("leading", 3, vec![IndexKey::Column("d".into())], &[]),
-    ]
-    .into_iter()
-    .map(|row| (row.relation.clone(), row))
-    .collect::<IndexRows>();
+    ]);
     let definitions = PhysicalIndexDefinitions::prepare(&rows).unwrap();
     let search = definitions.search_fields("public.t", &[], &[]);
     assert_eq!(
@@ -291,9 +295,7 @@ fn composite_unique_keys_retain_the_same_complete_tuple_in_storage_and_commands(
         definition.unique = true;
         definition.predicate = predicate.map(|value| Box::new(Expr::Literal(Value::Bool(value))));
         row.definition_json = Some(serde_json::to_string(&definition).unwrap());
-        let definitions =
-            PhysicalIndexDefinitions::prepare(&BTreeMap::from([(row.relation.clone(), row)]))
-                .unwrap();
+        let definitions = PhysicalIndexDefinitions::prepare(&index_rows([row])).unwrap();
         let physical = ValueIndexKey::Index("opaque:4".into());
         assert!(definitions
             .search_fields("public.t", &[], &[])
@@ -378,7 +380,9 @@ fn shared_physical_index_preparation_does_not_publish_invalid_definitions() {
     let source = rows(2, true);
     let prepared = cache.bind(source.clone()).unwrap();
     let mut invalid = source.as_ref().clone();
-    invalid.values_mut().next().unwrap().definition_json = Some("invalid JSON".into());
+    let mut row = invalid.values().next().unwrap().clone();
+    row.definition_json = Some("invalid JSON".into());
+    invalid.replace(row).unwrap();
     let sibling = cache.clone();
     assert!(sibling.bind(Arc::new(invalid)).is_err());
     assert!(Arc::ptr_eq(&prepared, &cache.bind(source.clone()).unwrap()));
