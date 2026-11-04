@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -41148,6 +41148,90 @@
       "invariant": "Unchanged membership needs no native node or new handle; failed successors preserve original membership and release temporary leases; successful restoration shares unselected handles.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_type_description_lifetime_follows_relations_and_array_elements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/type_objects/tests.rs",
+      "capability": "Type description lifetime binding",
+      "workload": "Resolve scalar and generated array row types with temporary, permanent and unlogged persistence, including names with opposite namespace spelling.",
+      "invariant": "Actual relation persistence and original role identity govern both scalar and array descriptions; built-in types remain durable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_scope_changes_publish_complete_roots_or_preserve_original_eligibility",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/tests.rs",
+      "capability": "Native description partition publication",
+      "workload": "Move selected descriptions between durable and temporary roots under seven admission allowances, retaining original roots and unrelated entries.",
+      "invariant": "Every successful candidate has one address in exactly one partition; failed preparation preserves exact texts, eligibility, entry identity and native leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_source_selection_is_allocation_free_and_releases_unselected_temporary_text",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/snapshot/tests.rs",
+      "capability": "Bounded original comment selection",
+      "workload": "Retain native sources with 1, 64 and 4096 durable and temporary entries beside a four-MiB temporary value, replace source text and retire the original registry.",
+      "invariant": "Source selection allocates nothing and retains no temporary payload; freezing preserves exact original durable descriptions and all native/capture leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporary_descriptions_survive_refresh_without_entering_durable_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Native comment restoration and persistence",
+      "workload": "Publish durable and temporary descriptions, refresh an existing owner and a fresh owner, merge private state, change scope and delete both classes.",
+      "invariant": "Session refresh shares the original temporary root, fresh opens contain only durable descriptions and scope changes atomically update native eligibility and stored metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_comment_lifetime_matches_postgresql_through_rollback_capture_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments/native.rs",
+      "capability": "Engine description lifetime",
+      "workload": "Run the PostgreSQL 18.4 description fixture on memory, native SQLite, SQLite KV and redb; retain an original source across owner/rename/savepoint/rollback changes and closure.",
+      "invariant": "All public descriptions match the independent oracle; durable capture retains only original durable text, temporary metadata is never stored and persistent reopen matches a fresh PostgreSQL session.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_comment_denial_preserves_durable_and_temporary_roots_and_later_use",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments/native.rs",
+      "capability": "Engine description admission recovery",
+      "workload": "Exhaust native admission for implicit and explicit durable/temporary COMMENT operations on all four providers, roll back and continue writing/deleting.",
+      "invariant": "53200 preserves both native partitions and stored metadata, rollback needs no repair guard and subsequent operations reclaim every native lease.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     }
   ]

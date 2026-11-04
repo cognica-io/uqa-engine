@@ -27,11 +27,30 @@ fn native_comment_restore_preserves_original_root_and_metadata_on_admission_fail
     let memory = MemoryBudget::new(1 << 20);
     let mut admitted = CommentRegistry::with_budget(&memory);
     for (address, text) in engine.durable.comments.read().iter() {
-        admitted.insert(*address, text).unwrap();
+        admitted
+            .insert(*address, text, uqa_sql::ast::RelationPersistence::Permanent)
+            .unwrap();
     }
     *engine.durable.comments.write() = admitted;
-    let original = engine.durable.comments.snapshot();
+    let before = engine.durable.comments.snapshot();
     let catalog = engine.storage.catalog.as_ref().unwrap();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    engine
+        .restore_engine_registries_from_catalog(catalog.as_ref(), CatalogRestoreMode::LoadOnly)
+        .unwrap();
+    let original = engine.durable.comments.snapshot();
+    for (address, text) in before.iter() {
+        assert!(std::ptr::eq(original.get(address).unwrap(), text));
+    }
+    drop((occupied, before));
+    let key = catalog
+        .metadata_with_prefix("uqa.sql.comment.v1:")
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .0;
+    catalog.set_metadata(&key, "stored replacement").unwrap();
     let stored = catalog.metadata_with_prefix("uqa.sql.comment.v1:").unwrap();
     let baseline = memory.used();
     let occupied = memory.reserve(memory.available()).unwrap();
@@ -53,7 +72,14 @@ fn native_comment_restore_preserves_original_root_and_metadata_on_admission_fail
     engine
         .restore_engine_registries_from_catalog(catalog.as_ref(), CatalogRestoreMode::LoadOnly)
         .unwrap();
-    assert_eq!(*engine.durable.comments.read(), *original);
+    assert_eq!(engine.durable.comments.read().len(), 1);
+    assert!(engine
+        .durable
+        .comments
+        .read()
+        .iter()
+        .all(|(_, text)| text == "stored replacement"));
+    assert!(original.iter().all(|(_, text)| text == "original 한글"));
     engine
         .sql("COMMENT ON TYPE saved IS 'usable'", &[])
         .unwrap();

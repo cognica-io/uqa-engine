@@ -26,6 +26,7 @@ pub fn comment(
     crate::catalog::comments::set(
         context.comments,
         ObjectAddress::whole(TYPE_CLASS, resolved.oid()),
+        resolved.persistence(&context.binding)?,
         description,
     )?;
     context.changes.catalog_registry_changed();

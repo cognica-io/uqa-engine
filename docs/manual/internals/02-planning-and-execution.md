@@ -319,6 +319,8 @@ Routine [rename analysis](../../../crates/uqa-sql/src/routines/lifecycle/rename.
 
 ## Statement capability boundaries
 
+Execution's `catalog/comments` owns durable and temporary description roots, complete native admission, persistence, restoration and original-generation capture. SQL resolves the addressed type's lifetime; table and view row types use actual relation persistence, and their generated arrays retain the element's owner and lifetime. Ordinary catalog lookup merges both roots in object-address order. Physical refresh preserves the session's temporary root; fresh opens restore durable descriptions only. Backup-source selection retains the durable root without traversing object catalogs or temporary descriptions. Engine supplies the existing catalog, session and transaction adapters. The [comment-generation argument](../../design/backup-image-format.md#immutable-native-comment-generations) records the ownership and failure boundaries.
+
 ```mermaid
 flowchart LR
     Engine[Engine composition facade] --> Catalog[CatalogReadView]

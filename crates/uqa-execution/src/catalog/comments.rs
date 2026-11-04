@@ -11,7 +11,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-use uqa_sql::{catalog::dependencies::ObjectAddress, SQLError};
+use uqa_sql::{ast::RelationPersistence, catalog::dependencies::ObjectAddress, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 /// Object-first ordering gives both forms of `obj_description` a bounded key lookup.
@@ -66,41 +66,60 @@ fn address(key_text: &str) -> Option<CommentAddress> {
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    memory: &uqa_core::memory::MemoryBudget,
+    current: &CommentRegistry,
 ) -> StorageBackendResult<CommentRegistry> {
-    let mut registry = CommentRegistry::with_budget(memory);
-    for (name, description) in catalog.metadata_with_prefix(PREFIX)? {
-        let object = address(&name)
-            .ok_or_else(|| StorageBackendError::Other("invalid catalog comment address".into()))?;
-        if description.is_empty() || description.contains('\0') {
-            return Err(StorageBackendError::Other(
-                "invalid catalog comment text".into(),
-            ));
+    let descriptions = catalog
+        .metadata_with_prefix(PREFIX)?
+        .into_iter()
+        .map(|(name, description)| {
+            let object = address(&name).ok_or_else(|| {
+                StorageBackendError::Other("invalid catalog comment address".into())
+            })?;
+            if description.is_empty() || description.contains('\0') {
+                return Err(StorageBackendError::Other(
+                    "invalid catalog comment text".into(),
+                ));
+            }
+            Ok((object, description))
+        })
+        .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
+    let mut registry = current.durable_generation();
+    for (object, description) in &descriptions {
+        if registry.durable_get(object) != Some(description) {
+            registry
+                .insert(*object, description, RelationPersistence::Permanent)
+                .map_err(|error| StorageBackendError::backend("comment restoration", error))?;
         }
-        registry
-            .insert(object, &description)
-            .map_err(|error| StorageBackendError::backend("comment restoration", error))?;
     }
-    Ok(registry)
+    for (object, _) in current.durable_iter() {
+        if !descriptions.contains_key(object) {
+            registry
+                .remove(object)
+                .map_err(|error| StorageBackendError::backend("comment restoration", error))?;
+        }
+    }
+    Ok(registry.with_temporary_from(current))
 }
 
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &CommentRegistry,
-    mut committed: Arc<CommentRegistry>,
+    committed: Arc<CommentRegistry>,
 ) -> StorageBackendResult<Arc<CommentRegistry>> {
+    let mut committed = Arc::new(committed.with_temporary_from(current));
     let addresses = current
-        .keys()
-        .chain(committed.keys())
+        .durable_iter()
+        .chain(committed.durable_iter())
+        .map(|(address, _)| address)
         .copied()
         .collect::<BTreeSet<_>>();
     for object in addresses {
         if catalog.map_or(Ok(false), |catalog| {
             catalog.metadata_has_private_changes(&key(object))
         })? {
-            if let Some(description) = current.get(&object) {
+            if let Some(description) = current.durable_get(&object) {
                 Arc::make_mut(&mut committed)
-                    .insert(object, description)
+                    .insert(object, description, RelationPersistence::Permanent)
                     .map_err(|error| {
                         StorageBackendError::backend("private comment merge", error)
                     })?;
@@ -120,20 +139,25 @@ pub fn merge_private(
 pub fn set(
     publication: &dyn CommentPublication,
     object: ObjectAddress,
+    persistence: RelationPersistence,
     description: Option<&str>,
 ) -> Result<(), SQLError> {
     let object = CommentAddress::from(object);
     let description = description.filter(|text| !text.is_empty());
     let mut registry = publication.comments().clone();
+    let was_durable = registry.get(&object).is_some() && !registry.is_temporary(&object);
     if let Some(text) = description {
-        registry.insert(object, text)?;
+        registry.insert(object, text, persistence)?;
     } else {
         registry.remove(&object)?;
     }
     if let Some(catalog) = publication.comment_catalog() {
-        match description {
-            Some(text) => catalog.set_metadata(&key(object), text),
-            None => catalog.delete_metadata(&key(object)),
+        match (persistence, description) {
+            (RelationPersistence::Temporary, _) if !was_durable => Ok(()),
+            (RelationPersistence::Temporary, _) | (_, None) => {
+                catalog.delete_metadata(&key(object))
+            }
+            (_, Some(text)) => catalog.set_metadata(&key(object), text),
         }
         .map_err(|error| uqa_sql::catalog::errors::storage_error("catalog comment", &error))?;
     }
@@ -165,16 +189,20 @@ pub fn remove(
                 .range(first..=last)
                 .filter_map(move |(object, _)| (object.class_id == class).then_some(*object))
         })
+        .map(|object| (object, comments.is_temporary(&object)))
         .collect::<Vec<_>>();
     drop(comments);
     if addresses.is_empty() {
         return Ok(false);
     }
     let mut registry = publication.comments().clone();
-    for object in &addresses {
+    for (object, _) in &addresses {
         registry.remove(object)?;
     }
-    for object in addresses {
+    for (object, temporary) in addresses {
+        if temporary {
+            continue;
+        }
         if let Some(catalog) = publication.comment_catalog() {
             catalog.delete_metadata(&key(object)).map_err(|error| {
                 uqa_sql::catalog::errors::storage_error("remove catalog comment", &error)
@@ -274,6 +302,78 @@ mod tests {
     }
 
     #[test]
+    fn temporary_descriptions_survive_refresh_without_entering_durable_metadata() {
+        let publication = Publication {
+            catalog: KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new())),
+            comments: RefCell::default(),
+            persistence_calls: Cell::new(0),
+        };
+        let durable = ObjectAddress::whole(1247, 20_000);
+        let temporary = ObjectAddress::whole(1247, 20_001);
+        set(
+            &publication,
+            durable,
+            RelationPersistence::Unlogged,
+            Some("durable"),
+        )
+        .unwrap();
+        set(
+            &publication,
+            temporary,
+            RelationPersistence::Temporary,
+            Some("temporary"),
+        )
+        .unwrap();
+        let current = publication.comments.borrow().clone();
+        let restored = restore(&publication.catalog, &current).unwrap();
+        assert_eq!(restored, current);
+        assert!(std::ptr::eq(
+            restored.get(&temporary.into()).unwrap(),
+            current.get(&temporary.into()).unwrap()
+        ));
+        let fresh = restore(&publication.catalog, &CommentRegistry::new()).unwrap();
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[&durable.into()], "durable");
+        let merged = merge_private(None, &current, Arc::new(fresh)).unwrap();
+        assert_eq!(*merged, current);
+        set(
+            &publication,
+            durable,
+            RelationPersistence::Temporary,
+            Some("now temporary"),
+        )
+        .unwrap();
+        assert!(publication
+            .catalog
+            .metadata_with_prefix(PREFIX)
+            .unwrap()
+            .is_empty());
+        assert_eq!(publication.comments.borrow().len(), 2);
+        set(
+            &publication,
+            temporary,
+            RelationPersistence::Permanent,
+            Some("now durable"),
+        )
+        .unwrap();
+        let fresh = restore(&publication.catalog, &CommentRegistry::new()).unwrap();
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[&temporary.into()], "now durable");
+        remove(
+            &publication,
+            1247,
+            &BTreeSet::from([durable.object_id, temporary.object_id]),
+        )
+        .unwrap();
+        assert!(publication.comments.borrow().is_empty());
+        assert!(publication
+            .catalog
+            .metadata_with_prefix(PREFIX)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn object_descriptions_restore_replace_and_drop_by_identity() {
         let publication = Publication {
             catalog: KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new())),
@@ -282,16 +382,33 @@ mod tests {
         };
         let first = ObjectAddress::whole(uqa_sql::catalog::dependencies::TYPE_CLASS, 20_000);
         let second = ObjectAddress::whole(uqa_sql::catalog::dependencies::TYPE_CLASS, 20_001);
-        set(&publication, first, Some("original\n설명")).unwrap();
-        set(&publication, second, Some("independent")).unwrap();
+        set(
+            &publication,
+            first,
+            RelationPersistence::Permanent,
+            Some("original\n설명"),
+        )
+        .unwrap();
+        set(
+            &publication,
+            second,
+            RelationPersistence::Permanent,
+            Some("independent"),
+        )
+        .unwrap();
         assert_eq!(
-            restore(&publication.catalog, publication.comments.borrow().budget()).unwrap(),
+            restore(&publication.catalog, &publication.comments.borrow()).unwrap(),
             *publication.comments.borrow()
         );
-        set(&publication, first, Some("replacement")).unwrap();
+        set(
+            &publication,
+            first,
+            RelationPersistence::Permanent,
+            Some("replacement"),
+        )
+        .unwrap();
         assert_eq!(
-            restore(&publication.catalog, publication.comments.borrow().budget()).unwrap()
-                [&first.into()],
+            restore(&publication.catalog, &publication.comments.borrow()).unwrap()[&first.into()],
             "replacement"
         );
         remove(
@@ -301,12 +418,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            restore(&publication.catalog, publication.comments.borrow().budget()).unwrap(),
-            CommentRegistry::try_from_iter([(second.into(), "independent".into())]).unwrap()
+            restore(&publication.catalog, &publication.comments.borrow()).unwrap(),
+            CommentRegistry::try_from_iter([(
+                second.into(),
+                "independent".into(),
+                RelationPersistence::Permanent
+            )])
+            .unwrap()
         );
-        set(&publication, second, Some("")).unwrap();
+        set(
+            &publication,
+            second,
+            RelationPersistence::Permanent,
+            Some(""),
+        )
+        .unwrap();
         assert!(
-            restore(&publication.catalog, publication.comments.borrow().budget())
+            restore(&publication.catalog, &publication.comments.borrow())
                 .unwrap()
                 .is_empty()
         );
@@ -328,7 +456,11 @@ mod tests {
                 .set_metadata(&format!("{PREFIX}{name}"), text)
                 .unwrap();
             assert!(
-                restore(&catalog, &uqa_core::memory::MemoryBudget::new(4096)).is_err(),
+                restore(
+                    &catalog,
+                    &CommentRegistry::with_budget(&uqa_core::memory::MemoryBudget::new(4096))
+                )
+                .is_err(),
                 "{name}"
             );
         }
@@ -346,6 +478,7 @@ mod tests {
             set(
                 &publication,
                 ObjectAddress::whole(1247, oid),
+                RelationPersistence::Permanent,
                 Some("original"),
             )
             .unwrap();
@@ -358,6 +491,7 @@ mod tests {
             set(
                 &publication,
                 ObjectAddress::whole(1247, 20_000),
+                RelationPersistence::Permanent,
                 Some("replacement")
             )
             .unwrap_err()
@@ -380,6 +514,7 @@ mod tests {
         set(
             &publication,
             ObjectAddress::whole(1247, 20_000),
+            RelationPersistence::Permanent,
             Some("replacement"),
         )
         .unwrap();
@@ -404,17 +539,52 @@ mod tests {
         }
         let expected = catalog.metadata_with_prefix(PREFIX).unwrap();
         let exact = uqa_core::memory::MemoryBudget::new(1 << 20);
-        let loaded = restore(&catalog, &exact).unwrap();
+        let loaded = restore(&catalog, &CommentRegistry::with_budget(&exact)).unwrap();
         let required = exact.used();
         drop(loaded);
         assert_eq!(exact.used(), 0);
         let denied = uqa_core::memory::MemoryBudget::new(required - 1);
-        assert!(restore(&catalog, &denied).is_err());
+        assert!(restore(&catalog, &CommentRegistry::with_budget(&denied)).is_err());
         assert_eq!(denied.used(), 0);
         assert_eq!(catalog.metadata_with_prefix(PREFIX).unwrap(), expected);
-        let loaded = restore(&catalog, &exact).unwrap();
+        let loaded = restore(&catalog, &CommentRegistry::with_budget(&exact)).unwrap();
         assert_eq!(loaded.len(), 3);
-        drop(loaded);
+        let occupied = exact.reserve(exact.available()).unwrap();
+        let unchanged = restore(&catalog, &loaded).unwrap();
+        for (object, text) in loaded.iter() {
+            assert!(std::ptr::eq(unchanged.get(object).unwrap(), text));
+        }
+        drop((occupied, unchanged));
+        let removed = CommentAddress::from(ObjectAddress::whole(1247, 20_000));
+        let replaced = CommentAddress::from(ObjectAddress::whole(1247, 20_001));
+        let retained = CommentAddress::from(ObjectAddress::whole(1247, 20_002));
+        let added = CommentAddress::from(ObjectAddress::whole(1247, 20_003));
+        catalog.delete_metadata(&key(removed)).unwrap();
+        catalog.set_metadata(&key(replaced), "replacement").unwrap();
+        catalog
+            .set_metadata(&key(added), "new description")
+            .unwrap();
+        let changed = catalog.metadata_with_prefix(PREFIX).unwrap();
+        let occupied = exact.reserve(exact.available()).unwrap();
+        let error = restore(&catalog, &loaded).unwrap_err();
+        assert_eq!(
+            uqa_sql::catalog::errors::storage_error("comment restoration", &error).sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(loaded.len(), 3);
+        assert!(loaded.iter().all(|(_, text)| text == "original 한글"));
+        assert_eq!(catalog.metadata_with_prefix(PREFIX).unwrap(), changed);
+        drop(occupied);
+        let restored = restore(&catalog, &loaded).unwrap();
+        assert_eq!(restored.len(), 3);
+        assert!(restored.get(&removed).is_none());
+        assert_eq!(restored[&replaced], "replacement");
+        assert_eq!(restored[&added], "new description");
+        assert!(std::ptr::eq(
+            restored.get(&retained).unwrap(),
+            loaded.get(&retained).unwrap()
+        ));
+        drop((loaded, restored));
         assert_eq!(exact.used(), 0);
     }
 }

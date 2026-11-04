@@ -11,7 +11,7 @@ use crate::{NontransactionalSequenceSource, TableDataSnapshot};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
-    comments::snapshot::{CommentCaptureSource, CommentTableSource},
+    comments::snapshot::CommentCaptureSource,
     foreign::capture::ForeignTableCaptureSource,
     security::roles::persistence::RoleCatalogSnapshot,
     sequence::{capture::SequenceCaptureSource, snapshot::SequenceReadSnapshot},
@@ -41,7 +41,6 @@ impl SnapshotSources {
         registry: MemoryCaptureRegistry,
         tables: &BTreeMap<RelationIdentity, TableDataSnapshot>,
         durable: &DurableCatalogSnapshot,
-        temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     ) -> StorageBackendResult<Self> {
         let sequences = std::sync::Arc::new(registry.cell(SequenceCaptureSource::new(
             SequenceReadSnapshot {
@@ -68,26 +67,7 @@ impl SnapshotSources {
             durable.catalog_indexes.clone(),
             durable.table_field_analyzers.clone(),
         ))?;
-        let comments = registry.cell(
-            CommentCaptureSource::new(
-                &crate::Engine::catalog_definition_snapshot(durable),
-                tables.iter().map(|(relation, table)| CommentTableSource {
-                    relation,
-                    object_id: table.object_id,
-                    catalog_oids: table.catalog_oids,
-                    persistence: table.persistence,
-                    columns: &table.columns,
-                    checks: &table.table_checks,
-                    keys: &table.key_constraints,
-                    foreign_keys: &table.foreign_keys,
-                    hierarchy: &table.hierarchy,
-                }),
-                temporary_namespace,
-            )
-            .map_err(|error| {
-                uqa_storage::StorageBackendError::backend("comment catalog capture", error)
-            })?,
-        )?;
+        let comments = registry.cell(CommentCaptureSource::new(&durable.comments))?;
         let mut sources = Self {
             tables: SnapshotTableSources::new(registry, tables)?,
             sequences,

@@ -206,6 +206,37 @@ impl ResolvedTypeObject {
         self.oid
     }
 
+    /// Descriptions follow the resolved object's lifetime. Relation row types use actual relation persistence; generated arrays follow their element.
+    pub fn persistence(
+        &self,
+        context: &TypeObjectBinding<'_>,
+    ) -> Result<crate::ast::RelationPersistence, SQLError> {
+        use crate::ast::RelationPersistence;
+        let element;
+        let kind = if let ResolvedKind::Array { element: oid } = self.kind {
+            element = classify(context, oid);
+            &element
+        } else {
+            &self.kind
+        };
+        match kind {
+            ResolvedKind::User(object) => Ok(
+                if crate::catalog::temporary_namespace::is_temporary_schema_name(
+                    &object.identity().schema,
+                ) {
+                    RelationPersistence::Temporary
+                } else {
+                    RelationPersistence::Permanent
+                },
+            ),
+            ResolvedKind::RowType(relation) => Ok(relation.persistence),
+            ResolvedKind::System => Ok(RelationPersistence::Permanent),
+            ResolvedKind::Array { .. } => Err(SQLError::Internal(
+                "generated array has another array as its element type".into(),
+            )),
+        }
+    }
+
     fn owner(&self, context: &TypeObjectBinding<'_>) -> RoleIdentity {
         match &self.kind {
             ResolvedKind::User(object) => object.owner(),
@@ -224,6 +255,12 @@ impl ResolvedTypeObject {
                         .catalog
                         .composite_by_type_oid(*element)
                         .map(|definition| definition.owner)
+                })
+                .or_else(|| {
+                    context
+                        .catalog
+                        .row_type_relation(*element)
+                        .map(|relation| relation.owner)
                 })
                 .unwrap_or(RoleIdentity::BOOTSTRAP),
             ResolvedKind::RowType(relation) => relation.owner,

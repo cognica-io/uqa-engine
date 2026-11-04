@@ -24,8 +24,8 @@ impl Engine {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
         self.restore_ranges_from_catalog(catalog)?;
-        let comment_memory = self.durable.comments.read().budget().clone();
-        let comments = uqa_execution::catalog::comments::restore(catalog, &comment_memory)?;
+        let comments =
+            uqa_execution::catalog::comments::restore(catalog, &self.durable.comments.read())?;
         *self.durable.comments.write() = comments;
         self.restore_composites_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
