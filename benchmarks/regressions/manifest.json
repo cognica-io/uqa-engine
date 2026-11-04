@@ -39634,6 +39634,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_capture_reuses_exact_images_and_preserves_complete_current_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/incremental.rs",
+      "capability": "Complete incremental images",
+      "workload": "Capture equal, changed, deleted, new, tombstone and generation/namespace replacement units with plaintext and protected repositories.",
+      "invariant": "Decoded child units equal the independent current fixture and its full-capture summary; only exact equal images reuse ranges and all work counters reconcile.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_children_and_branches_survive_parent_manifest_removal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/incremental.rs",
+      "capability": "Independent incremental roots",
+      "workload": "Publish identical, branched and empty children, then remove the parent manifest.",
+      "invariant": "Every retained child verifies independently; an unchanged child installs only its inventory object and no data pack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_fallback_streams_large_equal_and_changed_units_with_bounded_memory",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/incremental.rs",
+      "capability": "Bounded incremental comparison",
+      "workload": "Compare 257 units including a greater-than-two-MiB payload twice under a 128-KiB allowance, with one byte changed for the second child.",
+      "invariant": "Exact restored bytes, one newly written changed unit, full fallback source/hash accounting, a bounded peak and zero retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_capture_rejects_corrupt_parent_metadata_and_reused_objects_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/incremental.rs",
+      "capability": "Authenticated inherited references",
+      "workload": "Corrupt the parent inventory or a reused data object before preparing an equal child.",
+      "invariant": "Neither image can publish, consumed sources retire and cancellation releases every remaining charged owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "incremental_capture_denial_cancellation_and_truncated_sources_release_every_partial_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/incremental.rs",
+      "capability": "Incremental failure ownership",
+      "workload": "Deny candidate-spool space, cancel during source reads and truncate a declared equal-length current unit.",
+      "invariant": "Every operation fails with its actual cause, publishes no root and releases source and partial workspace ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_incremental_backup_restores_changed_membership_and_inherited_artifacts",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import/incremental.rs",
+      "capability": "Source-independent incremental provider import",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_incremental_backup_restores_membership_and_artifacts_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import/incremental.rs",
+      "capability": "Source-independent incremental provider import",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_incremental_backup_restores_membership_and_artifacts_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests/incremental.rs",
+      "capability": "Source-independent incremental provider import",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
