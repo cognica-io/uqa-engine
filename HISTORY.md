@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain native domain, enum, composite, range and shell catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and survive native DDL, rollback and closure without copying complete type catalogs. Complete Engine backup remains under implementation.
+
 - Add complete incremental repository inventories that reuse unchanged immutable unit ranges, preserve changed/new/tombstone units and omit deleted units. Bounded comparison reports actual source reads and hashes separately from reused and newly stored bytes; fingerprint acceleration, retention/GC and public Engine backup jobs remain in progress.
 - Retain the absolute memory catalog OID counter position with the selected transaction data and sequence cut, including reservations consumed by rolled-back definitions. Fresh counter construction preserves uninitialized state, wrapping and exhaustion; memory document counters retain their original transactional semantics. Complete Engine backup remains under implementation.
 - Capture nontransactional memory sequence values from native rollback history, matching the original object and definition generations. Captures preserve reserved cache endpoints and exact `setval` positions through private definition changes, rollback and closure; complete Engine backup remains under implementation.

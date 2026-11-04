@@ -39738,6 +39738,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_roots_capture_without_visiting_definitions_or_temporary_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type root capture",
+      "workload": "Capture 1, 64 and 4096 immutable type entries, add large temporary definitions and retire later native roots.",
+      "invariant": "Capture allocates no heap storage, temporary payloads do not increase the selected footprint, and independent allowances release completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_views_merge_canonical_partitions_and_preserve_wire_encodings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type catalog encoding",
+      "workload": "Merge durable and temporary native definitions, round-trip persisted maps and compare capture against the existing ordered-entry producer.",
+      "invariant": "Native ordered lookup and persisted bytes retain their meaning; captured entries exclude temporary state and survive later edits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_type_publication_and_independent_capture_leave_original_roots_usable",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type admission failure",
+      "workload": "Exhaust native mutation allowance, compare original roots, capture under insufficient and exact independent limits, cancel and close.",
+      "invariant": "Failed replacement and removal preserve original roots; each capture funds the full retained footprint and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_root_publication_shares_unrelated_payloads_and_bounds_selected_path_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Immutable domain publication",
+      "workload": "Install 1, 32 and 512 domain definitions with 16-KiB defaults, publish one small domain, capture and replace one original definition.",
+      "invariant": "Publication allocates below 32 KiB and 256 allocations while sharing all unrelated entries; capture allocates zero heap storage and retains original defaults.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_type_roots_capture_in_bounded_work_without_temporary_payload_retention",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/type_roots.rs",
+      "capability": "Committed native type roots",
+      "workload": "Create 1, 32 and 128 SQL domains plus a two-MiB temporary default, select committed types during private DDL, roll back a savepoint, commit and replace.",
+      "invariant": "Selected type capture allocates below 16 KiB and 64 allocations; temporary definitions stay excluded, original contents survive closure, and cancellation and complete release remain effective.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
