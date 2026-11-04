@@ -100,6 +100,8 @@ pub mod view_ownership;
 
 pub mod builtin_routines;
 pub mod grants;
+#[cfg(test)]
+mod native_authority_tests;
 pub mod object_acl;
 pub mod system_relations;
 pub mod table_grants;

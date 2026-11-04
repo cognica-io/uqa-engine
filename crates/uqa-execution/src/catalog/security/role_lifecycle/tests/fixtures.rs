@@ -83,7 +83,8 @@ impl Catalog {
             schemas: SchemaRegistry::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
-            system_relations: BTreeMap::new(),
+            system_relations:
+                uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
             sequences: BTreeMap::new(),
             routines: BTreeMap::new(),
             domains: crate::catalog::domain::DomainRegistry::new(),

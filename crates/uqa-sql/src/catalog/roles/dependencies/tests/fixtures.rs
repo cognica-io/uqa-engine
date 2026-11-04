@@ -81,7 +81,8 @@ impl Catalog {
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
             foreign_persistence: BTreeMap::new(),
-            system_relations: BTreeMap::new(),
+            system_relations:
+                crate::catalog::security::system_relations::SystemRelationSecurities::new(),
             sequences: BTreeMap::new(),
             sequence_persistence: BTreeMap::new(),
             routines: BTreeMap::new(),

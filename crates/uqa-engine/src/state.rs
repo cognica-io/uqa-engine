@@ -261,17 +261,11 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) builtin_routine_security: CatalogCell<
         uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
-        Vec<(
-            u32,
-            uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity,
-        )>,
+        uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities,
     >,
     pub(super) system_relation_security: CatalogCell<
         uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
-        Vec<(
-            RelationIdentity,
-            uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity,
-        )>,
+        uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities,
     >,
     pub(super) sql_user_functions: CatalogCell<
         BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>,
@@ -366,8 +360,12 @@ impl DurableCatalogState {
             ),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
-            builtin_routine_security: CatalogCell::new(BTreeMap::new()),
-            system_relation_security: CatalogCell::new(BTreeMap::new()),
+            builtin_routine_security: CatalogCell::new(
+                uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
+            ),
+            system_relation_security: CatalogCell::new(
+                uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
+            ),
             sql_user_functions: CatalogCell::new(BTreeMap::new()),
             roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
             role_memberships: CatalogCell::new(RoleMemberships::new()),

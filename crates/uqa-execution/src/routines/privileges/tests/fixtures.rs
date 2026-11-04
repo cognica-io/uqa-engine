@@ -53,7 +53,9 @@ impl Fixture {
             .remove(&uqa_sql::ast::RoleAttribute::Superuser);
         Self {
             registry: RefCell::new(BTreeMap::new()),
-            builtins: RefCell::new(BTreeMap::new()),
+            builtins: RefCell::new(
+                uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
+            ),
             persisted: RefCell::new(Vec::new()),
             on_writer: RefCell::new(None),
             fail_persist: Cell::new(false),
@@ -137,6 +139,7 @@ impl Fixture {
         assert!(self.roles.try_borrow_mut().is_ok());
         assert!(self.memberships.try_borrow_mut().is_ok());
         assert!(self.registry.try_borrow_mut().is_ok());
+        assert!(self.builtins.try_borrow_mut().is_ok());
     }
 }
 impl RoutineRegistryState for Fixture {

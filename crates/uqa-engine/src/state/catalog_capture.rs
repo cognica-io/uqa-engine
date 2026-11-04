@@ -132,12 +132,12 @@ impl DurableCatalogState {
         self.builtin_routine_security = CatalogCell::capture_source(
             self.builtin_routine_security.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::relations::builtin_routines,
+            uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::capture,
         )?;
         self.system_relation_security = CatalogCell::capture_source(
             self.system_relation_security.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::relations::system_relations,
+            uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture,
         )?;
         Ok(())
     }

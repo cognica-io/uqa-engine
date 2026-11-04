@@ -51,6 +51,7 @@ impl TableGrantContext<'_> {
                     view_updates,
                     foreign_updates,
                     system_updates,
+                    system,
                     acl_updates,
                     notices,
                 },
@@ -99,12 +100,9 @@ impl TableGrantContext<'_> {
                 securities.insert(relation, security);
             }
         }
-        let system_changed = !system_updates.is_empty();
-        if system_changed {
-            let mut securities = self.system.system_relation_securities_write();
-            for update in system_updates {
-                update.publish(&mut securities);
-            }
+        let system_changed = system.is_some();
+        if let Some(prepared::SystemPrivilegeCandidate { mut registry, next }) = system {
+            **registry = next;
         }
         drop(memberships);
         drop(roles);

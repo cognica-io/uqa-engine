@@ -74,8 +74,8 @@ catalog_sources! {
     roles: RoleDefinitions => uqa_sql::catalog::roles::CapturedRoleDefinitions, RoleDefinitions::capture;
     role_memberships: RoleMemberships => uqa_sql::catalog::roles::CapturedRoleMemberships, RoleMemberships::capture;
     database_security: BoundDatabaseSecurity => BoundDatabaseSecurity, BoundDatabaseSecurity::capture_security;
-    builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => Vec<(u32, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity)>, uqa_sql::catalog::security::capture::relations::builtin_routines;
-    system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => Vec<(RelationIdentity, uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity)>, uqa_sql::catalog::security::capture::relations::system_relations;
+    builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::capture;
+    system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities, uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture;
     foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;
     foreign_servers: ForeignServers => uqa_sql::catalog::foreign_server::CapturedForeignServers, ForeignServers::capture;
     triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;

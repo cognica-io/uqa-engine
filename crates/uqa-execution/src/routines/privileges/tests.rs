@@ -221,3 +221,35 @@ fn builtin_and_user_target_errors_leave_all_acl_candidates_unpublished() {
     assert_eq!(*fixture.builtins.borrow(), before);
     assert!(!fixture.allowed("app.allowed"));
 }
+
+#[test]
+fn builtin_admission_failure_precedes_mixed_routine_persistence_and_publication() {
+    use uqa_core::memory::MemoryBudget;
+    use uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities;
+
+    let fixture = Fixture::new();
+    let budget = MemoryBudget::new(65536);
+    *fixture.builtins.borrow_mut() = BuiltinRoutineSecurities::with_budget(&budget);
+    fixture.add("app.allowed", 21_000, false);
+    fixture
+        .grant("REVOKE EXECUTE ON FUNCTION app.allowed(),pg_catalog.lower(text) FROM PUBLIC")
+        .unwrap();
+    let before = fixture.builtins.borrow().clone();
+    let persisted = fixture.persisted.borrow().clone();
+    let blocked = budget.reserve(budget.available()).unwrap();
+    let grant = "GRANT EXECUTE ON FUNCTION app.allowed(),pg_catalog.lower(text) TO reader";
+    let error = fixture.grant(grant).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(*fixture.persisted.borrow(), persisted);
+    assert_eq!(*fixture.builtins.borrow(), before);
+    assert!(!fixture.allowed("app.allowed"));
+    assert!(fixture.registry.try_borrow_mut().is_ok());
+    assert!(fixture.builtins.try_borrow_mut().is_ok());
+    drop(blocked);
+    fixture.grant(grant).unwrap();
+    assert!(fixture.allowed("app.allowed"));
+    assert_ne!(fixture.builtins.borrow()[&870], before[&870]);
+    assert_eq!(fixture.persisted.borrow().len(), persisted.len() + 1);
+    drop((fixture, before));
+    assert_eq!(budget.used(), 0);
+}

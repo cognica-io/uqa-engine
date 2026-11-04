@@ -64,11 +64,14 @@ pub fn restore(
             )));
         }
         let entry = decode(&json, roles)?;
-        if result.insert(oid, entry).is_some() {
+        if result.contains_key(&oid) {
             return Err(StorageBackendError::Other(
                 "duplicate builtin routine ACL record".into(),
             ));
         }
+        result
+            .insert(oid, entry)
+            .map_err(|error| StorageBackendError::backend("builtin routine ACL", error))?;
     }
     Ok(result)
 }
@@ -114,7 +117,9 @@ pub fn merge_private(
     if let Some(catalog) = catalog {
         for (oid, entry) in current {
             if catalog.metadata_has_private_changes(&metadata_key(*oid))? {
-                latest.insert(*oid, entry.clone());
+                latest
+                    .insert(*oid, entry.clone())
+                    .map_err(|error| StorageBackendError::backend("builtin routine ACL", error))?;
             }
         }
     }

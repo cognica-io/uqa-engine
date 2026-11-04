@@ -16,8 +16,11 @@ use super::{
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{ast::RoleAttribute, catalog::SystemRelation};
-use std::{collections::BTreeMap, ops::Deref};
-use uqa_core::RelationIdentity;
+use std::ops::Deref;
+use uqa_core::{memory::OwnedMap, RelationIdentity};
+
+mod registry;
+pub use registry::{CapturedSystemRelationSecurities, SystemRelationSecurities};
 
 /// One catalog tuple ACL and its replacement identity. Equal ACL values can still be different committed tuples.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -28,7 +31,7 @@ pub struct SystemAcl {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemRelationSecurity {
     pub table: Option<SystemAcl>,
-    pub columns: BTreeMap<String, SystemAcl>,
+    pub columns: OwnedMap<String, SystemAcl>,
 }
 impl SystemRelationSecurity {
     pub fn security(&self, relation: SystemRelation) -> BoundTableSecurity {
@@ -48,7 +51,6 @@ impl SystemRelationSecurity {
         column.map_or_else(|| self.table.as_ref(), |column| self.columns.get(column))
     }
 }
-pub type SystemRelationSecurities = BTreeMap<RelationIdentity, SystemRelationSecurity>;
 pub type SystemRelationSecurityRead<'a> = Box<dyn Deref<Target = SystemRelationSecurities> + 'a>;
 
 pub trait SystemRelationSecurityCatalog {

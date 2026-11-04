@@ -49,9 +49,8 @@ pub fn restore(
         if migrated {
             migrations.push((key.clone(), persistence::encode(&entry)?));
         }
-        let security = result
-            .entry(RelationIdentity::new(relation.namespace(), relation.name()))
-            .or_default();
+        let identity = RelationIdentity::new(relation.namespace(), relation.name());
+        let mut security = result.get(&identity).cloned().unwrap_or_default();
         if column.is_empty() {
             security.table = Some(entry);
         } else if relation.column_names().iter().any(|name| name == column) {
@@ -61,6 +60,9 @@ pub fn restore(
                 "unknown system ACL attribute".into(),
             ));
         }
+        result
+            .insert(identity, security)
+            .map_err(|error| StorageBackendError::backend("system relation ACL", error))?;
     }
     for (identity, entry) in &result {
         let relation = SystemRelation::at(&identity.schema, &identity.name)
@@ -107,18 +109,18 @@ impl SystemPrivilegeUpdate {
         }
         Ok(())
     }
-    pub fn publish(self, securities: &mut SystemRelationSecurities) {
-        let security = securities
-            .entry(RelationIdentity::new(
-                self.relation.namespace(),
-                self.relation.name(),
-            ))
-            .or_default();
-        if let Some(column) = self.column {
-            security.columns.insert(column, self.entry);
+    pub fn publish(
+        &self,
+        securities: &mut SystemRelationSecurities,
+    ) -> Result<(), uqa_sql::SQLError> {
+        let identity = RelationIdentity::new(self.relation.namespace(), self.relation.name());
+        let mut security = securities.get(&identity).cloned().unwrap_or_default();
+        if let Some(column) = &self.column {
+            security.columns.insert(column.clone(), self.entry.clone());
         } else {
-            security.table = Some(self.entry);
+            security.table = Some(self.entry.clone());
         }
+        securities.insert(identity, security)
     }
 }
 
@@ -135,23 +137,27 @@ pub fn merge_private(
         let relation = SystemRelation::at(&identity.schema, &identity.name).ok_or_else(|| {
             StorageBackendError::Other("non-system relation in system ACL registry".into())
         })?;
+        let mut changed = None;
         if security.table.is_some()
             && catalog.metadata_has_private_changes(&metadata_key(relation, None))?
         {
-            latest
-                .entry(identity.clone())
-                .or_default()
+            changed
+                .get_or_insert_with(|| latest.get(identity).cloned().unwrap_or_default())
                 .table
                 .clone_from(&security.table);
         }
         for (column, entry) in &security.columns {
             if catalog.metadata_has_private_changes(&metadata_key(relation, Some(column)))? {
-                latest
-                    .entry(identity.clone())
-                    .or_default()
+                changed
+                    .get_or_insert_with(|| latest.get(identity).cloned().unwrap_or_default())
                     .columns
                     .insert(column.clone(), entry.clone());
             }
+        }
+        if let Some(changed) = changed {
+            latest
+                .insert(identity.clone(), changed)
+                .map_err(|error| StorageBackendError::backend("system relation ACL", error))?;
         }
     }
     Ok(latest)

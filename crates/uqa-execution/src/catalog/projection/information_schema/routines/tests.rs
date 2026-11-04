@@ -9,7 +9,10 @@ use crate::catalog::test_support::{empty_catalog, CatalogServices};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
-use uqa_sql::catalog::{roles::RoleDefinition, security::builtin_routines::BuiltinRoutineSecurity};
+use uqa_sql::catalog::{
+    roles::RoleDefinition,
+    security::builtin_routines::{BuiltinRoutineSecurities, BuiltinRoutineSecurity},
+};
 
 /// The bootstrap catalog with an ordinary `reader` role, where the bootstrap owner revoked `EXECUTE` on `revoked` from PUBLIC.
 fn catalog(revoked: &[u32]) -> CatalogReadView {
@@ -27,22 +30,20 @@ fn catalog(revoked: &[u32]) -> CatalogReadView {
         .unwrap(),
     );
     snapshot.definitions.builtin_routine_security = Arc::new(
-        revoked
-            .iter()
-            .map(|oid| {
-                (
-                    *oid,
-                    BuiltinRoutineSecurity {
-                        revision: [1; 16],
-                        execute_acl: vec![RoutineAclEntry {
-                            role: Some(RoleIdentity::BOOTSTRAP),
-                            grantor: RoleIdentity::BOOTSTRAP,
-                            grant_option: false,
-                        }],
-                    },
-                )
-            })
-            .collect(),
+        BuiltinRoutineSecurities::try_from_iter(revoked.iter().map(|oid| {
+            (
+                *oid,
+                BuiltinRoutineSecurity {
+                    revision: [1; 16],
+                    execute_acl: vec![RoutineAclEntry {
+                        role: Some(RoleIdentity::BOOTSTRAP),
+                        grantor: RoleIdentity::BOOTSTRAP,
+                        grant_option: false,
+                    }],
+                },
+            )
+        }))
+        .unwrap(),
     );
     CatalogReadView::new(snapshot)
 }

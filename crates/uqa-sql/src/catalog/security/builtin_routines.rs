@@ -22,7 +22,10 @@ use super::object_acl;
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleDefinitions;
 use crate::{ast::RoutineAclEntry, catalog::roles::RoleIdentity, SQLError};
-use std::{collections::BTreeMap, ops::Deref};
+use std::ops::Deref;
+
+mod registry;
+pub use registry::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,7 +34,6 @@ pub struct BuiltinRoutineSecurity {
     pub execute_acl: Vec<RoutineAclEntry>,
 }
 
-pub type BuiltinRoutineSecurities = BTreeMap<u32, BuiltinRoutineSecurity>;
 pub type BuiltinRoutineSecurityRead<'a> = Box<dyn Deref<Target = BuiltinRoutineSecurities> + 'a>;
 
 pub trait BuiltinRoutineSecurityCatalog {

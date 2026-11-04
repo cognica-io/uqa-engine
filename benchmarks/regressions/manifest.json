@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -40128,6 +40128,85 @@
       "invariant": "Capture stays below 32 KiB and 128 allocations and preserves original identities, optional type/version and written option order under independent cancellation and complete allowance release.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_roots_capture_original_acl_tuples_without_allocations_or_encoding_changes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Immutable authority capture",
+      "workload": "Capture both native ACL root families with 1, 64 and 4096 entries under independent exact allowances; compare complete legacy tuples and stored encodings.",
+      "invariant": "Root capture allocates no heap objects; original revisions, role endpoints, optional defaults and empty column tuples survive source closure and release all allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_authority_publication_shares_unrelated_large_acl_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Selected authority publication",
+      "workload": "Update selected built-in and system ACL tuples beside 1, 32 and 512 entries and unrelated large ACL and column-name payloads.",
+      "invariant": "Both publications together stay below 32 KiB and 256 allocations, share every unrelated definition and preserve the original selected tuples.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_copy_and_failed_admission_preserve_complete_revisions_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Authority admission and retirement",
+      "workload": "Admit exact system ACL copies, reject one-byte-insufficient captures and exhausted native updates, cancel captures and retire owners.",
+      "invariant": "Admitted bytes match copied storage; rejected updates preserve original revisions and every native or captured lease is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "builtin_admission_failure_precedes_mixed_routine_persistence_and_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/privileges/tests.rs",
+      "capability": "Atomic mixed routine authority",
+      "workload": "Exhaust the native built-in ACL allowance before a mixed user/built-in GRANT, then release the competing reservation and retry.",
+      "invariant": "Admission failure occurs before persistence or either registry publication, releases guards, preserves original ACLs and permits ordinary retry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "denied_system_acl_successor_preserves_independent_tuples_and_releases_reservations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/tests.rs",
+      "capability": "Independent system authority tuples",
+      "workload": "Deny an attribute ACL successor beside independent table and attribute records, then release the reservation and apply the original update.",
+      "invariant": "Failure preserves every original tuple; success changes only the selected attribute and releases all native reservations after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_authority_roots_preserve_original_acl_revisions_with_bounded_capture_work",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/authority_roots.rs",
+      "capability": "Committed native authority roots",
+      "workload": "Capture built-in and system ACL roots with 1, 32 and 128 role endpoints through private revocation, savepoint rollback, COMMIT or ROLLBACK, later publication and closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations; original complete ACLs and revisions survive closure, retain cancellation and release all admission.",
+      "case_names": [
+        "case_1",
+        "case_2"
       ]
     }
   ]

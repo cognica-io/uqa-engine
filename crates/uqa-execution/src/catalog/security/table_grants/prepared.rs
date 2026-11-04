@@ -37,8 +37,18 @@ pub(super) struct PreparedTableGrant<'a> {
     pub view_updates: Vec<ViewPrivilegeUpdate>,
     pub foreign_updates: Vec<ForeignTablePrivilegeUpdate>,
     pub system_updates: Vec<SystemPrivilegeUpdate>,
+    pub system: Option<SystemPrivilegeCandidate<'a>>,
     pub acl_updates: Vec<super::tuples::RelationPrivilegeUpdate>,
     pub notices: Vec<uqa_sql::SQLNotice>,
+}
+
+pub(super) struct SystemPrivilegeCandidate<'a> {
+    pub registry: Box<
+        dyn std::ops::DerefMut<
+                Target = uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
+            > + 'a,
+    >,
+    pub next: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
 }
 
 pub(super) fn resolve_roles(
@@ -136,12 +146,23 @@ pub(super) fn prepare<'a>(
         &mut view_updates,
         &mut foreign_updates,
     )?;
+    let system = if system_updates.is_empty() {
+        None
+    } else {
+        let registry = context.system.system_relation_securities_write();
+        let mut next = registry.clone();
+        for update in &system_updates {
+            update.publish(&mut next)?;
+        }
+        Some(SystemPrivilegeCandidate { registry, next })
+    };
     Ok(RoleDependencyCandidate {
         value: PreparedTableGrant {
             updates,
             view_updates,
             foreign_updates,
             system_updates,
+            system,
             acl_updates,
             notices,
         },

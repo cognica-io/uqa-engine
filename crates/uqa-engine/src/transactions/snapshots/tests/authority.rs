@@ -27,7 +27,7 @@ fn same_authority(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
     macro_rules! same_map {
         ($($field:ident),+) => {$ ({
             let saved = selected.catalogs.$field.captured(&selected.cut).unwrap();
-            assert!(saved.get().unwrap().iter().map(|(k,v)| (k,v)).eq(original.$field.iter()));
+            assert!(saved.get().unwrap().iter().eq(original.$field.iter()));
         })+};
     }
     same_map!(role_memberships, builtin_routine_security, foreign_wrappers);
@@ -54,11 +54,7 @@ fn same_authority(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
     {
         assert_eq!(name, old_name);
         assert_eq!(value.table, old.table);
-        assert!(value
-            .columns
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(old.columns.iter()));
+        assert!(value.columns.iter().eq(old.columns.iter()));
     }
     let servers = selected
         .catalogs
