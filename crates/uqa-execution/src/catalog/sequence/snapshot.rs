@@ -7,10 +7,8 @@
 //! Retain sequence definitions and authorization from one committed view plus private records.
 
 use super::{
-    restoration::{
-        load_sequence_value_rows, prepare_sequence_rows, select_sequence_records,
-        RestoredSequenceRegistry,
-    },
+    registry::SequenceCatalog,
+    restoration::{load_sequence_value_rows, prepare_sequence_rows, select_sequence_records},
     SequenceState,
 };
 use crate::catalog::{
@@ -23,11 +21,8 @@ use uqa_sql::{
     ast::RelationPersistence,
     catalog::{
         roles::guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
-        security::{
-            sequence_inquiry::{
-                SequencePrivilegeInquiry, SequenceSecurityCatalog, SequenceSecurityRead,
-            },
-            BoundSequenceSecurity,
+        security::sequence_inquiry::{
+            SequencePrivilegeInquiry, SequenceSecurityCatalog, SequenceSecurityRead,
         },
     },
 };
@@ -37,12 +32,7 @@ use uqa_storage::{
 
 #[derive(Clone)]
 pub struct SequenceReadSnapshot {
-    pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
-    pub object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    pub persistence: Arc<BTreeMap<RelationIdentity, RelationPersistence>>,
-    pub security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub catalog: Arc<SequenceCatalog>,
     pub roles: RoleCatalogSnapshot,
 }
 
@@ -76,21 +66,43 @@ impl RoleCatalogGuards for SequenceReadSnapshot {
 
 impl SequenceSecurityCatalog for SequenceReadSnapshot {
     fn security_read(&self) -> SequenceSecurityRead<'_> {
-        Box::new(self.security.as_ref())
+        Box::new(self.catalog.security())
     }
 }
 
 impl SequenceReadSnapshot {
-    pub fn named_states(&self) -> BTreeMap<String, SequenceState> {
-        self.sequences
+    pub fn states_at_positions(
+        &self,
+        positions: Option<
+            &std::collections::HashMap<
+                crate::row_locks::SequencePositionKey,
+                crate::row_locks::RecordedSequencePosition,
+            >,
+        >,
+    ) -> BTreeMap<RelationIdentity, SequenceState> {
+        self.catalog
             .iter()
+            .map(|(relation, record)| {
+                let position = positions
+                    .and_then(|positions| {
+                        positions.get(&record.state.position_key(record.object_id))
+                    })
+                    .copied();
+                (relation.clone(), record.state.at_position(position))
+            })
+            .collect()
+    }
+
+    pub fn named_states(&self) -> BTreeMap<String, SequenceState> {
+        self.catalog
+            .states()
             .map(|(relation, state)| (relation.qualified_name(), *state))
             .collect()
     }
 
     pub fn names(&self) -> Vec<String> {
         let mut names = self
-            .sequences
+            .catalog
             .keys()
             .map(RelationIdentity::qualified_name)
             .collect::<Vec<_>>();
@@ -101,8 +113,8 @@ impl SequenceReadSnapshot {
     /// Select from SQL's ordered search-path candidates without publishing the detached metadata into live registries.
     pub fn first_state(&self, candidates: &[RelationIdentity]) -> Option<(String, SequenceState)> {
         candidates.iter().find_map(|relation| {
-            self.sequences
-                .get(relation)
+            self.catalog
+                .state(relation)
                 .map(|state| (relation.qualified_name(), *state))
         })
     }
@@ -127,10 +139,10 @@ impl SequenceReadSnapshot {
         mut private: impl FnMut(&RelationIdentity, [u8; 16]) -> StorageBackendResult<bool>,
     ) -> StorageBackendResult<Self> {
         let selected = select_sequence_records(
-            current.object_ids.iter().map(|(relation, object_id)| {
+            current.catalog.object_ids().map(|(relation, object_id)| {
                 (relation.clone(), (SequenceSource::Current, *object_id))
             }),
-            self.object_ids.iter().map(|(relation, object_id)| {
+            self.catalog.object_ids().map(|(relation, object_id)| {
                 (relation.clone(), (SequenceSource::Committed, *object_id))
             }),
             |relation, (source, object_id)| {
@@ -138,57 +150,47 @@ impl SequenceReadSnapshot {
                     SequenceSource::Current => current,
                     SequenceSource::Committed => &self,
                 };
-                if snapshot.persistence.get(relation) == Some(&RelationPersistence::Temporary) {
+                if snapshot.catalog.persistence(relation) == Some(RelationPersistence::Temporary) {
                     return Ok(true);
                 }
                 private(relation, *object_id)
             },
         )?;
         let removed = self
-            .object_ids
+            .catalog
             .keys()
             .filter(|relation| !selected.contains_key(*relation))
             .cloned()
             .collect::<Vec<_>>();
         for relation in removed {
-            Arc::make_mut(&mut self.sequences).remove(&relation);
-            Arc::make_mut(&mut self.object_ids).remove(&relation);
-            Arc::make_mut(&mut self.persistence).remove(&relation);
-            Arc::make_mut(&mut self.security).remove(&relation);
+            Arc::make_mut(&mut self.catalog)
+                .remove_selected(&relation)
+                .map_err(|error| StorageBackendError::backend("select private sequence", error))?;
         }
-        for (relation, (source, object_id)) in selected {
+        for (relation, (source, _)) in selected {
             if matches!(source, SequenceSource::Committed) {
                 continue;
             }
-            let (Some(state), Some(persistence), Some(security)) = (
-                current.sequences.get(&relation),
-                current.persistence.get(&relation),
-                current.security.get(&relation),
-            ) else {
-                return Err(StorageBackendError::Other(format!(
-                    "sequence `{}` has incomplete private catalog metadata",
-                    relation.qualified_name()
-                )));
-            };
-            Arc::make_mut(&mut self.sequences).insert(relation.clone(), *state);
-            Arc::make_mut(&mut self.object_ids).insert(relation.clone(), object_id);
-            if let Some(oid) = current.catalog_oids.get(&object_id) {
-                Arc::make_mut(&mut self.catalog_oids).insert(object_id, *oid);
-            }
-            Arc::make_mut(&mut self.persistence).insert(relation.clone(), *persistence);
-            Arc::make_mut(&mut self.security).insert(relation, security.clone());
+            let record = *current
+                .catalog
+                .get(&relation)
+                .expect("selected complete sequence exists");
+            let security = current.catalog.security()[&relation].clone();
+            Arc::make_mut(&mut self.catalog)
+                .insert(relation, record, security)
+                .map_err(|error| StorageBackendError::backend("select private sequence", error))?;
         }
         Ok(self)
     }
 
     /// The OID of the sequence with the object identity.
     pub fn catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
-        super::catalog_oids::sequence_catalog_oid(&self.catalog_oids, object_id)
+        self.catalog.catalog_oid(object_id)
     }
 
     /// The sequence with the OID.
     pub fn relation_with_oid(&self, oid: i64) -> Option<RelationIdentity> {
-        self.object_ids.iter().find_map(|(relation, object_id)| {
+        self.catalog.object_ids().find_map(|(relation, object_id)| {
             (self.catalog_oid(object_id) == oid).then(|| relation.clone())
         })
     }
@@ -211,29 +213,22 @@ impl SequenceReadSnapshot {
         rows: Vec<uqa_storage::SequenceRow>,
         recorded: BTreeMap<[u8; 16], u32>,
     ) -> StorageBackendResult<Self> {
-        let temporary = RestoredSequenceRegistry::temporary(
-            &self.sequences,
-            &self.object_ids,
-            &self.persistence,
-            &self.security,
-        );
-        let registry = prepare_sequence_rows(temporary, rows, &self.roles.roles)?;
+        let temporary = self.catalog.temporary_only();
+        let mut registry = prepare_sequence_rows(temporary, rows, &self.roles.roles)?;
         let catalog_oids = registry
-            .object_ids
-            .values()
-            .filter_map(|object_id| {
+            .object_ids()
+            .filter_map(|(_, object_id)| {
                 recorded
                     .get(object_id)
-                    .or_else(|| self.catalog_oids.get(object_id))
+                    .or_else(|| self.catalog.catalog_oids().get(object_id))
                     .map(|oid| (*object_id, *oid))
             })
-            .collect();
+            .collect::<Vec<_>>();
+        registry
+            .replace_catalog_oids(catalog_oids)
+            .map_err(|error| StorageBackendError::backend("load sequence OIDs", error))?;
         Ok(Self {
-            sequences: Arc::new(registry.sequences),
-            object_ids: Arc::new(registry.object_ids),
-            persistence: Arc::new(registry.persistence),
-            security: Arc::new(registry.security),
-            catalog_oids: Arc::new(catalog_oids),
+            catalog: Arc::new(registry),
             roles: self.roles,
         })
     }

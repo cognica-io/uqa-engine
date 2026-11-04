@@ -74,8 +74,8 @@ impl SequenceValueContext<'_> {
         };
         let name = relation.qualified_name();
         let object_id = snapshot
-            .object_ids
-            .get(&relation)
+            .catalog
+            .object_id(&relation)
             .copied()
             .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
         Ok(BoundSequenceValue { name, object_id })
@@ -92,8 +92,8 @@ impl SequenceValueContext<'_> {
             // Refresh sequence definitions and authority through their independent catalog view without advancing the caller's ordinary SQL data snapshot.
             let snapshot = self.read_snapshot()?;
             let relation = snapshot
-                .object_ids
-                .iter()
+                .catalog
+                .object_ids()
                 .find_map(|(relation, object_id)| {
                     (*object_id == bound.object_id).then(|| relation.clone())
                 })
@@ -119,12 +119,12 @@ impl SequenceValueContext<'_> {
     ) -> Result<NextvalTarget, SequenceValueError> {
         let name = relation.qualified_name();
         let state = snapshot
-            .sequences
-            .get(&relation)
+            .catalog
+            .state(&relation)
             .copied()
             .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        let temporary = snapshot.persistence.get(&relation)
-            == Some(&uqa_sql::ast::RelationPersistence::Temporary);
+        let temporary = snapshot.catalog.persistence(&relation)
+            == Some(uqa_sql::ast::RelationPersistence::Temporary);
         let privileges = snapshot.privileges(&self.privileges);
         match access {
             ValueAccess::Next => privileges.ensure_sequence_nextval_privilege(&name, &relation)?,

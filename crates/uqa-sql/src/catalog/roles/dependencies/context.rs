@@ -8,9 +8,9 @@
 
 use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::security::{
-    database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity,
+    database::BoundDatabaseSecurity, sequence_registry::SequenceSecurities, BoundTableSecurity,
 };
-use std::{collections::BTreeMap, ops::Deref};
+use std::ops::Deref;
 use uqa_core::RelationIdentity;
 
 pub type RoleDependencyRead<'a, T> = Box<dyn Deref<Target = T> + 'a>;
@@ -33,9 +33,7 @@ pub trait RoleDependencyCatalog:
     fn foreign_tables(
         &self,
     ) -> RoleDependencyRead<'_, crate::catalog::security::foreign_tables::ForeignTableSecurities>;
-    fn sequences(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>>;
+    fn sequences(&self) -> RoleDependencyRead<'_, SequenceSecurities>;
     fn routines(&self) -> RoleDependencyRead<'_, crate::routines::registry::RoutineRegistry>;
     fn domains(
         &self,
@@ -47,7 +45,4 @@ pub trait RoleDependencyCatalog:
 
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {
     fn temporary_namespace_allocated(&self) -> bool;
-    fn sequence_persistence(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, crate::ast::RelationPersistence>>;
 }

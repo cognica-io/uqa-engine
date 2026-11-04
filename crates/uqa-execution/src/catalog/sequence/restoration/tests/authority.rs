@@ -10,12 +10,7 @@ use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::SequenceSecurityRow;
 
 fn empty() -> RestoredSequenceRegistry {
-    RestoredSequenceRegistry {
-        sequences: BTreeMap::new(),
-        object_ids: BTreeMap::new(),
-        persistence: BTreeMap::new(),
-        security: BTreeMap::new(),
-    }
+    RestoredSequenceRegistry::default()
 }
 
 fn roles() -> RoleDefinitions {
@@ -41,11 +36,11 @@ fn legacy_sequence_conversion_is_prepared_without_catalog_access_and_rejected_by
     expected.security = SequenceSecurityRow::bootstrap();
     assert_eq!(conversions[0], expected);
     assert_eq!(
-        registry.security[&legacy.relation].role_owner,
+        registry.security()[&legacy.relation].role_owner,
         uqa_core::catalog_role::RoleIdentity::BOOTSTRAP
     );
     assert_eq!(
-        registry.sequences[&legacy.relation],
+        *registry.state(&legacy.relation).unwrap(),
         sequence_state_from_row(expected).unwrap().1
     );
     let (_, repeated) =

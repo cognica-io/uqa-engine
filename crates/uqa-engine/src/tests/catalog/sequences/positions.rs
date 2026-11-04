@@ -58,8 +58,15 @@ fn record(engine: &Engine, name: &str) -> (i64, bool, i64) {
 fn position_key(engine: &Engine, name: &str) -> SequencePositionKey {
     let relation = RelationIdentity::new("public", name);
     engine.refresh_sequences_from_catalog().unwrap();
-    let state = engine.durable.sequences.read()[&relation];
-    state.position_key(engine.durable.sequence_object_ids.read()[&relation])
+    let state = *engine.durable.sequences.read().state(&relation).unwrap();
+    state.position_key(
+        *engine
+            .durable
+            .sequences
+            .read()
+            .object_id(&relation)
+            .unwrap(),
+    )
 }
 
 /// The recorded position of a sequence with whether it was written in this run.

@@ -24,7 +24,7 @@ use uqa_sql::{
                 RoleDependencyCatalog, RoleDependencyRead, RoleTableSecurity, RoleTablesRead,
             },
         },
-        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
+        security::{database::BoundDatabaseSecurity, BoundTableSecurity},
     },
     SQLError,
 };
@@ -203,8 +203,9 @@ impl RoleDependencyCatalog for Engine {
     }
     fn sequences(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
-        Box::new(self.durable.sequence_security.read())
+    ) -> RoleDependencyRead<'_, uqa_sql::catalog::security::sequence_registry::SequenceSecurities>
+    {
+        Box::new(self.durable.sequences.security())
     }
     fn routines(&self) -> RoleDependencyRead<'_, uqa_sql::routines::registry::RoutineRegistry> {
         Box::new(self.durable.sql_user_functions.read())
@@ -222,11 +223,6 @@ impl RoleDependencyCatalog for Engine {
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
     fn temporary_namespace_allocated(&self) -> bool {
         self.session.state.read().temporary_namespace.is_some()
-    }
-    fn sequence_persistence(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>> {
-        Box::new(self.durable.sequence_persistence.read())
     }
 }
 

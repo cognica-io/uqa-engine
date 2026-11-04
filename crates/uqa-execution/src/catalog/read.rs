@@ -220,7 +220,7 @@ impl CatalogReadView {
     /// The `pg_class` OID of the sequence with the object identity.
     pub fn sequence_catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
         super::sequence::catalog_oids::sequence_catalog_oid(
-            &self.snapshot.definitions.sequence_catalog_oids,
+            self.snapshot.definitions.sequences.catalog_oids(),
             object_id,
         )
     }
@@ -235,14 +235,13 @@ impl CatalogReadView {
                     identity.qualified_name(),
                     self.snapshot
                         .definitions
-                        .sequence_persistence
-                        .get(identity)
-                        .copied()
+                        .sequences
+                        .persistence(identity)
                         .unwrap_or_default(),
                     self.snapshot
                         .definitions
-                        .sequence_object_ids
-                        .get(identity)
+                        .sequences
+                        .object_id(identity)
                         .copied()
                         .unwrap_or_default(),
                     self.sequence_security(identity)?,
@@ -266,16 +265,15 @@ impl CatalogReadView {
         self.snapshot
             .definitions
             .sequences
-            .iter()
+            .states()
             .map(|(identity, state)| {
                 Ok((
                     identity.clone(),
                     *state,
                     self.snapshot
                         .definitions
-                        .sequence_persistence
-                        .get(identity)
-                        .copied()
+                        .sequences
+                        .persistence(identity)
                         .unwrap_or_default(),
                     self.sequence_security(identity)?,
                 ))
@@ -300,13 +298,13 @@ impl CatalogReadView {
             None => std::collections::HashMap::new(),
         };
         let records = self.latest_sequence_records()?;
-        let object_ids = &self.snapshot.definitions.sequence_object_ids;
+        let sequences = &self.snapshot.definitions.sequences;
         Ok(self
             .sequence_definitions()?
             .into_iter()
             .map(|(identity, state, persistence, security)| {
-                let key = object_ids
-                    .get(&identity)
+                let key = sequences
+                    .object_id(&identity)
                     .map(|object_id| state.position_key(*object_id));
                 let state = state
                     .with_record(key.and_then(|key| records.get(&key)))
@@ -322,7 +320,7 @@ impl CatalogReadView {
         relation: &uqa_core::RelationIdentity,
         state: crate::catalog::sequence::SequenceState,
     ) -> Result<crate::catalog::sequence::SequenceState, SQLError> {
-        let Some(object_id) = self.snapshot.definitions.sequence_object_ids.get(relation) else {
+        let Some(object_id) = self.snapshot.definitions.sequences.object_id(relation) else {
             return Ok(state);
         };
         let key = state.position_key(*object_id);
@@ -359,7 +357,8 @@ impl CatalogReadView {
     ) -> Result<crate::catalog::security::SequenceSecurity, SQLError> {
         self.snapshot
             .definitions
-            .sequence_security
+            .sequences
+            .security()
             .get(relation)
             .ok_or_else(|| {
                 SQLError::Internal(format!(
@@ -416,7 +415,7 @@ impl CatalogReadView {
         name: &str,
     ) -> Result<Option<CatalogSequenceSnapshot>, SQLError> {
         for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(state) = self.snapshot.definitions.sequences.get(&relation) {
+            if let Some(state) = self.snapshot.definitions.sequences.state(&relation) {
                 return Ok(Some(CatalogSequenceSnapshot {
                     state: self.sequence_state_at_position(&relation, *state)?,
                     security: self.sequence_security(&relation)?,

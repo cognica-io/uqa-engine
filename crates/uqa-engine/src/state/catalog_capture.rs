@@ -109,11 +109,6 @@ impl DurableCatalogState {
             Some(registry),
             uqa_sql::catalog::security::schema_registry::SchemaRegistry::capture,
         )?;
-        self.sequence_security = CatalogCell::capture_source(
-            self.sequence_security.snapshot(),
-            Some(registry),
-            uqa_sql::catalog::security::capture::sequences,
-        )?;
         self.roles = CatalogCell::capture_source(
             self.roles.snapshot(),
             Some(registry),
@@ -149,22 +144,7 @@ impl DurableCatalogState {
         self.sequences = CatalogCell::capture_source(
             self.sequences.snapshot(),
             Some(registry),
-            uqa_execution::catalog::sequence::capture::sequences,
-        )?;
-        self.sequence_object_ids = CatalogCell::capture_source(
-            self.sequence_object_ids.snapshot(),
-            Some(registry),
-            uqa_sql::catalog::definition_capture::identities::sequence_objects,
-        )?;
-        self.sequence_catalog_oids = CatalogCell::capture_source(
-            self.sequence_catalog_oids.snapshot(),
-            Some(registry),
-            uqa_sql::catalog::definition_capture::identities::sequence_oids,
-        )?;
-        self.sequence_persistence = CatalogCell::capture_source(
-            self.sequence_persistence.snapshot(),
-            Some(registry),
-            uqa_sql::catalog::definition_capture::identities::sequence_persistence,
+            uqa_execution::catalog::sequence::registry::SequenceCatalog::capture,
         )?;
         self.graph_catalog_oids = CatalogCell::capture_source(
             self.graph_catalog_oids.snapshot(),

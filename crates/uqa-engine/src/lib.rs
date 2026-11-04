@@ -152,8 +152,8 @@ use uqa_storage::{
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    RelationIdentity, StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema,
+    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -894,6 +894,5 @@ mod tests;
 mod copy;
 
 use uqa_execution::catalog::sequence::session::{
-    NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
-    SessionSequenceValue,
+    SessionLastSequenceReference, SessionSequenceCache, SessionSequenceValue,
 };

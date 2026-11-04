@@ -18,14 +18,28 @@ fn transaction_sequence_cuts_join_reserved_values_to_original_incarnations(
         "CREATE SEQUENCE saved START 1 INCREMENT 3 CACHE 4; SELECT nextval('saved')",
     );
     let relation = RelationIdentity::new("public", "saved");
-    let original = engine.durable.sequences.read()[&relation];
+    let original = *engine.durable.sequences.read().state(&relation).unwrap();
     assert_eq!(original.current, 10);
-    let original_id = engine.durable.sequence_object_ids.read()[&relation];
+    let original_id = *engine
+        .durable
+        .sequences
+        .read()
+        .object_id(&relation)
+        .unwrap();
     sql(&engine, "BEGIN");
     for _ in 0..4 {
         sql(&engine, "SELECT nextval('saved')");
     }
-    assert_eq!(engine.durable.sequences.read()[&relation].current, 22);
+    assert_eq!(
+        engine
+            .durable
+            .sequences
+            .read()
+            .state(&relation)
+            .unwrap()
+            .current,
+        22
+    );
     sql(&engine, "SAVEPOINT prior_definition; ALTER SEQUENCE saved RESTART 100; SELECT nextval('saved'); ALTER SEQUENCE saved RENAME TO changed; CREATE SEQUENCE saved START 900; SELECT nextval('saved'); CREATE TEMP SEQUENCE temporary_sequence; SELECT nextval('temporary_sequence')");
     let control = StorageReadControl::with_limit(64 << 10);
     let first = capture(&engine, &control);
@@ -37,15 +51,16 @@ fn transaction_sequence_cuts_join_reserved_values_to_original_incarnations(
     let later_control = StorageReadControl::with_limit(64 << 10);
     let second = capture(&engine, &later_control);
     sql(&engine, completion);
-    let final_state = engine.durable.sequences.read()[&relation];
+    let final_state = *engine.durable.sequences.read().state(&relation).unwrap();
     assert_eq!(final_state.current, 2);
     assert!(!final_state.called);
     sql(&engine, "SELECT nextval('saved'); DROP SEQUENCE saved; CREATE SEQUENCE saved START 2000; SELECT nextval('saved')");
     drop(engine);
     let saved = first.sequences.captured(&first.cut).unwrap();
-    let rows = saved.get().unwrap();
+    let captured = saved.get().unwrap();
+    let rows = captured.iter().collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].relation, relation);
+    assert_eq!(rows[0].relation, &relation);
     assert_eq!(rows[0].object_id, original_id);
     assert_eq!(
         rows[0].state.definition_generation,
@@ -56,12 +71,12 @@ fn transaction_sequence_cuts_join_reserved_values_to_original_incarnations(
     assert_eq!(rows[0].state.current, 22);
     assert!(rows[0].state.called);
     let later = second.sequences.captured(&second.cut).unwrap();
-    assert_eq!(later.get().unwrap()[0].state.current, 2);
-    assert!(!later.get().unwrap()[0].state.called);
+    assert_eq!(later.get().unwrap().iter().next().unwrap().state.current, 2);
+    assert!(!later.get().unwrap().iter().next().unwrap().state.called);
     drop((first, second));
     control.cancellation().cancel();
     assert!(saved.get().is_err());
-    assert_eq!(later.get().unwrap()[0].state.current, 2);
+    assert_eq!(later.get().unwrap().iter().next().unwrap().state.current, 2);
     drop((saved, later));
     assert_eq!(control.memory().used(), 0);
     assert_eq!(later_control.memory().used(), 0);
@@ -71,8 +86,12 @@ fn transaction_sequence_cuts_join_reserved_values_to_original_incarnations(
 fn transaction_sequence_values_capture_without_waiting_for_a_private_callback() {
     let engine = Arc::new(Engine::new());
     sql(&engine, "CREATE SEQUENCE saved START 5 CACHE 8");
-    let original_generation = engine.durable.sequences.read()
-        [&RelationIdentity::new("public", "saved")]
+    let original_generation = engine
+        .durable
+        .sequences
+        .read()
+        .state(&RelationIdentity::new("public", "saved"))
+        .unwrap()
         .definition_generation;
     let (entered, started) = mpsc::channel();
     let (release, proceed) = mpsc::channel();
@@ -97,7 +116,8 @@ fn transaction_sequence_values_capture_without_waiting_for_a_private_callback() 
     release.send(()).unwrap();
     worker.join().unwrap().unwrap();
     drop((engine, selected));
-    let rows = saved.get().unwrap();
+    let captured = saved.get().unwrap();
+    let rows = captured.iter().collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].state.definition_generation, original_generation);
     assert_eq!(rows[0].state.current, 12);

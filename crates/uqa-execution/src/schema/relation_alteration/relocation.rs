@@ -92,12 +92,12 @@ impl RelationSchemaContext<'_> {
         let definitions = &catalog.snapshot().definitions;
         let mut owned = definitions
             .sequences
-            .iter()
+            .states()
             .filter_map(|(relation, state)| {
                 state
                     .owner
                     .filter(|owner| owner.table_object_id == object_id)
-                    .and_then(|_| definitions.sequence_object_ids.get(relation).copied())
+                    .and_then(|_| definitions.sequences.object_id(relation).copied())
             })
             .collect::<Vec<_>>();
         owned.sort_by_key(|identity| catalog.sequence_catalog_oid(identity));
@@ -164,13 +164,13 @@ impl RelationSchemaContext<'_> {
                 let catalog = self.indexes.identities.catalog.current_catalog_snapshot();
                 let definitions = &catalog.snapshot().definitions;
                 let Some((relation, _)) = definitions
-                    .sequence_object_ids
-                    .iter()
+                    .sequences
+                    .object_ids()
                     .find(|(_, id)| **id == sequence_id)
                 else {
                     return Ok(None);
                 };
-                let Some(state) = definitions.sequences.get(relation) else {
+                let Some(state) = definitions.sequences.state(relation) else {
                     return Ok(None);
                 };
                 if state
@@ -185,9 +185,8 @@ impl RelationSchemaContext<'_> {
                     value: (
                         relation.clone(),
                         definitions
-                            .sequence_persistence
-                            .get(relation)
-                            .copied()
+                            .sequences
+                            .persistence(relation)
                             .unwrap_or_default(),
                     ),
                 }))

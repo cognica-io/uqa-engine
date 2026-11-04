@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -37831,7 +37831,7 @@
       "kind": "lib",
       "test": "sequence_capture_preserves_extreme_positions_definition_and_owner_identity",
       "cases": 1,
-      "source": "crates/uqa-execution/src/catalog/sequence/capture.rs",
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Selected sequence state capture",
       "workload": "Retain extreme positions, an uncalled value, cache/log state and immutable owner/definition identities.",
       "invariant": "Exact state survives while denied large names and cancellation release every reservation.",
@@ -38890,7 +38890,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Joint durable sequence records",
-      "workload": "Capture permanent and unlogged definitions, exact identities/OIDs, optional ACLs and extreme state beside a one-MiB temporary name with no private authority.",
+      "workload": "Capture permanent and unlogged definitions, exact identities/OIDs, optional ACLs and extreme state beside a complete temporary record with a one-MiB name.",
       "invariant": "Each durable record joins its original object identity and authority; excluded temporary state contributes no output capacity or payload charge and unused OID claims stay absent.",
       "case_names": [
         ""
@@ -38899,12 +38899,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "durable_sequence_capture_rejects_incomplete_selected_metadata_without_leases",
+      "test": "durable_sequence_capture_retains_complete_metadata_after_rejected_publication",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Complete selected sequence metadata",
-      "workload": "Remove persistence, object identity or authority from a selected definition after another complete definition.",
-      "invariant": "No partial catalog escapes and every allocation is released; missing metadata is not replaced with invented defaults.",
+      "workload": "Deny a complete native record, identity, OID and authority replacement, then capture the still-installed generation.",
+      "invariant": "Rejected publication preserves every original root and identity; capture never observes partially installed metadata and releases every allowance.",
       "case_names": [
         ""
       ]
@@ -41014,6 +41014,126 @@
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
         "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "prepared_publication_needs_no_further_comparison_or_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/prepared.rs",
+      "capability": "Prepared ordered publication",
+      "workload": "Admit insertions and replacements with private and shared paths, then disable comparisons and occupy the remaining allowance.",
+      "invariant": "Publication makes no subsequent comparisons or admission and preserves prior retained entries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "abandoned_and_denied_preparation_preserve_the_original_root_and_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/prepared.rs",
+      "capability": "Prepared publication failure isolation",
+      "workload": "Reject admission, abandon a prepared insertion, and unwind before publication.",
+      "invariant": "Every prior root and lease remains unchanged and final release returns all native charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "prepared_retained_publication_preserves_cached_footprints_and_failed_roots",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Prepared retained footprint",
+      "workload": "Prepare replacements and observe cached retained footprint through successful and failed publication.",
+      "invariant": "Cached capture admission remains equal to the complete selected generation and failures preserve its root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_capture_keeps_complete_pairs_without_cardinality_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence capture work",
+      "workload": "Capture 1, 64 and 4096 native definitions, add a large temporary record, remove a selected live record and close its source.",
+      "invariant": "Capture allocates nothing, retains exact record and authority pointers, excludes temporary capacity and independently admits the cached footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_position_precedes_external_effects_and_needs_no_late_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence position publication",
+      "workload": "Reject and abandon a prepared position, then exhaust the remaining allowance after preparation before publishing the selected position.",
+      "invariant": "Failed admission precedes external effects and successful publication needs no later admission or change to identity, definition or authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_history_prepares_every_successor_before_effects_and_preserves_abandoned_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/history/tests.rs",
+      "capability": "Native sequence history publication",
+      "workload": "Capture original history, reject and abandon preparation, and publish physical/session observations after exhausting the remaining native allowance.",
+      "invariant": "Position and observation admission finishes before effects; unread cuts retain prior positions and final release returns every lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_native_sequence_admission_preserves_values_catalogs_and_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/native.rs",
+      "capability": "Native sequence failure recovery",
+      "workload": "Deny creation, restart, rename, removal, grants, owner changes and cached/uncached nextval or setval on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Memory errors leave original records, authority, OIDs, physical rows, caches and session observations intact; recovery can allocate and change definitions afterward.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_generation_identity_changes_only_with_published_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence generation identity",
+      "workload": "Abandon a prepared position and independently publish value, authority, OID, rename and membership changes.",
+      "invariant": "Unchanged native roots remain reusable without cardinality work; every published content change invalidates their identity and preserves the retained source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_effect_classification_preserves_catalog_admission_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/effects/routines/tests.rs",
+      "capability": "Sequence effect-analysis admission",
+      "workload": "Reject sequence catalog admission while classifying nextval and setval before execution.",
+      "invariant": "SQLSTATE 53200 survives the typed effect-catalog boundary without executing a sequence value operation.",
+      "case_names": [
+        ""
       ]
     }
   ]

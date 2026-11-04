@@ -167,7 +167,7 @@ impl SequenceTablePrivilegeInquiry for InquiryRead<'_, '_> {
         checks: &[TablePrivilegeCheck],
     ) -> Result<bool, SQLError> {
         let snapshot = self.sequence_snapshot()?;
-        if !snapshot.object_ids.contains_key(relation) {
+        if !snapshot.catalog.contains_key(relation) {
             return Err(
                 uqa_sql::catalog::security::sequence_inquiry::missing_sequence(
                     &relation.qualified_name(),

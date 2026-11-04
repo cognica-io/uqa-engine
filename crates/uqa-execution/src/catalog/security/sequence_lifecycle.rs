@@ -10,15 +10,13 @@ use super::roles::{
     dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
     locking::RoleLockContext,
 };
+use crate::catalog::sequence::registry::{SequenceCatalog, SequenceCatalogWrite};
 use crate::catalog::{
     context::CatalogContext, projection::resolve_regclass_kind_by_oid, sequence::sequence_row,
     sequence_introspection::SequenceIntrospectionCatalog,
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::DerefMut,
-};
+use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
@@ -40,8 +38,7 @@ use uqa_sql::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
-pub type SequenceSecurityWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
+pub type SequenceSecurityWrite<'a> = SequenceCatalogWrite<'a>;
 pub trait SequencePrivilegePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
@@ -62,6 +59,7 @@ pub struct SequencePrivilegeContext<'a> {
 
 struct SequencePrivilegeCandidate<'a> {
     registry: SequenceSecurityWrite<'a>,
+    candidate: SequenceCatalog,
     updates: Vec<(String, RelationIdentity, BoundSequenceSecurity)>,
     notices: Vec<uqa_sql::SQLNotice>,
 }
@@ -83,6 +81,7 @@ impl SequencePrivilegeContext<'_> {
             value:
                 SequencePrivilegeCandidate {
                     mut registry,
+                    candidate,
                     updates,
                     notices,
                 },
@@ -96,14 +95,14 @@ impl SequencePrivilegeContext<'_> {
             || self.prepare_privileges(statement, &targets, command_roles),
         )?;
         for (name, relation, security) in &updates {
-            self.persist_sequence_security(name, relation, security)?;
+            self.persist_sequence_security_record(&candidate, name, relation, security)?;
         }
         let changed = !updates.is_empty();
-        for (_, relation, security) in updates {
-            self.publication.prepared_relation_changed(&relation);
-            registry.insert(relation, security);
-        }
+        **registry = candidate;
         drop(registry);
+        for (_, relation, _) in updates {
+            self.publication.prepared_relation_changed(&relation);
+        }
         drop(memberships);
         drop(roles);
         for notice in notices {
@@ -145,16 +144,21 @@ impl SequencePrivilegeContext<'_> {
         let privileges = requested_acl_privileges(&statement.privileges)?;
         let memberships = self.inquiry.roles.role_memberships();
         let registry = self.publication.security_write();
+        let mut candidate = (*registry).clone();
         let mut updates = Vec::new();
         let mut notices = Vec::new();
         let mut dependencies = BTreeSet::new();
         for target in targets {
-            let current = registry.get(&target.relation).cloned().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "sequence `{}` has no security metadata",
-                    target.name
-                ))
-            })?;
+            let current = registry
+                .security()
+                .get(&target.relation)
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "sequence `{}` has no security metadata",
+                        target.name
+                    ))
+                })?;
             let current = current.resolve(&roles).map_err(SQLError::Internal)?;
             let (next, grantable) = apply_sequence_acl(
                 statement,
@@ -183,12 +187,14 @@ impl SequencePrivilegeContext<'_> {
                 let next =
                     BoundSequenceSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
                 next.validate(&roles).map_err(SQLError::Internal)?;
+                candidate.replace_security(&target.relation, next.clone())?;
                 updates.push((target.name.clone(), target.relation.clone(), next));
             }
         }
         Ok(RoleDependencyCandidate {
             value: SequencePrivilegeCandidate {
                 registry,
+                candidate,
                 updates,
                 notices,
             },
@@ -223,7 +229,7 @@ impl SequencePrivilegeContext<'_> {
             SQLError::Internal(format!("load sequences for privileges: {error}"))
         })?;
         let schemas = bind_sequence_grant_schemas(self.namespaces, schemas)?;
-        let sequences = self.sequences.states();
+        let sequences = self.sequences.registry();
         let targets = sequence_grants_in_schemas(&schemas, sequences.keys());
         Ok(targets)
     }
@@ -234,24 +240,20 @@ impl SequencePrivilegeContext<'_> {
         relation: &RelationIdentity,
         security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
-        let state = self
-            .sequences
-            .sequence_state(relation)
-            .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
-        let object_id = self
-            .sequences
-            .object_ids()
+        self.persist_sequence_security_record(&self.sequences.registry(), name, relation, security)
+    }
+
+    fn persist_sequence_security_record(
+        &self,
+        registry: &SequenceCatalog,
+        name: &str,
+        relation: &RelationIdentity,
+        security: &BoundSequenceSecurity,
+    ) -> Result<(), SQLError> {
+        let record = registry
             .get(relation)
-            .copied()
-            .ok_or_else(|| {
-                SQLError::Internal(format!("sequence `{name}` has no object identity"))
-            })?;
-        let persistence = self
-            .sequences
-            .sequence_persistence(relation)
-            .ok_or_else(|| {
-                SQLError::Internal(format!("sequence `{name}` has no persistence metadata"))
-            })?;
+            .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
+        let (state, object_id, persistence) = (record.state, record.object_id, record.persistence);
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             return Ok(());
         }
@@ -281,8 +283,8 @@ impl SequencePrivilegeContext<'_> {
         let catalog = self.catalog.catalog_read_view();
         if let Some((relation, _)) = self
             .sequences
+            .registry()
             .object_ids()
-            .iter()
             .find(|(_, object_id)| catalog.sequence_catalog_oid(object_id) == oid)
         {
             return Ok(Some((relation.qualified_name(), relation.clone())));

@@ -23,19 +23,15 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
         let engine = Engine::new();
         fixture(&engine);
         let sequences = engine.durable.sequences.snapshot();
-        let objects = engine.durable.sequence_object_ids.snapshot();
-        let oids = engine.durable.sequence_catalog_oids.snapshot();
-        let persistence = engine.durable.sequence_persistence.snapshot();
         let graph_oids = engine.durable.graph_catalog_oids.snapshot();
         let comments = engine.durable.comments.snapshot();
         let indexes = engine.durable.catalog_indexes.snapshot();
         let params = engine.durable.scoring_params.snapshot();
-        assert!(
-            !sequences.is_empty()
-                && !objects.is_empty()
-                && !oids.is_empty()
-                && !persistence.is_empty()
-        );
+        assert!(!sequences.is_empty());
+        assert_eq!(sequences.len(), sequences.security().len());
+        assert!(sequences
+            .iter()
+            .all(|(_, record)| record.catalog_oid.is_some()));
         assert!(
             !graph_oids.is_empty()
                 && !comments.is_empty()
@@ -43,9 +39,6 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
                 && !params.is_empty()
         );
         let sequence_key = engine.durable.sequences.key().unwrap();
-        let object_key = engine.durable.sequence_object_ids.key().unwrap();
-        let oid_key = engine.durable.sequence_catalog_oids.key().unwrap();
-        let persistence_key = engine.durable.sequence_persistence.key().unwrap();
         let graph_key = engine.durable.graph_catalog_oids.key().unwrap();
         let comment_key = engine.durable.comments.key().unwrap();
         let index_key = engine.durable.catalog_indexes.key().unwrap();
@@ -81,10 +74,14 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
                 saved
             }};
         }
-        let saved_sequences = same!(sequence_key, sequences);
-        let saved_objects = same!(object_key, objects);
-        let saved_oids = same!(oid_key, oids);
-        let saved_persistence = same!(persistence_key, persistence);
+        let saved_sequences = sequence_key.retained(&cut).unwrap().unwrap();
+        let saved = saved_sequences.get().unwrap();
+        assert!(saved.records.iter().eq(sequences.iter()));
+        assert!(saved
+            .security
+            .iter()
+            .map(|(key, authority)| (key, authority.security()))
+            .eq(sequences.security().iter()));
         let saved_comments = same!(comment_key, comments);
         let saved_params = params_key.retained(&cut).unwrap().unwrap();
         assert!(saved_params.get().unwrap().iter().eq(params.iter()));
@@ -97,9 +94,6 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
         macro_rules! cancelled { ($($value:expr),+ $(,)?) => { $(assert!($value.get().is_err());)+ }; }
         cancelled!(
             saved_sequences,
-            saved_objects,
-            saved_oids,
-            saved_persistence,
             saved_comments,
             saved_params,
             saved_indexes,
@@ -107,9 +101,6 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
         );
         drop((
             saved_sequences,
-            saved_objects,
-            saved_oids,
-            saved_persistence,
             saved_comments,
             saved_params,
             saved_indexes,

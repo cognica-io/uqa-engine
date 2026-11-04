@@ -47,10 +47,10 @@ impl DependencyBuilder<'_> {
                 DependencyKind::Normal,
             );
         }
-        for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
+        for (identity, object_id) in snapshot.definitions.sequences.object_ids() {
             let oid = super::catalog_oid(
                 crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                    &snapshot.definitions.sequence_catalog_oids,
+                    snapshot.definitions.sequences.catalog_oids(),
                     object_id,
                 ),
             )?;
@@ -59,7 +59,7 @@ impl DependencyBuilder<'_> {
             let Some(owner) = snapshot
                 .definitions
                 .sequences
-                .get(identity)
+                .state(identity)
                 .and_then(|state| state.owner.as_ref())
             else {
                 continue;

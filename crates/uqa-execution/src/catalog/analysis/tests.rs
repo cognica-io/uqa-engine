@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::sequence::{registry::SequenceRecord, SequenceState};
 use crate::catalog::{
     foreign::StoredForeignTable, test_support::empty_catalog, RelationLookupMode,
 };
@@ -12,6 +13,7 @@ use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken, RelationIdentity,
 };
+use uqa_sql::ast::SequenceDataType;
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
     catalog::{
@@ -302,14 +304,20 @@ fn source_schema_binding_borrows_retained_view_payloads_instead_of_cloning_them(
 #[test]
 fn admitted_source_catalog_adapters_preserve_shadowing_row_type_identity_and_cleanup() {
     let mut snapshot = fixture().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.sequences).insert(
-        RelationIdentity::new("later", "v"),
-        crate::catalog::sequence::SequenceState::initial(
-            1,
-            1,
-            uqa_sql::ast::SequenceDataType::BigInt,
-        ),
-    );
+    Arc::make_mut(&mut snapshot.definitions.sequences)
+        .insert(
+            RelationIdentity::new("later", "v"),
+            SequenceRecord {
+                state: SequenceState::initial(1, 1, SequenceDataType::BigInt),
+                object_id: [1; 16],
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                catalog_oid: None,
+            },
+            uqa_sql::catalog::security::BoundSequenceSecurity::owner(
+                uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            ),
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let mut namespace = namespace();
     namespace.search_path.push("later".into());

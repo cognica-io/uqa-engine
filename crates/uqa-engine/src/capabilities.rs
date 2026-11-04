@@ -249,7 +249,6 @@ impl Engine {
         durable: &DurableCatalogSnapshot,
     ) -> CatalogDefinitionSnapshot {
         CatalogDefinitionSnapshot {
-            sequence_persistence: durable.sequence_persistence.clone(),
             foreign_tables: durable.foreign_catalog.tables_snapshot(),
             foreign_wrappers: durable.foreign_wrappers.clone(),
             foreign_servers: durable.foreign_servers.clone(),
@@ -268,10 +267,7 @@ impl Engine {
             database_security: durable.database_security.clone(),
             schemas: durable.schemas.clone(),
             sequences: durable.sequences.clone(),
-            sequence_object_ids: durable.sequence_object_ids.clone(),
-            sequence_catalog_oids: durable.sequence_catalog_oids.clone(),
             graph_catalog_oids: durable.graph_catalog_oids.clone(),
-            sequence_security: durable.sequence_security.clone(),
             foreign_table_security: durable.foreign_catalog.security_snapshot(),
             builtin_routine_security: durable.builtin_routine_security.clone(),
             system_relation_security: durable.system_relation_security.clone(),

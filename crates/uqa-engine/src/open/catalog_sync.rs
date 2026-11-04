@@ -221,11 +221,7 @@ impl Engine {
         )?;
         snapshot.roles = sequences.roles.roles;
         snapshot.role_memberships = sequences.roles.memberships;
-        snapshot.sequences = sequences.sequences;
-        snapshot.sequence_object_ids = sequences.object_ids;
-        snapshot.sequence_catalog_oids = sequences.catalog_oids;
-        snapshot.sequence_persistence = sequences.persistence;
-        snapshot.sequence_security = sequences.security;
+        snapshot.sequences = sequences.catalog;
         snapshot.schemas = uqa_execution::schema::namespaces::authority::merge_private(
             self.storage.catalog.as_deref(),
             &current.schemas,

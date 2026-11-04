@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 pub trait QueryEffectCatalog: RoutineResolution + EngineHook {
     fn registered_runtime_function_may_mutate_engine(&self, name: &str) -> bool;
     fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain>;
-    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
+    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, SQLError>;
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String>;
     fn view_plan(&self, name: &str) -> Result<Option<QueryPlan>, SQLError>;
     fn lookup_prepared(&self, name: &str) -> Option<crate::plan::SharedExecutablePlan>;
@@ -396,10 +396,11 @@ fn sequence_function_targets_temporary(
     Ok(context
         .catalog
         .sequence_persistence(reference)
-        .map_err(|error| {
-            SQLError::Internal(format!(
-                "resolve sequence `{reference}` while classifying query mutability: {error}"
-            ))
+        .map_err(|error| match error {
+            SQLError::Internal(message) => SQLError::Internal(format!(
+                "resolve sequence `{reference}` while classifying query mutability: {message}"
+            )),
+            error => error,
         })?
         .is_some_and(|persistence| persistence == crate::ast::RelationPersistence::Temporary))
 }

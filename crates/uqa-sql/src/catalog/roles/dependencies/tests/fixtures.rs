@@ -8,6 +8,7 @@ use super::super::context::{RoleDependencyRead, RoleTableSecurity, RoleTablesRea
 use super::*;
 use crate::catalog::security::database::BoundDatabaseSecurity;
 use crate::catalog::security::schema_registry::SchemaRegistry;
+use crate::catalog::security::sequence_registry::SequenceSecurities;
 use crate::catalog::security::BoundTableSecurity;
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
@@ -63,8 +64,7 @@ pub(super) struct Catalog {
     pub views: crate::catalog::stored_view::ViewDefinitions,
     pub foreign_tables: crate::catalog::security::foreign_tables::ForeignTableSecurities,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
-    pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
-    pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
+    pub sequences: SequenceSecurities,
     pub routines: crate::routines::registry::RoutineRegistry,
     pub domains:
         crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
@@ -81,8 +81,7 @@ impl Catalog {
                 crate::catalog::security::foreign_tables::ForeignTableSecurities::default(),
             system_relations:
                 crate::catalog::security::system_relations::SystemRelationSecurities::new(),
-            sequences: BTreeMap::new(),
-            sequence_persistence: BTreeMap::new(),
+            sequences: SequenceSecurities::default(),
             routines: crate::routines::registry::RoutineRegistry::new(),
             domains: crate::catalog::type_definitions::TypeDefinitions::new(),
             events: Rc::default(),
@@ -113,11 +112,6 @@ impl super::super::context::TemporaryRoleDependencyCatalog for Catalog {
     fn temporary_namespace_allocated(&self) -> bool {
         true
     }
-    fn sequence_persistence(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, crate::ast::RelationPersistence>> {
-        Box::new(self.read("sequence persistence", &self.sequence_persistence))
-    }
 }
 impl RoleDependencyCatalog for Catalog {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
@@ -138,9 +132,7 @@ impl RoleDependencyCatalog for Catalog {
     {
         Box::new(self.read("foreign", &self.foreign_tables))
     }
-    fn sequences(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
+    fn sequences(&self) -> RoleDependencyRead<'_, SequenceSecurities> {
         Box::new(self.read("sequences", &self.sequences))
     }
     fn routines(&self) -> RoleDependencyRead<'_, crate::routines::registry::RoutineRegistry> {

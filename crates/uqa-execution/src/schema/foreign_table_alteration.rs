@@ -13,7 +13,7 @@ use super::{
     },
     sequences::role_ownership::{
         table_owned_sequence_owner_updates, OwnedSequenceSecurityCatalog,
-        OwnedSequenceSecurityWrite, SequenceSecurityPublication,
+        SequenceSecurityPublication,
     },
 };
 use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
@@ -62,7 +62,6 @@ pub trait ForeignTableAlterPublication {
     fn foreign_catalog(&self) -> crate::catalog::foreign::ForeignCatalog;
     fn publish_foreign_catalog(&self, catalog: crate::catalog::foreign::ForeignCatalog);
     fn memory_tables_write(&self) -> ForeignMemoryRegistryWrite<'_>;
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_>;
     fn persist_security(
         &self,
         relation: &RelationIdentity,
@@ -259,6 +258,10 @@ fn alter_foreign_table_role_owner(
     )?;
     let mut next = context.publication.foreign_catalog();
     next.replace_security(&relation, security.clone())?;
+    let mut sequence_catalog = context.sequence_publication.sequence_catalog();
+    for (sequence, security) in &sequence_updates {
+        sequence_catalog.replace_security(sequence, security.clone())?;
+    }
     for (sequence, sequence_security) in &sequence_updates {
         context.sequence_publication.persist_security(
             &sequence.qualified_name(),
@@ -269,10 +272,9 @@ fn alter_foreign_table_role_owner(
     context.publication.persist_security(&relation, &security)?;
     context.publication.publish_foreign_catalog(next);
     if !sequence_updates.is_empty() {
-        let mut registry = context.publication.sequence_security_write();
-        for (sequence, sequence_security) in sequence_updates {
-            registry.insert(sequence, sequence_security);
-        }
+        context
+            .sequence_publication
+            .publish_sequences(sequence_catalog);
     }
     drop(memberships);
     drop(roles);

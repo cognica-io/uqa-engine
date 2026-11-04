@@ -47,7 +47,10 @@ impl QueryEffectCatalog for Catalog {
     fn domain_by_oid(&self, _: u32) -> Option<StoredDomain> {
         None
     }
-    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String> {
+    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, SQLError> {
+        if name == "denied_ids" {
+            return Err(uqa_core::memory::MemoryError::SizeOverflow.into());
+        }
         Ok((name == "temp_ids").then_some(RelationPersistence::Temporary))
     }
     fn table_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, String> {
@@ -196,4 +199,27 @@ fn unparsed_procedural_statement_is_conservative_without_running_the_parser() {
     assert!(mutates.unwrap());
     assert!(metadata.notices.is_empty());
     assert!(statement.validation().is_none());
+}
+
+#[test]
+fn sequence_effect_classification_preserves_catalog_admission_diagnostics() {
+    let context = QueryEffectContext {
+        catalog: &Catalog,
+        optimizer_effects: |_| false,
+        graph_effects: |_| Ok(false),
+    };
+    for function in ["nextval('denied_ids')", "setval('denied_ids', 42)"] {
+        let statement = crate::compile(&format!("SELECT {function}"))
+            .unwrap()
+            .remove(0);
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(statement) else {
+            panic!("query")
+        };
+        assert_eq!(
+            super::super::query_may_write_database(&context, &query)
+                .unwrap_err()
+                .sqlstate(),
+            Some("53200")
+        );
+    }
 }

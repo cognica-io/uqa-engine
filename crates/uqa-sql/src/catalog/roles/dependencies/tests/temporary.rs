@@ -118,33 +118,38 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     table.security = BoundTableSecurity::bind(&named, &roles()).unwrap();
     let sequence = RelationIdentity::new("pg_temp_1", "seq");
     catalog
-        .sequence_persistence
-        .insert(sequence.clone(), RelationPersistence::Temporary);
-    catalog.sequences.insert(
-        sequence,
-        BoundSequenceSecurity {
-            role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
-                role: Some(roles()["sequence_reader"].identity()),
-                grantor: roles()["grantor"].identity(),
-                privileges: SequencePrivileges {
-                    usage: true,
-                    ..Default::default()
-                },
-                grant_options: SequencePrivileges::default(),
-            }]),
-        },
-    );
-    catalog.sequences.insert(
-        RelationIdentity::new("public", "permanent"),
-        BoundSequenceSecurity {
-            role_owner: uqa_core::catalog_role::RoleIdentity {
-                oid: 999,
-                object_id: [99; 16],
+        .sequences
+        .insert(
+            sequence,
+            RelationPersistence::Temporary,
+            BoundSequenceSecurity {
+                role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                    role: Some(roles()["sequence_reader"].identity()),
+                    grantor: roles()["grantor"].identity(),
+                    privileges: SequencePrivileges {
+                        usage: true,
+                        ..Default::default()
+                    },
+                    grant_options: SequencePrivileges::default(),
+                }]),
             },
-            acl: None,
-        },
-    );
+        )
+        .unwrap();
+    catalog
+        .sequences
+        .insert(
+            RelationIdentity::new("public", "permanent"),
+            RelationPersistence::Permanent,
+            BoundSequenceSecurity {
+                role_owner: uqa_core::catalog_role::RoleIdentity {
+                    oid: 999,
+                    object_id: [99; 16],
+                },
+                acl: None,
+            },
+        )
+        .unwrap();
     catalog
         .views
         .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view())
@@ -164,8 +169,6 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
             "read foreign",
             "release foreign",
             "read sequences",
-            "read sequence persistence",
-            "release sequence persistence",
             "release sequences"
         ]
     );

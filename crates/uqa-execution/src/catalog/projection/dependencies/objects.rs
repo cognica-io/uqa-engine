@@ -280,10 +280,10 @@ impl CatalogObjects {
             self.unpin_row_type(oids);
         }
         self.collect_composite_relations(snapshot);
-        for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
+        for (identity, object_id) in snapshot.definitions.sequences.object_ids() {
             let oid = catalog_oid(
                 crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                    &snapshot.definitions.sequence_catalog_oids,
+                    snapshot.definitions.sequences.catalog_oids(),
                     object_id,
                 ),
             )?;

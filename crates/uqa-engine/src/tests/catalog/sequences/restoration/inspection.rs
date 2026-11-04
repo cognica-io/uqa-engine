@@ -42,7 +42,7 @@ fn public_sequence_inspection_keeps_live_catalog_authority_coherent() {
                     _ => unreachable!(),
                 }
                 let roles = engine.durable.roles.read();
-                for security in engine.durable.sequence_security.read().values() {
+                for security in engine.durable.sequences.read().security().values() {
                     let security = security.resolve(&roles).unwrap();
                     assert!(roles.contains_key(&security.role_owner), "{provider}: {isolation}: {api}: sequence owner {} is absent from the live role view", security.role_owner);
                 }

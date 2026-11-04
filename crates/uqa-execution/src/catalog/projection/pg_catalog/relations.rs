@@ -119,11 +119,11 @@ pub fn relation_identity_for_oid(
     if let Some((identity, _)) =
         snapshot
             .definitions
-            .sequence_object_ids
-            .iter()
+            .sequences
+            .object_ids()
             .find(|(_, object_id)| {
                 crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                    &snapshot.definitions.sequence_catalog_oids,
+                    snapshot.definitions.sequences.catalog_oids(),
                     object_id,
                 ) == oid
             })

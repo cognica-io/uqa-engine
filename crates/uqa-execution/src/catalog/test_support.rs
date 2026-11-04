@@ -51,7 +51,6 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             builtin_routine_security: Arc::default(),
             foreign_wrappers: Arc::default(),
             foreign_servers: Arc::default(),
-            sequence_persistence: Arc::default(),
             foreign_tables: Arc::default(),
             sql_user_functions: Arc::default(),
             role_memberships: Arc::default(),
@@ -68,10 +67,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
                 .into(),
             schemas: Arc::default(),
             sequences: Arc::default(),
-            sequence_object_ids: Arc::default(),
-            sequence_catalog_oids: Arc::default(),
             graph_catalog_oids: Arc::default(),
-            sequence_security: Arc::default(),
             foreign_table_security: Arc::default(),
             system_relation_security: Arc::default(),
             roles: Arc::default(),
@@ -163,4 +159,22 @@ pub(crate) fn index_rows(
             .unwrap();
     }
     indexes
+}
+
+/// Mutate a fixture through the same complete admitted authority owner as execution.
+pub(crate) fn edit_sequence_security(
+    snapshot: &mut super::sequence::snapshot::SequenceReadSnapshot,
+    edit: impl FnOnce(&mut uqa_sql::catalog::security::BoundSequenceSecurity),
+) {
+    let (relation, mut security) = snapshot
+        .catalog
+        .security()
+        .iter()
+        .next()
+        .map(|(relation, security)| (relation.clone(), security.clone()))
+        .unwrap();
+    edit(&mut security);
+    Arc::make_mut(&mut snapshot.catalog)
+        .replace_security(&relation, security)
+        .unwrap();
 }

@@ -7,8 +7,9 @@
 use crate::Engine;
 use std::{cell::Cell, collections::BTreeMap};
 use uqa_core::RelationIdentity;
+use uqa_execution::catalog::sequence::registry::SequenceCatalogRead;
 use uqa_execution::catalog::sequence::restoration::{
-    RestoredSequenceRegistry, SequencePersistenceRead, SequenceRestoreRegistry,
+    RestoredSequenceRegistry, SequenceRestoreRegistry,
 };
 use uqa_execution::catalog::sequence::{restoration::restore_sequence_rows, SequenceState};
 use uqa_sql::{ast::RelationPersistence, catalog::security::BoundSequenceSecurity};
@@ -27,11 +28,25 @@ struct Snapshot {
     security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
 }
 fn snapshot(engine: &Engine) -> Snapshot {
+    let catalog = engine.durable.sequences.read();
     Snapshot {
-        sequences: engine.durable.sequences.read().clone(),
-        object_ids: engine.durable.sequence_object_ids.read().clone(),
-        persistence: engine.durable.sequence_persistence.read().clone(),
-        security: engine.durable.sequence_security.read().clone(),
+        sequences: catalog
+            .states()
+            .map(|(key, state)| (key.clone(), *state))
+            .collect(),
+        object_ids: catalog
+            .object_ids()
+            .map(|(key, value)| (key.clone(), *value))
+            .collect(),
+        persistence: catalog
+            .persistences()
+            .map(|(key, value)| (key.clone(), *value))
+            .collect(),
+        security: catalog
+            .security()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
     }
 }
 fn setup() -> Engine {
@@ -46,7 +61,7 @@ fn setup() -> Engine {
 }
 fn incoming(engine: &Engine, name: &str, id: [u8; 16]) -> SequenceRow {
     let state = engine.sequence_state("stale_ids").unwrap().unwrap().1;
-    Engine::sequence_row(
+    uqa_execution::catalog::sequence::sequence_row(
         name,
         id,
         state,
@@ -100,14 +115,11 @@ struct PublicationObserver<'a> {
     calls: Cell<usize>,
 }
 impl SequenceRestoreRegistry for PublicationObserver<'_> {
-    fn persistence(&self) -> SequencePersistenceRead<'_> {
-        SequenceRestoreRegistry::persistence(self.engine)
+    fn read(&self) -> SequenceCatalogRead<'_> {
+        SequenceRestoreRegistry::read(self.engine)
     }
     fn install(&self, registry: RestoredSequenceRegistry) {
         assert!(!self.engine.durable.sequences.is_locked());
-        assert!(!self.engine.durable.sequence_object_ids.is_locked());
-        assert!(!self.engine.durable.sequence_persistence.is_locked());
-        assert!(!self.engine.durable.sequence_security.is_locked());
         self.calls.set(self.calls.get() + 1);
         SequenceRestoreRegistry::install(self.engine, registry);
     }

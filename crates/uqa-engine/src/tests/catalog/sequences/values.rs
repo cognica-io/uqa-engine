@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::{Engine, NontransactionalSequenceValue};
+use crate::Engine;
 use std::cell::RefCell;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::sequence::values::context::{
-    SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
-    SequenceValueRuntime,
+    SequenceCachesWrite, SequenceHistoryOperation, SequenceSessionRead, SequenceSessionWrite,
+    SequenceStatesWrite, SequenceValueRuntime,
 };
 use uqa_execution::row_locks::{
     binding::RelationLockSession, RelationLockMode, ScopedRelationLock,
@@ -77,22 +77,22 @@ impl SequenceValueRuntime for RuntimeObserver<'_> {
     fn sequence_positions(&self) -> Option<&crate::row_locks::RowLockManager> {
         SequenceValueRuntime::sequence_positions(self.engine)
     }
-    fn record_nontransactional_sequence_value(
+    fn with_sequence_histories(
         &self,
-        definition_generation: [u8; 16],
-        value: NontransactionalSequenceValue,
-        defines_lastval: bool,
-    ) {
-        assert!(!self.engine.session.sequence_caches.is_locked());
+        operation: SequenceHistoryOperation<'_>,
+    ) -> Result<Option<i64>, SequenceValueError> {
+        assert!(self.engine.session.sequence_caches.is_locked());
         assert!(!self.engine.session.state.is_locked());
         assert!(!self.engine.durable.sequences.is_locked());
-        self.events.borrow_mut().push("record");
-        SequenceValueRuntime::record_nontransactional_sequence_value(
-            self.engine,
-            definition_generation,
-            value,
-            defines_lastval,
-        );
+        self.events.borrow_mut().push("prepare");
+        let result = SequenceValueRuntime::with_sequence_histories(self.engine, operation);
+        if matches!(result, Ok(Some(_))) {
+            assert!(!self.engine.session.sequence_caches.is_locked());
+            assert!(!self.engine.session.state.is_locked());
+            assert!(!self.engine.durable.sequences.is_locked());
+            self.events.borrow_mut().push("record");
+        }
+        result
     }
 }
 impl RelationLockSession for RuntimeObserver<'_> {
@@ -186,18 +186,21 @@ fn setval_rechecks_bounds_if_the_definition_changes_before_relation_locking() {
     }
 }
 #[test]
-fn nextval_retains_the_actual_cache_guard_through_reservation_and_releases_it_before_history() {
+fn nextval_retains_the_actual_cache_guard_through_history_admission_and_reservation() {
     let engine = Engine::new();
     engine.sql("CREATE SEQUENCE ids CACHE 3", &[]).unwrap();
     let runtime = observer(&engine, true, false);
     let mut context = engine.sequence_value_context();
     context.runtime = &runtime;
     assert_eq!(context.nextval("ids").unwrap(), 1);
-    assert_eq!(*runtime.events.borrow(), ["open", "writer", "record"]);
+    assert_eq!(
+        *runtime.events.borrow(),
+        ["open", "writer", "prepare", "record"]
+    );
     assert_eq!(context.nextval("ids").unwrap(), 2);
     assert_eq!(
         *runtime.events.borrow(),
-        ["open", "writer", "record", "record"]
+        ["open", "writer", "prepare", "record", "prepare", "record"]
     );
     assert_eq!(context.currval("ids").unwrap(), 2);
     assert_eq!(context.lastval().unwrap(), 2);
@@ -230,7 +233,14 @@ fn failed_sequence_writer_leaves_real_allocation_cache_and_session_values_unchan
             matches!(error, SequenceValueError::Internal(message) if message.contains("prepare sequence writer:") && message.contains("injected sequence writer failure"))
         );
         assert_eq!(*runtime.events.borrow(), ["open", "writer"]);
-        assert_eq!(*engine.durable.sequences.read(), states);
+        let current = engine.durable.sequences.read();
+        assert!(current.iter().eq(states.iter()));
+        assert!(current.security().iter().eq(states.security().iter()));
+        assert!(current
+            .catalog_oids()
+            .iter()
+            .eq(states.catalog_oids().iter()));
+        drop(current);
         assert!(*engine.session.sequence_caches.lock() == caches);
         assert!(engine.session.state.read().sequence_currvals == values);
         assert!(engine.session.state.read().last_sequence == last);
@@ -249,7 +259,10 @@ fn setval_without_is_called_preserves_session_history_and_unrelated_cache_across
     let mut context = engine.sequence_value_context();
     context.runtime = &runtime;
     assert_eq!(context.setval("ids", 42, false).unwrap(), 42);
-    assert_eq!(*runtime.events.borrow(), ["open", "writer", "record"]);
+    assert_eq!(
+        *runtime.events.borrow(),
+        ["open", "writer", "prepare", "record"]
+    );
     assert!(engine.session.state.read().sequence_currvals == values);
     assert!(engine.session.state.read().last_sequence == last);
     assert_eq!(engine.session.sequence_caches.lock().len(), 1);

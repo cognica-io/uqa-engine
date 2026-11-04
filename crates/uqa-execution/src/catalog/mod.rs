@@ -26,12 +26,9 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::BoundSequenceSecurity;
-use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
-use uqa_core::RelationIdentity;
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
 mod analysis;
 pub mod definition_revision;
@@ -127,7 +124,6 @@ pub use uqa_sql::catalog::resolution::RelationResolution;
 pub struct CatalogDefinitionSnapshot {
     pub builtin_routine_security:
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
-    pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub foreign_tables: Arc<foreign::ForeignTables>,
     pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
@@ -147,13 +143,9 @@ pub struct CatalogDefinitionSnapshot {
     pub catalog_indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
     pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
     pub schemas: Arc<SchemaRegistry>,
-    pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
-    pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub sequences: Arc<sequence::registry::SequenceCatalog>,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
     pub graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
-    pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security:
         Arc<uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>,
     pub system_relation_security:

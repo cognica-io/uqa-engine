@@ -39,7 +39,17 @@ fn idle_memory_capture_retires_sources_without_retaining_undo_or_temporary_paylo
         Some(Value::Str("original".into()))
     );
     let sequences = selected.sequences.captured(&selected.cut).unwrap();
-    assert_eq!(sequences.get().unwrap()[0].state.current, 13);
+    assert_eq!(
+        sequences
+            .get()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .state
+            .current,
+        13
+    );
     let views = selected.catalogs.views.captured(&selected.cut).unwrap();
     assert_eq!(views.get().unwrap().len(), 1);
     assert_eq!(

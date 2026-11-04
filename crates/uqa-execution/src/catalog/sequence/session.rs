@@ -6,7 +6,7 @@
 
 //! Sequence cache entries and nontransactional session observations.
 use uqa_core::RelationIdentity;
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSequenceValue {
     pub object_id: [u8; 16],
     pub value: i64,
@@ -27,7 +27,7 @@ pub struct SessionLastSequenceReference {
     pub object_id: [u8; 16],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NontransactionalSequenceValue {
     pub object_id: [u8; 16],
     pub current: i64,
@@ -36,14 +36,6 @@ pub struct NontransactionalSequenceValue {
     pub autonomous: bool,
 }
 
-/// Value operations survive rollback only for the same object and definition generation.
-pub type NontransactionalSequenceValues =
-    std::collections::BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
-
-#[derive(Clone, Default)]
-pub struct NontransactionalSequenceHistory {
-    pub values_by_definition: std::collections::BTreeMap<[u8; 16], NontransactionalSequenceValue>,
-    pub object_id: [u8; 16],
-    pub session_currval: Option<SessionSequenceValue>,
-    pub defines_lastval: bool,
-}
+mod history;
+pub mod recovery;
+pub use history::{NontransactionalSequenceValues, PreparedSequenceHistory, SequenceValueKey};

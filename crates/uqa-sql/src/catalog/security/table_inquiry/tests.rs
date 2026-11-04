@@ -5,8 +5,10 @@
 //
 
 use super::*;
+use crate::ast::RelationPersistence;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use crate::catalog::security::sequence_registry::SequenceSecurities;
 use crate::catalog::{
     roles::guards::{RoleDefinitionRead, RoleMembershipRead},
     security::{
@@ -21,14 +23,13 @@ use crate::catalog::{
     },
 };
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
     roles: RefCell<RoleDefinitions>,
     memberships: RoleMemberships,
     table_security: TableSecurity,
-    sequences: RefCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
+    sequences: RefCell<SequenceSecurities>,
     replace_subject_on_lookup: Cell<bool>,
 }
 
@@ -58,18 +59,22 @@ impl Catalog {
                 }]),
                 ..TableSecurity::owner("uqa")
             },
-            sequences: RefCell::new(BTreeMap::from([(
-                RelationIdentity::new("public", "ids"),
-                BoundSequenceSecurity {
-                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
-                        role: Some(reader.identity()),
-                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                        privileges: AclPrivilege::Select.mask(),
-                        grant_options: SequencePrivileges::default(),
-                    }]),
-                },
-            )])),
+            sequences: RefCell::new(
+                SequenceSecurities::try_from_iter([(
+                    RelationIdentity::new("public", "ids"),
+                    RelationPersistence::Permanent,
+                    BoundSequenceSecurity {
+                        role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                        acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                            role: Some(reader.identity()),
+                            grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                            privileges: AclPrivilege::Select.mask(),
+                            grant_options: SequencePrivileges::default(),
+                        }]),
+                    },
+                )])
+                .unwrap(),
+            ),
             replace_subject_on_lookup: Cell::new(false),
         }
     }
@@ -84,15 +89,14 @@ impl Catalog {
                 })
                 .unwrap()
                 .unwrap();
+            let reader = self.roles.borrow()["reader"].identity();
             self.sequences
                 .borrow_mut()
-                .values_mut()
-                .next()
-                .unwrap()
-                .acl
-                .as_mut()
-                .unwrap()[0]
-                .role = Some(self.roles.borrow()["reader"].identity());
+                .edit(&RelationIdentity::new("public", "ids"), |security| {
+                    security.acl.as_mut().unwrap()[0].role = Some(reader);
+                    Ok(())
+                })
+                .unwrap();
         }
     }
 
@@ -248,13 +252,11 @@ fn public_subjects_receive_only_applicable_table_column_and_sequence_grants() {
     catalog
         .sequences
         .get_mut()
-        .values_mut()
-        .next()
-        .unwrap()
-        .acl
-        .as_mut()
-        .unwrap()[0]
-        .role = None;
+        .edit(&RelationIdentity::new("public", "ids"), |security| {
+            security.acl.as_mut().unwrap()[0].role = None;
+            Ok(())
+        })
+        .unwrap();
     for subject in [text("public"), Value::Int(0), Value::Int(99_999)] {
         for (target, table_select) in [
             (text("items"), false),

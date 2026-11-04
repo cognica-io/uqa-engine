@@ -9,13 +9,10 @@ use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
     catalog::{foreign::StoredForeignTable, security::BoundTableSecurity},
-    schema::{
-        foreign_table_alteration::{
-            ForeignMemoryRegistryWrite, ForeignTableAlterAccess, ForeignTableAlterCatalog,
-            ForeignTableAlterContext, ForeignTableAlterPublication, ForeignTableAlterTransactions,
-            ForeignTableAlterWrite, ForeignTableOwnerWriter,
-        },
-        sequences::role_ownership::OwnedSequenceSecurityWrite,
+    schema::foreign_table_alteration::{
+        ForeignMemoryRegistryWrite, ForeignTableAlterAccess, ForeignTableAlterCatalog,
+        ForeignTableAlterContext, ForeignTableAlterPublication, ForeignTableAlterTransactions,
+        ForeignTableAlterWrite, ForeignTableOwnerWriter,
     },
 };
 use uqa_sql::SQLError;
@@ -102,9 +99,6 @@ impl ForeignTableAlterPublication for Engine {
     }
     fn memory_tables_write(&self) -> ForeignMemoryRegistryWrite<'_> {
         Box::new(self.extensions.foreign_memory_tables.write())
-    }
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_> {
-        Box::new(self.durable.sequence_security.write())
     }
     fn persist_security(
         &self,

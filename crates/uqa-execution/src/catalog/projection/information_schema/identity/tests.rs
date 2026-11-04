@@ -19,12 +19,26 @@ fn identity_attributes_borrow_only_the_owned_sequence_definition() {
     let state = SequenceState::initial(7, 2, SequenceDataType::BigInt);
     let selected = RelationIdentity::new("public", "owned_sequence");
     let sequences = Arc::make_mut(&mut snapshot.definitions.sequences);
-    sequences.insert(selected.clone(), state);
+    let security = uqa_sql::catalog::security::BoundSequenceSecurity::owner(
+        uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+    );
+    let record = |object_id| crate::catalog::sequence::registry::SequenceRecord {
+        state,
+        object_id,
+        persistence: uqa_sql::ast::RelationPersistence::Permanent,
+        catalog_oid: None,
+    };
+    sequences
+        .insert(selected.clone(), record([255; 16]), security.clone())
+        .unwrap();
     for i in 0..128 {
-        sequences.insert(
-            RelationIdentity::new("public", format!("unrelated_{i}")),
-            state,
-        );
+        sequences
+            .insert(
+                RelationIdentity::new("public", format!("unrelated_{i}")),
+                record([i; 16]),
+                security.clone(),
+            )
+            .unwrap();
     }
     let catalog = CatalogReadView::new(snapshot);
     let mut column = SQLColumnDef::nullable("id", ColumnType::BigInteger);
@@ -41,7 +55,12 @@ fn identity_attributes_borrow_only_the_owned_sequence_definition() {
         .unwrap();
     assert!(std::ptr::eq(
         state,
-        &raw const catalog.snapshot().definitions.sequences[&selected]
+        catalog
+            .snapshot()
+            .definitions
+            .sequences
+            .state(&selected)
+            .unwrap()
     ));
     assert_eq!(
         IdentityAttributes::of(&column, Some(state)).start,

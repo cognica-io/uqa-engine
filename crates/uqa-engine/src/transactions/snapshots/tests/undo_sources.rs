@@ -56,7 +56,17 @@ fn private_undo_generations_preserve_rows_and_sequences_without_capture_registra
         Some(Value::Str("committed".into()))
     );
     assert_eq!(saved.columns.get().unwrap().len(), 2);
-    assert_eq!(sequences.get().unwrap()[0].state.current, 3);
+    assert_eq!(
+        sequences
+            .get()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .state
+            .current,
+        3
+    );
     if commit_nested {
         engine.commit().unwrap();
     } else {
@@ -102,7 +112,17 @@ fn private_undo_generations_preserve_rows_and_sequences_without_capture_registra
         saved.document_store.get_field(1, "body").unwrap(),
         Some(Value::Str("committed".into()))
     );
-    assert_eq!(sequences.get().unwrap()[0].state.current, 3);
+    assert_eq!(
+        sequences
+            .get()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .state
+            .current,
+        3
+    );
     drop(selected);
     control.cancellation().cancel();
     assert!(saved.document_store.len().is_err());
