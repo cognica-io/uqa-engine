@@ -9,6 +9,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use uqa_sql::catalog::type_definitions::{StoredTypeDefinition, TypeDefinitions};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 /// The metadata keys and format marker of one type form's catalog.
@@ -28,7 +29,7 @@ pub(crate) struct TypeRecordFormat {
 }
 
 /// A durable definition and the OIDs it claims.
-pub(crate) trait TypeRecord: Serialize + DeserializeOwned + Clone {
+pub(crate) trait TypeRecord: Serialize + DeserializeOwned + StoredTypeDefinition {
     fn claimed_oids(&self) -> BTreeSet<u32>;
 }
 
@@ -37,9 +38,9 @@ impl TypeRecordFormat {
     pub(crate) fn merge_private<T: TypeRecord>(
         &self,
         catalog: Option<&dyn CatalogFacade>,
-        current: &BTreeMap<String, T>,
-        mut committed: Arc<BTreeMap<String, T>>,
-    ) -> StorageBackendResult<Arc<BTreeMap<String, T>>> {
+        current: &TypeDefinitions<T>,
+        mut committed: Arc<TypeDefinitions<T>>,
+    ) -> StorageBackendResult<Arc<TypeDefinitions<T>>> {
         let names = current
             .keys()
             .chain(committed.keys())
@@ -50,9 +51,17 @@ impl TypeRecordFormat {
                 catalog.metadata_has_private_changes(&self.key(&name))
             })? {
                 if let Some(definition) = current.get(&name) {
-                    Arc::make_mut(&mut committed).insert(name, definition.clone());
+                    Arc::make_mut(&mut committed)
+                        .insert(name, definition.clone())
+                        .map_err(|error| {
+                            StorageBackendError::backend(self.definition_context, error)
+                        })?;
                 } else {
-                    Arc::make_mut(&mut committed).remove(&name);
+                    Arc::make_mut(&mut committed)
+                        .remove(&name)
+                        .map_err(|error| {
+                            StorageBackendError::backend(self.definition_context, error)
+                        })?;
                 }
             }
         }
@@ -95,12 +104,12 @@ impl TypeRecordFormat {
     pub(crate) fn read<T: TypeRecord>(
         &self,
         catalog: &dyn CatalogFacade,
-    ) -> StorageBackendResult<BTreeMap<String, T>> {
+    ) -> StorageBackendResult<TypeDefinitions<T>> {
         let records = catalog.metadata_with_prefix(self.prefix)?;
         let claims = catalog.metadata_with_prefix(self.oid_prefix)?;
         match catalog.get_metadata(self.format_key)? {
             Some(marker) => self.check_marker(&marker)?,
-            None if records.is_empty() && claims.is_empty() => return Ok(BTreeMap::new()),
+            None if records.is_empty() && claims.is_empty() => return Ok(TypeDefinitions::new()),
             None => {
                 return Err(Self::corrupt(format!(
                     "{} records exist without their format marker",
@@ -108,12 +117,14 @@ impl TypeRecordFormat {
                 )))
             }
         }
-        let mut registry = BTreeMap::new();
+        let mut registry = TypeDefinitions::new();
         for (record, json) in records {
             let name = record
                 .strip_prefix(self.prefix)
                 .ok_or_else(|| Self::corrupt(format!("{} record key {record}", self.label)))?;
-            registry.insert(name.to_owned(), serde_json::from_str(&json)?);
+            registry
+                .insert(name.to_owned(), serde_json::from_str(&json)?)
+                .map_err(|error| StorageBackendError::backend(self.definition_context, error))?;
         }
         let expected = registry
             .iter()
@@ -136,13 +147,16 @@ impl TypeRecordFormat {
     /// Apply a statement's changes to the current registry. A definition changed by another writer since the statement read it is a serialization failure rather than a silent overwrite.
     pub(crate) fn merge_changes<T: TypeRecord>(
         &self,
-        before: &BTreeMap<String, T>,
-        after: &BTreeMap<String, T>,
-        current: &BTreeMap<String, T>,
-    ) -> StorageBackendResult<BTreeMap<String, T>> {
+        before: &TypeDefinitions<T>,
+        after: &TypeDefinitions<T>,
+        current: &TypeDefinitions<T>,
+    ) -> StorageBackendResult<TypeDefinitions<T>> {
         let names = before.keys().chain(after.keys()).collect::<BTreeSet<_>>();
         let mut merged = current.clone();
         for name in names {
+            if before.shares_definition(name, after) {
+                continue;
+            }
             let previous = before.get(name).map(serde_json::to_string).transpose()?;
             let next = after.get(name).map(serde_json::to_string).transpose()?;
             if previous == next {
@@ -161,9 +175,15 @@ impl TypeRecordFormat {
                 ));
             }
             if let Some(definition) = after.get(name) {
-                merged.insert(name.clone(), definition.clone());
+                merged
+                    .insert(name.clone(), definition.clone())
+                    .map_err(|error| {
+                        StorageBackendError::backend(self.definition_context, error)
+                    })?;
             } else {
-                merged.remove(name);
+                merged.remove(name).map_err(|error| {
+                    StorageBackendError::backend(self.definition_context, error)
+                })?;
             }
         }
         Ok(merged)
@@ -173,13 +193,13 @@ impl TypeRecordFormat {
     pub(crate) fn persist<T: TypeRecord>(
         &self,
         catalog: &dyn CatalogFacade,
-        before: &BTreeMap<String, T>,
-        after: &BTreeMap<String, T>,
+        before: &TypeDefinitions<T>,
+        after: &TypeDefinitions<T>,
     ) -> StorageBackendResult<()> {
         if !after.is_empty() && catalog.get_metadata(self.format_key)?.is_none() {
             catalog.set_metadata(self.format_key, &self.marker())?;
         }
-        let owned = |registry: &BTreeMap<String, T>| {
+        let owned = |registry: &TypeDefinitions<T>| {
             registry
                 .iter()
                 .flat_map(|(name, definition)| {
@@ -224,6 +244,9 @@ impl TypeRecordFormat {
             }
         }
         for (name, definition) in after {
+            if before.shares_definition(name, after) {
+                continue;
+            }
             let json = serde_json::to_string(definition)?;
             if before
                 .get(name)

@@ -13,10 +13,11 @@ fn expression_output_metadata_follows_its_retained_generation() {
     let old = AliasConstantOutput::build(&catalog, &resolution).unwrap();
     let mut snapshot = catalog.snapshot().clone();
     let domains = Arc::make_mut(&mut snapshot.definitions.domains);
-    let mut domain = domains.remove("hidden.positive").unwrap();
+    let mut domain = domains.get("hidden.positive").unwrap().clone();
+    domains.remove("hidden.positive").unwrap();
     domain.identity.name = "renamed".into();
     domain.definition.name = "hidden.renamed".into();
-    domains.insert("hidden.renamed".into(), domain);
+    domains.insert("hidden.renamed".into(), domain).unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     let new = AliasConstantOutput::build(&current, &resolution).unwrap();
     assert_eq!(

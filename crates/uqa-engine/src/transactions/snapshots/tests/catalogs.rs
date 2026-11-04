@@ -9,30 +9,35 @@ use super::{capture::capture, *};
 fn definitions(engine: &Engine) {
     use uqa_sql::catalog::range_type::{StoredMultirange, StoredRange};
     sql(engine, "CREATE SCHEMA saved; CREATE TABLE docs(id integer); INSERT INTO docs VALUES(1); CREATE DOMAIN saved.domain_type AS integer CHECK(VALUE > 0); CREATE TYPE saved.enum_type AS ENUM('first','second'); CREATE TYPE saved.composite_type AS (id integer, body text); CREATE TYPE saved.pending_type; CREATE VIEW saved.saved_view AS SELECT id FROM docs; CREATE FUNCTION saved.saved_function() RETURNS integer LANGUAGE SQL RETURN 7");
-    engine.durable.ranges.write().insert(
-        "public.retained_range".into(),
-        StoredRange {
-            object_id: [1; 16],
-            oid: 60_001,
-            array_oid: 60_002,
-            array_name: "_retained_range".into(),
-            identity: RelationIdentity::new("public", "retained_range"),
-            owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            subtype: uqa_sql::ColumnType::Integer,
-            subtype_operator_class: 1978,
-            collation_oid: 0,
-            canonical_oid: None,
-            subtype_difference_oid: None,
-            multirange: StoredMultirange {
-                object_id: [2; 16],
-                oid: 60_003,
-                array_oid: 60_004,
-                array_name: "_retained_multi".into(),
-                identity: RelationIdentity::new("public", "retained_multi"),
+    engine
+        .durable
+        .ranges
+        .write()
+        .insert(
+            "public.retained_range".into(),
+            StoredRange {
+                object_id: [1; 16],
+                oid: 60_001,
+                array_oid: 60_002,
+                array_name: "_retained_range".into(),
+                identity: RelationIdentity::new("public", "retained_range"),
+                owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                subtype: uqa_sql::ColumnType::Integer,
+                subtype_operator_class: 1978,
+                collation_oid: 0,
+                canonical_oid: None,
+                subtype_difference_oid: None,
+                multirange: StoredMultirange {
+                    object_id: [2; 16],
+                    oid: 60_003,
+                    array_oid: 60_004,
+                    array_name: "_retained_multi".into(),
+                    identity: RelationIdentity::new("public", "retained_multi"),
+                },
+                usage_acl: None,
             },
-            usage_acl: None,
-        },
-    );
+        )
+        .unwrap();
 }
 
 #[rstest::rstest]
@@ -74,9 +79,12 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
         .durable
         .ranges
         .write()
-        .get_mut("public.retained_range")
+        .edit("public.retained_range", |definition| {
+            definition.array_name = "_private_array".into();
+            Ok(())
+        })
         .unwrap()
-        .array_name = "_private_array".into();
+        .unwrap();
     let control = StorageReadControl::with_limit(128 << 10);
     let selected = capture(&engine, &control);
     assert!(selected
@@ -112,7 +120,9 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
     exact!(domains, enums, composites, ranges, shells);
     let schemas = selected.catalogs.schemas.captured(&selected.cut).unwrap();
     assert!(schemas.budget().shares_allowance(control.memory()));
-    assert_eq!(schemas.get().unwrap(), &original_schemas);
+    assert!(schemas.get().unwrap().iter().eq(original_schemas
+        .iter()
+        .map(|(name, security)| (name, security))));
     drop(schemas);
     let views = selected.catalogs.views.captured(&selected.cut).unwrap();
     assert_eq!(views.get().unwrap().len(), 1);
@@ -157,15 +167,14 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
 fn transaction_catalog_sources_exclude_temporary_definitions_during_a_private_callback() {
     let engine = Arc::new(Engine::new());
     definitions(&engine);
-    sql(&engine, "CREATE TEMP TABLE temp_table(id integer); CREATE DOMAIN pg_temp.temp_domain AS text DEFAULT 'temporary'; CREATE FUNCTION pg_temp.temp_function() RETURNS text LANGUAGE SQL AS 'SELECT ''temporary'''; CREATE TEMP VIEW temp_view AS SELECT id FROM temp_table");
-    for definition in engine.durable.domains.write().values_mut() {
-        if uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(
-            &definition.identity.schema,
-        ) {
-            definition.definition.default =
-                Some(uqa_sql::ast::Expr::Literal(Value::Str("t".repeat(1 << 20))));
-        }
-    }
+    sql(&engine, "CREATE TEMP TABLE temp_table(id integer); CREATE FUNCTION pg_temp.temp_function() RETURNS text LANGUAGE SQL AS 'SELECT ''temporary'''; CREATE TEMP VIEW temp_view AS SELECT id FROM temp_table");
+    sql(
+        &engine,
+        &format!(
+            "CREATE DOMAIN pg_temp.temp_domain AS text DEFAULT '{}'",
+            "t".repeat(1 << 20)
+        ),
+    );
     let (entered, started) = mpsc::channel();
     let (release, proceed) = mpsc::channel();
     let writer = engine.clone();
@@ -184,10 +193,19 @@ fn transaction_catalog_sources_exclude_temporary_definitions_during_a_private_ca
     let selected = capture(&engine, &control);
     let domains = selected.catalogs.domains.captured(&selected.cut).unwrap();
     assert_eq!(domains.get().unwrap().len(), 1);
-    assert_eq!(domains.get().unwrap()[0].0, "saved.domain_type");
+    assert!(domains.get().unwrap().get("saved.domain_type").is_some());
     let enums = selected.catalogs.enums.captured(&selected.cut).unwrap();
     assert_eq!(enums.get().unwrap().len(), 1);
-    assert_eq!(enums.get().unwrap()[0].1.labels.len(), 2);
+    assert_eq!(
+        enums
+            .get()
+            .unwrap()
+            .get("saved.enum_type")
+            .unwrap()
+            .labels
+            .len(),
+        2
+    );
     let routines = selected
         .catalogs
         .sql_user_functions

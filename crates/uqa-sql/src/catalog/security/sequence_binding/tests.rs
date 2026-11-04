@@ -5,26 +5,30 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::sequence::{
     grant_acl, role_has_privilege, AclPrivilege, PrivilegeCheck,
 };
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    ["owner", "grantor", "reader", "PUBLIC"]
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
-            let mut role = RoleDefinition::bootstrap();
-            role.name = name.into();
-            role.oid = 20_001 + index as i64;
-            role.object_id = [index as u8 + 1; 16];
-            role.attributes.clear();
-            (name.into(), role)
-        })
-        .collect()
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(
+        ["owner", "grantor", "reader", "PUBLIC"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_001 + index as i64;
+                role.object_id = [index as u8 + 1; 16];
+                role.attributes.clear();
+                (name.into(), role)
+            }),
+    )
+    .unwrap()
 }
 
-fn security(roles: &BTreeMap<String, RoleDefinition>) -> BoundSequenceSecurity {
+fn security(roles: &RoleDefinitions) -> BoundSequenceSecurity {
     let mut named = SequenceSecurity {
         role_owner: "owner".into(),
         acl: Some(Vec::new()),
@@ -53,13 +57,14 @@ fn sequence_endpoints_keep_incarnations_when_all_names_are_reused() {
     let original = bound.clone();
     let owner = bound.owner_reference(&roles).unwrap();
     for name in ["owner", "grantor", "reader"] {
-        let mut role = roles.remove(name).unwrap();
+        let mut role = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         let mut replacement = role.clone();
         replacement.oid += 100;
         replacement.object_id[0] += 100;
-        roles.insert(name.into(), replacement);
+        roles.insert(name.into(), replacement).unwrap();
         role.name = format!("renamed_{name}");
-        roles.insert(role.name.clone(), role);
+        roles.insert(role.name.clone(), role).unwrap();
     }
     bound.validate(&roles).unwrap();
     let named = bound.resolve(&roles).unwrap();
@@ -85,7 +90,7 @@ fn sequence_endpoints_keep_incarnations_when_all_names_are_reused() {
                     grant_option: false
                 },
                 &roles,
-                &BTreeMap::new()
+                &RoleMemberships::new()
             ),
             expected
         );
@@ -100,10 +105,11 @@ fn missing_or_reused_oid_cannot_rebind_any_sequence_endpoint() {
     for name in ["owner", "grantor", "reader"] {
         let mut roles = roles();
         let bound = security(&roles);
-        let mut replacement = roles.remove(name).unwrap();
+        let mut replacement = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         assert!(bound.resolve(&roles).is_err());
         replacement.object_id[0] += 100;
-        roles.insert(name.into(), replacement);
+        roles.insert(name.into(), replacement).unwrap();
         assert!(bound.validate(&roles).is_err());
     }
 }
@@ -155,7 +161,7 @@ fn sequence_acl_validation_rejects_unrooted_cycles_and_invalid_paths() {
             grant_option: false
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(role_has_privilege(
         &empty.resolve(&roles).unwrap(),
@@ -165,7 +171,7 @@ fn sequence_acl_validation_rejects_unrooted_cycles_and_invalid_paths() {
             grant_option: true
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
 }
 
@@ -199,9 +205,10 @@ fn sequence_public_and_named_public_keep_distinct_grants_and_grantors() {
     );
     let bound = BoundSequenceSecurity::bind(&named, &roles).unwrap();
     bound.validate(&roles).unwrap();
-    let mut role = roles.remove("PUBLIC").unwrap();
+    let mut role = roles.get("PUBLIC").unwrap().clone();
+    roles.remove("PUBLIC").unwrap();
     role.name = "renamed_public".into();
-    roles.insert(role.name.clone(), role);
+    roles.insert(role.name.clone(), role).unwrap();
     let named = bound.resolve(&roles).unwrap();
     let acl = named.acl.as_ref().unwrap();
     assert!(acl.iter().any(|entry| entry.role == AclGrantee::Public));

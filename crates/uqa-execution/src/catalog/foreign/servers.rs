@@ -7,10 +7,11 @@
 //! Foreign-server persistence and initial-open identity migration. Connection options remain separate from catalog metadata.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     foreign_server::{validate_foreign_servers, ForeignServerDefinition, ForeignServerMetadata},
-    roles::{RoleDefinition, RoleIdentity},
+    roles::RoleIdentity,
 };
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
@@ -29,7 +30,11 @@ pub fn fdw_definition(server: &ForeignServerDefinition) -> uqa_fdw::ForeignServe
     uqa_fdw::ForeignServer {
         name: server.name.clone(),
         fdw_type: server.fdw_type.clone(),
-        options: server.options.clone(),
+        options: server
+            .options
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     }
 }
 
@@ -64,7 +69,7 @@ pub fn persist(
 }
 
 pub(super) struct RestoredServers {
-    pub definitions: BTreeMap<String, ForeignServerDefinition>,
+    pub definitions: uqa_sql::catalog::foreign_server::ForeignServers,
     migrations: Vec<ForeignServerRow>,
     initialize_format: bool,
 }
@@ -87,7 +92,7 @@ impl RestoredServers {
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredServers> {
     let format = catalog_format(catalog)?;
@@ -98,7 +103,7 @@ pub(super) fn restore(
     }
     let current = format.is_some();
     let rows = catalog.load_foreign_server_rows()?;
-    let mut definitions = BTreeMap::new();
+    let mut definitions = uqa_sql::catalog::foreign_server::ForeignServers::new();
     let mut legacy = Vec::new();
     for row in rows {
         let Some(json) = row.metadata_json.as_deref() else {
@@ -178,7 +183,7 @@ pub(super) fn restore(
 }
 
 fn insert(
-    definitions: &mut BTreeMap<String, ForeignServerDefinition>,
+    definitions: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     row: ForeignServerRow,
     metadata: ForeignServerMetadata,
 ) -> StorageBackendResult<()> {
@@ -188,9 +193,12 @@ fn insert(
         options: serde_json::from_str(&row.options_json)?,
         metadata,
     };
-    if definitions.insert(row.name.clone(), definition).is_some() {
+    if definitions.contains_key(&row.name) {
         return Err(invalid(format!("duplicate foreign server `{}`", row.name)));
     }
+    definitions
+        .insert(row.name, definition)
+        .map_err(|error| StorageBackendError::backend("foreign servers", error))?;
     Ok(())
 }
 

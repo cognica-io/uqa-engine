@@ -6,9 +6,9 @@
 
 //! Versioned system ACL tuples retain incarnations; only initial restoration binds legacy names.
 
-use super::{RoleDefinition, SystemAcl};
+use super::SystemAcl;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::{BoundTableSecurity, TableAclEntry};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -35,7 +35,7 @@ pub(super) fn encode(entry: &SystemAcl) -> StorageBackendResult<String> {
 
 pub(super) fn decode(
     json: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<(SystemAcl, bool)> {
     let value: serde_json::Value = serde_json::from_str(json)?;

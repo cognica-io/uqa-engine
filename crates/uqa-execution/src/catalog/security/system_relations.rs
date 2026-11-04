@@ -6,10 +6,10 @@
 
 //! Restore and merge independently persisted relation and attribute ACL tuples.
 
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::ops::DerefMut;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
-    roles::RoleDefinition,
     security::system_relations::{
         metadata_key, validate_security, SystemAcl, SystemRelationSecurities,
         SystemRelationSecurityCatalog, METADATA_PREFIX,
@@ -28,7 +28,7 @@ pub trait SystemRelationSecurityState: SystemRelationSecurityCatalog {
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<SystemRelationSecurities> {
     let mut result = SystemRelationSecurities::new();

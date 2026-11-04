@@ -59,12 +59,16 @@ fn add_user_types(snapshot: &mut CatalogReadSnapshot) {
         array_name: None,
         usage_acl: None,
     };
-    Arc::make_mut(&mut snapshot.definitions.domains).insert("public.positive".into(), domain);
+    Arc::make_mut(&mut snapshot.definitions.domains)
+        .insert("public.positive".into(), domain)
+        .unwrap();
     let mut legacy = snapshot.definitions.domains["public.positive"].clone();
     legacy.oid = 60_002;
     legacy.array_oid = None;
     legacy.identity.name = "legacy".into();
-    Arc::make_mut(&mut snapshot.definitions.domains).insert("public.legacy".into(), legacy);
+    Arc::make_mut(&mut snapshot.definitions.domains)
+        .insert("public.legacy".into(), legacy)
+        .unwrap();
     let definition = StoredEnum {
         object_id: [3; 16],
         oid: 60_010,
@@ -75,21 +79,30 @@ fn add_user_types(snapshot: &mut CatalogReadSnapshot) {
         labels: initial_enum_labels(60_010, &["calm".into()], &[60_012]).unwrap(),
         usage_acl: None,
     };
-    snapshot.definitions.enums = Arc::new(BTreeMap::from([("public.mood".into(), definition)]));
-    snapshot.definitions.composites = Arc::new(BTreeMap::from([(
-        "public.pair".into(),
-        StoredComposite {
-            object_id: [4; 16],
-            oid: 60_020,
-            array_oid: 60_021,
-            relation_oid: 60_022,
-            array_name: "_pair".into(),
-            identity: RelationIdentity::new("public", "pair"),
-            owner: RoleIdentity::BOOTSTRAP,
-            attributes: Vec::new(),
-            usage_acl: None,
-        },
-    )]));
+    snapshot.definitions.enums = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+            "public.mood".into(),
+            definition,
+        )]))
+        .unwrap(),
+    );
+    snapshot.definitions.composites = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+            "public.pair".into(),
+            StoredComposite {
+                object_id: [4; 16],
+                oid: 60_020,
+                array_oid: 60_021,
+                relation_oid: 60_022,
+                array_name: "_pair".into(),
+                identity: RelationIdentity::new("public", "pair"),
+                owner: RoleIdentity::BOOTSTRAP,
+                attributes: Vec::new(),
+                usage_acl: None,
+            },
+        )]))
+        .unwrap(),
+    );
 }
 
 fn add_relations(snapshot: &mut CatalogReadSnapshot, tables: u32) {
@@ -272,28 +285,31 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
         .next()
         .unwrap()
         .catalog_oids = Some(oids(80_020));
-    snapshot.definitions.graph_catalog_oids = Arc::new(BTreeMap::from([(
-        "graph".into(),
-        GraphCatalogOids {
-            namespace: 80_030,
-            label_sequence: 80_031,
-            labels: BTreeMap::from([(
-                1,
-                LabelCatalogOids {
-                    sequence: 80_040,
-                    relation: oids(80_050),
-                    id_default: 80_060,
-                    properties_default: 80_061,
-                    not_null: BTreeMap::new(),
-                    toast_table: 80_062,
-                    toast_index: 80_063,
-                    primary_key: None,
-                    endpoint_indexes: None,
-                    trigger: 80_064,
-                },
-            )]),
-        },
-    )]));
+    snapshot.definitions.graph_catalog_oids = Arc::new(
+        uqa_sql::catalog::graph_oids::GraphOidRegistry::try_from_iter([(
+            "graph".into(),
+            GraphCatalogOids {
+                namespace: 80_030,
+                label_sequence: 80_031,
+                labels: uqa_core::memory::OwnedMap::from_iter([(
+                    1,
+                    LabelCatalogOids {
+                        sequence: 80_040,
+                        relation: oids(80_050),
+                        id_default: 80_060,
+                        properties_default: 80_061,
+                        not_null: uqa_core::memory::OwnedMap::new(),
+                        toast_table: 80_062,
+                        toast_index: 80_063,
+                        primary_key: None,
+                        endpoint_indexes: None,
+                        trigger: 80_064,
+                    },
+                )]),
+            },
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let before = TYPE_PROJECTION_BUILDS.get();
     for relation in [80_000, 80_010, 80_020, 80_050] {

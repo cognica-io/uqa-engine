@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 mod expression_metadata;
 mod output_cache;
@@ -19,10 +20,13 @@ fn routine_pseudo_types_have_catalog_backed_names_and_reserved_identities() {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas =
         Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();
@@ -267,10 +271,13 @@ fn missing_retained_type_identity_uses_the_missing_type_diagnostic() {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas =
         Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();

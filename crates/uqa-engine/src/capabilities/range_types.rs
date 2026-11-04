@@ -10,6 +10,7 @@ use crate::Engine;
 use uqa_execution::catalog::range_type::{
     RangeRegistry, RangeRegistryPublication, RangeRegistryRead,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 impl Engine {
     pub(crate) fn range_input_context<'a>(
@@ -66,9 +67,7 @@ impl RangeRegistryPublication for Engine {
         self.restored_catalog_read_view()
     }
 
-    fn range_role_definitions(
-        &self,
-    ) -> std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition> {
+    fn range_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
 

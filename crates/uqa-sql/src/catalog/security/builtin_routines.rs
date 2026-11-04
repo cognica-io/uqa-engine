@@ -20,11 +20,8 @@ pub struct BuiltinRoutineIdentity {
 
 use super::object_acl;
 use crate::catalog::roles::identity::RoleSubject;
-use crate::{
-    ast::RoutineAclEntry,
-    catalog::roles::{RoleDefinition, RoleIdentity},
-    SQLError,
-};
+use crate::catalog::roles::RoleDefinitions;
+use crate::{ast::RoutineAclEntry, catalog::roles::RoleIdentity, SQLError};
 use std::{collections::BTreeMap, ops::Deref};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -65,10 +62,7 @@ pub fn metadata_key(oid: u32) -> String {
     format!("{METADATA_PREFIX}{oid}")
 }
 
-pub fn validate(
-    entry: &BuiltinRoutineSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<(), SQLError> {
+pub fn validate(entry: &BuiltinRoutineSecurity, roles: &RoleDefinitions) -> Result<(), SQLError> {
     if entry.revision == [0; 16] {
         return Err(SQLError::Internal(
             "invalid builtin routine ACL tuple identity".into(),

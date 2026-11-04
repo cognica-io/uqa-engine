@@ -7,19 +7,17 @@
 //! Role references of session-local relations are catalog dependencies after commit.
 
 use super::context::TemporaryRoleDependencyCatalog;
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::RelationPersistence,
-    catalog::{
-        roles::RoleDefinition,
-        security::{dependencies::AclRoleReferences, BoundTableSecurity},
-    },
+    catalog::security::{dependencies::AclRoleReferences, BoundTableSecurity},
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub fn role_dependencies(
     catalog: &dyn TemporaryRoleDependencyCatalog,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     limit: usize,
 ) -> Result<BTreeSet<u32>, SQLError> {
     let mut referenced = BTreeSet::new();
@@ -75,7 +73,7 @@ pub fn role_dependencies(
 
 fn table_dependencies(
     security: &BoundTableSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     limit: usize,
     referenced: &mut BTreeSet<u32>,
 ) -> Result<(), SQLError> {
@@ -96,7 +94,7 @@ fn table_dependencies(
 
 fn acl_dependencies<T: AclRoleReferences>(
     acl: &[T],
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     limit: usize,
     referenced: &mut BTreeSet<u32>,
 ) -> Result<(), SQLError> {
@@ -114,7 +112,7 @@ fn acl_dependencies<T: AclRoleReferences>(
 
 fn add_role(
     name: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     limit: usize,
     referenced: &mut BTreeSet<u32>,
 ) -> Result<(), SQLError> {

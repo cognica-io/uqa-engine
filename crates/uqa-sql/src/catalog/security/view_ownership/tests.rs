@@ -6,43 +6,46 @@
 
 use super::*;
 use crate::catalog::roles::RoleReference;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::BoundSchemaSecurity;
 use crate::{
     ast::RelationPersistence,
     catalog::roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleDefinition, RoleMembership, RoleMembershipKey,
+        RoleDefinition,
     },
     plan::UnifiedPlan,
 };
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
 
 struct Catalog {
     user: String,
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
     calls: RefCell<Vec<&'static str>>,
 }
 impl Catalog {
     fn new(user: &str) -> Self {
-        let roles = ["view_owner", "schema_owner", user]
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .enumerate()
-            .map(|(index, name)| {
-                let mut role = RoleDefinition::bootstrap();
-                role.name = name.into();
-                role.oid = 20_001 + index as i64;
-                role.object_id = [index as u8 + 1; 16];
-                role.attributes.clear();
-                (name.into(), role)
-            })
-            .collect();
+        let roles = RoleDefinitions::try_from_iter(
+            ["view_owner", "schema_owner", user]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    let mut role = RoleDefinition::bootstrap();
+                    role.name = name.into();
+                    role.oid = 20_001 + index as i64;
+                    role.object_id = [index as u8 + 1; 16];
+                    role.attributes.clear();
+                    (name.into(), role)
+                }),
+        )
+        .unwrap();
         Self {
             user: user.into(),
             roles: RefCell::new(roles),
-            memberships: RefCell::new(BTreeMap::new()),
+            memberships: RefCell::new(RoleMemberships::new()),
             calls: RefCell::new(Vec::new()),
         }
     }

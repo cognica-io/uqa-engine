@@ -8,12 +8,13 @@
 //!
 //! Attributes keep their `pg_attribute.attnum`. A dropped attribute stays in the definition with its number, as `PostgreSQL` keeps an `attisdropped` row, so later attributes keep their numbers and the number is never reused.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition};
+use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, CompositeTypeReference, ObjectAclEntry};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeDescriptor};
 
@@ -142,12 +143,12 @@ impl<Owner> StoredComposite<Owner> {
 
 /// Check the definitions restored or published as one registry: identities and OIDs are unique, names agree with their keys, attribute numbers ascend and live names are distinct, and owners exist.
 pub fn validate_composite_registry(
-    registry: &BTreeMap<String, StoredComposite>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredComposite>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
             return Err(format!(
                 "invalid or duplicate composite identity for `{name}`"

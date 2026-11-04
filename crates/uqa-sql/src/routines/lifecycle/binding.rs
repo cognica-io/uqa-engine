@@ -13,9 +13,10 @@ use super::{
     wrong_routine_kind_error, RoutineDropResolution, RoutineDropTarget,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{AlterRoutineKind, DropFunctionItem, DropFunctionStmt},
-    catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
+    catalog::roles::role_inherits,
     routines::{routine_signature_types, SQLUserFunction},
     SQLError,
 };
@@ -243,8 +244,8 @@ pub fn ensure_routine_drop_owner(
     written: &str,
     kind: &str,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Result<(), SQLError> {
     let schema = uqa_core::RelationIdentity::from_legacy_name(&function.def.name)
         .map_err(|error| SQLError::Internal(format!("resolve dropped routine schema: {error}")))?

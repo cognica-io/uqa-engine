@@ -42,7 +42,8 @@ fn host_range_constructors_share_statement_effects_and_recover_native_transactio
         .durable
         .ranges
         .write()
-        .insert("public.r".into(), range());
+        .insert("public.r".into(), range())
+        .unwrap();
     engine.sql("CREATE SEQUENCE host_canonical_calls; CREATE FUNCTION host_canonical(r) RETURNS r LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM nextval('host_canonical_calls'); RETURN $1; END $$", &[]).unwrap();
     let result = engine
         .sql(
@@ -57,9 +58,12 @@ fn host_range_constructors_share_statement_effects_and_recover_native_transactio
         .durable
         .ranges
         .write()
-        .get_mut("public.r")
+        .edit("public.r", |definition| {
+            definition.canonical_oid = Some(*oid as u32);
+            Ok(())
+        })
         .unwrap()
-        .canonical_oid = Some(*oid as u32);
+        .unwrap();
     let control = ProductionControl::uncontrolled();
     let lower = uqa_sql::SQLParam::typed_scalar(Value::Str("1".into()), ColumnType::Text);
     let upper = uqa_sql::SQLParam::typed_scalar(Value::Int(4), ColumnType::Integer);
@@ -109,7 +113,8 @@ fn declared_range_input_adapters_invoke_selected_sql_routines_without_repeating_
         .durable
         .ranges
         .write()
-        .insert("public.r".into(), range());
+        .insert("public.r".into(), range())
+        .unwrap();
     engine.sql("CREATE SEQUENCE canonical_calls; CREATE FUNCTION canonical(r) RETURNS r LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM nextval('canonical_calls'); RETURN $1; END $$", &[]).unwrap();
     let oid_result = engine
         .sql("SELECT oid FROM pg_proc WHERE proname = 'canonical'", &[])
@@ -122,9 +127,12 @@ fn declared_range_input_adapters_invoke_selected_sql_routines_without_repeating_
         .durable
         .ranges
         .write()
-        .get_mut("public.r")
+        .edit("public.r", |definition| {
+            definition.canonical_oid = Some(oid);
+            Ok(())
+        })
         .unwrap()
-        .canonical_oid = Some(oid);
+        .unwrap();
     let result = engine.sql("SELECT '[1,2]'::r::text AS value", &[]).unwrap();
     assert_eq!(
         result.rows[0].get("value"),

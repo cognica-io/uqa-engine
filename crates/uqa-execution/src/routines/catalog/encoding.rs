@@ -8,9 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::CreateFunction,
-    catalog::roles::RoleDefinition,
     routines::security::binding::{
         bind_legacy_authority, validate_routine_authority, validate_routine_authority_identities,
         LegacyRoutineAclEntry,
@@ -54,7 +54,7 @@ fn validate_object_identity(definition: &CreateFunction) -> StorageBackendResult
 
 pub(crate) fn decode(
     json: Option<&str>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allows_migration: bool,
 ) -> StorageBackendResult<(Definitions, bool)> {
     let value: serde_json::Value = json
@@ -112,7 +112,7 @@ pub(crate) fn decode(
 
 fn bind_legacy_definition(
     definition: &mut serde_json::Value,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     implicit_owner_execute: bool,
 ) -> StorageBackendResult<()> {
     let object = definition.as_object_mut().ok_or_else(|| {

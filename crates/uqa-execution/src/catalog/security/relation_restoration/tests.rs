@@ -7,14 +7,16 @@
 use super::*;
 use std::sync::Arc;
 use uqa_core::{catalog_acl::LegacyRelationSecurity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions) {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     catalog.save_schema("public").unwrap();
     (
         catalog,
-        BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
     )
 }
 
@@ -48,9 +50,10 @@ fn relation_restore_binds_once_and_rejects_secondary_name_conversion() {
     let restored = restore_tables(&catalog, &roles, true).unwrap();
     let encoded = catalog.load_tables().unwrap();
     assert!(matches!(encoded[0].security, RelationSecurityRow::Bound(_)));
-    let mut owner = roles.remove("uqa").unwrap();
+    let mut owner = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     owner.name = "renamed".into();
-    roles.insert(owner.name.clone(), owner);
+    roles.insert(owner.name.clone(), owner).unwrap();
     assert_eq!(
         restore_tables(&catalog, &roles, false)
             .unwrap()
@@ -66,7 +69,13 @@ fn relation_restore_binds_once_and_rejects_secondary_name_conversion() {
         serde_json::to_value(catalog.load_tables().unwrap()).unwrap(),
         serde_json::to_value(&encoded).unwrap()
     );
-    roles.get_mut("renamed").unwrap().object_id = [9; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [9; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(restore_tables(&catalog, &roles, true).is_err());
     assert_eq!(
         serde_json::to_value(catalog.load_tables().unwrap()).unwrap(),

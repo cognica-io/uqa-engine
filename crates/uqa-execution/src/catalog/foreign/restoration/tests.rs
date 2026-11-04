@@ -44,7 +44,7 @@ fn table(name: &str, persistence: RelationPersistence) -> StoredForeignTable {
 fn registry() -> RestoredForeignCatalog {
     RestoredForeignCatalog {
         wrappers: uqa_sql::catalog::foreign_wrapper::native_wrappers(),
-        servers: BTreeMap::new(),
+        servers: uqa_sql::catalog::foreign_server::ForeignServers::new(),
         tables: BTreeMap::new(),
         security: BTreeMap::new(),
     }

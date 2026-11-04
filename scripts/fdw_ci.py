@@ -67,17 +67,18 @@ def affected(path: str) -> bool:
 
 
 def execution_definition(contents: bytes) -> bytes:
-    """Ignore only the event declaration; preserve every execution and evidence setting."""
+    """Ignore event and concurrency declarations; preserve every execution and evidence setting."""
     before, separator, remaining = contents.partition(b"\non:\n")
     if not separator:
         raise ValueError("workflow event declaration is unavailable")
     following = re.search(rb"(?m)^[A-Za-z_][A-Za-z0-9_-]*:", remaining)
     if following is None:
         raise ValueError("workflow execution definition is unavailable")
-    return before + b"\n" + remaining[following.start():]
+    execution = before + b"\n" + remaining[following.start():]
+    return re.sub(rb"(?m)^concurrency:\n(?:[ \t]+[^\n]*\n|\n)*", b"", execution)
 
 
-def only_events_changed(root: Path, base: str, revision: str, path: str) -> bool:
+def only_scheduling_changed(root: Path, base: str, revision: str, path: str) -> bool:
     try:
         before = execution_definition(git(root, "show", f"{base}:{path}"))
         after = execution_definition(git(root, "show", f"{revision}:{path}"))
@@ -116,7 +117,7 @@ def select(root: Path, event: dict, event_name: str, revision: str, *, fetch=Fal
     paths = [path.decode("utf-8", errors="surrogateescape") for path in raw.split(b"\0") if path]
     selected = sorted(path for path in paths if affected(path)
                       and not (path == ".github/workflows/fdw-features.yml"
-                               and only_events_changed(root, base, revision, path)))
+                               and only_scheduling_changed(root, base, revision, path)))
     result.update(required=bool(selected), paths=selected,
                   reason="Foreign-handler inputs changed." if selected else "No foreign-handler input changed.")
     return result

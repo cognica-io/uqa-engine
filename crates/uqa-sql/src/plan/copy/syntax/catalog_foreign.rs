@@ -35,3 +35,9 @@ syntax_struct!(crate::catalog::foreign_server::ForeignServerMetadata {
     option_order,
     wrapper_reference
 });
+syntax_struct!(crate::catalog::foreign_server::ForeignServerDefinition {
+    name,
+    fdw_type,
+    options,
+    metadata
+});

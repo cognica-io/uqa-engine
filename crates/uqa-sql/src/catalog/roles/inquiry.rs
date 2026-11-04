@@ -40,12 +40,11 @@ pub fn pg_get_userbyid_value(
         }
     };
     let roles = catalog.role_definitions();
-    Ok(Value::Str(
-        roles
-            .values()
-            .find(|role| role.oid == oid)
-            .map_or_else(|| format!("unknown (OID={oid})"), |role| role.name.clone()),
-    ))
+    let name = roles
+        .values()
+        .find(|role| role.oid == oid)
+        .map_or_else(|| format!("unknown (OID={oid})"), |role| role.name.clone());
+    Ok(Value::Str(name))
 }
 
 pub fn pg_has_role_value(
@@ -92,15 +91,17 @@ pub fn pg_has_role_value(
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::roles::RoleDefinitions;
+
     use super::*;
     use crate::catalog::roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
         RoleDefinition,
     };
-    use std::{cell::Cell, collections::BTreeMap};
+    use std::cell::Cell;
 
     struct Catalog {
-        roles: BTreeMap<String, RoleDefinition>,
+        roles: RoleDefinitions,
         reads: Cell<usize>,
     }
     impl RoleCatalogGuards for Catalog {
@@ -118,7 +119,7 @@ mod tests {
         let mut role = RoleDefinition::bootstrap();
         role.name = "selected_owner".into();
         let mut catalog = Catalog {
-            roles: BTreeMap::from([(role.name.clone(), role)]),
+            roles: RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap(),
             reads: Cell::new(0),
         };
         assert_eq!(
@@ -136,9 +137,10 @@ mod tests {
                 Value::Str(expected.into())
             );
         }
-        let mut renamed = catalog.roles.remove("selected_owner").unwrap();
+        let mut renamed = catalog.roles.get("selected_owner").unwrap().clone();
+        catalog.roles.remove("selected_owner").unwrap();
         renamed.name = "renamed_owner".into();
-        catalog.roles.insert(renamed.name.clone(), renamed);
+        catalog.roles.insert(renamed.name.clone(), renamed).unwrap();
         assert_eq!(
             pg_get_userbyid_value(&catalog, &[Value::Int(10)]).unwrap(),
             Value::Str("renamed_owner".into())

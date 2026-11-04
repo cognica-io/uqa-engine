@@ -6,10 +6,11 @@
 
 //! Versioned domain authority, complete restoration and durable registry publication.
 
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     domain::{validate_domain_registry, StoredDomain},
-    roles::{guards::RoleCatalogGuards, RoleDefinition},
+    roles::guards::RoleCatalogGuards,
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -20,7 +21,7 @@ mod restoration;
 pub use restoration::{finish_restore, restore, DomainRestoreState, RestoredDomains};
 
 pub const DOMAINS_METADATA_KEY: &str = "sql_domains_json";
-pub type DomainRegistry = BTreeMap<String, StoredDomain>;
+pub type DomainRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain>;
 pub type DomainRegistryRead<'a> = Box<dyn Deref<Target = DomainRegistry> + 'a>;
 
 pub trait DomainRegistryPublication: RoleCatalogGuards {
@@ -35,7 +36,7 @@ pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &Arc<DomainRegistry>,
     committed: Arc<DomainRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<Arc<DomainRegistry>> {
     let committed = merge_private_records(current, committed, |name| {
         catalog.map_or(Ok(false), |catalog| {
@@ -59,9 +60,13 @@ fn merge_private_records(
     for name in names {
         if is_private(&name)? {
             if let Some(domain) = current.get(&name) {
-                Arc::make_mut(&mut committed).insert(name, domain.clone());
+                Arc::make_mut(&mut committed)
+                    .insert(name, domain.clone())
+                    .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             } else {
-                Arc::make_mut(&mut committed).remove(&name);
+                Arc::make_mut(&mut committed)
+                    .remove(&name)
+                    .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             }
         }
     }

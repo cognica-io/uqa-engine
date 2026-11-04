@@ -6,7 +6,10 @@
 
 //! Immutable map generations with owner-supplied payload footprints and independent capture admission.
 
-use super::{Budgeted, BudgetedSharedMap, BudgetedSharedMapSnapshot, MemoryBudget, MemoryError};
+use super::{
+    Budgeted, BudgetedSharedMap, BudgetedSharedMapIter, BudgetedSharedMapSnapshot, MemoryBudget,
+    MemoryError,
+};
 use std::borrow::Borrow;
 
 struct Entry<V> {
@@ -49,8 +52,8 @@ impl<K, V> RetainedMap<K, V> {
         self.values.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
-        self.values.iter().map(|(key, entry)| (key, &entry.value))
+    pub fn iter(&self) -> RetainedMapIter<'_, K, V> {
+        RetainedMapIter(self.values.iter())
     }
 
     pub fn clear(&mut self) {
@@ -116,6 +119,15 @@ impl<K: Ord, V> RetainedMap<K, V> {
     }
 }
 
+impl<'a, K, V> IntoIterator for &'a RetainedMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = RetainedMapIter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// An immutable root without a construction-budget handle or a mutable source owner.
 pub struct RetainedMapSnapshot<K, V> {
     values: BudgetedSharedMapSnapshot<K, Entry<V>>,
@@ -130,8 +142,8 @@ impl<K, V> RetainedMapSnapshot<K, V> {
         self.values.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
-        self.values.iter().map(|(key, entry)| (key, &entry.value))
+    pub fn iter(&self) -> RetainedMapIter<'_, K, V> {
+        RetainedMapIter(self.values.iter())
     }
 }
 
@@ -141,6 +153,26 @@ impl<K: Ord, V> RetainedMapSnapshot<K, V> {
         K: Borrow<Q>,
     {
         self.values.get(key).map(|entry| &entry.value)
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a RetainedMapSnapshot<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = RetainedMapIter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// Ordered borrowed entries without an allocation or an additional retained root.
+pub struct RetainedMapIter<'a, K, V>(BudgetedSharedMapIter<'a, K, Entry<V>>);
+
+impl<'a, K, V> Iterator for RetainedMapIter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(key, entry)| (key, &entry.value))
     }
 }
 

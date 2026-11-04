@@ -6,8 +6,9 @@
 
 use super::{build_pg_authid, build_pg_roles};
 use crate::catalog::{test_support::empty_catalog, CatalogReadView};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::RoleAttribute, catalog::roles::RoleDefinition};
 
 #[test]
@@ -19,11 +20,13 @@ fn private_and_public_role_projections_share_one_snapshot_and_keep_password_mask
     role.connection_limit = 7;
     role.attributes = [RoleAttribute::Login, RoleAttribute::Replication].into();
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(role.name.clone(), role.clone())]));
+    snapshot.definitions.roles =
+        Arc::new(RoleDefinitions::try_from_iter([(role.name.clone(), role.clone())]).unwrap());
     let original = CatalogReadView::new(snapshot.clone());
     role.name = "renamed".into();
     role.connection_limit = 9;
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(role.name.clone(), role)]));
+    snapshot.definitions.roles =
+        Arc::new(RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap());
     let updated = CatalogReadView::new(snapshot);
 
     for (catalog, expected_name, expected_limit) in

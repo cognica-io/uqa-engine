@@ -7,13 +7,10 @@
 //! Membership catalog overlays preserve each transaction's rows and undo boundary.
 
 use super::{refresh_catalog, reopen, sessions, sql};
-use std::collections::BTreeMap;
-use uqa_sql::catalog::roles::{identity::RoleBinding, RoleMembership, RoleMembershipKey};
+use uqa_sql::catalog::roles::RoleMemberships;
+use uqa_sql::catalog::roles::{identity::RoleBinding, RoleMembership};
 
-fn row(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
-) -> Option<RoleMembership> {
+fn row(memberships: &RoleMemberships, member: &str) -> Option<RoleMembership> {
     memberships
         .values()
         .find(|edge| edge.member.name == member)
@@ -111,7 +108,7 @@ fn membership_oid_claims_reject_two_stale_publishers_of_the_same_oid() {
                 inherit_option: true,
                 set_option: true,
             };
-            after.insert(membership.key(), membership);
+            after.insert(membership.key(), membership).unwrap();
             engine
                 .persist_role_memberships_snapshot(&before, &after)
                 .unwrap();

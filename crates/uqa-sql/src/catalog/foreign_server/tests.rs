@@ -5,12 +5,17 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeMap;
 
 #[test]
 fn persisted_option_order_must_describe_each_stored_key_once() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let mut server = definition();
-    server.options = BTreeMap::from([("a".into(), "1".into()), ("b".into(), "2".into())]);
+    server.options =
+        uqa_core::memory::OwnedMap::from_iter([("a".into(), "1".into()), ("b".into(), "2".into())]);
     for (order, valid) in [
         (None, true),
         (Some(vec!["b", "a"]), true),
@@ -32,7 +37,7 @@ fn definition() -> ForeignServerDefinition {
     ForeignServerDefinition {
         name: "source".into(),
         fdw_type: "memory_fdw".into(),
-        options: BTreeMap::new(),
+        options: uqa_core::memory::OwnedMap::new(),
         metadata: ForeignServerMetadata {
             option_order: None,
             wrapper_reference: None,
@@ -50,15 +55,22 @@ fn foreign_server_owner_follows_role_incarnation_through_rename() {
     let mut role = RoleDefinition::bootstrap();
     let servers = BTreeMap::from([("source".into(), definition())]);
     role.name = "renamed".into();
-    let mut roles = BTreeMap::from([("renamed".into(), role)]);
+    let mut roles = RoleDefinitions::try_from_iter([("renamed".into(), role)]).unwrap();
     validate_foreign_servers(&servers, &roles).unwrap();
-    roles.get_mut("renamed").unwrap().object_id = [9; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [9; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(validate_foreign_servers(&servers, &roles).is_err());
 }
 
 #[test]
 fn foreign_server_registry_requires_unique_addresses_and_matching_names() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for duplicate_oid in [false, true] {
         let mut other = definition();
         other.name = "other".into();

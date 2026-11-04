@@ -116,7 +116,9 @@ fn builtin_kuromoji_follows_the_cli_feature_configuration() {
 
 fn verify_builtin(name: &str, input: &str, position: usize, expected: &str, enabled: bool) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let sql = format!("SELECT analysis -> 'tokens' -> {position} ->> 'term' AS term FROM analyze_text('{name}', '{input}')");
+    let sql = format!(
+        "SELECT analysis -> 'tokens' -> {position} ->> 'term' AS term FROM analyze_text('{name}', '{input}')"
+    );
     let output = run_usql(&["--copy-text", "-c", &sql], "", dir.path());
     if enabled {
         assert!(output.status.success(), "{}", stderr(&output));
@@ -420,6 +422,8 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
         &[],
         "CREATE SERVER remote_source FOREIGN DATA WRAPPER duckdb_fdw;\n\
          CREATE FOREIGN TABLE remote_items(cursor refcursor, ids smallint[], amount numeric(9,2)) SERVER remote_source OPTIONS (source 'items');\n\
+         CREATE FOREIGN DATA WRAPPER local_options HANDLER memory_fdw_handler;\n\
+         CREATE SERVER ordered_options FOREIGN DATA WRAPPER local_options OPTIONS (z 'last', a 'first');\n\
          \\dt\n\\d remote_items\n\\dft\n\\dfs\n\\q\n",
         dir.path(),
     );
@@ -429,6 +433,8 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
         "remote_items",
         "remote_source",
         "duckdb_fdw",
+        "ordered_options",
+        "a=first z=last",
         "refcursor",
         "smallint[]",
         "numeric(9,2)",

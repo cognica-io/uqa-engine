@@ -17,6 +17,8 @@ use std::{
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     ast::RoleAttribute,
     catalog::{
@@ -26,49 +28,46 @@ use uqa_sql::{
                 RoleDependencyCatalog, RoleDependencyRead, RoleTableSecurity, RoleTablesRead,
             },
             guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
-            RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
+            RoleDefinition, RoleMembership, RoleReferenceNames,
         },
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
+        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
 };
 
 pub(super) struct Catalog {
-    pub roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    pub memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    pub roles: RefCell<RoleDefinitions>,
+    pub memberships: RefCell<RoleMemberships>,
     pub current: RefCell<String>,
     pub events: RefCell<Vec<String>>,
     pub fail_membership_persistence: Cell<bool>,
     pub epoch: Cell<usize>,
     pub locks: crate::row_locks::RowLockManager,
     pub cancel: uqa_core::CancellationToken,
-    pub refreshed_roles: RefCell<std::collections::VecDeque<BTreeMap<String, RoleDefinition>>>,
-    pub refreshed_memberships:
-        RefCell<std::collections::VecDeque<BTreeMap<RoleMembershipKey, RoleMembership>>>,
-    pub writer_memberships: RefCell<Option<BTreeMap<RoleMembershipKey, RoleMembership>>>,
+    pub refreshed_roles: RefCell<std::collections::VecDeque<RoleDefinitions>>,
+    pub refreshed_memberships: RefCell<std::collections::VecDeque<RoleMemberships>>,
+    pub writer_memberships: RefCell<Option<RoleMemberships>>,
     pub catalog_locks: RefCell<Vec<(u32, Option<u32>, crate::row_locks::RelationLockMode)>>,
     pub tuple_locks: RefCell<Vec<(u32, u32, crate::row_locks::RelationLockMode)>>,
     database: BoundDatabaseSecurity,
-    schemas: BTreeMap<String, BoundSchemaSecurity>,
+    schemas: SchemaRegistry,
     views: BTreeMap<RelationIdentity, StoredView>,
     foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
     sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    domains: BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>,
+    domains:
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
 }
 impl Catalog {
     pub fn new() -> Self {
         Self {
-            roles: RefCell::new(BTreeMap::from([(
-                "uqa".into(),
-                RoleDefinition::bootstrap(),
-            )])),
-            memberships: RefCell::new(BTreeMap::new()),
+            roles: RefCell::new(
+                RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
+                    .unwrap(),
+            ),
+            memberships: RefCell::new(RoleMemberships::new()),
             current: RefCell::new("uqa".into()),
             events: RefCell::new(Vec::new()),
             fail_membership_persistence: Cell::new(false),
@@ -81,13 +80,13 @@ impl Catalog {
             catalog_locks: RefCell::new(Vec::new()),
             tuple_locks: RefCell::new(Vec::new()),
             database: BoundDatabaseSecurity::bootstrap(),
-            schemas: BTreeMap::new(),
+            schemas: SchemaRegistry::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
             system_relations: BTreeMap::new(),
             sequences: BTreeMap::new(),
             routines: BTreeMap::new(),
-            domains: BTreeMap::new(),
+            domains: crate::catalog::domain::DomainRegistry::new(),
         }
     }
     pub fn context(&self) -> RoleExecutionContext<'_> {
@@ -110,7 +109,10 @@ impl Catalog {
         let index = self.roles.borrow().len();
         let definition =
             RoleDefinition::from_create(&statement, 20_000 + index as i64, [index as u8; 16]);
-        self.roles.borrow_mut().insert(name.into(), definition);
+        self.roles
+            .borrow_mut()
+            .insert(name.into(), definition)
+            .unwrap();
     }
     pub fn membership(&self, role: &str, member: &str, grantor: &str) {
         use uqa_sql::catalog::roles::identity::RoleBinding;
@@ -126,7 +128,8 @@ impl Catalog {
         };
         self.memberships
             .borrow_mut()
-            .insert(membership.key(), membership);
+            .insert(membership.key(), membership)
+            .unwrap();
     }
     pub fn released(&self) {
         assert!(self.roles.try_borrow_mut().is_ok());
@@ -288,19 +291,15 @@ impl RolePublication for Catalog {
         }
         Ok(())
     }
-    fn persist_roles(
-        &self,
-        _: &BTreeMap<String, RoleDefinition>,
-        _: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<(), SQLError> {
+    fn persist_roles(&self, _: &RoleDefinitions, _: &RoleDefinitions) -> Result<(), SQLError> {
         assert!(self.roles.try_borrow_mut().is_err());
         self.event("persist roles");
         Ok(())
     }
     fn persist_memberships(
         &self,
-        _: &BTreeMap<RoleMembershipKey, RoleMembership>,
-        _: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        _: &RoleMemberships,
+        _: &RoleMemberships,
     ) -> Result<(), SQLError> {
         assert!(self.roles.try_borrow_mut().is_err());
         assert!(self.memberships.try_borrow_mut().is_err());
@@ -343,7 +342,7 @@ impl RoleDependencyCatalog for Catalog {
         self.event("database");
         Box::new(&self.database)
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         self.event("schemas");
         Box::new(&self.schemas)
     }
@@ -373,7 +372,10 @@ impl RoleDependencyCatalog for Catalog {
     }
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+    ) -> RoleDependencyRead<
+        '_,
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    > {
         self.event("domains");
         Box::new(&self.domains)
     }

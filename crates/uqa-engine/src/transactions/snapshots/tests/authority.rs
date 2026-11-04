@@ -76,11 +76,7 @@ fn same_authority(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
         assert_eq!(value.name, old.name);
         assert_eq!(value.fdw_type, old.fdw_type);
         assert_eq!(value.metadata, old.metadata);
-        assert!(value
-            .options
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(old.options.iter()));
+        assert!(value.options.iter().eq(old.options.iter()));
     }
 }
 

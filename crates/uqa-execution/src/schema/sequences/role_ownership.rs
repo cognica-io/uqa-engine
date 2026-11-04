@@ -22,6 +22,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     catalog::roles::{self, RoleReferenceNames},
     catalog::security::ownership::{OwnerChangeAuthority, RelationOwnerSchemas},
@@ -125,7 +126,7 @@ pub fn table_owned_sequence_owner_updates(
     catalog: &dyn OwnedSequenceSecurityCatalog,
     table_object_id: [u8; 16],
     new_owner: &str,
-    roles: &BTreeMap<String, roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<(RelationIdentity, BoundSequenceSecurity)>, SQLError> {
     let owned = catalog.owned_sequences(table_object_id);
     let registry = catalog.security_registry();

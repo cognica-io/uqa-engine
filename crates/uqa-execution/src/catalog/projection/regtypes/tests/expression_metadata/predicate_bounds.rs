@@ -130,11 +130,13 @@ fn catalog_name_bounds_limit_column_rows_and_expression_work() {
 fn defaults_fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = fixture(0).snapshot().clone();
     let domain = Arc::make_mut(&mut snapshot.definitions.domains)
-        .get_mut("hidden.positive")
+        .edit("hidden.positive", |domain| {
+            domain.definition.base = ColumnType::Regtype;
+            domain.definition.default = Some(constant(25, "regtype"));
+            Ok(domain.clone())
+        })
+        .unwrap()
         .unwrap();
-    domain.definition.base = ColumnType::Regtype;
-    domain.definition.default = Some(constant(25, "regtype"));
-    let domain = domain.clone();
     let function = Arc::make_mut(
         &mut Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
             .get_mut("hidden.echo")
@@ -150,7 +152,8 @@ fn defaults_fixture(unrelated: usize) -> CatalogReadView {
         domain.array_oid = Some(domain.oid + 1);
         domain.object_id = (i as u128 + 500).to_le_bytes();
         Arc::make_mut(&mut snapshot.definitions.domains)
-            .insert(domain.definition.name.clone(), domain);
+            .insert(domain.definition.name.clone(), domain)
+            .unwrap();
         let mut function = function.clone();
         function.def.name = format!("hidden.unrelated_{i}");
         function.def.catalog_oid = Some(90_000 + u32::try_from(i).unwrap());

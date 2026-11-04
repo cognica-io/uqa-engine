@@ -7,6 +7,7 @@
 use super::{support::Values, *};
 use crate::catalog::{range_type::input::*, CatalogReadView};
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use uqa_core::{
     memory::{MemoryBudget, Produced, ProductionControl},
     CancellationToken, Value,
@@ -116,9 +117,16 @@ impl Inputs {
         let mut snapshot = crate::catalog::test_support::empty_catalog()
             .snapshot()
             .clone();
-        snapshot.definitions.ranges = Arc::new(ranges);
-        snapshot.definitions.enums =
-            Arc::new(BTreeMap::from([("public.label".into(), enumeration)]));
+        snapshot.definitions.ranges = Arc::new(
+            uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(ranges).unwrap(),
+        );
+        snapshot.definitions.enums = Arc::new(
+            uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+                "public.label".into(),
+                enumeration,
+            )]))
+            .unwrap(),
+        );
         Self {
             values: Values(CatalogReadView::new(snapshot)),
             endpoint_calls: Cell::new(0),

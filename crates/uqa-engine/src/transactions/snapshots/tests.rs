@@ -14,12 +14,19 @@ mod capture;
 mod catalogs;
 mod comments;
 mod events;
+mod graph_oid_roots;
 mod identifiers;
 mod idle;
 mod resources;
+mod role_roots;
+mod schema_roots;
 mod sequence_values;
 mod sequences;
+mod server_roots;
 mod table_metadata;
+mod type_roots;
+mod undo_sources;
+mod wrapper_roots;
 
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();

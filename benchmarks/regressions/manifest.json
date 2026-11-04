@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -39735,6 +39735,397 @@
       "capability": "Source-independent incremental provider import",
       "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
       "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_roots_capture_without_visiting_definitions_or_temporary_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type root capture",
+      "workload": "Capture 1, 64 and 4096 immutable type entries, add large temporary definitions and retire later native roots.",
+      "invariant": "Capture allocates no heap storage, temporary payloads do not increase the selected footprint, and independent allowances release completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_views_merge_canonical_partitions_and_preserve_wire_encodings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type catalog encoding",
+      "workload": "Merge durable and temporary native definitions, round-trip persisted maps and compare capture against the existing ordered-entry producer.",
+      "invariant": "Native ordered lookup and persisted bytes retain their meaning; captured entries exclude temporary state and survive later edits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_type_publication_and_independent_capture_leave_original_roots_usable",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Native type admission failure",
+      "workload": "Exhaust native mutation allowance, compare original roots, capture under insufficient and exact independent limits, cancel and close.",
+      "invariant": "Failed replacement and removal preserve original roots; each capture funds the full retained footprint and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_root_publication_shares_unrelated_payloads_and_bounds_selected_path_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests.rs",
+      "capability": "Immutable domain publication",
+      "workload": "Install 1, 32 and 512 domain definitions with 16-KiB defaults, publish one small domain, capture and replace one original definition.",
+      "invariant": "Publication allocates below 32 KiB and 256 allocations while sharing all unrelated entries; capture allocates zero heap storage and retains original defaults.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_type_roots_capture_in_bounded_work_without_temporary_payload_retention",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/type_roots.rs",
+      "capability": "Committed native type roots",
+      "workload": "Create 1, 32 and 128 SQL domains plus a two-MiB temporary default, select committed types during private DDL, roll back a savepoint, commit and replace.",
+      "invariant": "Selected type capture allocates below 16 KiB and 64 allocations; temporary definitions stay excluded, original contents survive closure, and cancellation and complete release remain effective.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_roots_capture_without_enumeration_or_temporary_authority_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Native schema root capture",
+      "workload": "Capture 1, 64 and 4096 namespaces before and after adding large temporary authority, then retire the source.",
+      "invariant": "Capture allocates zero heap objects, excludes temporary authority from exact independent admission and releases every selected allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_root_publication_preserves_unrelated_grants_and_matches_legacy_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Native schema publication",
+      "workload": "Insert one namespace beside 1, 32 and 512 existing namespaces and a large unrelated ACL; compare captured authority with the legacy producer.",
+      "invariant": "Insertion stays below 32 KiB and 256 allocations, retains unrelated payloads and preserves every ordered legacy authority value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_schema_publication_and_capture_preserve_original_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Schema admission failure",
+      "workload": "Deny native replacement and removal, capture with exact and insufficient independent allowances, cancel and retire all owners.",
+      "invariant": "Failed publication preserves the original root, failed capture releases partial admission, and all native and independent reservations retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_schema_roots_preserve_original_authority_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/schema_roots.rs",
+      "capability": "Committed native schema roots",
+      "workload": "Create 1, 32 and 128 schemas through SQL; capture original authority during private grants, then revoke, roll back a savepoint, commit, rename and replace.",
+      "invariant": "Selected authority capture stays below 16 KiB and 64 allocations, preserves original grant identities after closure and retains original cancellation and final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_undo_generations_preserve_rows_and_sequences_without_capture_registration",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/undo_sources.rs",
+      "capability": "Committed source ownership",
+      "workload": "Create outer, nested and savepoint generations, capture original rows and autonomous sequence values, complete the nested frame in both ways, roll back and close the source.",
+      "invariant": "Only the outer original owns capture registrations; private undo preserves native rows, metadata and sequence history while the original capture retains cancellation and releases its allowance.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_and_membership_roots_capture_without_enumeration_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Native role and membership capture",
+      "workload": "Capture 1, 64 and 4096 role definitions and membership tuples twice under separate allowances, then retire the sources.",
+      "invariant": "Capture allocates no heap objects, independently admits the complete selected roots and preserves ordered original values through source closure and full release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_role_publication_shares_unrelated_payloads_and_preserves_legacy_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Native role publication",
+      "workload": "Publish one role and membership beside 1, 32 and 512 existing entries plus large unrelated endpoint names; compare legacy values and native encodings.",
+      "invariant": "Publication stays below 32 KiB and 256 allocations, shares unrelated immutable values, preserves serialized roles and captured memberships and leaves earlier authority unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_role_publication_and_independent_capture_preserve_original_roots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Role admission failure",
+      "workload": "Deny native role and membership replacements, independently underfund each capture by one byte, cancel and retire every owner.",
+      "invariant": "Failed publication preserves both original roots, incomplete capture leaks no admission and the final native and capture owners release their full allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_role_roots_preserve_original_memberships_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/role_roots.rs",
+      "capability": "Committed native role roots",
+      "workload": "Create 1, 32 and 128 SQL roles and memberships; capture original authority during private ALTER and REVOKE, then roll back a savepoint, commit, rename and replace.",
+      "invariant": "Selected role and membership capture stays below 32 KiB and 128 allocations, preserves original identities after source closure and retains cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_roots_capture_without_enumeration_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Native graph identity capture",
+      "workload": "Capture 1, 64 and 4096 graph records with independent exact and insufficient allowances, then retire the source.",
+      "invariant": "Root capture allocates no heap storage, preserves every durable graph name and releases independent admissions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_copies_admit_exact_nested_allocations_and_keep_legacy_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Graph identity encoding and admission",
+      "workload": "Copy all label identity fields and nested constraint names, compare the original record and legacy ordered observations, then deny and cancel.",
+      "invariant": "Actual owned allocations equal admitted bytes; original JSON, complete OIDs and ordered values remain unchanged with no failed-copy leak.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_graph_oid_publication_shares_unrelated_definitions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Selected graph identity publication",
+      "workload": "Change one graph record beside 1, 32 and 512 records and an unrelated large constraint-name payload.",
+      "invariant": "Publication stays below 32 KiB and 256 allocations and shares all unrelated definitions while preserving original roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_graph_oid_publication_preserves_captured_roots_and_releases_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Graph identity publication failure",
+      "workload": "Exhaust native admission before a replacement while an independent capture retains the original graph.",
+      "invariant": "Failed publication leaves complete original values unchanged and final owners release native and captured allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_changes_preserve_original_records_through_rename_label_removal_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/changes/tests.rs",
+      "capability": "Graph identity record lifecycle",
+      "workload": "Persist same-name and changed-name renames, remove a label and drop the graph while retaining earlier roots.",
+      "invariant": "Persisted records match each successor, legacy absence remains absent, same-name rename preserves the record and earlier roots remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_admission_failure_does_not_mutate_native_or_persisted_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/changes/tests.rs",
+      "capability": "Graph identity record atomicity",
+      "workload": "Deny native successor admission before label removal and rename with an existing durable record.",
+      "invariant": "No incomplete successor reaches native or persisted state and the last owner releases every native lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_creation_keeps_legacy_absence_and_publishes_only_changed_graph_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/graphs.rs",
+      "capability": "Graph identity allocation ownership",
+      "workload": "Create graphs beside a legacy graph without OID records, repeat unchanged publication and add one new label.",
+      "invariant": "Legacy graphs gain no invented OIDs, unchanged publication returns no delta and adding a label preserves earlier objects and unrelated shared records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_graph_oid_roots_preserve_original_labels_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/graph_oid_roots.rs",
+      "capability": "Committed graph identity roots",
+      "workload": "Capture original identity roots for 1, 16 and 64 graphs during private label changes, then roll back a savepoint, commit, replace, rename and close.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and retains exact original labels under independent cancellation and full admission release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_roots_capture_without_allocations_and_preserve_original_encodings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Immutable wrapper capture",
+      "workload": "Capture 1, 64 and 4096 wrapper definitions with independent exact allowances and compare complete legacy observations and both encodings.",
+      "invariant": "Capture allocates no heap objects, preserves original handler and validator bindings and ordered options, and releases both independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_wrapper_publication_shares_unrelated_options_and_callback_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Selected wrapper publication",
+      "workload": "Publish one wrapper beside 1, 32 and 512 definitions and unrelated large option and callback-name payloads.",
+      "invariant": "Selected publication stays below 32 KiB and 256 allocations, retains original values and shares every unrelated definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_wrapper_publication_and_capture_preserve_complete_original_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Wrapper admission failure",
+      "workload": "Deny an independently captured root by one byte, exhaust native admission before replacement, cancel and retire source owners.",
+      "invariant": "Failure leaves complete original wrapper identities and callbacks unchanged; denied capture leaks nothing and final owners release every native and captured lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_wrapper_roots_preserve_original_options_and_incarnations_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/wrapper_roots.rs",
+      "capability": "Committed native wrapper roots",
+      "workload": "Capture 1, 32 and 128 SQL wrapper definitions through private same-name replacement, savepoint rollback, COMMIT, another replacement and Engine closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and preserves the original incarnation, handler and ordered options under independent cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "server_roots_admit_exact_option_storage_and_capture_original_values_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Immutable server capture",
+      "workload": "Copy exact option storage and capture 1, 64 and 4096 server definitions with independent allowances, legacy values and option encodings.",
+      "invariant": "Copied allocation equals admitted bytes; root capture allocates no heap storage, preserves every optional metadata field and original reference, and releases all independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_server_publication_shares_unrelated_options_and_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Selected server publication",
+      "workload": "Publish one server beside 1, 32 and 512 definitions and unrelated large option and metadata payloads.",
+      "invariant": "Selected publication stays below 32 KiB and 256 allocations while preserving original values and sharing every unrelated definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_server_publication_and_capture_preserve_original_references_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Server admission failure",
+      "workload": "Deny capture by one byte, exhaust native admission, attempt replacement, cancel and retire source owners.",
+      "invariant": "Failure leaves original wrapper and owner references unchanged; all rejected and completed native and captured leases are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_server_roots_preserve_original_options_and_incarnations_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/server_roots.rs",
+      "capability": "Committed native server roots",
+      "workload": "Capture 1, 32 and 128 SQL server definitions through private replacement, savepoint rollback, COMMIT, another incarnation and Engine closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and preserves original identities, optional type/version and written option order under independent cancellation and complete allowance release.",
       "case_names": [
         ""
       ]

@@ -18,6 +18,7 @@ use uqa_execution::{
         TableLockCatalog, TableLockContext, TableLockMetadata, TableLockSession,
     },
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     catalog::{resolution::RelationResolution, stored_view::StoredView},
@@ -46,7 +47,7 @@ impl TableLockCatalog for Engine {
     fn table(
         &self,
         name: &str,
-        _roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+        _roles: &RoleDefinitions,
     ) -> Result<Option<TableLockMetadata>, SQLError> {
         let relation =
             uqa_core::RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;

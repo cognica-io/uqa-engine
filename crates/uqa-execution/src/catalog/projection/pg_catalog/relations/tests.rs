@@ -6,7 +6,8 @@
 
 use super::build_pg_database;
 use crate::catalog::{test_support::empty_catalog, CatalogReadView};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 #[test]
 fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
@@ -24,7 +25,11 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
     reader.oid = 20_000;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    let mut roles = BTreeMap::from([(owner.name.clone(), owner), (reader.name.clone(), reader)]);
+    let mut roles = RoleDefinitions::try_from_iter([
+        (owner.name.clone(), owner),
+        (reader.name.clone(), reader),
+    ])
+    .unwrap();
     let create = DatabasePrivileges {
         create: true,
         ..DatabasePrivileges::default()
@@ -55,13 +60,14 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
     snapshot.definitions.roles = Arc::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
     for name in ["uqa", "reader"] {
-        let mut renamed = roles.remove(name).unwrap();
+        let mut renamed = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         let mut replacement = renamed.clone();
         renamed.name = format!("renamed {name}");
         replacement.oid += 30_000;
         replacement.object_id = if name == "uqa" { [8; 16] } else { [9; 16] };
-        roles.insert(renamed.name.clone(), renamed);
-        roles.insert(name.into(), replacement);
+        roles.insert(renamed.name.clone(), renamed).unwrap();
+        roles.insert(name.into(), replacement).unwrap();
     }
     snapshot.definitions.roles = Arc::new(roles);
     let renamed = CatalogReadView::new(snapshot);

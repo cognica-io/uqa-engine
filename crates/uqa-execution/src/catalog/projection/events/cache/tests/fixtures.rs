@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnDef, EventEnableMode, RelationPersistence, TableConstraintSet},
     catalog::{
@@ -18,10 +19,9 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas =
         Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+    );
     let relation = RelationIdentity::new("public", "items");
     snapshot.tables.insert(
         relation.clone(),

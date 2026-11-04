@@ -8,10 +8,12 @@ use super::*;
 use std::cell::RefCell;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::catalog::enum_type::initial_enum_labels;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn definition(name: &str, base_oid: u32, labels: &[&str]) -> StoredEnum {
@@ -42,16 +44,19 @@ struct Publication<'a> {
 #[test]
 fn physical_label_lookup_tracks_the_pinned_registry_generation() {
     let cache = EnumLabelCache::default();
-    let first = Arc::new(EnumRegistry::from([
-        (
-            "public.mood".into(),
-            definition("mood", 20_000, &["sad", "happy"]),
-        ),
-        (
-            "public.color".into(),
-            definition("color", 21_000, &["blue"]),
-        ),
-    ]));
+    let first = Arc::new(
+        EnumRegistry::try_from_iter([
+            (
+                "public.mood".into(),
+                definition("mood", 20_000, &["sad", "happy"]),
+            ),
+            (
+                "public.color".into(),
+                definition("color", 21_000, &["blue"]),
+            ),
+        ])
+        .unwrap(),
+    );
     let value = cache.value(&first, 20_003).unwrap();
     assert_eq!(value.type_oid(), 20_000);
     assert_eq!(value.label_oid(), Some(20_003));
@@ -63,11 +68,12 @@ fn physical_label_lookup_tracks_the_pinned_registry_generation() {
     assert!(cache.value(&first, 1).is_none());
     let mut changed = first.as_ref().clone();
     changed
-        .get_mut("public.mood")
+        .edit("public.mood", |definition| {
+            definition.rename_label("happy", "renamed")
+        })
         .unwrap()
-        .rename_label("happy", "renamed")
         .unwrap();
-    changed.remove("public.color");
+    changed.remove("public.color").unwrap();
     let changed = Arc::new(changed);
     assert_eq!(cache.value(&changed, 20_003), Some(value.clone()));
     assert_eq!(
@@ -102,7 +108,7 @@ impl EnumRegistryPublication for Publication<'_> {
     fn enum_catalog(&self) -> Option<&dyn CatalogFacade> {
         Some(self.catalog)
     }
-    fn enum_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn enum_role_definitions(&self) -> RoleDefinitions {
         roles()
     }
     fn publish_enum_definitions(&self, registry: EnumRegistry) {
@@ -121,7 +127,7 @@ fn published_definitions_restore_with_every_oid_claim() {
     let mood = definition("mood", 20_000, &["sad", "ok", "happy"]);
     let before = EnumRegistry::new();
     let mut after = before.clone();
-    after.insert("public.mood".into(), mood.clone());
+    after.insert("public.mood".into(), mood.clone()).unwrap();
     publish(&publication, &before, after.clone()).unwrap();
     let restored = restore(&catalog, &roles()).unwrap();
     assert_eq!(
@@ -131,9 +137,10 @@ fn published_definitions_restore_with_every_oid_claim() {
 
     let mut renamed = after.clone();
     renamed
-        .get_mut("public.mood")
+        .edit("public.mood", |definition| {
+            definition.rename_label("ok", "neutral")
+        })
         .unwrap()
-        .rename_label("ok", "neutral")
         .unwrap();
     publish(&publication, &after, renamed.clone()).unwrap();
     assert_eq!(
@@ -160,12 +167,16 @@ fn concurrent_changes_and_claimed_oids_are_rejected() {
     };
     let first = definition("mood", 20_000, &["a"]);
     let mut committed = EnumRegistry::new();
-    committed.insert("public.mood".into(), first.clone());
+    committed
+        .insert("public.mood".into(), first.clone())
+        .unwrap();
     publish(&publication, &EnumRegistry::new(), committed.clone()).unwrap();
 
     // A statement that read the empty registry cannot replace the definition committed meanwhile.
     let mut stale = EnumRegistry::new();
-    stale.insert("public.mood".into(), definition("mood", 30_000, &["b"]));
+    stale
+        .insert("public.mood".into(), definition("mood", 30_000, &["b"]))
+        .unwrap();
     let error = publish(&publication, &EnumRegistry::new(), stale).unwrap_err();
     assert!(
         error
@@ -180,7 +191,7 @@ fn concurrent_changes_and_claimed_oids_are_rejected() {
     other.object_id = [9; 16];
     other.oid = 40_000;
     other.array_oid = 40_001;
-    colliding.insert("public.other".into(), other);
+    colliding.insert("public.other".into(), other).unwrap();
     let error = publish(&publication, &committed, colliding).unwrap_err();
     assert!(error.to_string().contains("OID"), "{error}");
     assert_eq!(publication.registry.borrow().len(), 1);

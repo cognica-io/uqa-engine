@@ -8,11 +8,14 @@
 
 use super::*;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 #[test]
 fn shell_records_require_one_exact_oid_claim_and_a_known_format() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let shell = StoredShellType {
         object_id: [1; 16],
         oid: 20_000,
@@ -20,7 +23,7 @@ fn shell_records_require_one_exact_oid_claim_and_a_known_format() {
         owner: RoleIdentity::BOOTSTRAP,
         usage_acl: None,
     };
-    let registry = ShellRegistry::from([("public.pending".into(), shell)]);
+    let registry = ShellRegistry::try_from_iter([("public.pending".into(), shell)]).unwrap();
     for corruption in 0..5 {
         let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
         assert!(restore(&catalog, &roles).unwrap().is_empty());

@@ -7,6 +7,7 @@
 use super::super::context::{RoleDependencyRead, RoleTableSecurity, RoleTablesRead};
 use super::*;
 use crate::catalog::security::database::BoundDatabaseSecurity;
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::security::BoundTableSecurity;
 use crate::{catalog::stored_view::StoredView, routines::SQLUserFunction};
 use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
@@ -58,7 +59,7 @@ impl RoleTablesRead for Read<'_, BTreeMap<RelationIdentity, Table>> {
 }
 pub(super) struct Catalog {
     pub database: BoundDatabaseSecurity,
-    pub schemas: BTreeMap<String, BoundSchemaSecurity>,
+    pub schemas: SchemaRegistry,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: BTreeMap<RelationIdentity, StoredView>,
     pub foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
@@ -67,14 +68,15 @@ pub(super) struct Catalog {
     pub sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     pub sequence_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
     pub routines: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
-    pub domains: BTreeMap<String, crate::catalog::domain::StoredDomain>,
+    pub domains:
+        crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
     pub events: Events,
 }
 impl Catalog {
     pub fn new() -> Self {
         Self {
             database: BoundDatabaseSecurity::bootstrap(),
-            schemas: BTreeMap::new(),
+            schemas: SchemaRegistry::new(),
             tables: BTreeMap::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
@@ -83,7 +85,7 @@ impl Catalog {
             sequences: BTreeMap::new(),
             sequence_persistence: BTreeMap::new(),
             routines: BTreeMap::new(),
-            domains: BTreeMap::new(),
+            domains: crate::catalog::type_definitions::TypeDefinitions::new(),
             events: Rc::default(),
         }
     }
@@ -140,7 +142,7 @@ impl RoleDependencyCatalog for Catalog {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.read("database", &self.database))
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.read("schemas", &self.schemas))
     }
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
@@ -164,7 +166,10 @@ impl RoleDependencyCatalog for Catalog {
     }
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>> {
+    ) -> RoleDependencyRead<
+        '_,
+        crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
+    > {
         Box::new(self.read("domains", &self.domains))
     }
 }

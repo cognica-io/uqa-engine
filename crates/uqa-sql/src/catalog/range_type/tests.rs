@@ -5,7 +5,10 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::type_metadata::{builtin_type_name, pg_type_name, pg_type_oid};
+use std::collections::BTreeMap;
 
 fn definition() -> StoredRange {
     StoredRange {
@@ -66,7 +69,8 @@ fn declared_range_type_names_preserve_identity_across_independent_namespaces() {
 
 #[test]
 fn range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let range = definition();
     validate_range_registry(
         &BTreeMap::from([("public.r".into(), range.clone())]),

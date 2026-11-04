@@ -7,12 +7,10 @@
 //! Check, grant and revoke the ACL of an object with one grantable privilege, as `PostgreSQL`'s `aclchk.c` does for routine `EXECUTE` and type `USAGE`. An absent ACL is the default ACL: the privilege for PUBLIC and for the owner. Owners always hold grant options.
 
 use crate::ast::ObjectAclEntry;
-use crate::catalog::roles::{
-    identity::RoleSubject, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
-    RoleReference,
-};
+use crate::catalog::roles::{identity::RoleSubject, role_inherits, RoleDefinition, RoleReference};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::SQLError;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::{catalog_acl::AclGrantee, catalog_role::RoleIdentity};
 
 /// Whether a role holding `has_role` memberships may use the object, or grant it when `grant_option` is set.
@@ -85,8 +83,8 @@ pub fn select_grantor(
     owner: RoleIdentity,
     acl: Option<&[ObjectAclEntry]>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<RoleIdentity> {
     if role_inherits(roles, memberships, current_user, &owner) {
         return Some(owner);
@@ -293,7 +291,7 @@ pub fn acl_roles(owner: RoleIdentity, acl: Option<&[ObjectAclEntry]>) -> BTreeSe
 pub fn added_acl_roles(
     before: (RoleIdentity, Option<&[ObjectAclEntry]>),
     after: (RoleIdentity, Option<&[ObjectAclEntry]>),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     object_kind: &str,
     added: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
@@ -320,7 +318,7 @@ pub fn added_acl_roles(
 /// Bind grantee names to role incarnations; PUBLIC stays unbound.
 pub fn bind_grantees(
     grantees: &[AclGrantee],
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<Option<RoleIdentity>>, SQLError> {
     grantees
         .iter()

@@ -13,7 +13,6 @@ mod servers;
 mod wrappers;
 use std::{
     cell::Cell,
-    collections::BTreeMap,
     ops::{Deref, DerefMut},
 };
 use uqa_execution::schema::{
@@ -28,13 +27,13 @@ struct ServerWrite<'a> {
     guard: Option<
         uqa_storage::memory_capture::MemoryCaptureWriteGuard<
             'a,
-            BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+            uqa_sql::catalog::foreign_server::ForeignServers,
         >,
     >,
     held: &'a Cell<bool>,
 }
 impl Deref for ServerWrite<'_> {
-    type Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>;
+    type Target = uqa_sql::catalog::foreign_server::ForeignServers;
     fn deref(&self) -> &Self::Target {
         self.guard.as_deref().unwrap()
     }

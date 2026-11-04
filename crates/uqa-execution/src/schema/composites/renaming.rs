@@ -57,16 +57,18 @@ pub fn rename_attribute<S: Clone + 'static>(
     )?;
     let before = context.attributes.publication.composite_registry().clone();
     let mut after = before.clone();
-    let attribute = after
-        .get_mut(&definition.identity.qualified_name())
-        .and_then(|definition| {
-            definition
+    let missing = || SQLError::Internal("renamed composite attribute disappeared".into());
+    after
+        .edit(&definition.identity.qualified_name(), |definition| {
+            let attribute = definition
                 .attributes
                 .iter_mut()
                 .find(|attribute| !attribute.dropped && attribute.name == from)
-        })
-        .ok_or_else(|| SQLError::Internal("renamed composite attribute disappeared".into()))?;
-    to.clone_into(&mut attribute.name);
+                .ok_or_else(missing)?;
+            to.clone_into(&mut attribute.name);
+            Ok(())
+        })?
+        .ok_or_else(missing)?;
     crate::catalog::composite_type::publish(context.attributes.publication, &before, after)?;
     context.attributes.changes.catalog_registry_changed();
     super::values::rebuild_indexes(&context.attributes.values, rebuild)?;

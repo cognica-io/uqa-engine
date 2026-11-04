@@ -5,11 +5,12 @@
 //
 
 use super::*;
-use uqa_sql::catalog::roles::{RoleDefinition, RoleIdentity};
+use uqa_sql::catalog::roles::RoleIdentity;
+use uqa_sql::catalog::roles::{RoleDefinition, RoleDefinitions};
 
 struct RefreshingDependencies<'a> {
     catalog: &'a Catalog,
-    replacement: BTreeMap<String, RoleDefinition>,
+    replacement: RoleDefinitions,
     detail: Option<&'static str>,
 }
 
@@ -32,9 +33,12 @@ fn deletion_releases_roles_before_dependency_projection_and_keeps_diagnostic_ord
         catalog
             .roles
             .borrow_mut()
-            .get_mut("dependent")
+            .edit("dependent", |value| {
+                value.revision = revision;
+                Ok(())
+            })
             .unwrap()
-            .revision = revision;
+            .unwrap();
         let dependencies = RefreshingDependencies {
             catalog: &catalog,
             replacement: catalog.roles.borrow().clone(),
@@ -73,13 +77,18 @@ fn deletion_preserves_the_selected_tuple_across_dependency_projection() {
         let mut replacement = catalog.roles.borrow().clone();
         match change {
             "updated" => replacement
-                .get_mut("dependent")
+                .edit("dependent", RoleDefinition::advance_revision)
                 .unwrap()
-                .advance_revision()
                 .unwrap(),
-            "replaced" => replacement.get_mut("dependent").unwrap().object_id = [99; 16],
+            "replaced" => replacement
+                .edit("dependent", |role| {
+                    role.object_id = [99; 16];
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap(),
             "deleted" => {
-                replacement.remove("dependent");
+                replacement.remove("dependent").unwrap();
             }
             _ => {}
         }
@@ -127,11 +136,16 @@ fn alteration_does_not_retry_a_committed_definition_even_when_attributes_match()
         let catalog = Catalog::new();
         catalog.role("target", &[]);
         let mut committed = catalog.roles.borrow().clone();
-        let target = committed.get_mut("target").unwrap();
-        target.advance_revision().unwrap();
-        if change_attribute {
-            target.attributes.insert(RoleAttribute::Login);
-        }
+        committed
+            .edit("target", |target| {
+                target.advance_revision()?;
+                if change_attribute {
+                    target.attributes.insert(RoleAttribute::Login);
+                }
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         catalog
             .refreshed_roles
             .borrow_mut()
@@ -159,9 +173,13 @@ fn tuple_publication_preserves_an_unrelated_definition_committed_during_the_wait
     catalog.role("target", &[]);
     catalog.role("peer", &[]);
     let mut committed = catalog.roles.borrow().clone();
-    let peer = committed.get_mut("peer").unwrap();
-    peer.attributes.insert(RoleAttribute::Login);
-    peer.advance_revision().unwrap();
+    committed
+        .edit("peer", |peer| {
+            peer.attributes.insert(RoleAttribute::Login);
+            peer.advance_revision()
+        })
+        .unwrap()
+        .unwrap();
     catalog
         .refreshed_roles
         .borrow_mut()
@@ -197,9 +215,11 @@ fn deletion_revalidates_the_tuple_selected_after_dependency_exclusion() {
     let original = catalog.roles.borrow().clone();
     let mut committed = original.clone();
     committed
-        .get_mut("target")
+        .edit("target", |value| {
+            value.advance_revision().unwrap();
+            Ok(())
+        })
         .unwrap()
-        .advance_revision()
         .unwrap();
     catalog
         .refreshed_roles

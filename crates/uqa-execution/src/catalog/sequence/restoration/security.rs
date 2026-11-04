@@ -6,16 +6,13 @@
 
 //! Bind legacy sequence ACL endpoints only during complete initial catalog restoration.
 
-use std::collections::BTreeMap;
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::{BoundSequenceSecurity, SequenceSecurity},
-};
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::security::{BoundSequenceSecurity, SequenceSecurity};
 use uqa_storage::{SequenceSecurityRow, StorageBackendError, StorageBackendResult};
 
 pub(super) fn restore_security(
     row: &SequenceSecurityRow,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<BoundSequenceSecurity> {
     let security = match row {

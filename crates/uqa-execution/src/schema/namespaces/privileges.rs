@@ -18,11 +18,10 @@ use crate::{
     },
     row_locks::shared_objects::SharedObjectLockSession,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Deref,
-};
+use std::{collections::BTreeSet, ops::Deref};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     ast::GrantSchemaStmt,
     catalog::{
@@ -40,8 +39,7 @@ use uqa_sql::{
     SQLError,
 };
 
-pub type SchemaRegistryRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
+pub type SchemaRegistryRead<'a> = Box<dyn Deref<Target = SchemaRegistry> + 'a>;
 pub trait SchemaPrivilegeRegistry {
     fn schemas_read(&self) -> SchemaRegistryRead<'_>;
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
@@ -111,7 +109,7 @@ pub fn grant_schema_privileges(
         context
             .registry
             .schemas_write()
-            .insert(name, value.security);
+            .insert(name, value.security)?;
         context.changes.namespace_catalog_changed();
         if let Some(notice) = value.notice {
             context.notices.schema_privilege_notice(notice);
@@ -186,7 +184,7 @@ fn resolve_roles(
     context: &SchemaPrivilegeContext<'_>,
     statement: &GrantSchemaStmt,
     command_roles: &mut AclCommandRoles,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<ResolvedAclRoles, SQLError> {
     command_roles.resolve_validated(
         context.session,

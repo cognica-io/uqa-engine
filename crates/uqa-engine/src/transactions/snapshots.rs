@@ -15,6 +15,13 @@ mod table;
 #[cfg(test)]
 mod capture;
 
+/// Only an original committed boundary owns backup sources; private generations retain undo state alone.
+#[derive(Clone, Copy)]
+pub(super) enum SnapshotBoundary {
+    CommittedOriginal,
+    PrivateUndo,
+}
+
 impl Drop for crate::EngineSnapshotData {
     fn drop(&mut self) {
         // Retire immutable membership while its component source owners still exist.
@@ -27,14 +34,13 @@ mod tests;
 impl Engine {
     pub(super) fn snapshot_transaction_data(
         &self,
+        boundary: SnapshotBoundary,
     ) -> Result<Option<std::sync::Arc<EngineDataSnapshot>>, SQLError> {
         let mut tables = BTreeMap::new();
         let mut owners = BTreeMap::new();
-        let generation = self
-            .storage
-            .backend
-            .is_none()
-            .then(uqa_storage::memory_capture::MemoryCaptureRegistry::new);
+        let generation = (matches!(boundary, SnapshotBoundary::CommittedOriginal)
+            && self.storage.backend.is_none())
+        .then(uqa_storage::memory_capture::MemoryCaptureRegistry::new);
         for (name, table) in self.storage.tables.read().iter() {
             if self.storage.backend.is_some()
                 && table.persistence != uqa_sql::ast::RelationPersistence::Temporary

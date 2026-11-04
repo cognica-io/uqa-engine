@@ -227,51 +227,9 @@ fn same_indexes(
 }
 
 fn same_graphs(
-    saved: &[(
-        String,
-        uqa_sql::catalog::definition_capture::identities::CapturedGraphCatalogOids,
-    )],
-    original: &std::collections::BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>,
+    saved: &uqa_sql::catalog::graph_oids::CapturedGraphOidRegistry,
+    original: &uqa_sql::catalog::graph_oids::GraphOidRegistry,
 ) {
     assert_eq!(saved.len(), original.len());
-    for ((key, after), (name, before)) in saved.iter().zip(original.iter()) {
-        assert_eq!(key, name);
-        assert_eq!(
-            (after.namespace, after.label_sequence),
-            (before.namespace, before.label_sequence)
-        );
-        assert_eq!(after.labels.len(), before.labels.len());
-        for ((id, after), (original_id, before)) in after.labels.iter().zip(before.labels.iter()) {
-            assert_eq!(id, original_id);
-            assert_eq!(
-                (
-                    after.sequence,
-                    after.relation,
-                    after.id_default,
-                    after.properties_default,
-                    after.toast_table,
-                    after.toast_index,
-                    after.primary_key,
-                    after.endpoint_indexes,
-                    after.trigger
-                ),
-                (
-                    before.sequence,
-                    before.relation,
-                    before.id_default,
-                    before.properties_default,
-                    before.toast_table,
-                    before.toast_index,
-                    before.primary_key,
-                    before.endpoint_indexes,
-                    before.trigger
-                )
-            );
-            assert!(after
-                .not_null
-                .iter()
-                .map(|(k, v)| (k, v))
-                .eq(before.not_null.iter()));
-        }
-    }
+    assert!(saved.iter().eq(original.iter()));
 }

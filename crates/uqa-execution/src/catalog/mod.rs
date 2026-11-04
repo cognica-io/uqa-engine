@@ -6,6 +6,8 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -24,9 +26,7 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
-};
+use security::{BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -131,17 +131,13 @@ pub struct CatalogDefinitionSnapshot {
     pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
     pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub foreign_servers:
-        Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
+    pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
     pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
-    pub role_memberships: Arc<
-        BTreeMap<
-            uqa_sql::catalog::roles::RoleMembershipKey,
-            uqa_sql::catalog::roles::RoleMembership,
-        >,
-    >,
+    pub role_memberships: Arc<RoleMemberships>,
 
-    pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
+    pub domains: Arc<
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    >,
     pub enums: Arc<enum_type::EnumRegistry>,
     pub ranges: Arc<range_type::RangeRegistry>,
     pub shells: Arc<shell_type::ShellRegistry>,
@@ -151,18 +147,18 @@ pub struct CatalogDefinitionSnapshot {
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub database_security: Arc<BoundDatabaseSecurity>,
-    pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
+    pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
     pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub graph_catalog_oids: Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
+    pub graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,
+    pub roles: Arc<RoleDefinitions>,
     pub triggers: Arc<
         BTreeMap<
             uqa_storage::RelationIdentity,

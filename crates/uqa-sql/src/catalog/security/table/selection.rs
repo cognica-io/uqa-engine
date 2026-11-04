@@ -7,12 +7,13 @@
 //! Relation authorization observes bound ACLs without constructing a display-name copy.
 
 use super::TableAclPrivilege;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::RoleAttribute,
     catalog::{
         roles::{
-            identity::RoleSubject, memberships::role_inherits_with_control, RoleDefinition,
-            RoleIdentity, RoleMembership, RoleMembershipKey, RoleReference,
+            identity::RoleSubject, memberships::role_inherits_with_control, RoleIdentity,
+            RoleReference,
         },
         security::{
             system_relations::SystemRelationSecurity, table_binding::BoundTableAclEntry,
@@ -22,13 +23,12 @@ use crate::{
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::memory::ProductionControl;
 
 pub struct RelationPrivileges<'a, 'c, Subject: ?Sized = RoleReference> {
     pub subject: &'a Subject,
-    pub roles: &'a BTreeMap<String, RoleDefinition>,
-    pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: &'a RoleDefinitions,
+    pub memberships: &'a RoleMemberships,
     pub control: ProductionControl<'c>,
 }
 

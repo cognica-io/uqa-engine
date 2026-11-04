@@ -162,7 +162,7 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
             labels,
             usage_acl: None,
         },
-    );
+    )?;
     enum_type::publish(context.publication, &before, registry)?;
     context.shells.complete(shell.as_ref())?;
     context.visibility.enum_type_created(oid);
@@ -186,9 +186,10 @@ pub fn alter_enum(context: &EnumTypeContext<'_>, statement: AlterEnum) -> Result
     let key = resolved.identity.qualified_name();
     let before = context.publication.enum_registry().clone();
     let mut registry = before.clone();
-    let definition = registry
-        .get_mut(&key)
+    let mut definition = registry
+        .get(&key)
         .filter(|definition| definition.oid == resolved.oid)
+        .cloned()
         .ok_or_else(|| SQLError::Routine {
             sqlstate: "42704".into(),
             message: format!("type \"{}\" does not exist", resolved.identity.name),
@@ -209,6 +210,7 @@ pub fn alter_enum(context: &EnumTypeContext<'_>, statement: AlterEnum) -> Result
             };
             match definition.add_label(&label, neighbor.as_ref(), if_not_exists, allocate)? {
                 AddedEnumLabel::Added { oid, .. } => {
+                    registry.insert(key, definition)?;
                     enum_type::publish(context.publication, &before, registry)?;
                     context.visibility.enum_label_added(resolved.oid, oid);
                 }
@@ -222,6 +224,7 @@ pub fn alter_enum(context: &EnumTypeContext<'_>, statement: AlterEnum) -> Result
         }
         AlterEnumAction::RenameValue { old, new } => {
             definition.rename_label(&old, &new)?;
+            registry.insert(key, definition)?;
             enum_type::publish(context.publication, &before, registry)?;
         }
     }

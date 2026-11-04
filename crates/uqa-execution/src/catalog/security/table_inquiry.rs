@@ -18,12 +18,11 @@ use crate::catalog::{
 };
 use std::{cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc};
 use uqa_core::{RelationIdentity, Value};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
-        roles::{
-            guards::RoleCatalogGuards, identity::RoleSubject, RoleDefinition, RoleReferenceNames,
-        },
+        roles::{guards::RoleCatalogGuards, identity::RoleSubject, RoleReferenceNames},
         security::{
             sequence_inquiry::{SequencePrivilegeInquiry, SequenceTablePrivilegeInquiry},
             table::TablePrivilegeCheck,
@@ -190,7 +189,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
     fn table_privilege_security(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<TableSecurity, SQLError> {
         match target {
             ResolvedTablePrivilegeTarget::System(relation) => self
@@ -235,7 +234,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
     fn column_privilege_relation(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<ColumnPrivilegeRelation, SQLError> {
         match target {
             ResolvedTablePrivilegeTarget::System(relation) => Ok(ColumnPrivilegeRelation {

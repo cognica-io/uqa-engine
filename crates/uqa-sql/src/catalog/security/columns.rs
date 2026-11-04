@@ -7,7 +7,8 @@
 //! Table-shaped relation column ACL grant paths and privilege checks.
 
 use crate::catalog::roles::identity::RoleSubject;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use super::{TableAclEntry, TablePrivileges};
@@ -16,7 +17,7 @@ use crate::SQLError;
 
 use super::table::{acl_grantor, grant_option_roles, TableAclPrivilege, TablePrivilegeCheck};
 use super::TableSecurity;
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 pub fn column_grant_option_roles(
     security: &TableSecurity,
@@ -50,8 +51,8 @@ pub fn select_column_acl_grantor(
     column: &str,
     privilege: TableAclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -72,8 +73,8 @@ pub fn role_has_column_privilege(
     column: &str,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)

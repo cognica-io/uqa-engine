@@ -275,9 +275,10 @@ fn domain_owner_keeps_its_incarnation_when_its_name_is_reused() {
     // Isolate retained authority from the separately pending SQL role-rename command.
     {
         let mut roles = engine.durable.roles.write();
-        let mut role = roles.remove("domain_owner").unwrap();
+        let mut role = roles.get("domain_owner").unwrap().clone();
+        roles.remove("domain_owner").unwrap();
         role.name = "renamed_owner".into();
-        roles.insert(role.name.clone(), role);
+        roles.insert(role.name.clone(), role).unwrap();
     }
     engine.note_catalog_registry_changed();
     sql(&engine, "CREATE ROLE domain_owner");

@@ -37,9 +37,10 @@ fn memory_database_acl_keeps_identities_in_catalog_snapshots() {
     // Inject a changed role catalog to exercise the adapter without pretending to execute SQL RENAME.
     {
         let mut roles = engine.durable.roles.write();
-        let mut reader = roles.remove("reader").unwrap();
+        let mut reader = roles.get("reader").unwrap().clone();
+        roles.remove("reader").unwrap();
         reader.name = "renamed".into();
-        roles.insert(reader.name.clone(), reader);
+        roles.insert(reader.name.clone(), reader).unwrap();
     }
     engine.note_catalog_registry_changed();
     sql(&engine, "CREATE ROLE reader");

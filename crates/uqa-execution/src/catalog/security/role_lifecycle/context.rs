@@ -6,20 +6,16 @@
 
 //! State operations used by native role lifecycle execution.
 
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::ops::DerefMut;
 use uqa_sql::catalog::roles::identity::RoleBinding;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
-    catalog::roles::{
-        definition::RoleValidationContext, RoleDefinition, RoleIdentity, RoleMembership,
-        RoleMembershipKey,
-    },
+    catalog::roles::{definition::RoleValidationContext, RoleIdentity},
     SQLError,
 };
 
-pub type RoleDefinitionWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, RoleDefinition>> + 'a>;
-pub type RoleMembershipWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RoleMembershipKey, RoleMembership>> + 'a>;
+pub type RoleDefinitionWrite<'a> = Box<dyn DerefMut<Target = RoleDefinitions> + 'a>;
+pub type RoleMembershipWrite<'a> = Box<dyn DerefMut<Target = RoleMemberships> + 'a>;
 pub trait RoleRegistry {
     fn write_roles(&self) -> RoleDefinitionWrite<'_>;
     fn write_memberships(&self) -> RoleMembershipWrite<'_>;
@@ -28,13 +24,13 @@ pub trait RolePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn persist_roles(
         &self,
-        before: &BTreeMap<String, RoleDefinition>,
-        roles: &BTreeMap<String, RoleDefinition>,
+        before: &RoleDefinitions,
+        roles: &RoleDefinitions,
     ) -> Result<(), SQLError>;
     fn persist_memberships(
         &self,
-        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        before: &RoleMemberships,
+        memberships: &RoleMemberships,
     ) -> Result<(), SQLError>;
     fn catalog_changed(&self);
     fn set_current_role(&self, target: Option<RoleBinding>);

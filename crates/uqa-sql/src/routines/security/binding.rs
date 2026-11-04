@@ -7,14 +7,15 @@
 //! Bind legacy routine names once and validate retained owner and ACL incarnations.
 
 use super::bound_routine_owner;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::security::object_acl;
 use crate::{
     ast::{CreateFunction, RoutineAclEntry},
-    catalog::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity, RoleReference},
+    catalog::roles::{identity::RoleSubject, RoleIdentity, RoleReference},
     SQLError,
 };
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 /// Only the initial catalog converter may interpret named routine authority.
@@ -34,7 +35,7 @@ pub struct BoundRoutineAuthority {
 pub fn bind_legacy_authority(
     owner: &str,
     acl: Option<Vec<LegacyRoutineAclEntry>>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     implicit_owner_execute: bool,
 ) -> Result<BoundRoutineAuthority, SQLError> {
     let bind = |name: &str| {
@@ -98,7 +99,7 @@ fn authority_roles(definition: &CreateFunction) -> Result<BTreeSet<RoleIdentity>
 
 pub fn routine_role_dependencies(
     definition: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<BTreeSet<String>, SQLError> {
     validate_routine_authority_identities(definition)?;
     authority_roles(definition)?
@@ -114,14 +115,14 @@ pub fn routine_role_dependencies(
 
 pub fn validate_routine_authority(
     definition: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     routine_role_dependencies(definition, roles).map(|_| ())
 }
 
 pub fn bind_routine_grantees(
     grantees: &[AclGrantee],
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<Option<RoleIdentity>>, SQLError> {
     object_acl::bind_grantees(grantees, roles)
 }
@@ -129,7 +130,7 @@ pub fn bind_routine_grantees(
 pub fn added_routine_acl_roles(
     before: &CreateFunction,
     after: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     added: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
     object_acl::added_acl_roles(

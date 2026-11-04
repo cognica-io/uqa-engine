@@ -10,8 +10,8 @@ use super::{
     identity::{RoleBinding, RoleSubject},
     RoleDefinition,
 };
+use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct RoleTuple {
@@ -34,7 +34,7 @@ impl RoleTuple {
 
     pub fn revalidate<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
     ) -> Result<&'a RoleDefinition, SQLError> {
         let current = self
             .role
@@ -53,7 +53,7 @@ impl RoleTuple {
     }
 }
 
-pub fn validate_revisions(roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+pub fn validate_revisions(roles: &RoleDefinitions) -> Result<(), String> {
     for (name, role) in roles {
         if role.revision == 0 {
             return Err(format!("persisted role `{name}` has no tuple revision"));
@@ -63,8 +63,8 @@ pub fn validate_revisions(roles: &BTreeMap<String, RoleDefinition>) -> Result<()
 }
 
 pub fn validate_revision_changes(
-    before: &BTreeMap<String, RoleDefinition>,
-    after: &BTreeMap<String, RoleDefinition>,
+    before: &RoleDefinitions,
+    after: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     validate_revisions(before).map_err(SQLError::Internal)?;
     validate_revisions(after).map_err(SQLError::Internal)?;

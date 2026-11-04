@@ -7,7 +7,8 @@
 //! Table and column ACLs retain role incarnations independently of display names.
 
 use super::{role_bindings, TableAclEntry, TablePrivileges, TableSecurity};
-use crate::catalog::roles::{RoleDefinition, RoleIdentity, RoleReference};
+use crate::catalog::roles::RoleDefinitions;
+use crate::catalog::roles::{RoleIdentity, RoleReference};
 use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
@@ -69,7 +70,7 @@ impl BoundTableSecurity {
 
     pub fn owner_reference(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<RoleReference, crate::SQLError> {
         owner_reference_with_control(
             self.role_owner,
@@ -78,10 +79,7 @@ impl BoundTableSecurity {
         )
     }
 
-    pub fn bind(
-        security: &TableSecurity,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<Self, String> {
+    pub fn bind(security: &TableSecurity, roles: &RoleDefinitions) -> Result<Self, String> {
         let bind = |name: &str| role_bindings::bind_role(roles, name, "table");
         let entries = |entries: &[TableAclEntry]| {
             entries
@@ -109,10 +107,7 @@ impl BoundTableSecurity {
     }
 
     /// Resolve names only from the role view accompanying this security snapshot.
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<TableSecurity, String> {
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<TableSecurity, String> {
         resolve_privileges(
             self.role_owner,
             self.acl.as_deref(),
@@ -124,7 +119,7 @@ impl BoundTableSecurity {
     pub fn validate(
         &self,
         columns: Option<&[String]>,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<(), String> {
         if self.acl_revisions.relation == Some([0; 16])
             || self.acl_revisions.columns.iter().any(|(column, revision)| {
@@ -153,7 +148,7 @@ mod tests;
 /// Resolve a captured owner incarnation against the selected catalog, retaining its admitted name.
 pub fn owner_reference_with_control(
     owner: RoleIdentity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<RoleReference, crate::SQLError> {
     let role = role_bindings::role_definition_with_control(roles, owner, "table", control)?;
@@ -164,7 +159,7 @@ fn resolve_privileges<'a>(
     owner: RoleIdentity,
     acl: Option<&[BoundTableAclEntry]>,
     columns: impl Iterator<Item = (&'a String, &'a Vec<BoundTableAclEntry>)>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<TableSecurity, String> {
     let name = |identity| role_bindings::role_name(roles, identity, "table").map(str::to_owned);
     let entries = |entries: &[BoundTableAclEntry]| {

@@ -49,10 +49,12 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
     Arc::make_mut(&mut snapshot.definitions.sql_user_functions).remove("public.f");
     let missing = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_eq!(missing.routines[&[1; 16]], None);
-    Arc::make_mut(&mut snapshot.definitions.schemas).insert(
-        "new_namespace".into(),
-        super::super::security::BoundSchemaSecurity::bootstrap("new_namespace"),
-    );
+    Arc::make_mut(&mut snapshot.definitions.schemas)
+        .insert(
+            "new_namespace".into(),
+            super::super::security::BoundSchemaSecurity::bootstrap("new_namespace"),
+        )
+        .unwrap();
     let namespace = capture(&CatalogReadView::new(snapshot), &dependencies).unwrap();
     assert_ne!(namespace.global_catalog, missing.global_catalog);
 }

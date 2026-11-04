@@ -7,6 +7,7 @@
 //! Memory catalog generations register owning producers before Engine publication.
 
 use super::{BoundDatabaseSecurity, CatalogCell, DurableCatalogState};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_storage::{memory_capture::MemoryCaptureRegistry, StorageBackendResult};
 
 impl DurableCatalogState {
@@ -47,27 +48,27 @@ impl DurableCatalogState {
         self.domains = CatalogCell::capture_source(
             self.domains.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::domains,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.enums = CatalogCell::capture_source(
             self.enums.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::enums,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.composites = CatalogCell::capture_source(
             self.composites.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::composites,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.ranges = CatalogCell::capture_source(
             self.ranges.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::ranges,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.shells = CatalogCell::capture_source(
             self.shells.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::shells,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         Ok(())
     }
@@ -79,12 +80,12 @@ impl DurableCatalogState {
         self.foreign_wrappers = CatalogCell::capture_source(
             self.foreign_wrappers.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::foreign::wrappers,
+            uqa_sql::catalog::foreign_wrapper::ForeignWrappers::capture,
         )?;
         self.foreign_servers = CatalogCell::capture_source(
             self.foreign_servers.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::foreign::servers,
+            uqa_sql::catalog::foreign_server::ForeignServers::capture,
         )?;
         self.foreign_tables = CatalogCell::capture_source(
             self.foreign_tables.snapshot(),
@@ -106,7 +107,7 @@ impl DurableCatalogState {
         self.schemas = CatalogCell::capture_source(
             self.schemas.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::schemas,
+            uqa_sql::catalog::security::schema_registry::SchemaRegistry::capture,
         )?;
         self.sequence_security = CatalogCell::capture_source(
             self.sequence_security.snapshot(),
@@ -116,12 +117,12 @@ impl DurableCatalogState {
         self.roles = CatalogCell::capture_source(
             self.roles.snapshot(),
             Some(registry),
-            uqa_sql::catalog::roles::capture::roles,
+            RoleDefinitions::capture,
         )?;
         self.role_memberships = CatalogCell::capture_source(
             self.role_memberships.snapshot(),
             Some(registry),
-            uqa_sql::catalog::roles::capture::memberships,
+            RoleMemberships::capture,
         )?;
         self.foreign_table_security = CatalogCell::capture_source(
             self.foreign_table_security.snapshot(),
@@ -173,7 +174,7 @@ impl DurableCatalogState {
         self.graph_catalog_oids = CatalogCell::capture_source(
             self.graph_catalog_oids.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::identities::graph_oids,
+            uqa_sql::catalog::graph_oids::GraphOidRegistry::capture,
         )?;
         self.catalog_indexes = CatalogCell::capture_resource(
             self.catalog_indexes.snapshot(),

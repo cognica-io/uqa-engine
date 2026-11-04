@@ -6,6 +6,7 @@
 
 use super::*;
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::SequenceSecurityRow;
 
 fn empty() -> RestoredSequenceRegistry {
@@ -17,8 +18,8 @@ fn empty() -> RestoredSequenceRegistry {
     }
 }
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 #[test]
@@ -82,7 +83,13 @@ fn later_invalid_sequence_prevents_a_prepared_conversion_batch() {
 fn initial_migration_never_repairs_a_current_sequence_owner_from_a_reused_name_or_oid() {
     let current = row();
     let mut replacement = roles();
-    replacement.get_mut("uqa").unwrap().object_id = [99; 16];
+    replacement
+        .edit("uqa", |value| {
+            value.object_id = [99; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     for migration in [false, true] {
         let error = prepare_sequence_rows_with_migration(
             empty(),

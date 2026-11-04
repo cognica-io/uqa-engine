@@ -10,7 +10,7 @@ use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use uqa_graph::GraphStoreHandle;
-use uqa_sql::catalog::graph_oids::GraphCatalogOids;
+use uqa_sql::catalog::graph_oids::GraphOidRegistry;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
@@ -25,7 +25,7 @@ use uqa_sql::{
 
 struct GraphNamesGuard<'a> {
     graphs: MappedRwLockReadGuard<'a, BTreeMap<String, Arc<GraphStoreHandle>>>,
-    oids: MappedRwLockReadGuard<'a, BTreeMap<String, GraphCatalogOids>>,
+    oids: MappedRwLockReadGuard<'a, GraphOidRegistry>,
 }
 impl GraphNamespaceRead for GraphNamesGuard<'_> {
     fn names(&self) -> Box<dyn Iterator<Item = &str> + '_> {

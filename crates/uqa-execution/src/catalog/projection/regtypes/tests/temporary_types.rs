@@ -41,7 +41,10 @@ fn qualified_temporary_types_follow_the_session_namespace() {
         })
         .collect();
     let mut snapshot = test_support::empty_catalog().snapshot().clone();
-    snapshot.definitions.domains = Arc::new(domains.clone());
+    snapshot.definitions.domains = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(domains.clone())
+            .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let cache = RegtypeOutputCache::default();
     for id in [1, 2] {

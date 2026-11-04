@@ -6,6 +6,9 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::foreign_server::{ForeignServerDefinition, ForeignServers};
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     foreign_server::ForeignServerMetadata,
     foreign_wrapper::{ForeignWrapperHandler, ForeignWrapperReference},
@@ -13,21 +16,21 @@ use uqa_sql::catalog::{
 };
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn catalog() -> KeyValueCatalog {
     KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()))
 }
 
-fn servers() -> BTreeMap<String, ForeignServerDefinition> {
-    BTreeMap::from([(
+fn servers() -> ForeignServers {
+    ForeignServers::try_from_iter([(
         "source".into(),
         ForeignServerDefinition {
             name: "source".into(),
             fdw_type: "memory_fdw".into(),
-            options: BTreeMap::new(),
+            options: uqa_core::memory::OwnedMap::new(),
             metadata: ForeignServerMetadata {
                 option_order: None,
                 oid: 16_384,
@@ -39,6 +42,7 @@ fn servers() -> BTreeMap<String, ForeignServerDefinition> {
             },
         },
     )])
+    .unwrap()
 }
 
 #[test]
@@ -66,10 +70,12 @@ fn initial_conversion_defers_writes_and_binds_each_server_once() {
     assert!(!again.initialize);
     assert_eq!(again.server_migrations.len(), 0);
     servers
-        .get_mut("source")
+        .edit("source", |server| {
+            server.metadata.wrapper_reference = None;
+            Ok(())
+        })
         .unwrap()
-        .metadata
-        .wrapper_reference = None;
+        .unwrap();
     for migrate in [false, true] {
         assert!(restore(&catalog, &roles(), &mut servers.clone(), migrate).is_err());
     }
@@ -78,7 +84,7 @@ fn initial_conversion_defers_writes_and_binds_each_server_once() {
 #[test]
 fn records_preserve_no_handler_and_option_order_without_touching_native_adapters() {
     let catalog = catalog();
-    let mut servers = BTreeMap::new();
+    let mut servers = ForeignServers::new();
     restore(&catalog, &roles(), &mut servers, true)
         .unwrap()
         .persist_migrations(&catalog)
@@ -97,8 +103,8 @@ fn records_preserve_no_handler_and_option_order_without_touching_native_adapters
     persist(&catalog, &definition).unwrap();
     let restored = restore(&catalog, &roles(), &mut servers, false).unwrap();
     assert_eq!(restored.definitions["custom/wrapper"], definition);
-    for (name, native) in native_wrappers() {
-        assert_eq!(restored.definitions[&name], native);
+    for (name, native) in &native_wrappers() {
+        assert_eq!(&restored.definitions[name], native);
     }
 }
 
@@ -117,20 +123,24 @@ fn current_catalog_never_repairs_missing_records_or_rebinds_an_incarnation() {
     assert!(catalog.get_metadata(&key).unwrap().is_none());
     catalog.set_metadata(&key, &original).unwrap();
     servers
-        .get_mut("source")
+        .edit("source", |server| {
+            server
+                .metadata
+                .wrapper_reference
+                .as_mut()
+                .unwrap()
+                .object_id[0] ^= 1;
+            Ok(())
+        })
         .unwrap()
-        .metadata
-        .wrapper_reference
-        .as_mut()
-        .unwrap()
-        .object_id[0] ^= 1;
+        .unwrap();
     assert!(restore(&catalog, &roles(), &mut servers, true).is_err());
 }
 
 #[test]
 fn partial_or_unknown_wrapper_formats_are_rejected_before_publication() {
     let catalog = catalog();
-    let mut servers = BTreeMap::new();
+    let mut servers = ForeignServers::new();
     restore(&catalog, &roles(), &mut servers, true)
         .unwrap()
         .persist_migrations(&catalog)
@@ -153,13 +163,13 @@ fn partial_or_unknown_wrapper_formats_are_rejected_before_publication() {
         assert!(restore(&catalog, &roles(), &mut servers, true).is_err());
     }
     catalog.set_metadata(&key, &original).unwrap();
-    assert!(restore(&catalog, &BTreeMap::new(), &mut servers, true).is_err());
+    assert!(restore(&catalog, &RoleDefinitions::new(), &mut servers, true).is_err());
 }
 
 #[test]
 fn native_wrapper_upgrade_is_initial_only_and_defers_all_writes() {
     let catalog = catalog();
-    let mut servers = BTreeMap::new();
+    let mut servers = ForeignServers::new();
     catalog
         .set_metadata(FORMAT_KEY, r#"{"version":1}"#)
         .unwrap();

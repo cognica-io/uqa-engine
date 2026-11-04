@@ -6,12 +6,13 @@
 
 //! Declared ranges retain four type identities and the selected support objects independently of their current names.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition};
+use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, ObjectAclEntry, RangeAlignment, RangeTypeReference};
 use crate::expr::RangeValueDescriptor;
 
@@ -135,13 +136,13 @@ impl StoredRange {
 
 /// Check persisted structure and authority before exposing a generation. Declaration binding separately resolves the subtype, class, collation and support signatures against the complete catalog.
 pub fn validate_range_registry(
-    registry: &BTreeMap<String, StoredRange>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredRange>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut names = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         for identity in [definition.object_id, definition.multirange.object_id] {
             if identity == [0; 16] || !identities.insert(identity) {
                 return Err(format!("invalid or duplicate range identity for `{name}`"));

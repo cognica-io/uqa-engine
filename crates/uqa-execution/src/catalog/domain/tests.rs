@@ -5,13 +5,13 @@
 //
 
 use super::*;
+use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn encode(
-    registry: &DomainRegistry,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<String> {
+fn encode(registry: &DomainRegistry, roles: &RoleDefinitions) -> StorageBackendResult<String> {
     uqa_sql::catalog::domain::validate_domain_definitions(registry, roles)
         .map_err(StorageBackendError::Other)?;
     Ok(serde_json::json!({"domain_catalog_format": 1, "domains": registry}).to_string())
@@ -40,16 +40,16 @@ fn legacy() -> BTreeMap<String, StoredDomain<String>> {
     )])
 }
 
-fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions) {
     (
         KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new())),
-        BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
     )
 }
 
 fn restore(
     storage: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<DomainRegistry> {
     let loaded = super::restore(storage, roles, allow_migration)?;
@@ -92,19 +92,20 @@ fn complete_legacy_conversion_preserves_domain_identity_and_never_rebinds_after_
     assert_eq!(domain.oid, legacy["public.positive"].oid);
     assert_eq!(domain.owner, roles["uqa"].identity());
     let before = catalog.get_metadata(DOMAINS_METADATA_KEY).unwrap();
-    let mut owner = roles.remove("uqa").unwrap();
+    let mut owner = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     owner.name = "renamed".into();
-    roles.insert("renamed".into(), owner);
+    roles.insert("renamed".into(), owner).unwrap();
     let mut replacement = RoleDefinition::bootstrap();
     replacement.oid = 77;
     replacement.object_id = [9; 16];
-    roles.insert("uqa".into(), replacement);
+    roles.insert("uqa".into(), replacement).unwrap();
     assert_eq!(
         restore(&catalog, &roles, false).unwrap()["public.positive"].owner,
         domain.owner
     );
     assert_eq!(catalog.get_metadata(DOMAINS_METADATA_KEY).unwrap(), before);
-    roles.remove("renamed");
+    roles.remove("renamed").unwrap();
     assert!(restore(&catalog, &roles, true)
         .unwrap_err()
         .to_string()
@@ -137,10 +138,12 @@ fn invalid_legacy_candidates_are_rejected_before_any_conversion_write() {
 #[test]
 fn malformed_aggregate_catalogs_never_fall_back_to_legacy_names() {
     let (catalog, roles) = fixture();
-    let registry = legacy()
-        .into_iter()
-        .map(|(name, domain)| (name, domain.bind_owner(&roles).unwrap()))
-        .collect();
+    let registry = DomainRegistry::try_from_iter(
+        legacy()
+            .into_iter()
+            .map(|(name, domain)| (name, domain.bind_owner(&roles).unwrap())),
+    )
+    .unwrap();
     let current: serde_json::Value =
         serde_json::from_str(&encode(&registry, &roles).unwrap()).unwrap();
     for corruption in 0..5 {
@@ -196,15 +199,15 @@ fn empty_catalog_conversion_is_initial_only_and_idempotent() {
 #[test]
 fn unchanged_domain_metadata_selects_the_committed_registry_and_validates_its_authority() {
     let (catalog, roles) = fixture();
-    let committed = Arc::new(BTreeMap::from([(
-        "public.positive".into(),
-        records::domain("positive", 1),
-    )]));
+    let committed = Arc::new(
+        DomainRegistry::try_from_iter([("public.positive".into(), records::domain("positive", 1))])
+            .unwrap(),
+    );
     let current = Arc::default();
     let selected = merge_private(Some(&catalog), &current, Arc::clone(&committed), &roles).unwrap();
     assert!(Arc::ptr_eq(&selected, &committed));
     assert!(current.is_empty());
-    assert!(merge_private(Some(&catalog), &current, committed, &BTreeMap::new()).is_err());
+    assert!(merge_private(Some(&catalog), &current, committed, &RoleDefinitions::new()).is_err());
     assert!(catalog
         .get_metadata(DOMAINS_METADATA_KEY)
         .unwrap()

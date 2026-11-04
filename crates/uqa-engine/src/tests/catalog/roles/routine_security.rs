@@ -22,9 +22,10 @@ fn rename_role(engine: &Engine, old: &str, new: &str) {
     // Install a renamed role snapshot directly to isolate retained routine authority.
     {
         let mut roles = engine.durable.roles.write();
-        let mut role = roles.remove(old).unwrap();
+        let mut role = roles.get(old).unwrap().clone();
+        roles.remove(old).unwrap();
         role.name = new.into();
-        roles.insert(new.into(), role);
+        roles.insert(new.into(), role).unwrap();
     }
     engine.note_catalog_registry_changed();
 }

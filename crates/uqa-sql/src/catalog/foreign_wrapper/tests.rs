@@ -5,9 +5,12 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeMap;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn custom() -> ForeignWrapperDefinition {
@@ -27,7 +30,7 @@ fn custom() -> ForeignWrapperDefinition {
 #[test]
 fn native_implementations_and_ordered_options_have_durable_identities() {
     let mut wrappers = native_wrappers();
-    wrappers.insert("custom".into(), custom());
+    wrappers.insert("custom".into(), custom()).unwrap();
     validate_wrappers(&wrappers, &roles()).unwrap();
     let serialized = serde_json::to_string(&wrappers).unwrap();
     assert_eq!(
@@ -50,7 +53,7 @@ fn a_recreated_name_never_retargets_a_stored_wrapper_reference() {
     let original = custom();
     let mut replacement = original.clone();
     replacement.identity.object_id = [2; 16];
-    let wrappers = BTreeMap::from([("custom".into(), replacement)]);
+    let wrappers = ForeignWrappers::try_from_iter([("custom".into(), replacement)]).unwrap();
     assert!(bound_wrapper(&wrappers, "custom", original.identity).is_err());
     assert!(bound_wrapper(&wrappers, "missing", original.identity).is_err());
 }
@@ -75,17 +78,28 @@ fn restoration_rejects_aliases_invalid_options_and_replaced_owners() {
     bad.options.push(("a=b".into(), "ambiguous".into()));
     variants.push(bad);
     for bad in variants {
-        assert!(validate_wrappers(&BTreeMap::from([("custom".into(), bad)]), &roles()).is_err());
+        assert!(validate_wrappers(
+            &ForeignWrappers::try_from_iter([("custom".into(), bad)]).unwrap(),
+            &roles()
+        )
+        .is_err());
     }
     let mut alias = original.clone();
     alias.name = "alias".into();
     assert!(validate_wrappers(
-        &BTreeMap::from([("custom".into(), original), ("alias".into(), alias)]),
+        &ForeignWrappers::try_from_iter([("custom".into(), original), ("alias".into(), alias)])
+            .unwrap(),
         &roles()
     )
     .is_err());
     let mut native = native_wrappers();
-    native.get_mut("memory_fdw").unwrap().identity.object_id[0] ^= 1;
+    native
+        .edit("memory_fdw", |wrapper| {
+            wrapper.identity.object_id[0] ^= 1;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(validate_wrappers(&native, &roles()).is_err());
 }
 
@@ -123,15 +137,15 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
         oid: 20_000,
         binding,
     });
-    let mut wrappers = BTreeMap::from([("custom".into(), wrapper)]);
+    let mut wrappers = ForeignWrappers::try_from_iter([("custom".into(), wrapper)]).unwrap();
     validate_functions(&wrappers, &routines).unwrap();
     validate_functions(&wrappers, &BTreeMap::new()).unwrap();
     wrappers
-        .get_mut("custom")
+        .edit("custom", |wrapper| {
+            wrapper.validator.as_mut().unwrap().oid += 1;
+            Ok(())
+        })
         .unwrap()
-        .validator
-        .as_mut()
-        .unwrap()
-        .oid += 1;
+        .unwrap();
     assert!(validate_functions(&wrappers, &routines).is_err());
 }

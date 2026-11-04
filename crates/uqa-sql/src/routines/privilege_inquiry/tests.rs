@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::routines::security::{grant_routine_acl, revoke_routine_acl};
 
 struct Catalog {
@@ -31,7 +33,7 @@ impl RoutinePrivilegeCatalog for Catalog {
     }
 }
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
+fn roles() -> RoleDefinitions {
     let mut owner = RoleDefinition::bootstrap();
     owner.name = "owner".into();
     owner.oid = 11;
@@ -41,10 +43,12 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
     reader.name = "reader".into();
     reader.oid = 12;
     reader.object_id = [2; 16];
-    [RoleDefinition::bootstrap(), owner, reader]
-        .into_iter()
-        .map(|role| (role.name.clone(), role))
-        .collect()
+    RoleDefinitions::try_from_iter(
+        [RoleDefinition::bootstrap(), owner, reader]
+            .into_iter()
+            .map(|role| (role.name.clone(), role)),
+    )
+    .unwrap()
 }
 
 fn text(value: &str) -> Value {
@@ -54,7 +58,7 @@ fn text(value: &str) -> Value {
 #[test]
 fn function_inquiry_distinguishes_public_unknown_roles_and_missing_target_input_types() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     for acl in [None, Some(Vec::new())] {
         let public = acl.is_none();
         let catalog = Catalog { acl };
@@ -117,7 +121,7 @@ fn function_inquiry_distinguishes_public_unknown_roles_and_missing_target_input_
 #[test]
 fn function_inquiry_preserves_strictness_error_order_and_exact_privilege_tokens() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let catalog = Catalog { acl: None };
     let inquiry = RoutinePrivilegeInquiry {
         current_user: &"reader".into(),

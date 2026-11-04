@@ -39,12 +39,7 @@ fn memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure() 
         let saved_sequences = sequences_key.retained(&cut).unwrap().unwrap();
         drop(cut);
         assert_eq!(saved_database.get().unwrap(), database.as_ref());
-        assert!(saved_schemas
-            .get()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(schemas.iter()));
+        assert!(saved_schemas.get().unwrap().iter().eq(schemas.iter()));
         assert!(saved_sequences
             .get()
             .unwrap()
@@ -76,12 +71,7 @@ fn failed_catalog_authority_capture_does_not_change_grant_publication() {
     assert!(failed.check().is_err());
     assert_ne!(*engine.durable.schemas.read(), *original);
     let saved = key.retained(&cut).unwrap().unwrap();
-    assert!(saved
-        .get()
-        .unwrap()
-        .iter()
-        .map(|(k, v)| (k, v))
-        .eq(original.iter()));
+    assert!(saved.get().unwrap().iter().eq(original.iter()));
     drop((cut, failed, saved, engine));
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);

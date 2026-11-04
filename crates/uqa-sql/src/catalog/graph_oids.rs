@@ -6,11 +6,13 @@
 
 //! The public OIDs of an Apache AGE graph's catalog objects, allocated from the database's counter in the order AGE creates them: the graph's schema, whose OID `ag_graph.graphid` repeats, its label id sequence, and for each label its id sequence, its relation with the array and row types, the defaults and NOT NULL constraints of its columns, its TOAST table and index, its key and endpoint indexes and its cache-invalidation trigger. Graphs and labels created before OIDs were recorded derive theirs from their names.
 
-use std::collections::BTreeMap;
+use uqa_core::memory::OwnedMap;
 
 use serde::{Deserialize, Serialize};
 
 mod label;
+pub mod registry;
+pub use registry::{CapturedGraphOidRegistry, GraphOidRegistry};
 
 pub use label::{EndpointIndexOids, IndexConstraintOids, LabelCatalogOids};
 
@@ -22,7 +24,7 @@ pub struct GraphCatalogOids {
     /// `_label_id_seq`.
     pub label_sequence: u32,
     /// Each label's OIDs by its AGE label id.
-    pub labels: BTreeMap<u32, LabelCatalogOids>,
+    pub labels: OwnedMap<u32, LabelCatalogOids>,
 }
 
 impl GraphCatalogOids {

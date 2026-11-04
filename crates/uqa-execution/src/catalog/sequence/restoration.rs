@@ -9,6 +9,7 @@ use super::{sequence_row, SequenceState};
 use crate::catalog::sequence_introspection::SequenceIntrospectionCatalog;
 use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
     catalog::security::{sequence_inquiry::SequenceSecurityCatalog, BoundSequenceSecurity},
@@ -310,7 +311,7 @@ pub fn restore_sequence_rows(
 pub(super) fn prepare_sequence_rows(
     temporary: RestoredSequenceRegistry,
     rows: Vec<SequenceRow>,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<RestoredSequenceRegistry> {
     prepare_sequence_rows_with_migration(temporary, rows, roles, false)
         .map(|(registry, _)| registry)
@@ -319,7 +320,7 @@ pub(super) fn prepare_sequence_rows(
 fn prepare_sequence_rows_with_migration(
     temporary: RestoredSequenceRegistry,
     rows: Vec<SequenceRow>,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<(RestoredSequenceRegistry, Vec<SequenceRow>)> {
     let mut migrations = Vec::new();

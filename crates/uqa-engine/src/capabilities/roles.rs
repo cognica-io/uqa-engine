@@ -14,6 +14,8 @@ use uqa_execution::catalog::security::role_lifecycle::context::{
 };
 use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     catalog::{
         roles::{
@@ -22,12 +24,8 @@ use uqa_sql::{
                 RoleDependencyCatalog, RoleDependencyRead, RoleForeignPersistenceRead,
                 RoleTableSecurity, RoleTablesRead,
             },
-            RoleDefinition, RoleMembership, RoleMembershipKey,
         },
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
+        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -125,15 +123,15 @@ impl RolePublication for Engine {
     }
     fn persist_roles(
         &self,
-        before: &BTreeMap<String, RoleDefinition>,
-        roles: &BTreeMap<String, RoleDefinition>,
+        before: &RoleDefinitions,
+        roles: &RoleDefinitions,
     ) -> Result<(), SQLError> {
         self.persist_roles_snapshot(before, roles)
     }
     fn persist_memberships(
         &self,
-        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        before: &RoleMemberships,
+        memberships: &RoleMemberships,
     ) -> Result<(), SQLError> {
         self.persist_role_memberships_snapshot(before, memberships)
     }
@@ -188,7 +186,7 @@ impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.durable.database_security.read())
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.durable.schemas.read())
     }
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
@@ -212,7 +210,10 @@ impl RoleDependencyCatalog for Engine {
     }
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+    ) -> RoleDependencyRead<
+        '_,
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    > {
         Box::new(self.durable.domains.read())
     }
 }

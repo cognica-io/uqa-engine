@@ -13,6 +13,7 @@ use std::sync::Arc;
 use uqa_core::{
     catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity, RelationIdentity, Value,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::TableConstraintSet, catalog::domain::StoredDomain, Statement};
 
 mod domains;
@@ -26,10 +27,13 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas =
         Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     for position in 0..=unrelated {
         let Statement::CreateTable(mut table) =
             uqa_sql::compile("CREATE TABLE items(id integer, CONSTRAINT positive CHECK(id > 0))")

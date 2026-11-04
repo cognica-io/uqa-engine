@@ -5,14 +5,15 @@
 //
 
 //! Validate table and column ACL grant paths against durable relation metadata.
-use super::{RoleDefinition, TableAclEntry, TableAclPrivilege, TableSecurity};
+use super::{TableAclEntry, TableAclPrivilege, TableSecurity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::security::columns::column_grant_option_roles;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub fn validate_table_security_invariants(
     security: &TableSecurity,
     columns: Option<&[String]>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let validate_acl = |acl: &[TableAclEntry], column: Option<&str>| -> Result<(), String> {
         let mut paths = BTreeSet::new();

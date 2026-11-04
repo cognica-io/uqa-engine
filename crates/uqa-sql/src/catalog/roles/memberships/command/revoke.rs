@@ -8,26 +8,20 @@
 
 use super::{
     super::{clear_membership_admin, revoke_membership},
-    BTreeMap, MembershipTarget, MembershipUpdate, RoleBinding, RoleDefinition, RoleMembership,
-    RoleMembershipKey, RoleMembershipOptions, SQLError,
+    MembershipTarget, MembershipUpdate, RoleBinding, RoleMembershipKey, RoleMembershipOptions,
+    SQLError,
 };
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 pub struct MembershipRevocation<'a> {
     target: &'a MembershipTarget,
-    before: BTreeMap<RoleMembershipKey, RoleMembership>,
-    after: BTreeMap<RoleMembershipKey, RoleMembership>,
+    before: RoleMemberships,
+    after: RoleMemberships,
 }
 
 impl<'a> MembershipRevocation<'a> {
-    pub fn new(
-        target: &'a MembershipTarget,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    ) -> Self {
-        let before = memberships
-            .iter()
-            .filter(|(key, _)| key.role == target.role.identity())
-            .map(|(key, value)| (*key, value.clone()))
-            .collect::<BTreeMap<_, _>>();
+    pub fn new(target: &'a MembershipTarget, memberships: &RoleMemberships) -> Self {
+        let before = memberships.clone();
         Self {
             target,
             after: before.clone(),
@@ -38,7 +32,7 @@ impl<'a> MembershipRevocation<'a> {
     /// Returns a warning only when the original graph lacks the recipient, including duplicate or already cascaded requests.
     pub fn member(
         &mut self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         member: &RoleBinding,
     ) -> Result<Option<crate::SQLNotice>, SQLError> {
         let key = RoleMembershipKey {
@@ -61,24 +55,29 @@ impl<'a> MembershipRevocation<'a> {
             {
                 clear_membership_admin(&mut self.after, &key, self.target.cascade)?;
             }
-            if let Some(row) = self.after.get_mut(&key) {
+            self.after.edit(&key, |row| {
                 if options.inherit == Some(false) {
                     row.inherit_option = false;
                 }
                 if options.set == Some(false) {
                     row.set_option = false;
                 }
-            }
+                Ok(())
+            })?;
         }
         Ok(None)
     }
 
     pub fn into_updates(self) -> Vec<MembershipUpdate> {
         self.before
-            .into_iter()
+            .iter()
+            .filter(|(key, _)| key.role == self.target.role.identity())
             .filter_map(|(key, before)| {
-                let after = self.after.get(&key).cloned();
-                (after.as_ref() != Some(&before)).then_some(MembershipUpdate { before, after })
+                let after = self.after.get(key).cloned();
+                (after.as_ref() != Some(before)).then(|| MembershipUpdate {
+                    before: before.clone(),
+                    after,
+                })
             })
             .collect()
     }

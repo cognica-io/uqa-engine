@@ -7,7 +7,8 @@
 //! Sequence ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use crate::catalog::roles::identity::RoleSubject;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use crate::ast::{RoleAttribute, SequencePrivilege};
@@ -15,7 +16,7 @@ use crate::SQLError;
 use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
 
 use super::SequenceSecurity;
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 mod invariants;
 pub use invariants::validate_sequence_security_invariants;
@@ -146,8 +147,8 @@ pub fn select_acl_grantor(
     security: &SequenceSecurity,
     privilege: AclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -170,8 +171,8 @@ pub fn role_has_privilege(
     security: &SequenceSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: PrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)
@@ -338,8 +339,8 @@ pub fn rewrite_acl_owner(security: &mut SequenceSecurity, new_owner: &str) {
 pub fn role_can_view_sequence(
     security: &SequenceSecurity,
     subject: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     role_inherits(roles, memberships, subject, &security.role_owner)
         || role_has_any_sequence_privilege(security, subject, roles, memberships)
@@ -348,8 +349,8 @@ pub fn role_can_view_sequence(
 pub fn role_has_any_sequence_privilege(
     security: &SequenceSecurity,
     subject: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     [
         AclPrivilege::Select,
@@ -374,8 +375,8 @@ pub fn role_has_any_sequence_privilege(
 pub fn role_can_select_sequence(
     security: &SequenceSecurity,
     subject: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     role_has_privilege(
         security,
@@ -392,8 +393,8 @@ pub fn role_can_select_sequence(
 pub fn role_can_read_sequence_value(
     security: &SequenceSecurity,
     subject: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     [AclPrivilege::Select, AclPrivilege::Usage]
         .into_iter()

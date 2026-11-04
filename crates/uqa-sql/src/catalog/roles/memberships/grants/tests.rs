@@ -7,9 +7,11 @@
 use super::super::test_support::{apply_grant_role_statement, insert_membership};
 use super::super::*;
 use crate::ast::{CreateRoleStmt, GrantRoleStmt, RoleMembershipOptions};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+fn roles() -> RoleDefinitions {
+    let mut roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for (index, name) in [
         "target",
         "root2",
@@ -24,25 +26,27 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
     .into_iter()
     .enumerate()
     {
-        let mut attributes = BTreeSet::from([RoleAttribute::Inherit]);
+        let mut attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]);
         if matches!(name, "root2" | "super_target") {
             attributes.insert(RoleAttribute::Superuser);
         }
-        roles.insert(
-            name.into(),
-            RoleDefinition::from_create(
-                &CreateRoleStmt {
-                    name: name.into(),
-                    attributes: attributes.into_iter().collect(),
-                    connection_limit: -1,
-                    in_roles: Vec::new(),
-                    role_members: Vec::new(),
-                    admin_members: Vec::new(),
-                },
-                20_000 + i64::try_from(index).unwrap(),
-                [u8::try_from(index + 1).unwrap(); 16],
-            ),
-        );
+        roles
+            .insert(
+                name.into(),
+                RoleDefinition::from_create(
+                    &CreateRoleStmt {
+                        name: name.into(),
+                        attributes: attributes.into_iter().collect(),
+                        connection_limit: -1,
+                        in_roles: Vec::new(),
+                        role_members: Vec::new(),
+                        admin_members: Vec::new(),
+                    },
+                    20_000 + i64::try_from(index).unwrap(),
+                    [u8::try_from(index + 1).unwrap(); 16],
+                ),
+            )
+            .unwrap();
     }
     roles
 }
@@ -62,8 +66,8 @@ fn statement(target: &str, members: &[&str], grantor: Option<&str>, admin: bool)
 }
 
 fn edge(
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &mut RoleMemberships,
+    roles: &RoleDefinitions,
     role: &str,
     member: &str,
     grantor: &str,
@@ -72,8 +76,8 @@ fn edge(
     insert_membership(memberships, role, member, grantor, options, roles).unwrap();
 }
 
-fn admins(roles: &BTreeMap<String, RoleDefinition>) -> BTreeMap<RoleMembershipKey, RoleMembership> {
-    let mut members = BTreeMap::new();
+fn admins(roles: &RoleDefinitions) -> RoleMemberships {
+    let mut members = RoleMemberships::new();
     edge(
         &mut members,
         roles,
@@ -248,7 +252,7 @@ fn admin_back_grants_require_a_path_independent_of_all_recipients() {
 #[test]
 fn admin_back_grant_checks_all_recipients_as_one_proposal() {
     let roles = roles();
-    let mut members = BTreeMap::new();
+    let mut members = RoleMemberships::new();
     for (member, grantor) in [
         ("admin", "uqa"),
         ("middle", "uqa"),

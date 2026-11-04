@@ -17,6 +17,7 @@ use super::{
 use crate::catalog::security::{
     roles::dependencies::RoleDependencyCandidate, system_relations::SystemPrivilegeUpdate,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantTableStmt, GrantTableTarget},
@@ -44,7 +45,7 @@ pub(super) fn resolve_roles(
     context: &TableGrantContext<'_>,
     statement: &GrantTableStmt,
     command_roles: &mut AclCommandRoles,
-    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<ResolvedAclRoles, SQLError> {
     command_roles.resolve_validated(
         context.names,

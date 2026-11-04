@@ -5,13 +5,10 @@
 //
 
 use super::{sql, Engine, StorageReadControl};
-use std::collections::BTreeMap;
-use uqa_sql::catalog::roles::{capture::CapturedRoleDefinition, RoleDefinition};
+use uqa_sql::catalog::roles::CapturedRoleDefinitions;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
-fn same_roles(
-    saved: &[(String, CapturedRoleDefinition)],
-    expected: &BTreeMap<String, RoleDefinition>,
-) {
+fn same_roles(saved: &CapturedRoleDefinitions, expected: &RoleDefinitions) {
     assert_eq!(saved.len(), expected.len());
     for ((name, role), (expected_name, original)) in saved.iter().zip(expected) {
         assert_eq!(name, expected_name);
@@ -61,7 +58,6 @@ fn memory_role_capture_preserves_rollback_membership_and_same_name_replacement()
             .get()
             .unwrap()
             .iter()
-            .map(|(k, v)| (k, v))
             .eq(memberships.iter()));
         control.cancellation().cancel();
         assert!(saved_roles.get().is_err());
@@ -101,7 +97,6 @@ fn underfunded_role_capture_does_not_abort_role_or_membership_changes() {
         .get()
         .unwrap()
         .iter()
-        .map(|(k, v)| (k, v))
         .eq(memberships.iter()));
     drop((cut, failed, saved_roles, saved_memberships, engine));
     assert_eq!(small.memory().used(), 0);

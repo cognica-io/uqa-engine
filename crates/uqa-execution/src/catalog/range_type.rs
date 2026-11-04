@@ -6,15 +6,9 @@
 
 //! Range definitions publish their four type claims in the caller's definition transaction. Generated routines remain in the routine catalog.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Deref,
-    sync::Arc,
-};
-use uqa_sql::catalog::{
-    range_type::{validate_range_registry, StoredRange},
-    roles::RoleDefinition,
-};
+use std::{collections::BTreeSet, ops::Deref, sync::Arc};
+use uqa_sql::catalog::range_type::{validate_range_registry, StoredRange};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::type_records::{TypeRecord, TypeRecordFormat};
@@ -26,14 +20,14 @@ mod validation;
 pub(crate) use descriptors::RangeDescriptors;
 pub use validation::validate_catalog;
 
-pub type RangeRegistry = BTreeMap<String, StoredRange>;
+pub type RangeRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredRange>;
 pub type RangeRegistryRead<'a> = Box<dyn Deref<Target = RangeRegistry> + 'a>;
 
 pub trait RangeRegistryPublication {
     fn range_registry(&self) -> RangeRegistryRead<'_>;
     fn range_catalog(&self) -> Option<&dyn CatalogFacade>;
     fn range_catalog_snapshot(&self) -> super::CatalogReadView;
-    fn range_role_definitions(&self) -> BTreeMap<String, RoleDefinition>;
+    fn range_role_definitions(&self) -> RoleDefinitions;
     fn publish_range_definitions(&self, registry: RangeRegistry);
 }
 
@@ -56,7 +50,7 @@ impl TypeRecord for StoredRange {
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<RangeRegistry> {
     let registry = FORMAT.read(catalog)?;
     validate_range_registry(&registry, roles).map_err(StorageBackendError::Other)?;
@@ -67,7 +61,7 @@ pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &Arc<RangeRegistry>,
     committed: Arc<RangeRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<Arc<RangeRegistry>> {
     let registry = FORMAT.merge_private(catalog, current, committed)?;
     validate_range_registry(&registry, roles).map_err(StorageBackendError::Other)?;

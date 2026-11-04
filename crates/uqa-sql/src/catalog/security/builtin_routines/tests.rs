@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 
 #[test]
 fn builtin_acl_validation_preserves_role_identity_across_rename() {
@@ -15,10 +17,11 @@ fn builtin_acl_validation_preserves_role_identity_across_rename() {
     reader.object_id = [9; 16];
     reader.attributes.clear();
     let identity = reader.identity();
-    let mut roles = BTreeMap::from([
+    let mut roles = RoleDefinitions::try_from_iter([
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader.clone()),
-    ]);
+    ])
+    .unwrap();
     let entry = BuiltinRoutineSecurity {
         revision: [7; 16],
         execute_acl: vec![RoutineAclEntry {
@@ -28,18 +31,25 @@ fn builtin_acl_validation_preserves_role_identity_across_rename() {
         }],
     };
     validate(&entry, &roles).unwrap();
-    roles.remove("reader");
+    roles.remove("reader").unwrap();
     reader.name = "renamed".into();
-    roles.insert("renamed".into(), reader);
+    roles.insert("renamed".into(), reader).unwrap();
     validate(&entry, &roles).unwrap();
     assert_eq!(identity.role_name(&roles), Some("renamed"));
-    roles.get_mut("renamed").unwrap().object_id = [8; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [8; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(validate(&entry, &roles).is_err());
 }
 
 #[test]
 fn builtin_acl_validation_never_substitutes_default_public_for_corruption() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let empty = BuiltinRoutineSecurity {
         revision: [1; 16],
         execute_acl: vec![],

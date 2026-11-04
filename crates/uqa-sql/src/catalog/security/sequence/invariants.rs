@@ -6,11 +6,12 @@
 
 //! Validate sequence ACL endpoints and grant paths before catalog publication or migration.
 
-use super::{AclPrivilege, BTreeMap, BTreeSet, RoleDefinition, SequenceSecurity};
+use super::{AclPrivilege, BTreeSet, SequenceSecurity};
+use crate::catalog::roles::RoleDefinitions;
 
 pub fn validate_sequence_security_invariants(
     security: &SequenceSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     if !roles.contains_key(&security.role_owner) {
         return Err(format!(

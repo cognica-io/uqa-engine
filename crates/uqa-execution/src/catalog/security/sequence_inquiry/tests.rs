@@ -13,6 +13,7 @@ use std::{
     sync::Arc,
 };
 use uqa_core::{catalog_sequence::SequencePrivileges, RelationIdentity};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
     catalog::{
@@ -63,11 +64,14 @@ impl Catalog {
                 },
             )])),
             roles: RoleCatalogSnapshot {
-                roles: Arc::new(BTreeMap::from([
-                    ("uqa".into(), RoleDefinition::bootstrap()),
-                    (reader.name.clone(), reader),
-                ])),
-                memberships: Arc::new(BTreeMap::new()),
+                roles: Arc::new(
+                    RoleDefinitions::try_from_iter([
+                        ("uqa".into(), RoleDefinition::bootstrap()),
+                        (reader.name.clone(), reader),
+                    ])
+                    .unwrap(),
+                ),
+                memberships: Arc::new(RoleMemberships::new()),
             },
         };
         Self {
@@ -141,9 +145,12 @@ fn inquiry_refresh_keeps_selected_role_identity_across_name_resolution() {
         let catalog = Catalog::new();
         let mut replaced = catalog.retained.clone();
         Arc::make_mut(&mut replaced.roles.roles)
-            .get_mut("reader")
+            .edit("reader", |role| {
+                role.object_id = [2; 16];
+                Ok(())
+            })
             .unwrap()
-            .object_id = [2; 16];
+            .unwrap();
         Arc::make_mut(&mut replaced.security)
             .values_mut()
             .next()
@@ -226,7 +233,9 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
         role.oid = 20_001;
         role.object_id = [2; 16];
         let new_reader = role.identity();
-        Arc::make_mut(&mut snapshot.roles.roles).insert(role.name.clone(), role);
+        Arc::make_mut(&mut snapshot.roles.roles)
+            .insert(role.name.clone(), role)
+            .unwrap();
         Arc::make_mut(&mut snapshot.security)
             .values_mut()
             .next()

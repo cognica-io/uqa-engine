@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 mod authority;
 use uqa_storage::{SequenceOwner, SequenceOwnerDependency};
@@ -104,10 +105,11 @@ fn durable_sequence_row_round_trip_preserves_all_allocation_and_owner_fields() {
         RelationPersistence::Permanent,
         &security::restore_security(
             &original.security,
-            &BTreeMap::from([(
+            &RoleDefinitions::try_from_iter([(
                 "uqa".into(),
                 uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-            )]),
+            )])
+            .unwrap(),
             false,
         )
         .unwrap(),

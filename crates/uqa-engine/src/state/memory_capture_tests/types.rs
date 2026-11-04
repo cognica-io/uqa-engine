@@ -41,7 +41,8 @@ fn fixture(engine: &Engine) {
         .durable
         .ranges
         .write()
-        .insert("public.retained_range".into(), range());
+        .insert("public.retained_range".into(), range())
+        .unwrap();
 }
 
 #[test]
@@ -84,7 +85,8 @@ fn memory_type_capture_preserves_definitions_through_rollback_replacement_and_cl
                 .durable
                 .ranges
                 .write()
-                .insert("public.retained_range".into(), replacement);
+                .insert("public.retained_range".into(), replacement)
+                .unwrap();
         }
         drop(engine);
         macro_rules! same {

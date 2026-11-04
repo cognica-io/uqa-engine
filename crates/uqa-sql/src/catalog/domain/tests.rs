@@ -5,6 +5,9 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeMap;
 
 fn registry() -> BTreeMap<String, StoredDomain> {
     let crate::Statement::CreateDomain(mut definition) =
@@ -35,7 +38,8 @@ fn registry() -> BTreeMap<String, StoredDomain> {
 #[test]
 fn domain_constraint_oids_and_incarnations_are_unique_across_the_registry() {
     let original = registry();
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for duplicate_oid in [false, true] {
         let mut registry = original.clone();
         let mut domain = registry["public.positive"].clone();
@@ -67,20 +71,29 @@ fn domain_authority_follows_the_original_incarnation_through_rename_and_name_reu
     let mut replacement = RoleDefinition::bootstrap();
     replacement.object_id = [9; 16];
     replacement.oid = 42;
-    let mut roles = BTreeMap::from([("renamed".into(), owner), ("uqa".into(), replacement)]);
+    let mut roles =
+        RoleDefinitions::try_from_iter([("renamed".into(), owner), ("uqa".into(), replacement)])
+            .unwrap();
     validate_domain_registry(&registry, &roles).unwrap();
-    roles.remove("renamed");
+    roles.remove("renamed").unwrap();
     assert!(validate_domain_registry(&registry, &roles)
         .unwrap_err()
         .contains("missing role incarnation"));
-    roles.get_mut("uqa").unwrap().oid = RoleIdentity::BOOTSTRAP.oid;
+    roles
+        .edit("uqa", |value| {
+            value.oid = RoleIdentity::BOOTSTRAP.oid;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(validate_domain_registry(&registry, &roles).is_err());
 }
 
 #[test]
 fn domain_candidates_reject_inconsistent_names_and_duplicate_or_invalid_identities() {
     let original = registry();
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     validate_domain_registry(&original, &roles).unwrap();
     for corruption in 0..6 {
         let mut registry = original.clone();

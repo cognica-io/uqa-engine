@@ -103,7 +103,7 @@ pub fn create_domain(
             array_name: Some(array_name),
             usage_acl: None,
         },
-    );
+    )?;
     domain::publish(context.publication, &before, registry)?;
     context.shells.complete(shell.as_ref())?;
     context.changes.catalog_registry_changed();

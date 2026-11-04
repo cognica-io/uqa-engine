@@ -9,7 +9,8 @@
 use super::{DomainRegistry, DOMAINS_METADATA_KEY};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use uqa_sql::catalog::{domain::StoredDomain, roles::RoleDefinition};
+use uqa_sql::catalog::domain::StoredDomain;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub(super) const PREFIX: &str = "uqa.sql.domain.v1:";
@@ -39,7 +40,7 @@ struct RecordFormat {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<(DomainRegistry, bool)> {
     let value = catalog
@@ -61,7 +62,9 @@ pub(super) fn read(
         let mut registry = DomainRegistry::new();
         for (record, json) in catalog.metadata_with_prefix(PREFIX)? {
             let name = record.strip_prefix(PREFIX).expect("domain record prefix");
-            registry.insert(name.to_owned(), serde_json::from_str(&json)?);
+            registry
+                .insert(name.to_owned(), serde_json::from_str(&json)?)
+                .map_err(|error| StorageBackendError::backend("domain definition", error))?;
         }
         validate_oids(catalog, &registry)?;
         return Ok((registry, current));
@@ -95,15 +98,15 @@ pub(super) fn read(
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
-    let registry = legacy
-        .into_iter()
-        .map(|(name, domain)| {
-            domain
-                .bind_owner(roles)
-                .map(|domain| (name, domain))
-                .map_err(StorageBackendError::Other)
-        })
-        .collect::<StorageBackendResult<DomainRegistry>>()?;
+    let mut registry = DomainRegistry::new();
+    for (name, domain) in legacy {
+        let domain = domain
+            .bind_owner(roles)
+            .map_err(StorageBackendError::Other)?;
+        registry
+            .insert(name, domain)
+            .map_err(|error| StorageBackendError::backend("domain definition", error))?;
+    }
     Ok((registry, false))
 }
 
@@ -149,6 +152,9 @@ pub(super) fn merge_changes(
         .collect::<std::collections::BTreeSet<_>>();
     let mut merged = current.clone();
     for name in names {
+        if before.shares_definition(name, after) {
+            continue;
+        }
         let previous = before.get(name).map(serde_json::to_string).transpose()?;
         let next = after.get(name).map(serde_json::to_string).transpose()?;
         if previous == next {
@@ -164,9 +170,13 @@ pub(super) fn merge_changes(
             ));
         }
         if let Some(domain) = after.get(name) {
-            merged.insert(name.clone(), domain.clone());
+            merged
+                .insert(name.clone(), domain.clone())
+                .map_err(|error| StorageBackendError::backend("domain definition", error))?;
         } else {
-            merged.remove(name);
+            merged
+                .remove(name)
+                .map_err(|error| StorageBackendError::backend("domain definition", error))?;
         }
     }
     Ok(merged)
@@ -179,6 +189,9 @@ pub(super) fn persist(
 ) -> StorageBackendResult<()> {
     let mut changed = Vec::new();
     for (name, domain) in after {
+        if before.shares_definition(name, after) {
+            continue;
+        }
         let json = serde_json::to_string(domain)?;
         if before
             .get(name)

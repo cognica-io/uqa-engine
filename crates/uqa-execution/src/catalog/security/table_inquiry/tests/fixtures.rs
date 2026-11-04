@@ -16,6 +16,8 @@ use crate::catalog::{
     test_support::{empty_catalog, NoRoutines},
     CatalogReadView, RelationLookupMode, RelationNameResolution,
 };
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     ast::{Expr, TriggerEvent},
     catalog::{
@@ -75,11 +77,14 @@ impl Fixture {
                 },
             )])),
             roles: RoleCatalogSnapshot {
-                roles: Arc::new(BTreeMap::from([
-                    ("uqa".into(), RoleDefinition::bootstrap()),
-                    (reader.name.clone(), reader),
-                ])),
-                memberships: Arc::new(BTreeMap::new()),
+                roles: Arc::new(
+                    RoleDefinitions::try_from_iter([
+                        ("uqa".into(), RoleDefinition::bootstrap()),
+                        (reader.name.clone(), reader),
+                    ])
+                    .unwrap(),
+                ),
+                memberships: Arc::new(RoleMemberships::new()),
             },
         };
         let mut catalog = empty_catalog().snapshot().clone();

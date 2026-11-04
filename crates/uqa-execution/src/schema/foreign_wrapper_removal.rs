@@ -21,9 +21,8 @@ pub struct ForeignWrapperRemovalPublication<'a> {
 impl ForeignWrapperRemovalPublication<'_> {
     /// The caller retains the object lock and has already checked the deletion's authority.
     pub fn remove(&self, name: &str, object_id: [u8; 16]) -> Result<(), SQLError> {
-        if self
-            .registry
-            .wrappers()
+        let mut next = self.registry.wrappers().clone();
+        if next
             .get(name)
             .is_none_or(|wrapper| wrapper.identity.object_id != object_id)
         {
@@ -31,12 +30,13 @@ impl ForeignWrapperRemovalPublication<'_> {
                 "foreign-data wrapper `{name}` changed before catalog removal"
             )));
         }
+        next.remove(name)?;
         if let Some(catalog) = self.catalog {
             crate::catalog::foreign::wrappers::remove(catalog, name).map_err(|error| {
                 uqa_sql::catalog::errors::storage_error("DROP FOREIGN DATA WRAPPER", &error)
             })?;
         }
-        self.registry.wrappers_write().remove(name);
+        **self.registry.wrappers_write() = next;
         self.changes.catalog_registry_changed();
         Ok(())
     }

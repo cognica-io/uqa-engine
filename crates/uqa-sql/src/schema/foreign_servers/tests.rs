@@ -5,20 +5,21 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::{
     foreign_server::ForeignServerMetadata,
     roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
         identity::RoleBinding,
-        RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference,
+        RoleDefinition, RoleMembership, RoleReference,
     },
 };
 use std::cell::RefCell;
 
 struct Catalog {
     current: RoleReference,
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
 }
 
 impl Catalog {
@@ -42,14 +43,18 @@ impl Catalog {
             inherit_option: true,
             set_option: true,
         };
-        let roles = [owner, member, bootstrap]
-            .into_iter()
-            .map(|role| (role.name.clone(), role))
-            .collect::<BTreeMap<_, _>>();
+        let roles = RoleDefinitions::try_from_iter(
+            [owner, member, bootstrap]
+                .into_iter()
+                .map(|role| (role.name.clone(), role)),
+        )
+        .unwrap();
         Self {
             current: RoleReference::from_identity(roles["member"].identity(), &roles).unwrap(),
             roles: RefCell::new(roles),
-            memberships: RefCell::new(BTreeMap::from([(membership.key(), membership)])),
+            memberships: RefCell::new(
+                RoleMemberships::try_from_iter([(membership.key(), membership)]).unwrap(),
+            ),
         }
     }
 
@@ -57,7 +62,7 @@ impl Catalog {
         ForeignServerDefinition {
             name: "Mixed.Server".into(),
             fdw_type: "memory_fdw".into(),
-            options: BTreeMap::new(),
+            options: uqa_core::memory::OwnedMap::new(),
             metadata: ForeignServerMetadata {
                 option_order: None,
                 wrapper_reference: None,
@@ -106,13 +111,16 @@ fn server_drop_authority_uses_inheritance_and_releases_catalog_guards() {
     let server = catalog.server();
     ensure_drop_authority(&server, &catalog, &catalog).unwrap();
     catalog.assert_released();
+    let key = *catalog.memberships.borrow().keys().next().unwrap();
     catalog
         .memberships
         .borrow_mut()
-        .values_mut()
-        .next()
+        .edit(&key, |membership| {
+            membership.inherit_option = false;
+            Ok(())
+        })
         .unwrap()
-        .inherit_option = false;
+        .unwrap();
     let error = ensure_drop_authority(&server, &catalog, &catalog).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     assert_eq!(
@@ -131,16 +139,24 @@ fn server_drop_authority_uses_inheritance_and_releases_catalog_guards() {
 fn server_drop_authority_follows_owner_rename_but_not_replacement() {
     let catalog = Catalog::new();
     let server = catalog.server();
-    let mut owner = catalog.roles.borrow_mut().remove("owner").unwrap();
+    let mut owner = catalog.roles.borrow_mut().get("owner").unwrap().clone();
+    catalog.roles.borrow_mut().remove("owner").unwrap();
     owner.name = "renamed".into();
-    catalog.roles.borrow_mut().insert(owner.name.clone(), owner);
+    catalog
+        .roles
+        .borrow_mut()
+        .insert(owner.name.clone(), owner)
+        .unwrap();
     ensure_drop_authority(&server, &catalog, &catalog).unwrap();
     catalog
         .roles
         .borrow_mut()
-        .get_mut("renamed")
+        .edit("renamed", |value| {
+            value.object_id = [3; 16];
+            Ok(())
+        })
         .unwrap()
-        .object_id = [3; 16];
+        .unwrap();
     let error = ensure_drop_authority(&server, &catalog, &catalog).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     catalog.assert_released();

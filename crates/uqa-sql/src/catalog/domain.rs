@@ -5,11 +5,12 @@
 //
 
 use crate::ast::{ColumnType, CreateDomain};
+use crate::catalog::roles::RoleDefinitions;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition, RoleReference};
+use super::roles::{identity::RoleSubject, RoleReference};
 
 mod production;
 
@@ -58,10 +59,7 @@ impl<Owner> StoredDomain<Owner> {
 
 impl StoredDomain<String> {
     /// Bind a legacy name only when the catalog restoration owner allows conversion.
-    pub fn bind_owner(
-        self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<StoredDomain, String> {
+    pub fn bind_owner(self, roles: &RoleDefinitions) -> Result<StoredDomain, String> {
         let owner = RoleReference::Named(self.owner)
             .bind(roles)
             .map_err(|error| error.to_string())?
@@ -81,8 +79,8 @@ impl StoredDomain<String> {
 
 /// Validate the complete catalog before any durable conversion or registry publication.
 pub fn validate_domain_registry(
-    registry: &BTreeMap<String, StoredDomain>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     validate_domain_definitions(registry, roles)?;
     for domain in registry.values() {
@@ -94,14 +92,14 @@ pub fn validate_domain_registry(
 
 /// Early restoration validates authority and supplied identities before any missing legacy constraint metadata is allocated.
 pub fn validate_domain_definitions(
-    registry: &BTreeMap<String, StoredDomain>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut constraint_objects = BTreeSet::new();
     let mut constraint_oids = BTreeSet::new();
-    for (name, domain) in registry {
+    for (name, domain) in registry.iter() {
         // A domain with a recorded array OID drew both OIDs from the database's counter; an earlier one derives its OID from its identity.
         let oids_valid = match domain.array_oid {
             Some(array_oid) => {

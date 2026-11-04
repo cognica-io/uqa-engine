@@ -73,7 +73,9 @@ pub fn drop_empty_schema(
         .map_err(|error| StorageBackendError::backend("DROP SCHEMA", error))?;
     let mut schemas = context.state.schema_registry_write();
     context.persistence.drop_schema_row(name)?;
-    let removed = schemas.remove(name).is_some();
+    let removed = schemas
+        .remove(name)
+        .map_err(|error| StorageBackendError::backend("schema definition", error))?;
     drop(schemas);
     if removed {
         context.changes.namespace_catalog_changed();

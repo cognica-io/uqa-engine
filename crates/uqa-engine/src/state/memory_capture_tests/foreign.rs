@@ -8,25 +8,16 @@ use super::{sql, Engine, StorageReadControl};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::foreign::{capture::CapturedForeignTable, StoredForeignTable};
-use uqa_sql::catalog::{
-    definition_capture::foreign::CapturedForeignServer, foreign_server::ForeignServerDefinition,
-};
+use uqa_sql::catalog::foreign_server::{CapturedForeignServers, ForeignServers};
 
-fn same_servers(
-    saved: &[(String, CapturedForeignServer)],
-    source: &BTreeMap<String, ForeignServerDefinition>,
-) {
+fn same_servers(saved: &CapturedForeignServers, source: &ForeignServers) {
     assert_eq!(saved.len(), source.len());
     for ((name, value), (original_name, original)) in saved.iter().zip(source) {
         assert_eq!(name, original_name);
         assert_eq!(value.name, original.name);
         assert_eq!(value.fdw_type, original.fdw_type);
         assert_eq!(value.metadata, original.metadata);
-        assert!(value
-            .options
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(original.options.iter()));
+        assert!(value.options.iter().eq(original.options.iter()));
     }
 }
 
@@ -99,12 +90,7 @@ fn memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unr
         let saved_wrappers = wrapper_key.retained(&cut).unwrap().unwrap();
         let saved_servers = server_key.retained(&cut).unwrap().unwrap();
         let saved_tables = table_key.retained(&cut).unwrap().unwrap();
-        assert!(saved_wrappers
-            .get()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(wrappers.iter()));
+        assert!(saved_wrappers.get().unwrap().iter().eq(wrappers.iter()));
         same_servers(saved_servers.get().unwrap(), &servers);
         same_tables(saved_tables.get().unwrap(), &tables);
         drop(cut);
@@ -142,13 +128,7 @@ fn denied_foreign_capture_keeps_ordinary_ddl_and_independent_cuts_usable() {
         .is_empty());
     assert!(denied.check().is_err());
     let saved = key.retained(&cut).unwrap().unwrap();
-    let original = &saved
-        .get()
-        .unwrap()
-        .iter()
-        .find(|(name, _)| name == "large")
-        .unwrap()
-        .1;
+    let original = saved.get().unwrap().get("large").unwrap();
     assert_eq!(original.options[0].1.len(), 32768);
     drop((saved, cut, denied, engine));
     assert_eq!(small.memory().used(), 0);

@@ -6,12 +6,10 @@
 
 //! Retained catalog inputs for ordered role dependency checks.
 
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::{
     catalog::{
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
+        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -33,7 +31,7 @@ pub trait RoleDependencyCatalog:
     crate::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>>;
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
     fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
     fn foreign_tables(
@@ -45,7 +43,10 @@ pub trait RoleDependencyCatalog:
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>>;
+    ) -> RoleDependencyRead<
+        '_,
+        crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
+    >;
 }
 
 pub trait RoleForeignPersistenceRead {

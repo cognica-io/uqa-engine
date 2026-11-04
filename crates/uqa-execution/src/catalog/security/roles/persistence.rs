@@ -7,6 +7,7 @@
 //! Durable role records and their transaction-private catalog overlays.
 
 use std::{collections::BTreeMap, sync::Arc};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     catalog::roles::{restoration, RoleDefinition, RoleMembership, RoleMembershipKey},
     SQLError,
@@ -20,14 +21,14 @@ pub const ROLES_METADATA_KEY: &str = "sql_roles_json";
 pub const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 
 pub struct RoleCatalogValues {
-    pub roles: BTreeMap<String, RoleDefinition>,
-    pub memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: RoleDefinitions,
+    pub memberships: RoleMemberships,
 }
 
 #[derive(Clone)]
 pub struct RoleCatalogSnapshot {
-    pub roles: Arc<BTreeMap<String, RoleDefinition>>,
-    pub memberships: Arc<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    pub roles: Arc<RoleDefinitions>,
+    pub memberships: Arc<RoleMemberships>,
 }
 
 impl RoleCatalogSnapshot {
@@ -47,9 +48,13 @@ impl RoleCatalogSnapshot {
             for name in names {
                 if catalog.metadata_has_private_changes(&records::role_key(name))? {
                     if let Some(role) = current.roles.get(name) {
-                        Arc::make_mut(&mut roles).insert(name.clone(), role.clone());
+                        Arc::make_mut(&mut roles)
+                            .insert(name.clone(), role.clone())
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     } else {
-                        Arc::make_mut(&mut roles).remove(name);
+                        Arc::make_mut(&mut roles)
+                            .remove(name)
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     }
                 }
             }
@@ -63,9 +68,13 @@ impl RoleCatalogSnapshot {
             for identity in identities {
                 if catalog.metadata_has_private_changes(&memberships::key(identity))? {
                     if let Some(membership) = current.memberships.get(identity) {
-                        Arc::make_mut(&mut memberships).insert(*identity, membership.clone());
+                        Arc::make_mut(&mut memberships)
+                            .insert(*identity, membership.clone())
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     } else {
-                        Arc::make_mut(&mut memberships).remove(identity);
+                        Arc::make_mut(&mut memberships)
+                            .remove(identity)
+                            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     }
                 }
             }
@@ -97,21 +106,33 @@ fn restore_catalog(
         records::RoleRecordFormat::Aggregate | records::RoleRecordFormat::Definitions
     ) {
         // Complete a candidate catalog before binding legacy membership names. No metadata is written until both candidates have been validated.
-        for role in roles.values_mut() {
+        let mut restored = roles.clone();
+        for (name, role) in &roles {
             if role.object_id == [0; 16] {
+                let mut role = role.clone();
                 role.object_id = if role.oid == 10 {
                     RoleDefinition::bootstrap().object_id
                 } else {
                     crate::catalog::identity::new_nonzero_catalog_identity("role", "identity")?
                 };
+                restored
+                    .insert(name.clone(), role)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             }
         }
+        roles = restored;
     }
     restoration::validate_role_identities(&roles).map_err(StorageBackendError::Other)?;
     if format != records::RoleRecordFormat::Revisions {
-        for role in roles.values_mut() {
+        let mut restored = roles.clone();
+        for (name, role) in &roles {
+            let mut role = role.clone();
             role.revision = 1;
+            restored
+                .insert(name.clone(), role)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
+        roles = restored;
     }
     uqa_sql::catalog::roles::tuple::validate_revisions(&roles)
         .map_err(StorageBackendError::Other)?;
@@ -135,8 +156,8 @@ fn restore_catalog(
 
 pub fn persist_roles(
     catalog: Option<&dyn CatalogFacade>,
-    before: &BTreeMap<String, RoleDefinition>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    before: &RoleDefinitions,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());
@@ -146,8 +167,8 @@ pub fn persist_roles(
 
 pub fn persist_memberships(
     catalog: Option<&dyn CatalogFacade>,
-    before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    after: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    before: &RoleMemberships,
+    after: &RoleMemberships,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());

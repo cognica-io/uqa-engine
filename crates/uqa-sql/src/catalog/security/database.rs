@@ -7,14 +7,15 @@
 //! Database ACL values, grant paths, privilege checks and dependency-aware revocation.
 
 use crate::catalog::roles::identity::RoleSubject;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt, RoleAttribute};
 use crate::catalog::DATABASE_NAME;
 use crate::SQLError;
 
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 pub mod binding;
 pub use binding::BoundDatabaseSecurity;
@@ -158,8 +159,8 @@ pub fn select_acl_grantor(
     security: &DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -182,8 +183,8 @@ pub fn role_has_database_privilege_check(
     security: &DatabaseSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: DatabasePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)
@@ -216,8 +217,8 @@ pub fn role_has_database_privilege(
     security: &DatabaseSecurity,
     subject: &(impl RoleSubject + ?Sized),
     privilege: DatabaseAclPrivilege,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     role_has_database_privilege_check(
         security,
@@ -421,8 +422,8 @@ pub fn apply_database_acl(
     grantees: &[AclGrantee],
     privileges: &[DatabaseAclPrivilege],
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &DatabaseSecurity,
 ) -> Result<(DatabaseSecurity, usize), SQLError> {
     let grantors = privileges
@@ -470,7 +471,7 @@ pub fn validate_database_acl_roles(
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     for role in grantees {
         if role
@@ -508,7 +509,7 @@ pub fn validate_database_acl_roles(
 
 pub fn validate_stored_database_security(
     security: &DatabaseSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     if !roles.contains_key(&security.role_owner) {
         return Err(format!(

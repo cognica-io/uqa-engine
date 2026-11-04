@@ -52,7 +52,7 @@ pub(super) fn add_attributes(
         definition.attributes.push(prepared);
         let before = context.attributes.publication.composite_registry().clone();
         let mut after = before.clone();
-        after.insert(definition.identity.qualified_name(), definition.clone());
+        after.insert(definition.identity.qualified_name(), definition.clone())?;
         composite_type::publish(context.attributes.publication, &before, after)?;
         context.attributes.changes.catalog_registry_changed();
         super::values::rebuild_indexes(&context.attributes.values, rebuild)?;

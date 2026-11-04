@@ -14,17 +14,18 @@ use super::{
     BoundSchemaSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::RoleReference;
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::temporary_namespace::{TemporaryNamespace, TemporaryNamespaceOids};
 use crate::{
-    catalog::roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+    catalog::roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::Value;
 
-pub type SchemaRegistryRead<'a> =
-    Box<dyn std::ops::Deref<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
+pub type SchemaRegistryRead<'a> = Box<dyn std::ops::Deref<Target = SchemaRegistry> + 'a>;
 
 /// Metadata-only graph names held under the caller's original registry read guard.
 pub trait GraphNamespaceRead {
@@ -228,7 +229,7 @@ impl SchemaPrivilegeInquiry<'_> {
 
 fn resolve_schema_privilege_role(
     value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Option<String>, SQLError> {
     match value {
         Value::Str(name) | Value::FixedChar(name) => {

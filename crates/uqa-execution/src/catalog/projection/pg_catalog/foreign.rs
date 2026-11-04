@@ -15,7 +15,6 @@ use super::{
     relations::pg_class_catalog_row,
 };
 use crate::catalog::CatalogReadView;
-use std::collections::BTreeMap;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity, Value};
 use uqa_sql::{
     catalog::{
@@ -128,7 +127,11 @@ pub fn servers(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
                 ("srvacl", Value::Null),
                 (
                     "srvoptions",
-                    ordered_options(&server.options, metadata.option_order.as_deref())?,
+                    ordered_options(
+                        server.options.iter(),
+                        |name| server.options.get(name),
+                        metadata.option_order.as_deref(),
+                    )?,
                 ),
             ]))
         })
@@ -151,7 +154,11 @@ pub fn tables(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
                 ("ftserver", int_value(i64::from(table.server_oid()?))),
                 (
                     "ftoptions",
-                    ordered_options(&table.options, Some(&table.option_order))?,
+                    ordered_options(
+                        table.options.iter(),
+                        |name| table.options.get(name),
+                        Some(&table.option_order),
+                    )?,
                 ),
             ]))
         })
@@ -169,16 +176,16 @@ fn option_array<'a>(options: impl Iterator<Item = (&'a str, &'a str)>) -> Result
     }
 }
 
-fn ordered_options(
-    options: &BTreeMap<String, String>,
+fn ordered_options<'a>(
+    options: impl Iterator<Item = (&'a String, &'a String)>,
+    get: impl Fn(&str) -> Option<&'a String>,
     order: Option<&[String]>,
 ) -> Result<Value, SQLError> {
     if let Some(order) = order {
         let pairs = order
             .iter()
             .map(|name| {
-                options
-                    .get(name)
+                get(name)
                     .map(|value| (name.as_str(), value.as_str()))
                     .ok_or_else(|| {
                         SQLError::Internal("foreign option order references a missing key".into())
@@ -187,11 +194,7 @@ fn ordered_options(
             .collect::<Result<Vec<_>, _>>()?;
         option_array(pairs.into_iter())
     } else {
-        option_array(
-            options
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.as_str())),
-        )
+        option_array(options.map(|(name, value)| (name.as_str(), value.as_str())))
     }
 }
 

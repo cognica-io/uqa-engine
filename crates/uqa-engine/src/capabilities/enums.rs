@@ -7,10 +7,9 @@
 //! Bind enum DDL to namespace, identity, publication and transaction visibility state.
 
 use crate::Engine;
-use std::collections::BTreeMap;
 use uqa_execution::catalog::enum_type::{EnumRegistry, EnumRegistryPublication, EnumRegistryRead};
 use uqa_execution::schema::enums::{EnumLabelVisibility, EnumTypeContext};
-use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::expr::enums::{EnumLabelCatalog, EnumTypeLabels};
 use uqa_sql::schema::domains::removal::TypeObjectBinding;
 use uqa_sql::SQLError;
@@ -225,7 +224,7 @@ impl EnumRegistryPublication for Engine {
     fn enum_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn enum_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn enum_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
     fn publish_enum_definitions(&self, registry: EnumRegistry) {

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use std::collections::BTreeSet;
 
 #[test]
@@ -190,16 +191,17 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
         roles::RoleDefinition,
         security::table::{role_has_table_privilege, TableAclPrivilege},
     };
-    use std::collections::BTreeMap;
+
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
     reader.oid = 20_001;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader),
-    ]);
+    ])
+    .unwrap();
     for relation in SystemRelation::all() {
         let security = relation.bootstrap_security().resolve(&roles).unwrap();
         for privilege in TableAclPrivilege::ALL {
@@ -208,7 +210,7 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
                 "uqa",
                 privilege,
                 &roles,
-                &BTreeMap::new()
+                &RoleMemberships::new()
             ));
             let expected = (privilege == TableAclPrivilege::Select
                 && !matches!(
@@ -222,7 +224,13 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
                 || (privilege == TableAclPrivilege::Update
                     && relation == SystemRelation::Projected(VirtualRelation::PgSettings));
             assert_eq!(
-                role_has_table_privilege(&security, "reader", privilege, &roles, &BTreeMap::new()),
+                role_has_table_privilege(
+                    &security,
+                    "reader",
+                    privilege,
+                    &roles,
+                    &RoleMemberships::new()
+                ),
                 expected,
                 "{relation:?} {privilege:?}"
             );

@@ -117,7 +117,7 @@ impl ForeignCreationContext<'_> {
         let definition = ForeignServerDefinition {
             name: statement.name.clone(),
             fdw_type: statement.fdw_type.clone(),
-            options,
+            options: options.into_iter().collect(),
             metadata: ForeignServerMetadata {
                 option_order: Some(
                     statement
@@ -138,13 +138,13 @@ impl ForeignCreationContext<'_> {
                 version: statement.version.clone(),
             },
         };
+        let mut next = self.registry.servers().clone();
+        next.insert(statement.name.clone(), definition)?;
         if let Some(catalog) = self.catalog {
-            crate::catalog::foreign::servers::persist(catalog, &definition)
+            crate::catalog::foreign::servers::persist(catalog, &next[&statement.name])
                 .map_err(storage_error)?;
         }
-        self.registry
-            .servers_write()
-            .insert(statement.name.clone(), definition);
+        **self.registry.servers_write() = next;
         self.changes.catalog_registry_changed();
         Ok(())
     }

@@ -83,7 +83,10 @@ fn table(
             control
         )),
         checks: take!(definition_capture::checks(checks, control)),
-        options: take!(definition_capture::foreign::options(options, control)),
+        options: take!(definition_capture::foreign::options(
+            options.iter(),
+            control
+        )),
         option_order: take!(definition_capture::names(option_order, control)),
     };
     Ok(control.finish(value, memory)?)

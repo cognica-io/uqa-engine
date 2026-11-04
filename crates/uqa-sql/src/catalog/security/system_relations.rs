@@ -14,13 +14,8 @@ use super::{
     BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
-use crate::{
-    ast::RoleAttribute,
-    catalog::{
-        roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
-        SystemRelation,
-    },
-};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use crate::{ast::RoleAttribute, catalog::SystemRelation};
 use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
 
@@ -90,7 +85,7 @@ pub fn metadata_key(relation: SystemRelation, column: Option<&str>) -> String {
 pub fn validate_security(
     relation: SystemRelation,
     security: &TableSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     if super::role_bindings::bind_role(roles, &security.role_owner, "system relation")?
         != crate::catalog::roles::RoleIdentity::BOOTSTRAP
@@ -107,7 +102,7 @@ fn masks_table_write(
     relation: SystemRelation,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> bool {
     relation.namespace() == "pg_catalog"
         && relation.kind() == "table"
@@ -129,8 +124,8 @@ pub fn has_table_privilege(
     security: &TableSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     !masks_table_write(relation, subject, check, roles)
         && role_has_privilege(security, subject, check, roles, memberships)
@@ -142,8 +137,8 @@ pub fn has_column_privilege(
     column: &str,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if !masks_table_write(relation, subject, check, roles) {
         return super::columns::role_has_column_privilege(

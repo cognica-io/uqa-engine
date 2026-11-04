@@ -8,14 +8,14 @@
 
 use super::{
     insufficient_privilege, membership_error, revoke_membership, role_has_admin, role_is_superuser,
-    role_reaches, RoleBinding, RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey,
-    RoleSubject, SQLError,
+    role_reaches, RoleBinding, RoleIdentity, RoleSubject, SQLError,
 };
 use crate::ast::RoleMembershipOptions;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::{BTreeSet, VecDeque};
 
 fn nearest_admin(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
     member: RoleIdentity,
     role: RoleIdentity,
 ) -> Option<RoleBinding> {
@@ -41,8 +41,8 @@ fn nearest_admin(
 }
 
 pub(super) fn require_group_authority(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &(impl RoleSubject + ?Sized),
     target: &RoleBinding,
 ) -> Result<(), SQLError> {
@@ -59,8 +59,8 @@ pub(super) fn require_group_authority(
 }
 
 pub(super) fn select_grantor(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &(impl RoleSubject + ?Sized),
     target: &RoleBinding,
     requested_grantor: Option<&RoleBinding>,
@@ -108,7 +108,7 @@ pub(super) fn select_grantor(
 }
 
 pub(super) fn validate_grant(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
     role: &RoleBinding,
     grantor: &RoleBinding,
     members: &[RoleBinding],
@@ -130,18 +130,14 @@ pub(super) fn validate_grant(
         return Err(circular());
     }
     // Remove every proposed recipient and its dependent grants together. A separate surviving ADMIN source is required for the grantor.
-    let mut remaining = memberships
-        .iter()
-        .filter(|(_, edge)| edge.role.identity() == role.identity())
-        .map(|(key, edge)| (*key, edge.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let mut remaining = memberships.clone();
     let recipients = members
         .iter()
         .map(RoleBinding::identity)
         .collect::<BTreeSet<_>>();
     let removed = remaining
         .keys()
-        .filter(|key| recipients.contains(&key.member))
+        .filter(|key| key.role == role.identity() && recipients.contains(&key.member))
         .copied()
         .collect::<Vec<_>>();
     for key in removed {
