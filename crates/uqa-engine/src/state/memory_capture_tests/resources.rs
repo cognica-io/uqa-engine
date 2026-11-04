@@ -96,7 +96,12 @@ fn memory_resource_capture_preserves_rollback_replacement_and_unread_engine_clos
         assert_eq!(captured_graphs.get().unwrap().len(), 1);
         assert_eq!(captured_models.get().unwrap().len(), 1);
         let graph = captured_graphs.get().unwrap().get("saved").unwrap().clone();
-        let model = captured_models.get().unwrap().get("saved").unwrap().clone();
+        let model = captured_models
+            .get()
+            .unwrap()
+            .image("saved")
+            .unwrap()
+            .unwrap();
         drop((cut, captured_graphs, captured_models));
         assert_eq!(graph_image(&graph), expected.0);
         assert_eq!(model_image(&model), expected.1);
@@ -134,7 +139,7 @@ fn memory_resource_capture_failure_preserves_writes_and_independent_capture_allo
         expected.0
     );
     assert_eq!(
-        model_image(model.get().unwrap().get("saved").unwrap()),
+        model_image(&model.get().unwrap().image("saved").unwrap().unwrap()),
         expected.1
     );
     drop((failed, cut, graph, model));
@@ -172,9 +177,9 @@ fn memory_resource_children_keep_original_cancellation_after_registry_and_engine
         .unwrap()
         .get()
         .unwrap()
-        .get("saved")
+        .image("saved")
         .unwrap()
-        .clone();
+        .unwrap();
     drop(cut);
     control.cancellation().cancel();
     let mut output = Vec::new();
@@ -189,5 +194,65 @@ fn memory_resource_children_keep_original_cancellation_after_registry_and_engine
     ));
     assert!(output.is_empty());
     drop((graph, model));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn committed_model_capture_and_native_publication_share_unrelated_weights() {
+    let engine = Engine::new();
+    let original = model(0.25);
+    engine.save_model("large", &original).unwrap();
+    let small = DeepModel {
+        layers: vec![DeepLayerSpec::Input { dimensions: 1 }],
+        alpha: 0.5,
+        gating: GatingSpec::None,
+    };
+    for index in 0..64 {
+        engine
+            .save_model(&format!("small-{index:02}"), &small)
+            .unwrap();
+    }
+    let large = std::sync::Arc::downgrade(&engine.durable.models.read()["large"]);
+    let unread = std::sync::Arc::downgrade(&engine.durable.models.read()["small-00"]);
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut cut = None;
+    let usage = allocation_counter::measure(|| {
+        cut = Some(engine.capture_committed_memory(&control).unwrap());
+    });
+    assert!(usage.bytes_total < 1 << 19, "{usage:?}");
+    let cut = cut.unwrap();
+    let captured = cut.resources.models.captured(&cut.cut).unwrap();
+    let saved = captured.get().unwrap().image("large").unwrap().unwrap();
+    let retained = control.memory().used();
+    let usage = allocation_counter::measure(|| engine.save_model("small-00", &small).unwrap());
+    assert!(usage.bytes_total < 1 << 19, "{usage:?}");
+    sql(&engine, "BEGIN; SAVEPOINT saved_models");
+    engine.save_model("large", &small).unwrap();
+    engine.save_model("private", &small).unwrap();
+    sql(&engine, "ROLLBACK TO saved_models; COMMIT");
+    assert_eq!(engine.load_model("large").unwrap(), Some(original));
+    assert!(engine.load_model("private").unwrap().is_none());
+    engine.save_model("later", &model(0.75)).unwrap();
+    let expected = model_image(
+        &engine.durable.models.read()["large"]
+            .capture_image_with_control(&StorageReadControl::with_limit(2 << 20))
+            .unwrap(),
+    );
+    drop(engine);
+    assert_eq!(control.memory().used(), retained);
+    assert_eq!(captured.get().unwrap().len(), 65);
+    assert!(captured.get().unwrap().image("later").unwrap().is_none());
+    assert_eq!(model_image(&saved), expected);
+    drop((captured, cut));
+    assert!(unread.upgrade().is_none());
+    assert!(large.upgrade().is_some());
+    assert!(control.memory().used() > 1 << 20);
+    assert!(control.memory().used() < (1 << 20) + 4096);
+    control.cancellation().cancel();
+    assert!(saved
+        .write_image(&mut Vec::new(), &StorageReadControl::with_limit(0))
+        .is_err());
+    drop(saved);
+    assert!(large.upgrade().is_none());
     assert_eq!(control.memory().used(), 0);
 }

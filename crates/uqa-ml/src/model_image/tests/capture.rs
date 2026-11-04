@@ -11,6 +11,21 @@ use std::sync::Arc;
 fn captured_model_images_preserve_every_layer_after_source_replacement_and_loss() {
     for model in fixtures::models() {
         let expected = encode(&model);
+        let mut catalog = crate::model_catalog::ModelCatalog::default();
+        catalog
+            .insert("saved".into(), Arc::new(model.clone()))
+            .unwrap();
+        let catalog_control = StorageReadControl::with_limit(1 << 20);
+        let captured_catalog = catalog.capture(&catalog_control).unwrap();
+        let catalog_image = captured_catalog.image("saved").unwrap().unwrap();
+        drop((catalog, captured_catalog));
+        let mut catalog_bytes = Vec::new();
+        catalog_image
+            .write_image(&mut catalog_bytes, &StorageReadControl::with_limit(0))
+            .unwrap();
+        assert_eq!(catalog_bytes, expected);
+        drop(catalog_image);
+        assert_eq!(catalog_control.memory().used(), 0);
         let mut source = Arc::new(model);
         let control = StorageReadControl::with_limit(1 << 20);
         let captured = source.capture_image_with_control(&control).unwrap();

@@ -17,6 +17,7 @@ use uqa_storage::{
 
 mod capture;
 mod layers;
+pub(crate) use capture::retained_model_bytes;
 pub use capture::ModelImageSnapshot;
 #[cfg(test)]
 mod tests;

@@ -27,14 +27,11 @@ impl DurableCatalogState {
                     uqa_graph::GraphStoreHandle::capture_image_with_control,
                 )
             })?;
-        state.models =
-            CatalogCell::capture_resource(state.models.snapshot(), registry, |values, control| {
-                resources(
-                    values,
-                    control,
-                    uqa_ml::DeepModel::capture_image_with_control,
-                )
-            })?;
+        state.models = CatalogCell::capture_resource(
+            state.models.snapshot(),
+            registry,
+            uqa_ml::model_catalog::ModelCatalog::capture,
+        )?;
         state.path_indexes = CatalogCell::capture_resource(
             state.path_indexes.snapshot(),
             registry,

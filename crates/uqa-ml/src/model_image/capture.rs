@@ -27,29 +27,35 @@ impl DeepModel {
         control: &StorageReadControl,
     ) -> StorageBackendResult<ModelImageSnapshot> {
         control.check()?;
-        let Self {
-            layers,
-            alpha: _,
-            gating: _,
-        } = self.as_ref();
-        let mut memory = control
-            .memory()
-            .reserve(size_of::<Self>() + size_of::<RetainedModel>())?;
-        buffer::<DeepLayerSpec>(&mut memory, layers.capacity())?;
-        for layer in layers {
-            control.check()?;
-            retain_layer(layer, &mut memory)?;
-        }
+        let bytes = retained_model_bytes(self, || control.check())?;
+        let mut memory = control.memory().reserve(bytes)?;
+        memory.grow(ModelImageSnapshot::wrapper_bytes())?;
         control.check()?;
-        Ok(ModelImageSnapshot(Arc::new(RetainedModel {
-            source: self.clone(),
-            control: control.clone(),
-            _memory: memory,
-        })))
+        Ok(ModelImageSnapshot::from_admitted(
+            self.clone(),
+            control,
+            memory,
+        ))
     }
 }
 
 impl ModelImageSnapshot {
+    pub(crate) fn wrapper_bytes() -> usize {
+        size_of::<RetainedModel>()
+    }
+
+    pub(crate) fn from_admitted(
+        source: Arc<DeepModel>,
+        control: &StorageReadControl,
+        memory: MemoryReservation,
+    ) -> Self {
+        Self(Arc::new(RetainedModel {
+            source,
+            control: control.clone(),
+            _memory: memory,
+        }))
+    }
+
     pub fn write_image(
         &self,
         output: &mut dyn std::io::Write,
@@ -61,16 +67,41 @@ impl ModelImageSnapshot {
     }
 }
 
-fn buffer<T>(memory: &mut MemoryReservation, capacity: usize) -> StorageBackendResult<()> {
-    memory.grow(
+pub(crate) fn retained_model_bytes<E: From<MemoryError>>(
+    model: &DeepModel,
+    mut check: impl FnMut() -> Result<(), E>,
+) -> Result<usize, E> {
+    let DeepModel {
+        layers,
+        alpha: _,
+        gating: _,
+    } = model;
+    let mut bytes = size_of::<DeepModel>();
+    buffer::<DeepLayerSpec>(&mut bytes, layers.capacity())?;
+    for layer in layers {
+        check()?;
+        retain_layer(layer, &mut bytes)?;
+    }
+    Ok(bytes)
+}
+
+fn buffer<T>(bytes: &mut usize, capacity: usize) -> Result<(), MemoryError> {
+    add(
+        bytes,
         capacity
             .checked_mul(size_of::<T>())
             .ok_or(MemoryError::SizeOverflow)?,
-    )?;
+    )
+}
+
+fn add(bytes: &mut usize, additional: usize) -> Result<(), MemoryError> {
+    *bytes = bytes
+        .checked_add(additional)
+        .ok_or(MemoryError::SizeOverflow)?;
     Ok(())
 }
 
-fn retain_layer(layer: &DeepLayerSpec, memory: &mut MemoryReservation) -> StorageBackendResult<()> {
+fn retain_layer(layer: &DeepLayerSpec, bytes: &mut usize) -> Result<(), MemoryError> {
     match layer {
         DeepLayerSpec::Input { dimensions: _ }
         | DeepLayerSpec::Flatten
@@ -79,7 +110,7 @@ fn retain_layer(layer: &DeepLayerSpec, memory: &mut MemoryReservation) -> Storag
         | DeepLayerSpec::BatchNorm { epsilon: _ }
         | DeepLayerSpec::Dropout { p: _ }
         | DeepLayerSpec::Attention => {}
-        DeepLayerSpec::Embed { embedding } => buffer::<f64>(memory, embedding.capacity())?,
+        DeepLayerSpec::Embed { embedding } => buffer::<f64>(bytes, embedding.capacity())?,
         DeepLayerSpec::Dense {
             weights,
             bias,
@@ -109,8 +140,8 @@ fn retain_layer(layer: &DeepLayerSpec, memory: &mut MemoryReservation) -> Storag
             padding_height: _,
             padding_width: _,
         } => {
-            buffer::<f64>(memory, weights.capacity())?;
-            buffer::<f64>(memory, bias.capacity())?;
+            buffer::<f64>(bytes, weights.capacity())?;
+            buffer::<f64>(bytes, bias.capacity())?;
         }
         DeepLayerSpec::Propagate {
             edge_label,
@@ -122,14 +153,14 @@ fn retain_layer(layer: &DeepLayerSpec, memory: &mut MemoryReservation) -> Storag
             pool_size: _,
             method: _,
             direction: _,
-        } => memory.grow(edge_label.capacity())?,
+        } => add(bytes, edge_label.capacity())?,
         DeepLayerSpec::Conv {
             edge_label,
             hop_weights,
             direction: _,
         } => {
-            memory.grow(edge_label.capacity())?;
-            buffer::<f64>(memory, hop_weights.capacity())?;
+            add(bytes, edge_label.capacity())?;
+            buffer::<f64>(bytes, hop_weights.capacity())?;
         }
         DeepLayerSpec::RNN {
             weights_input,
@@ -148,7 +179,7 @@ fn retain_layer(layer: &DeepLayerSpec, memory: &mut MemoryReservation) -> Storag
             return_sequences: _,
         } => {
             for weights in [weights_input, weights_hidden, bias] {
-                buffer::<f64>(memory, weights.capacity())?;
+                buffer::<f64>(bytes, weights.capacity())?;
             }
         }
     }

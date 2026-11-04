@@ -39530,6 +39530,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_captures_nonclone_payloads_without_allocating_or_visiting_entries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Immutable retained-map capture",
+      "workload": "Capture 1, 64 and 4,096 nonclone entries under independent allowances and replace and clear the source.",
+      "invariant": "Capture allocates no heap storage, independently funds the complete footprint and preserves original ordering and values until final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_failed_updates_and_overflow_preserve_root_and_footprint",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Retained-map publication atomicity",
+      "workload": "Exhaust tree admission and overflow a cached payload sum during insertion, replacement and removal.",
+      "invariant": "Failed updates preserve both root interpretation and retained totals; successful replacement adjusts the original total exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_capture_admits_exact_root_and_releases_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Retained-map independent admission",
+      "workload": "Capture roots under exact and insufficient budgets and exercise structural-plus-payload overflow.",
+      "invariant": "Admission funds the exact selected footprint, rejected captures leak no reservation and empty roots need no allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_catalog_capture_and_publication_do_not_traverse_unrelated_layers",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests.rs",
+      "capability": "Immutable model catalog work",
+      "workload": "Capture 1, 64 and 4,096 models beside four MiB of spare weights, replace and remove native entries and close the source.",
+      "invariant": "Capture allocates no heap objects; updates allocate below 32 KiB, unchanged model identity remains shared and independently funded images remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "detached_model_images_transfer_payload_leases_and_release_unselected_models",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests.rs",
+      "capability": "Detached model lease partition",
+      "workload": "Deny child metadata admission, select the same model twice and close a two-model catalog with multi-MiB buffers.",
+      "invariant": "Child creation charges no second weight copy, denied first reads allocate nothing with no remaining allowance, failed admission preserves the root lease, unselected models retire and original cancellation survives closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_catalog_admission_is_independent_and_preserves_failed_native_updates",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests.rs",
+      "capability": "Model catalog admission failures",
+      "workload": "Exhaust construction and independent capture allowances around native updates, root capture and child selection.",
+      "invariant": "Failed updates preserve native membership; rejected captures or children leave no partial charge and original cancellation remains effective.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "concurrent_model_image_selection_keeps_one_payload_lease_until_the_last_child",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests.rs",
+      "capability": "Concurrent model child ownership",
+      "workload": "Select one retained model through eight concurrent first readers, compare sequential admission, close the catalog and retire every child.",
+      "invariant": "Readers share one admitted child, exact output survives parent loss and payload retention ends at the last child.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_model_capture_and_native_publication_share_unrelated_weights",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/resources.rs",
+      "capability": "Committed model generations",
+      "workload": "Capture an actual memory Engine beside a one-MiB model, update other models, roll back savepoints, grow the catalog and close the Engine.",
+      "invariant": "Capture and publication each allocate below 512 KiB; original model images survive while unselected models retire and child cancellation remains attached.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

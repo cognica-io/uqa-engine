@@ -4125,6 +4125,7 @@ name = "uqa-ml"
 version = "0.6.3"
 dependencies = [
  "allocation-counter",
+ "parking_lot",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

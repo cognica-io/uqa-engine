@@ -77,6 +77,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share immutable stored-model catalog roots across transaction snapshots and memory captures. Captures admit cached model footprints without visiting layers or copying weights; detached image handles retain only their selected model after catalog closure, under the original memory allowance and cancellation. Complete Engine backup remains under implementation.
 - Share immutable scoring-parameter catalog roots across transaction snapshots and memory captures. Capture admits the complete retained footprint without copying the catalog; later updates preserve unrelated encoded payloads and exact rollback state. Complete Engine backup remains under implementation.
 - Qualify dependent PR stacks once after integration into a candidate targeting main. Intermediate stacked PRs no longer start duplicate platform matrices; existing validation commands and acceptance bounds remain unchanged.
 

@@ -31,8 +31,8 @@ mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
-    SequenceState, TableFieldAnalyzerRegistry, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache, SequenceState,
+    TableFieldAnalyzerRegistry, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -172,8 +172,8 @@ pub(super) struct DurableCatalogState {
         resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,
     >,
     pub(super) models: CatalogCell<
-        BTreeMap<String, Arc<DeepModel>>,
-        resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
+        uqa_ml::model_catalog::ModelCatalog,
+        uqa_ml::model_catalog::CapturedModelCatalog,
     >,
     pub(super) scoring_params: CatalogCell<
         uqa_storage::catalog::scoring_params::ScoringParameters,
@@ -310,7 +310,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: Arc<BTreeMap<String, Arc<DeepModel>>>,
+    pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
@@ -356,7 +356,7 @@ impl DurableCatalogState {
             comments: CatalogCell::new(BTreeMap::new()),
             composites: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
-            models: CatalogCell::new(BTreeMap::new()),
+            models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
             scoring_params: CatalogCell::new(
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),
             ),

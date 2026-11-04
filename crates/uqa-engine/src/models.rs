@@ -32,7 +32,7 @@ impl Engine {
                 .save_model(name, &json)
                 .map_err(|e| SQLError::Internal(format!("catalog save_model: {e}")))?;
         }
-        models.insert(name.to_string(), Arc::new(model.clone()));
+        models.insert(name.to_string(), Arc::new(model.clone()))?;
         drop(models);
         self.note_catalog_registry_changed();
         Ok(())
@@ -65,10 +65,10 @@ impl Engine {
         let mut cache = self.durable.models.write();
         match model.as_ref() {
             Some(model) => {
-                cache.insert(name.to_string(), Arc::new(model.clone()));
+                cache.insert(name.to_string(), Arc::new(model.clone()))?;
             }
             None => {
-                cache.remove(name);
+                cache.remove(name)?;
             }
         }
         Ok(model)
@@ -88,7 +88,7 @@ impl Engine {
                 .drop_model(name)
                 .map_err(|err| SQLError::Internal(format!("catalog drop_model: {err}")))?;
         }
-        models.remove(name);
+        models.remove(name)?;
         drop(models);
         self.note_catalog_registry_changed();
         Ok(true)
