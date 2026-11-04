@@ -18,7 +18,8 @@ permissions:
 
 concurrency:
   group: c-bindings-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  # Only a completed replacement PR candidate supersedes the previous source.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
 
 env:
   CARGO_TERM_COLOR: always

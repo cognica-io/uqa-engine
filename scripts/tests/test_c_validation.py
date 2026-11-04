@@ -188,6 +188,15 @@ class GitSelectionTests(unittest.TestCase):
         for kind in SCOPE.WORKFLOWS:
             self.assertFalse(self.select(kind)["required"])
 
+    def test_scheduling_changes_do_not_rebuild_unchanged_c_artifacts(self):
+        for policy in ("false", "${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}"):
+            for kind, path in SCOPE.WORKFLOWS.items():
+                changed = workflow(kind).replace(b"env:\n", ("concurrency:\n  group: fixture\n  cancel-in-progress: " + policy + "\nenv:\n").encode())
+                self.write(path, changed)
+            self.commit()
+            for kind in SCOPE.WORKFLOWS:
+                self.assertFalse(self.select(kind)["required"])
+
     def test_actual_workflow_execution_changes_select_the_affected_surface(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             with self.subTest(kind=kind):
@@ -205,6 +214,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_scopes_gate_all_heavy_jobs_and_full_callers_are_preserved(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             source = (ROOT / path).read_text()
+            self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}", source)
             self.assertIn("force_all:\n", source)
             self.assertIn("        default: true\n", source)
             self.assertIn("C_VALIDATION_FORCE_ALL: ${{ inputs.force_all }}", source)
