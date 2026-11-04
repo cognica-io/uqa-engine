@@ -5,13 +5,14 @@
 //
 
 use super::*;
+use std::collections::BTreeMap;
 use uqa_sql::catalog::{foreign_server::ForeignServerMetadata, roles::RoleIdentity};
 
 fn definition() -> ForeignServerDefinition {
     ForeignServerDefinition {
         name: "source".into(),
         fdw_type: "memory_fdw".into(),
-        options: BTreeMap::new(),
+        options: uqa_core::memory::OwnedMap::new(),
         metadata: ForeignServerMetadata {
             option_order: None,
             wrapper_reference: None,

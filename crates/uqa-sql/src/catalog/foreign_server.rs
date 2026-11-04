@@ -10,7 +10,11 @@ use super::roles::{identity::RoleSubject, RoleIdentity};
 use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use uqa_core::memory::OwnedMap;
+
+mod registry;
+pub use registry::{CapturedForeignServers, ForeignServers};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,7 +36,7 @@ pub struct ForeignServerMetadata {
 pub struct ForeignServerDefinition {
     pub name: String,
     pub fdw_type: String,
-    pub options: BTreeMap<String, String>,
+    pub options: OwnedMap<String, String>,
     pub metadata: ForeignServerMetadata,
 }
 
@@ -53,12 +57,12 @@ impl ForeignServerDefinition {
 
 /// Validate identities before publishing any restored definition. A name, OID or incarnation cannot alias another server, and an owner must still be the role incarnation that created it.
 pub fn validate_foreign_servers(
-    servers: &BTreeMap<String, ForeignServerDefinition>,
+    servers: &impl super::named_definitions::NamedDefinitionView<ForeignServerDefinition>,
     roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     let mut identities = BTreeSet::new();
-    for (name, server) in servers {
+    for (name, server) in servers.iter() {
         let metadata = &server.metadata;
         validate_foreign_server_name(name)?;
         if name != &server.name {

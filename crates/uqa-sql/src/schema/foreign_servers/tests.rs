@@ -62,7 +62,7 @@ impl Catalog {
         ForeignServerDefinition {
             name: "Mixed.Server".into(),
             fdw_type: "memory_fdw".into(),
-            options: BTreeMap::new(),
+            options: uqa_core::memory::OwnedMap::new(),
             metadata: ForeignServerMetadata {
                 option_order: None,
                 wrapper_reference: None,

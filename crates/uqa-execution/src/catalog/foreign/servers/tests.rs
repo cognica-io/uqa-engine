@@ -20,7 +20,10 @@ fn definition() -> ForeignServerDefinition {
     ForeignServerDefinition {
         name: "source".into(),
         fdw_type: "memory_fdw".into(),
-        options: BTreeMap::from([("metadata_json".into(), "user option".into())]),
+        options: uqa_core::memory::OwnedMap::from_iter([(
+            "metadata_json".into(),
+            "user option".into(),
+        )]),
         metadata: ForeignServerMetadata {
             option_order: None,
             wrapper_reference: None,

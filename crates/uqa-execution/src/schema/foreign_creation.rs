@@ -13,7 +13,7 @@ use crate::schema::{
         ownership::ImplicitOwnershipContext,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::ops::DerefMut;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::DeferredCreateForeignTable,
@@ -30,11 +30,8 @@ mod wrappers;
 pub use crate::catalog::foreign::reads::{
     ForeignRegistryReads, ForeignSecurityRead, ForeignServersRead, ForeignTablesRead,
 };
-pub type ForeignServersWrite<'a> = Box<
-    dyn DerefMut<
-            Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
-        > + 'a,
->;
+pub type ForeignServersWrite<'a> =
+    Box<dyn DerefMut<Target = uqa_sql::catalog::foreign_server::ForeignServers> + 'a>;
 pub type ForeignWrappersWrite<'a> =
     Box<dyn DerefMut<Target = uqa_sql::catalog::foreign_wrapper::ForeignWrappers> + 'a>;
 pub trait ForeignCreationRegistry: ForeignRegistryReads {

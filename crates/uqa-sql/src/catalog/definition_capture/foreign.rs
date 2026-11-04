@@ -14,7 +14,6 @@ use crate::{
     plan::copy::SyntaxProduction,
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::memory::{Produced, ProductionControl};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,8 +24,8 @@ pub struct CapturedForeignServer {
     pub metadata: ForeignServerMetadata,
 }
 
-pub fn options(
-    values: &BTreeMap<String, String>,
+pub fn options<'a>(
+    values: impl ExactSizeIterator<Item = (&'a String, &'a String)>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<(String, String)>>, SQLError> {
     let output = SyntaxProduction::new(*control);
@@ -52,11 +51,12 @@ pub fn wrappers(
 }
 
 pub fn servers(
-    values: &BTreeMap<String, ForeignServerDefinition>,
+    values: &impl crate::catalog::named_definitions::NamedDefinitionView<ForeignServerDefinition>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<(String, CapturedForeignServer)>>, SQLError> {
     let output = SyntaxProduction::new(*control);
-    let mut entries = output.vector(values.len())?;
+    let values = values.iter();
+    let mut entries = output.vector(values.size_hint().0)?;
     for (key, value) in values {
         let ForeignServerDefinition {
             name,
@@ -69,7 +69,7 @@ pub fn servers(
             CapturedForeignServer {
                 name: output.text(name)?,
                 fdw_type: output.text(fdw_type)?,
-                options: output.take(options(values, control)?),
+                options: output.take(options(values.iter(), control)?),
                 metadata: output.capture_definition(metadata)?,
             },
         ))?;

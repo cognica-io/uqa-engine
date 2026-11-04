@@ -28,7 +28,7 @@ pub struct ForeignRestoreContext<'a> {
 
 pub struct RestoredForeignCatalog {
     pub wrappers: uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
-    pub servers: BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+    pub servers: uqa_sql::catalog::foreign_server::ForeignServers,
     pub tables: BTreeMap<RelationIdentity, super::StoredForeignTable>,
     pub security: BTreeMap<RelationIdentity, BoundTableSecurity>,
 }
@@ -184,7 +184,7 @@ fn restore_schema(
 fn restore_wrappers(
     context: &ForeignRestoreContext<'_>,
     catalog: &dyn CatalogFacade,
-    servers: &mut BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
+    servers: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     allow_migration: bool,
 ) -> StorageBackendResult<super::wrappers::RestoredWrappers> {
     let restored = super::wrappers::restore(

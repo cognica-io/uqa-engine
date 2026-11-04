@@ -368,10 +368,12 @@ fn a_wrapper_without_a_handler_cannot_choose_a_native_adapter_by_name() {
         .durable
         .foreign_servers
         .write()
-        .get_mut("source")
+        .edit("source", |server| {
+            server.metadata.wrapper_reference = Some(reference);
+            Ok(())
+        })
         .unwrap()
-        .metadata
-        .wrapper_reference = Some(reference);
+        .unwrap();
     engine
         .sql("CREATE VIEW visible AS SELECT a FROM items", &[])
         .unwrap();

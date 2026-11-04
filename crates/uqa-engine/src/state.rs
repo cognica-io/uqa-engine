@@ -242,11 +242,8 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers,
     >,
     pub(super) foreign_servers: CatalogCell<
-        BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
-        Vec<(
-            String,
-            uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer,
-        )>,
+        uqa_sql::catalog::foreign_server::ForeignServers,
+        uqa_sql::catalog::foreign_server::CapturedForeignServers,
     >,
     pub(super) foreign_tables: CatalogCell<
         BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>,
@@ -318,8 +315,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub(super) foreign_servers:
-        Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
+    pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
     pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
     pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub(super) builtin_routine_security:
@@ -365,7 +361,9 @@ impl DurableCatalogState {
             named_analyzers: CatalogCell::new(BTreeMap::new()),
             table_field_analyzers: CatalogCell::new(BTreeMap::new()),
             foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
-            foreign_servers: CatalogCell::new(BTreeMap::new()),
+            foreign_servers: CatalogCell::new(
+                uqa_sql::catalog::foreign_server::ForeignServers::new(),
+            ),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
             builtin_routine_security: CatalogCell::new(BTreeMap::new()),

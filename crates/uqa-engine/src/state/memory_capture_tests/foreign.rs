@@ -8,25 +8,16 @@ use super::{sql, Engine, StorageReadControl};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::foreign::{capture::CapturedForeignTable, StoredForeignTable};
-use uqa_sql::catalog::{
-    definition_capture::foreign::CapturedForeignServer, foreign_server::ForeignServerDefinition,
-};
+use uqa_sql::catalog::foreign_server::{CapturedForeignServers, ForeignServers};
 
-fn same_servers(
-    saved: &[(String, CapturedForeignServer)],
-    source: &BTreeMap<String, ForeignServerDefinition>,
-) {
+fn same_servers(saved: &CapturedForeignServers, source: &ForeignServers) {
     assert_eq!(saved.len(), source.len());
     for ((name, value), (original_name, original)) in saved.iter().zip(source) {
         assert_eq!(name, original_name);
         assert_eq!(value.name, original.name);
         assert_eq!(value.fdw_type, original.fdw_type);
         assert_eq!(value.metadata, original.metadata);
-        assert!(value
-            .options
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(original.options.iter()));
+        assert!(value.options.iter().eq(original.options.iter()));
     }
 }
 

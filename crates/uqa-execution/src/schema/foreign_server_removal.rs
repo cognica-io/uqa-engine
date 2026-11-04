@@ -144,9 +144,8 @@ impl ForeignCatalogRemovalContext<'_> {
 impl ForeignServerRemovalPublication<'_> {
     /// The dependency plan has removed every dependent and retains this server's object lock; do not reauthorize those dependents against the invoking role.
     pub fn remove(&self, name: &str, object_id: [u8; 16]) -> Result<(), SQLError> {
-        if self
-            .registry
-            .servers()
+        let mut next = self.registry.servers().clone();
+        if next
             .get(name)
             .is_none_or(|server| server.metadata.object_id != object_id)
         {
@@ -154,10 +153,11 @@ impl ForeignServerRemovalPublication<'_> {
                 "foreign server `{name}` changed before catalog removal"
             )));
         }
+        next.remove(name)?;
         if let Some(catalog) = self.catalog {
             catalog.drop_foreign_server(name).map_err(storage_error)?;
         }
-        self.registry.servers_write().remove(name);
+        **self.registry.servers_write() = next;
         self.changes.catalog_registry_changed();
         Ok(())
     }

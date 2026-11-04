@@ -19,7 +19,7 @@ use uqa_sql::catalog::{
     domain::StoredDomain,
     enum_type::StoredEnum,
     events::{RuleCatalog, TriggerCatalog},
-    foreign_server::ForeignServerDefinition,
+    foreign_server::ForeignServers,
     foreign_wrapper::ForeignWrappers,
     graph_oids::{CapturedGraphOidRegistry, GraphOidRegistry},
     range_type::StoredRange,
@@ -77,7 +77,7 @@ catalog_sources! {
     builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => Vec<(u32, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity)>, uqa_sql::catalog::security::capture::relations::builtin_routines;
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => Vec<(RelationIdentity, uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity)>, uqa_sql::catalog::security::capture::relations::system_relations;
     foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;
-    foreign_servers: BTreeMap<String, ForeignServerDefinition> => Vec<(String, uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer)>, uqa_sql::catalog::definition_capture::foreign::servers;
+    foreign_servers: ForeignServers => uqa_sql::catalog::foreign_server::CapturedForeignServers, ForeignServers::capture;
     triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;
     rules: RuleCatalog => uqa_sql::catalog::definition_capture::rules::CapturedRules, uqa_sql::catalog::definition_capture::rules::durable_rules;
     graph_catalog_oids: GraphOidRegistry => CapturedGraphOidRegistry, GraphOidRegistry::capture;

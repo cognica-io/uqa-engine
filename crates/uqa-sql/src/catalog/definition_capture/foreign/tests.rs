@@ -9,6 +9,7 @@ use crate::{
     ast::FunctionBinding,
     catalog::{foreign_wrapper::*, roles::RoleIdentity},
 };
+use std::collections::BTreeMap;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn callback() -> ForeignWrapperFunction {
@@ -34,7 +35,7 @@ fn server() -> ForeignServerDefinition {
     ForeignServerDefinition {
         name: "Exact.Server".into(),
         fdw_type: "Exact.Wrapper".into(),
-        options: BTreeMap::from([
+        options: uqa_core::memory::OwnedMap::from_iter([
             ("z".into(), "first\nvalue".into()),
             ("a".into(), "second 한글".into()),
         ]),

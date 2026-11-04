@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -40074,6 +40074,58 @@
       "capability": "Committed native wrapper roots",
       "workload": "Capture 1, 32 and 128 SQL wrapper definitions through private same-name replacement, savepoint rollback, COMMIT, another replacement and Engine closure.",
       "invariant": "Capture stays below 32 KiB and 128 allocations and preserves the original incarnation, handler and ordered options under independent cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "server_roots_admit_exact_option_storage_and_capture_original_values_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Immutable server capture",
+      "workload": "Copy exact option storage and capture 1, 64 and 4096 server definitions with independent allowances, legacy values and option encodings.",
+      "invariant": "Copied allocation equals admitted bytes; root capture allocates no heap storage, preserves every optional metadata field and original reference, and releases all independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_server_publication_shares_unrelated_options_and_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Selected server publication",
+      "workload": "Publish one server beside 1, 32 and 512 definitions and unrelated large option and metadata payloads.",
+      "invariant": "Selected publication stays below 32 KiB and 256 allocations while preserving original values and sharing every unrelated definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_server_publication_and_capture_preserve_original_references_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_server/registry/tests.rs",
+      "capability": "Server admission failure",
+      "workload": "Deny capture by one byte, exhaust native admission, attempt replacement, cancel and retire source owners.",
+      "invariant": "Failure leaves original wrapper and owner references unchanged; all rejected and completed native and captured leases are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_server_roots_preserve_original_options_and_incarnations_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/server_roots.rs",
+      "capability": "Committed native server roots",
+      "workload": "Capture 1, 32 and 128 SQL server definitions through private replacement, savepoint rollback, COMMIT, another incarnation and Engine closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and preserves original identities, optional type/version and written option order under independent cancellation and complete allowance release.",
       "case_names": [
         ""
       ]

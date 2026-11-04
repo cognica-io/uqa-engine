@@ -85,7 +85,7 @@ impl DurableCatalogState {
         self.foreign_servers = CatalogCell::capture_source(
             self.foreign_servers.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::foreign::servers,
+            uqa_sql::catalog::foreign_server::ForeignServers::capture,
         )?;
         self.foreign_tables = CatalogCell::capture_source(
             self.foreign_tables.snapshot(),

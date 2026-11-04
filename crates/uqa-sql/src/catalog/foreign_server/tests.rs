@@ -7,13 +7,15 @@
 use super::*;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeMap;
 
 #[test]
 fn persisted_option_order_must_describe_each_stored_key_once() {
     let roles =
         RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let mut server = definition();
-    server.options = BTreeMap::from([("a".into(), "1".into()), ("b".into(), "2".into())]);
+    server.options =
+        uqa_core::memory::OwnedMap::from_iter([("a".into(), "1".into()), ("b".into(), "2".into())]);
     for (order, valid) in [
         (None, true),
         (Some(vec!["b", "a"]), true),
@@ -35,7 +37,7 @@ fn definition() -> ForeignServerDefinition {
     ForeignServerDefinition {
         name: "source".into(),
         fdw_type: "memory_fdw".into(),
-        options: BTreeMap::new(),
+        options: uqa_core::memory::OwnedMap::new(),
         metadata: ForeignServerMetadata {
             option_order: None,
             wrapper_reference: None,

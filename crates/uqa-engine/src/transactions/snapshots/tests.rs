@@ -22,6 +22,7 @@ mod role_roots;
 mod schema_roots;
 mod sequence_values;
 mod sequences;
+mod server_roots;
 mod table_metadata;
 mod type_roots;
 mod undo_sources;
