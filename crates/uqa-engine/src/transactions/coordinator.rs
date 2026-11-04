@@ -9,10 +9,11 @@
 //! Memory snapshot acquisition is ordered by the statement gate, the table registry and its per-table state, the durable registries (`graphs`, `models`, `scoring_params`, `views`, `catalog_indexes`, `database_security`, `schemas`, `path_indexes`, `sequences`, `sequence_object_ids`, `sequence_persistence`, `sequence_security`, `named_analyzers`, `table_field_analyzers`, `foreign_wrappers`, `foreign_servers`, `foreign_tables`, `foreign_table_security`, `sql_user_functions`, `roles`, `role_memberships`, `triggers`, and `rules`), and finally in-memory FDW rows. Durable restore uses the same registry order. Callers must enter through this coordinator instead of holding an individual registry lock across snapshot or restore.
 
 use super::{
-    failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, SQLError, SessionStateSnapshot, StorageBackendError, StorageSavepointId,
-    TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame, TransactionFrameKind,
-    TransactionIntent, TransactionStatus,
+    failed_transaction_error, snapshots::SnapshotBoundary, BackendTransactionMode,
+    ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
+    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
+    TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
+    TransactionStatus,
 };
 
 impl Engine {
@@ -246,7 +247,8 @@ impl Engine {
                 }
                 (Some(savepoint), None, baseline)
             } else {
-                (Some(savepoint), self.snapshot_transaction_data()?, baseline)
+                let snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
+                (Some(savepoint), snapshot, baseline)
             }
         };
         let (constraint_modes, deferred_foreign_key_checks, deferred_constraint_trigger_events) =
@@ -396,7 +398,10 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("BEGIN table data refresh", &err))?;
             self.synchronize_catalog_registries()
                 .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
-            return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
+            return Ok((
+                self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
+                snapshot_gate.baseline()?,
+            ));
         };
         let snapshot_gate = if backend.transaction_model().is_versioned() {
             let gate = self
@@ -452,7 +457,10 @@ impl Engine {
                 return Err(recovered);
             }
         };
-        Ok((self.snapshot_transaction_data()?, baseline))
+        Ok((
+            self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
+            baseline,
+        ))
     }
 
     /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the structural backend-writer lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.

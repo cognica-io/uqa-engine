@@ -7,8 +7,8 @@
 //! SQL savepoint state and backend savepoint coordination.
 
 use super::{
-    BackendTransactionMode, Engine, SQLError, StorageSavepointId, TransactionFrame,
-    TransactionSavepoint, TransactionStatus,
+    snapshots::SnapshotBoundary, BackendTransactionMode, Engine, SQLError, StorageSavepointId,
+    TransactionFrame, TransactionSavepoint, TransactionStatus,
 };
 
 impl Engine {
@@ -31,7 +31,7 @@ impl Engine {
             });
         }
         let session_snapshot = self.snapshot_session_state();
-        let data_snapshot = self.snapshot_transaction_data()?;
+        let data_snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
         let deferred = Self::backend_savepoints_deferred(stack);
         let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {

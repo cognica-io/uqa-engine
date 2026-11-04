@@ -61,7 +61,7 @@ impl Engine {
             // Never wait for the statement gate while holding transaction admission: an operation can own that gate while starting its first frame.
             if let Some(_statement) = self.runtime.statement_gate.try_lock_idle() {
                 let snapshot = self
-                    .snapshot_transaction_data()
+                    .snapshot_transaction_data(super::SnapshotBoundary::CommittedOriginal)
                     .map_err(|error| StorageBackendError::backend("idle memory capture", error))?
                     .ok_or_else(|| {
                         StorageBackendError::Other("memory capture has no data generation".into())

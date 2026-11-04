@@ -22,6 +22,7 @@ mod sequence_values;
 mod sequences;
 mod table_metadata;
 mod type_roots;
+mod undo_sources;
 
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();

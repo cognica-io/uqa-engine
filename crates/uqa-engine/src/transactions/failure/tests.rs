@@ -146,7 +146,9 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
     let constraints = table.key_constraints.snapshot();
     let mut snapshot = None;
     let allocated = allocation_counter::measure(|| {
-        snapshot = engine.snapshot_transaction_data().unwrap();
+        snapshot = engine
+            .snapshot_transaction_data(super::super::snapshots::SnapshotBoundary::CommittedOriginal)
+            .unwrap();
     });
     assert!(allocated.bytes_total < 64 * 1024, "{allocated:?}");
     let snapshot = snapshot.unwrap();

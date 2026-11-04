@@ -39855,6 +39855,20 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_undo_generations_preserve_rows_and_sequences_without_capture_registration",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/undo_sources.rs",
+      "capability": "Committed source ownership",
+      "workload": "Create outer, nested and savepoint generations, capture original rows and autonomous sequence values, complete the nested frame in both ways, roll back and close the source.",
+      "invariant": "Only the outer original owns capture registrations; private undo preserves native rows, metadata and sequence history while the original capture retains cancellation and releases its allowance.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
     }
   ]
 }
