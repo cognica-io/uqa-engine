@@ -32,7 +32,7 @@ pub use heap::BudgetedBinaryHeap;
 pub use map::{
     BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter,
     BudgetedSharedMapIter, BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet,
-    OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry,
+    OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry, PreparedSharedMapInsert,
 };
 pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{
@@ -40,7 +40,8 @@ pub use production::{
     ProductionString, ProductionVec,
 };
 pub use retained_map::{
-    RetainedMap, RetainedMapBidirectionalIter, RetainedMapIter, RetainedMapSnapshot,
+    PreparedRetainedMapInsert, RetainedMap, RetainedMapBidirectionalIter, RetainedMapIter,
+    RetainedMapSnapshot,
 };
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;

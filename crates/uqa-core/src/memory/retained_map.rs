@@ -8,7 +8,7 @@
 
 use super::{
     Budgeted, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
-    BudgetedSharedMapSnapshot, MemoryBudget, MemoryError,
+    BudgetedSharedMapSnapshot, MemoryBudget, MemoryError, PreparedSharedMapInsert,
 };
 use std::borrow::Borrow;
 
@@ -21,6 +21,25 @@ struct Entry<V> {
 pub struct RetainedMap<K, V> {
     values: BudgetedSharedMap<K, Entry<V>>,
     payload_bytes: usize,
+}
+
+/// A native owner admits the final payload before preparation and supplies that value after its external operation succeeds. The selected path and complete retained footprint are fixed until publication; abandoning this token changes neither the root nor its footprint.
+pub struct PreparedRetainedMapInsert<'a, K, V> {
+    insertion: PreparedSharedMapInsert<'a, K, Entry<V>>,
+    footprint: &'a mut usize,
+    payload_bytes: usize,
+    total: usize,
+}
+
+impl<K, V> PreparedRetainedMapInsert<'_, K, V> {
+    pub fn publish(self, value: V) {
+        // Publication has no remaining comparisons or admission. Install the matching footprint before retirement can run the replaced value's destructor.
+        *self.footprint = self.total;
+        self.insertion.publish(Entry {
+            value,
+            payload_bytes: self.payload_bytes,
+        });
+    }
 }
 
 impl<K, V> Clone for RetainedMap<K, V> {
@@ -42,6 +61,11 @@ impl<K, V> RetainedMap<K, V> {
 
     pub fn budget(&self) -> &MemoryBudget {
         self.values.budget()
+    }
+
+    /// Shared roots retain the same entries and their cached payload footprint.
+    pub fn shares_root(&self, other: &Self) -> bool {
+        self.values.shares_root(&other.values)
     }
 
     pub fn len(&self) -> usize {
@@ -127,21 +151,28 @@ impl<K: Ord, V> RetainedMap<K, V> {
 
     /// Replace a matching key and its value together. Failed footprint or tree admission leaves the original root and footprint unchanged.
     pub fn insert(&mut self, key: K, value: V, payload_bytes: usize) -> Result<(), MemoryError> {
+        self.prepare_insert(key, payload_bytes)?.publish(value);
+        Ok(())
+    }
+
+    /// Admit a selected path and its final cached payload footprint before obtaining the value. The final value must retain the separately owned payload capacities supplied here.
+    pub fn prepare_insert(
+        &mut self,
+        key: K,
+        payload_bytes: usize,
+    ) -> Result<PreparedRetainedMapInsert<'_, K, V>, MemoryError> {
         let previous = self.values.get(&key).map_or(0, |entry| entry.payload_bytes);
         let total = self
             .payload_bytes
             .checked_sub(previous)
             .and_then(|bytes| bytes.checked_add(payload_bytes))
             .ok_or(MemoryError::SizeOverflow)?;
-        self.values.try_insert(
-            key,
-            Entry {
-                value,
-                payload_bytes,
-            },
-        )?;
-        self.payload_bytes = total;
-        Ok(())
+        Ok(PreparedRetainedMapInsert {
+            insertion: self.values.prepare_insert(key)?,
+            footprint: &mut self.payload_bytes,
+            payload_bytes,
+            total,
+        })
     }
 
     pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> Result<bool, MemoryError>

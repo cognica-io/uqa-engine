@@ -15,7 +15,7 @@ mod tree;
 pub use owned::{OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter};
 pub use shared::{
     BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
-    BudgetedSharedMapSnapshot,
+    BudgetedSharedMapSnapshot, PreparedSharedMapInsert,
 };
 
 use std::borrow::Borrow;
