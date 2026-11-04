@@ -218,11 +218,8 @@ pub(super) struct DurableCatalogState {
     >,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
     pub(super) graph_catalog_oids: CatalogCell<
-        BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>,
-        Vec<(
-            String,
-            uqa_sql::catalog::definition_capture::identities::CapturedGraphCatalogOids,
-        )>,
+        uqa_sql::catalog::graph_oids::GraphOidRegistry,
+        uqa_sql::catalog::graph_oids::CapturedGraphOidRegistry,
     >,
     pub(super) sequence_persistence: CatalogCell<
         BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
@@ -317,8 +314,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
-    pub(super) graph_catalog_oids:
-        Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
+    pub(super) graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -364,7 +360,9 @@ impl DurableCatalogState {
             sequences: CatalogCell::new(BTreeMap::new()),
             sequence_object_ids: CatalogCell::new(BTreeMap::new()),
             sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
-            graph_catalog_oids: CatalogCell::new(BTreeMap::new()),
+            graph_catalog_oids: CatalogCell::new(
+                uqa_sql::catalog::graph_oids::GraphOidRegistry::new(),
+            ),
             sequence_persistence: CatalogCell::new(BTreeMap::new()),
             sequence_security: CatalogCell::new(BTreeMap::new()),
             named_analyzers: CatalogCell::new(BTreeMap::new()),

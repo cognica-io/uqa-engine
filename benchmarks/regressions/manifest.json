@@ -39921,6 +39921,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_roots_capture_without_enumeration_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Native graph identity capture",
+      "workload": "Capture 1, 64 and 4096 graph records with independent exact and insufficient allowances, then retire the source.",
+      "invariant": "Root capture allocates no heap storage, preserves every durable graph name and releases independent admissions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_copies_admit_exact_nested_allocations_and_keep_legacy_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Graph identity encoding and admission",
+      "workload": "Copy all label identity fields and nested constraint names, compare the original record and legacy ordered observations, then deny and cancel.",
+      "invariant": "Actual owned allocations equal admitted bytes; original JSON, complete OIDs and ordered values remain unchanged with no failed-copy leak.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_graph_oid_publication_shares_unrelated_definitions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Selected graph identity publication",
+      "workload": "Change one graph record beside 1, 32 and 512 records and an unrelated large constraint-name payload.",
+      "invariant": "Publication stays below 32 KiB and 256 allocations and shares all unrelated definitions while preserving original roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_graph_oid_publication_preserves_captured_roots_and_releases_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/registry/tests.rs",
+      "capability": "Graph identity publication failure",
+      "workload": "Exhaust native admission before a replacement while an independent capture retains the original graph.",
+      "invariant": "Failed publication leaves complete original values unchanged and final owners release native and captured allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_changes_preserve_original_records_through_rename_label_removal_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/changes/tests.rs",
+      "capability": "Graph identity record lifecycle",
+      "workload": "Persist same-name and changed-name renames, remove a label and drop the graph while retaining earlier roots.",
+      "invariant": "Persisted records match each successor, legacy absence remains absent, same-name rename preserves the record and earlier roots remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_admission_failure_does_not_mutate_native_or_persisted_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/changes/tests.rs",
+      "capability": "Graph identity record atomicity",
+      "workload": "Deny native successor admission before label removal and rename with an existing durable record.",
+      "invariant": "No incomplete successor reaches native or persisted state and the last owner releases every native lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "graph_oid_creation_keeps_legacy_absence_and_publishes_only_changed_graph_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/identity/allocation/tests/graphs.rs",
+      "capability": "Graph identity allocation ownership",
+      "workload": "Create graphs beside a legacy graph without OID records, repeat unchanged publication and add one new label.",
+      "invariant": "Legacy graphs gain no invented OIDs, unchanged publication returns no delta and adding a label preserves earlier objects and unrelated shared records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_graph_oid_roots_preserve_original_labels_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/graph_oid_roots.rs",
+      "capability": "Committed graph identity roots",
+      "workload": "Capture original identity roots for 1, 16 and 64 graphs during private label changes, then roll back a savepoint, commit, replace, rename and close.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and retains exact original labels under independent cancellation and full admission release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

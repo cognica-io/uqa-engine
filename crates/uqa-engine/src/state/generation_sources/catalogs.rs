@@ -21,7 +21,7 @@ use uqa_sql::catalog::{
     events::{RuleCatalog, TriggerCatalog},
     foreign_server::ForeignServerDefinition,
     foreign_wrapper::ForeignWrappers,
-    graph_oids::GraphCatalogOids,
+    graph_oids::{CapturedGraphOidRegistry, GraphOidRegistry},
     range_type::StoredRange,
     shell_type::StoredShellType,
     stored_view::StoredView,
@@ -80,5 +80,5 @@ catalog_sources! {
     foreign_servers: BTreeMap<String, ForeignServerDefinition> => Vec<(String, uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer)>, uqa_sql::catalog::definition_capture::foreign::servers;
     triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;
     rules: RuleCatalog => uqa_sql::catalog::definition_capture::rules::CapturedRules, uqa_sql::catalog::definition_capture::rules::durable_rules;
-    graph_catalog_oids: BTreeMap<String, GraphCatalogOids> => Vec<(String, uqa_sql::catalog::definition_capture::identities::CapturedGraphCatalogOids)>, uqa_sql::catalog::definition_capture::identities::graph_oids;
+    graph_catalog_oids: GraphOidRegistry => CapturedGraphOidRegistry, GraphOidRegistry::capture;
 }

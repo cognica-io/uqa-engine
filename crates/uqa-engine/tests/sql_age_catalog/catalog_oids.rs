@@ -127,16 +127,19 @@ fn graph_objects_take_oids_in_age_creation_order() {
     verify(&engine);
 }
 
-#[test]
-fn graph_objects_keep_their_oids_across_reopen_and_rename() {
+#[rstest::rstest]
+#[case(0)]
+#[case(1)]
+#[case(2)]
+fn graph_objects_keep_their_oids_across_reopen_and_rename(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("age-catalog-oids.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = open(&database, provider);
         build(&engine);
         verify(&engine);
     }
-    let engine = Engine::open(&database).unwrap();
+    let engine = open(&database, provider);
     verify(&engine);
     let person = class_oid(&engine, "social_graph", "Person");
     super::exec(
@@ -144,10 +147,22 @@ fn graph_objects_keep_their_oids_across_reopen_and_rename() {
         "SELECT alter_graph('social_graph', 'RENAME', 'renamed_graph')",
     );
     assert_eq!(class_oid(&engine, "renamed_graph", "Person"), person);
-    reopen_keeps(&database, person);
+    drop(engine);
+    let engine = open(&database, provider);
+    assert_eq!(class_oid(&engine, "renamed_graph", "Person"), person);
 }
 
-fn reopen_keeps(database: &Path, person: i64) {
-    let engine = Engine::open(database).unwrap();
-    assert_eq!(class_oid(&engine, "renamed_graph", "Person"), person);
+fn open(database: &Path, provider: usize) -> Engine {
+    match provider {
+        0 => Engine::open(database).unwrap(),
+        1 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(database).unwrap(),
+        ))
+        .unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(database).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
 }

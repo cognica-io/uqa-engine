@@ -285,28 +285,31 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
         .next()
         .unwrap()
         .catalog_oids = Some(oids(80_020));
-    snapshot.definitions.graph_catalog_oids = Arc::new(BTreeMap::from([(
-        "graph".into(),
-        GraphCatalogOids {
-            namespace: 80_030,
-            label_sequence: 80_031,
-            labels: BTreeMap::from([(
-                1,
-                LabelCatalogOids {
-                    sequence: 80_040,
-                    relation: oids(80_050),
-                    id_default: 80_060,
-                    properties_default: 80_061,
-                    not_null: BTreeMap::new(),
-                    toast_table: 80_062,
-                    toast_index: 80_063,
-                    primary_key: None,
-                    endpoint_indexes: None,
-                    trigger: 80_064,
-                },
-            )]),
-        },
-    )]));
+    snapshot.definitions.graph_catalog_oids = Arc::new(
+        uqa_sql::catalog::graph_oids::GraphOidRegistry::try_from_iter([(
+            "graph".into(),
+            GraphCatalogOids {
+                namespace: 80_030,
+                label_sequence: 80_031,
+                labels: uqa_core::memory::OwnedMap::from_iter([(
+                    1,
+                    LabelCatalogOids {
+                        sequence: 80_040,
+                        relation: oids(80_050),
+                        id_default: 80_060,
+                        properties_default: 80_061,
+                        not_null: uqa_core::memory::OwnedMap::new(),
+                        toast_table: 80_062,
+                        toast_index: 80_063,
+                        primary_key: None,
+                        endpoint_indexes: None,
+                        trigger: 80_064,
+                    },
+                )]),
+            },
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let before = TYPE_PROJECTION_BUILDS.get();
     for relation in [80_000, 80_010, 80_020, 80_050] {

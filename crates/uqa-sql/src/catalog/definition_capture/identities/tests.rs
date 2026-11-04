@@ -11,7 +11,7 @@ fn graph() -> GraphCatalogOids {
     GraphCatalogOids {
         namespace: 20001,
         label_sequence: 20002,
-        labels: BTreeMap::from([(
+        labels: uqa_core::memory::OwnedMap::from_iter([(
             17,
             LabelCatalogOids {
                 sequence: 20003,
@@ -23,7 +23,7 @@ fn graph() -> GraphCatalogOids {
                 },
                 id_default: 20007,
                 properties_default: 20008,
-                not_null: BTreeMap::from([
+                not_null: uqa_core::memory::OwnedMap::from_iter([
                     ("Exact.Column".into(), 20009),
                     ("removed".into(), 20010),
                 ]),

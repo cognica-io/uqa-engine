@@ -225,6 +225,7 @@ syntax_enum!(crate::SQLParam {
 mod ast;
 mod catalog_events;
 mod catalog_foreign;
+mod catalog_graphs;
 mod catalog_types;
 mod command;
 

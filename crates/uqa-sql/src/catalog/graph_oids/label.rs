@@ -6,7 +6,7 @@
 
 //! The public OIDs of one AGE label's catalog objects.
 
-use std::collections::BTreeMap;
+use uqa_core::memory::OwnedMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ pub struct LabelCatalogOids {
     /// `pg_attrdef` of the `properties` column.
     pub properties_default: u32,
     /// The NOT NULL constraints by column name.
-    pub not_null: BTreeMap<String, u32>,
+    pub not_null: OwnedMap<String, u32>,
     /// The TOAST table the `agtype` properties column needs, and its index.
     pub toast_table: u32,
     pub toast_index: u32,

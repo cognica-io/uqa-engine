@@ -174,7 +174,7 @@ impl DurableCatalogState {
         self.graph_catalog_oids = CatalogCell::capture_source(
             self.graph_catalog_oids.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::identities::graph_oids,
+            uqa_sql::catalog::graph_oids::GraphOidRegistry::capture,
         )?;
         self.catalog_indexes = CatalogCell::capture_resource(
             self.catalog_indexes.snapshot(),

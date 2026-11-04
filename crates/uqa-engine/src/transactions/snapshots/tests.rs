@@ -14,6 +14,7 @@ mod capture;
 mod catalogs;
 mod comments;
 mod events;
+mod graph_oid_roots;
 mod identifiers;
 mod idle;
 mod resources;

@@ -6,11 +6,10 @@
 
 use super::{capture::capture, *};
 use crate::state::SnapshotCut;
-use std::collections::BTreeMap;
 use uqa_core::{Edge, Vertex};
 use uqa_graph::{CapturedPath, CapturedPathIndex, GraphImageSnapshot};
 use uqa_ml::{model_image::ModelImageSnapshot, DeepLayerSpec, DeepModel, GatingSpec};
-use uqa_sql::catalog::graph_oids::GraphCatalogOids;
+use uqa_sql::catalog::graph_oids::GraphOidRegistry;
 use uqa_storage::analyzer_image::{write_analyzer_image, AnalyzerImageSnapshot};
 
 fn populate(engine: &Engine, value: f64) {
@@ -90,7 +89,7 @@ fn original_images(engine: &Engine) -> [Vec<u8>; 3] {
     [graph_image(&graph), model_image(&model), analyzer]
 }
 
-fn same_metadata(selected: &SnapshotCut, original_oids: &BTreeMap<String, GraphCatalogOids>) {
+fn same_metadata(selected: &SnapshotCut, original_oids: &GraphOidRegistry) {
     let paths = selected
         .resources
         .path_indexes
@@ -134,11 +133,7 @@ fn same_metadata(selected: &SnapshotCut, original_oids: &BTreeMap<String, GraphC
             assert_eq!(label.sequence, old_label.sequence);
             assert_eq!(label.id_default, old_label.id_default);
             assert_eq!(label.properties_default, old_label.properties_default);
-            assert!(label
-                .not_null
-                .iter()
-                .map(|(k, v)| (k, v))
-                .eq(old_label.not_null.iter()));
+            assert!(label.not_null.iter().eq(old_label.not_null.iter()));
             assert_eq!(label.toast_table, old_label.toast_table);
             assert_eq!(label.toast_index, old_label.toast_index);
             assert_eq!(label.primary_key, old_label.primary_key);

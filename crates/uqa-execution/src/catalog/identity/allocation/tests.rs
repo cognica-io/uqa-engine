@@ -249,6 +249,7 @@ impl SharedObjectLockSession for Session {
     }
 }
 
+mod graphs;
 mod snapshots;
 
 fn occupied(oid: i64) -> CatalogReadView {

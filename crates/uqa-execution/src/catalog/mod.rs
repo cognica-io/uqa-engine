@@ -154,7 +154,7 @@ pub struct CatalogDefinitionSnapshot {
     /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
     pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub graph_catalog_oids: Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
+    pub graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:
