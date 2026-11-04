@@ -8,6 +8,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
+- Exclude temporary views before allocating durable memory catalog images, preserving permanent and unlogged definitions under independent capture limits through rollback, replacement and Engine closure. Complete committed Engine backup remains under implementation.
+- Preserve admitted non-temporary memory table membership through creation, deletion, rename, rollback and Engine closure without retaining mutable table owners or copying the relation corpus at capture. Immutable map deletion preserves earlier roots with logarithmic allocation. Complete committed Engine backup remains under implementation.
+
+- Read captured memory sources through stable weak identities, including unchanged vector indexes, without borrowing current table/index membership. Retain selected images across source retirement and same-name replacement, admit weak source storage and release future mutable payloads on closure.
+
+- Preserve memory routine and rewrite-rule generations with exact source/bound bodies, attributes, identities, OLD/NEW conditions and dependencies. Captures retain independent constants without compiling deferred bodies or invoking routines; rollback, replacement and closure preserve selected definitions.
+- Preserve memory views and evaluated materialized-view rows through rollback, replacement and closure. Captures retain exact stored query bindings, authority and value representations without executing the query or retaining execution-only analysis owners.
+
+- Preserve memory trigger definitions, bound routine identities, enable modes and constraint metadata through rollback, replacement and closure, with independently admitted WHEN literals and argument payloads.
+
+- Retain resolved memory analyzer images and independent field bindings through replacement, rollback and closure. Captures preserve exact descriptor/dictionary bytes and historical index/search revisions without retaining compiled pipelines or source import allowances.
+
+- Preserve materialized memory path indexes through graph changes, rollback, replacement and closure, retaining exact label sequences and evaluated vertex pairs under independent capture allowances.
+
+- Retain memory foreign-wrapper, server and table definitions with exact handler and validator bindings, public identities, dropped attributes, constraints and option order. Captures own their default values independently and preserve selected definitions through rollback, replacement and closure without reading remote data.
+- Retain sequence positions and identities, graph catalog OIDs, comments, index definitions and stored scoring parameters in memory captures, preserving original names, allocation generations and encoded payloads through mutation, rollback and closure. Complete committed Engine selection and autonomous overlays remain in progress.
+- Preserve complete domain, enum, composite, range and shell type definitions in memory catalog captures, including exact OIDs, enum order keys, dropped attributes, support routine identities and independently owned default values. Complete committed Engine capture remains in progress.
+- Retain system-relation, built-in routine and foreign-table authority in memory catalog captures, including absent/empty ACLs, grant paths and relation/column tuple revisions. Permission changes, rollback and same-name foreign-table replacement preserve the selected values; joint committed Engine capture remains in progress.
+- Preserve role incarnations, tuple revisions, attributes and complete membership grant paths in retained memory catalog generations. Role rename, same-name replacement, rollback and Engine closure keep the selected authority under independent capture limits; complete committed Engine capture remains in progress.
 - Preserve memory database, schema and sequence authority in captured catalog generations, including bound role incarnations, ACL absence and grant paths, exact qualified names and namespace tuple identities. Complete committed Engine capture remains under implementation.
 - Retain immutable memory graph and model images through catalog replacement, rollback and Engine closure, with explicit payload admission and original cancellation preserved by independently retained image handles. Complete committed Engine selection and public backup jobs remain in progress.
 - Preserve non-temporary memory table definitions, complete ACL identities, statistics, analyzer configuration and allocation state through captured generations. Metadata mutation, rollback and source closure retain the original values under the backup's own limits; complete committed Engine selection and public backup jobs remain in progress.

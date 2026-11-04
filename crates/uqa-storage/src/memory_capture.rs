@@ -163,12 +163,17 @@ impl MemoryCapture {
     }
 }
 
-/// A source identity does not retain its mutable owner. Once that owner is changed or dropped, the cut retains its admitted frozen value. A key alone never captures the current value or admits a newer generation.
+/// A source identity does not retain its mutable owner. Once that owner is changed or dropped, the cut retains its admitted frozen value. Reading through a key uses the same selected-generation boundary as reading through the live cell.
 pub struct MemoryCaptureKey<F: Send + Sync + 'static> {
     registry: Weak<Registry>,
     id: u64,
     born: u64,
-    frozen: std::marker::PhantomData<fn() -> F>,
+    source: Weak<dyn CaptureRead<F>>,
+    source_bytes: usize,
+}
+
+trait CaptureRead<F: Send + Sync + 'static>: Send + Sync {
+    fn captured(&self, capture: &MemoryCapture) -> StorageBackendResult<Arc<Budgeted<F>>>;
 }
 
 impl<F: Send + Sync + 'static> Clone for MemoryCaptureKey<F> {
@@ -177,14 +182,33 @@ impl<F: Send + Sync + 'static> Clone for MemoryCaptureKey<F> {
             registry: self.registry.clone(),
             id: self.id,
             born: self.born,
-            frozen: std::marker::PhantomData,
+            source: self.source.clone(),
+            source_bytes: self.source_bytes,
         }
     }
 }
 
 impl<F: Send + Sync + 'static> MemoryCaptureKey<F> {
+    /// Fixed source storage pinned by this weak identity, excluding reference-count bookkeeping. A retained membership owner must admit these bytes before publishing the key. The source's mutable payload is not retained.
+    pub fn retained_source_bytes(&self) -> usize {
+        self.source_bytes
+    }
+
     pub fn same_source(&self, other: &Self) -> bool {
         Weak::ptr_eq(&self.registry, &other.registry) && self.id == other.id
+    }
+
+    /// Read the exact selected generation without retaining a mutable Engine or table. An unchanged live source freezes through its owning cell; a retired source has already preserved every admitted cut before releasing its last owning reference.
+    pub fn captured(&self, capture: &MemoryCapture) -> StorageBackendResult<Arc<Budgeted<F>>> {
+        if let Some(source) = self.source.upgrade() {
+            return source.captured(capture);
+        }
+        self.retained(capture)?.ok_or_else(|| {
+            capture.0.fail(
+                &mut capture.0.state.lock(),
+                StorageBackendError::Other("retired memory source has no selected value".into()),
+            )
+        })
     }
 
     /// A live unmodified source has not yet frozen and returns `None`. A dropped registered owner preserves its value before releasing it, so its selected cuts either contain that value or report their terminal failure.
@@ -222,6 +246,9 @@ impl Capture {
     }
 
     fn fail(&self, state: &mut State, error: StorageBackendError) -> StorageBackendError {
+        if let State::Failed(first) = state {
+            return failure::reproduce(first);
+        }
         let error = Arc::new(error);
         *state = State::Failed(error.clone());
         self.retire();
@@ -304,7 +331,16 @@ impl Drop for Capture {
 
 /// Mutable source ownership with automatic preservation before write admission. The source's existing copy-on-write implementation determines detachment cost; writes with no active captures never invoke `freeze`.
 pub struct MemoryCaptureCell<T: MemoryCaptureSource> {
-    registration: Option<Registration>,
+    owner: CellOwner<T>,
+}
+
+enum CellOwner<T: MemoryCaptureSource> {
+    Unregistered(Option<RwLock<T>>),
+    Registered(Arc<RegisteredCell<T>>),
+}
+
+struct RegisteredCell<T: MemoryCaptureSource> {
+    registration: Registration,
     value: RwLock<T>,
 }
 
@@ -318,14 +354,13 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
     /// An unregistered owner uses the same read/write boundary without allocating a private capture domain. Register it before publishing it in a shared memory source.
     pub fn new(value: T) -> Self {
         Self {
-            registration: None,
-            value: RwLock::new(value),
+            owner: CellOwner::Unregistered(Some(RwLock::new(value))),
         }
     }
 
-    /// Join one domain without moving the source or invalidating existing cuts. Re-registering in that domain is harmless; transferring a registered source to another domain is rejected.
+    /// Publish one stable registered source identity without admitting it to earlier cuts. Re-registering in that domain is harmless; transferring a registered source to another domain is rejected.
     pub fn register(&mut self, registry: &MemoryCaptureRegistry) -> StorageBackendResult<()> {
-        if let Some(registration) = &self.registration {
+        if let Some(registration) = self.registration() {
             return if Arc::ptr_eq(&registration.registry, &registry.0) {
                 Ok(())
             } else {
@@ -335,33 +370,63 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
             };
         }
         let _admission = registry.0.admission.read_recursive();
-        self.registration = Some(Registration {
+        let registration = Registration {
             registry: registry.0.clone(),
             id: allocate(&registry.0.next_cell)?,
             born: registry.0.next_capture.load(Ordering::Relaxed),
-        });
+        };
+        let CellOwner::Unregistered(value) = &mut self.owner else {
+            unreachable!("registered cells return before assigning another identity")
+        };
+        let value = value.take().expect("unpublished source value").into_inner();
+        self.owner = CellOwner::Registered(Arc::new(RegisteredCell {
+            registration,
+            value: RwLock::new(value),
+        }));
         Ok(())
     }
 
+    fn registration(&self) -> Option<&Registration> {
+        match &self.owner {
+            CellOwner::Unregistered(_) => None,
+            CellOwner::Registered(cell) => Some(&cell.registration),
+        }
+    }
+
+    fn value(&self) -> &RwLock<T> {
+        match &self.owner {
+            CellOwner::Unregistered(value) => value.as_ref().expect("unpublished source value"),
+            CellOwner::Registered(cell) => &cell.value,
+        }
+    }
+
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
-        self.value.read()
+        self.value().read()
     }
 
     /// Observe lock ownership for diagnostics without entering mutation admission.
     pub fn is_locked(&self) -> bool {
-        self.value.is_locked()
+        self.value().is_locked()
     }
 
     /// Retain the registered identity without retaining or copying its source data.
-    pub fn key(&self) -> StorageBackendResult<MemoryCaptureKey<T::Frozen>> {
-        let registration = self.registration.as_ref().ok_or_else(|| {
-            StorageBackendError::Other("memory capture source is not registered".into())
-        })?;
+    pub fn key(&self) -> StorageBackendResult<MemoryCaptureKey<T::Frozen>>
+    where
+        T: 'static,
+    {
+        let CellOwner::Registered(cell) = &self.owner else {
+            return Err(StorageBackendError::Other(
+                "memory capture source is not registered".into(),
+            ));
+        };
+        let registration = &cell.registration;
+        let source: Arc<dyn CaptureRead<T::Frozen>> = cell.clone();
         Ok(MemoryCaptureKey {
             registry: Arc::downgrade(&registration.registry),
             id: registration.id,
             born: registration.born,
-            frozen: std::marker::PhantomData,
+            source: Arc::downgrade(&source),
+            source_bytes: size_of::<RegisteredCell<T>>(),
         })
     }
 
@@ -371,7 +436,7 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
     ) -> StorageBackendResult<RwLockReadGuard<'_, T>> {
         loop {
             control.check()?;
-            if let Some(value) = self.value.try_read_for(WAIT) {
+            if let Some(value) = self.value().try_read_for(WAIT) {
                 control.check()?;
                 return Ok(value);
             }
@@ -382,12 +447,14 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
 
     /// Preserve every applicable cut before exposing mutable state. A source freeze failure invalidates that cut and releases its archive; the caller can still perform the ordinary write. No caller-side snapshot preparation is needed.
     pub fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
-        self.admit_write(self.value.write())
+        self.admit_write(self.value().write())
     }
 
     /// Try the same mutation boundary without waiting for the source lock. A failed admission neither visits nor freezes any cut.
     pub fn try_write(&self) -> Option<MemoryCaptureWriteGuard<'_, T>> {
-        self.value.try_write().map(|value| self.admit_write(value))
+        self.value()
+            .try_write()
+            .map(|value| self.admit_write(value))
     }
 
     pub fn write_with_control(
@@ -396,7 +463,7 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
     ) -> StorageBackendResult<MemoryCaptureWriteGuard<'_, T>> {
         let value = loop {
             control.check()?;
-            if let Some(value) = self.value.try_write_for(WAIT) {
+            if let Some(value) = self.value().try_write_for(WAIT) {
                 break value;
             }
             #[cfg(test)]
@@ -412,8 +479,7 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
         #[cfg(test)]
         tests::source_locked();
         let admission = self
-            .registration
-            .as_ref()
+            .registration()
             .map(|registration| registration.preserve(&*value));
         MemoryCaptureWriteGuard {
             source_guard: parking_lot::RwLockWriteGuard::map(value, |value| value),
@@ -426,11 +492,18 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
         &self,
         capture: &MemoryCapture,
     ) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
-        let Some(registration) = &self.registration else {
+        let CellOwner::Registered(cell) = &self.owner else {
             return Err(StorageBackendError::Other(
                 "memory capture source is not registered".into(),
             ));
         };
+        cell.captured(capture)
+    }
+}
+
+impl<T: MemoryCaptureSource> CaptureRead<T::Frozen> for RegisteredCell<T> {
+    fn captured(&self, capture: &MemoryCapture) -> StorageBackendResult<Arc<Budgeted<T::Frozen>>> {
+        let registration = &self.registration;
         if !Weak::ptr_eq(&capture.0.registry, &Arc::downgrade(&registration.registry))
             || capture.0.id < registration.born
         {
@@ -454,9 +527,9 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
 
 impl<T: MemoryCaptureSource> Drop for MemoryCaptureCell<T> {
     fn drop(&mut self) {
-        if let Some(registration) = &self.registration {
-            // Final source retirement is a mutation of membership: preserve the selected value before the only live owner disappears. Admission failure invalidates the archive and still permits source destruction.
-            drop(registration.preserve(self.value.get_mut()));
+        if let CellOwner::Registered(cell) = &self.owner {
+            // Preserve before releasing the owning strong reference. A key either upgrades that still-live allocation or observes the completed archive; it cannot miss a source whose final retirement is still preserving its value.
+            drop(cell.registration.preserve(&*cell.value.read()));
         }
     }
 }

@@ -15,30 +15,37 @@ use uqa_core::{
     RelationIdentity,
 };
 
+pub mod relations;
+
+fn acl_entries<P: Copy>(
+    entries: &[BoundAclEntry<P>],
+    output: &SyntaxProduction<'_>,
+) -> Result<Vec<BoundAclEntry<P>>, SQLError> {
+    let mut copied = output.vector(entries.len())?;
+    for BoundAclEntry {
+        role,
+        grantor,
+        privileges,
+        grant_options,
+    } in entries
+    {
+        output.check()?;
+        copied.push(BoundAclEntry {
+            role: *role,
+            grantor: *grantor,
+            privileges: *privileges,
+            grant_options: *grant_options,
+        })?;
+    }
+    copied.finish()
+}
+
 fn acl<P: Copy>(
     entries: Option<&[BoundAclEntry<P>]>,
     output: &SyntaxProduction<'_>,
 ) -> Result<Option<Vec<BoundAclEntry<P>>>, SQLError> {
     entries
-        .map(|entries| {
-            let mut copied = output.vector(entries.len())?;
-            for BoundAclEntry {
-                role,
-                grantor,
-                privileges,
-                grant_options,
-            } in entries
-            {
-                output.check()?;
-                copied.push(BoundAclEntry {
-                    role: *role,
-                    grantor: *grantor,
-                    privileges: *privileges,
-                    grant_options: *grant_options,
-                })?;
-            }
-            copied.finish()
-        })
+        .map(|entries| acl_entries(entries, output))
         .transpose()
 }
 

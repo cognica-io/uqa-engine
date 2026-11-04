@@ -10,6 +10,7 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod capture;
 mod iterative;
 
 #[test]

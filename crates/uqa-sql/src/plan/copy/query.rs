@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Copying, Result};
+use super::{CopyPurpose, Copying, Result};
 use crate::plan::{
     CteCyclePlan, CtePlan, CtePlanBody, CteSearchPlan, OrderPlan, ProjectionPlan, QueryBlockPlan,
     QueryPlan, RelationalPlan,
@@ -36,9 +36,20 @@ impl Copying<'_> {
     ) -> Result<QueryPlan> {
         self.check()?;
         Ok(QueryPlan {
-            analyzed_output: query.analyzed_output.clone(),
-            analyzed_source: query.analyzed_source.clone(),
+            analyzed_output: if self.purpose == CopyPurpose::Stored {
+                None
+            } else {
+                query.analyzed_output.clone()
+            },
+            analyzed_source: if self.purpose == CopyPurpose::Stored {
+                None
+            } else {
+                query.analyzed_source.clone()
+            },
             analyzed_grouping: self.field("analyzed_grouping", |copying| {
+                if copying.purpose == CopyPurpose::Stored {
+                    return Ok(None);
+                }
                 query
                     .analyzed_grouping
                     .as_ref()
@@ -47,7 +58,11 @@ impl Copying<'_> {
             })?,
             relations_bound: query.relations_bound,
             relation_privilege_subject: self.field("relation_privilege_subject", |copying| {
-                copying.role(query.relation_privilege_subject.as_ref())
+                if copying.purpose == CopyPurpose::Stored {
+                    Ok(None)
+                } else {
+                    copying.role(query.relation_privilege_subject.as_ref())
+                }
             })?,
             ctes: self.field("ctes", |copying| copying.map(ctes.iter(), Self::cte))?,
             root: self.field("root", root)?,
@@ -181,6 +196,9 @@ impl Copying<'_> {
     fn block_fields(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
         Ok(QueryBlockPlan {
             deferred_outer_rewrites: self.field("deferred_outer_rewrites", |copying| {
+                if copying.purpose == CopyPurpose::Stored {
+                    return Ok(Vec::new());
+                }
                 copying.map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
                     rewrite.copy_with(copying)
                 })

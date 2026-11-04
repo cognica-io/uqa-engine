@@ -462,13 +462,9 @@ impl Engine {
             }
         }
         let mut tables = self.storage.tables.write();
-        if tables.contains_key(&to_relation) {
-            return Ok(false);
-        }
-        let Some(state) = tables.remove(&from_relation) else {
+        let Some(state) = tables.rename(&from_relation, to_relation.clone())? else {
             return Ok(false);
         };
-        tables.insert(to_relation.clone(), state.clone());
         drop(tables);
         *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;

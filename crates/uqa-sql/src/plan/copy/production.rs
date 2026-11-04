@@ -57,6 +57,10 @@ impl<'a> SyntaxProduction<'a> {
         )?))
     }
 
+    pub(crate) fn capture_stored<T: SyntaxCopy>(&self, value: &T) -> Result<T, SQLError> {
+        Ok(self.take(super::capture_stored_with_control(value, &self.control)?))
+    }
+
     pub(crate) fn text(&self, value: &str) -> Result<String, SQLError> {
         Ok(self.take(self.control.copy_text(value)?))
     }

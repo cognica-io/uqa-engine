@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
+pub mod capture;
 mod graph_access;
 pub mod graph_guards;
 pub mod graph_identifiers;

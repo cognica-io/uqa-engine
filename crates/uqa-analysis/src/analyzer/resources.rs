@@ -8,6 +8,9 @@
 
 use super::CompiledAnalyzer;
 
+mod capture;
+pub use capture::CapturedAnalyzer;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AnalyzerResourceKind {
     Nori,

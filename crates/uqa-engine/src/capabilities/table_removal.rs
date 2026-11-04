@@ -73,7 +73,7 @@ impl TableRemovalPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
-        let removed = self.storage.tables.write().remove(relation);
+        let removed = self.storage.tables.write().remove(relation)?;
         if let Some(table) = removed {
             self.note_prepared_table_change(&table);
         }

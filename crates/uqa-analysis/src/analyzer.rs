@@ -21,7 +21,7 @@ mod compiled;
 mod diagnostics;
 mod resources;
 pub use compiled::CompiledAnalyzer;
-pub use resources::{AnalyzerResource, AnalyzerResourceKind};
+pub use resources::{AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analyzer {

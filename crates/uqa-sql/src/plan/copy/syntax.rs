@@ -13,25 +13,38 @@ pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
 
+macro_rules! syntax_field {
+    ($copying:ident, $value:expr) => {
+        $value.copy_syntax($copying)
+    };
+    ($copying:ident, $value:expr, $stored:expr) => {
+        if $copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            Ok($stored)
+        } else {
+            $value.copy_syntax($copying)
+        }
+    };
+}
+
 macro_rules! syntax_struct {
-    ($ty:ty { $($field:ident),* $(,)? }) => {
+    ($ty:ty { $($field:ident $(= $stored:expr)?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
-                Ok(Self { $($field: copying.field(stringify!($field), |copying| self.$field.copy_syntax(copying))?),* })
+                Ok(Self { $($field: copying.field(stringify!($field), |copying| syntax_field!(copying, self.$field $(, $stored)?))?),* })
             }
         }
     };
 }
 
 macro_rules! syntax_enum {
-    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)? }) => {
+    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident $(= $stored:expr)?),*})?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
                 Ok(match self {
                     $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
+                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| syntax_field!(copying, $field $(, $stored)?))?),*})?),*
                 })
             }
         }
@@ -111,7 +124,7 @@ impl<K: SyntaxCopy + Ord, V: SyntaxCopy> SyntaxCopy for OwnedMap<K, V> {
         let mut output = Self::new();
         for (key, value) in self {
             copying.check()?;
-            copying.memory.grow(Self::entry_bytes())?;
+            copying.reserve(Self::entry_bytes())?;
             output.insert(key.copy_syntax(copying)?, value.copy_syntax(copying)?);
         }
         Ok(output)
@@ -182,39 +195,25 @@ macro_rules! share_input {
     )+};
 }
 // These immutable descriptors already retain their payload owners; cloning only shares those handles.
-share_input!(
-    crate::ast::RetainedRowSource,
-    crate::ast::WindowDefinitionSyntax,
-    crate::RowSchema
-);
+share_input!(crate::ast::WindowDefinitionSyntax, crate::RowSchema);
+
+impl SyntaxCopy for crate::ast::RetainedRowSource {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == super::CopyPurpose::Stored {
+            return Err(crate::SQLError::Internal(
+                "stored syntax contains an execution-scoped row source".into(),
+            ));
+        }
+        Ok(self.clone())
+    }
+}
 
 impl SyntaxCopy for crate::ast::RetainedInputLiteral {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
-        if !copying.detach_constants {
+        if copying.purpose == super::CopyPurpose::Executable {
             return Ok(self.clone());
         }
-        let control = &copying.control;
-        let value = self.0.value.capture_with_control(control)?;
-        let value = crate::ir::RetainedConstantValue::from_produced(value, control)?;
-        let ty = self
-            .0
-            .ty
-            .as_ref()
-            .map(|ty| ty.clone_with_control(control))
-            .transpose()?;
-        let declaration = self
-            .0
-            .declaration
-            .as_ref()
-            .map(|name| control.copy_text(name))
-            .transpose()?;
-        Ok(Self(crate::ir::RetainedScalarLiteral::with_control(
-            value,
-            ty,
-            declaration,
-            self.0.collation_oid,
-            control,
-        )?))
+        Ok(Self(self.0.capture_with_control(&copying.control)?))
     }
 }
 
@@ -224,6 +223,9 @@ syntax_enum!(crate::SQLParam {
 });
 
 mod ast;
+mod catalog_events;
+mod catalog_foreign;
+mod catalog_types;
 mod command;
 
 syntax_struct!(crate::ast::ObjectAclEntry {

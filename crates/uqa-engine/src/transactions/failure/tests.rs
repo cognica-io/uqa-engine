@@ -15,7 +15,7 @@ fn sql(engine: &Engine, source: &str) {
 }
 
 fn image(snapshot: &crate::EngineDataSnapshot) -> Vec<u8> {
-    let table = snapshot.tables.values().next().unwrap();
+    let table = snapshot.data.tables.values().next().unwrap();
     let mut bytes = Vec::new();
     assert!(table
         .document_store
@@ -56,7 +56,7 @@ fn transaction_recovery_retains_large_catalog_generations_without_metadata_copie
             let recovery = recovery.unwrap();
             assert!(allocated.bytes_total < 64 * 1024, "{count}: {allocated:?}");
             assert!(Arc::ptr_eq(expected, recovery.data.as_ref().unwrap()));
-            assert_eq!(recovery.data.as_ref().unwrap().tables.len(), count);
+            assert_eq!(recovery.data.as_ref().unwrap().data.tables.len(), count);
         }
         sql(&engine, "ROLLBACK");
     }
@@ -80,8 +80,14 @@ fn transaction_generations_preserve_private_savepoint_and_failed_statement_state
     let private_image = image(&private);
     assert_ne!(committed_image, private_image);
     assert!(!Arc::ptr_eq(&committed, &private));
-    assert_eq!(committed.tables.values().next().unwrap().columns.len(), 2);
-    assert_eq!(private.tables.values().next().unwrap().columns.len(), 3);
+    assert_eq!(
+        committed.data.tables.values().next().unwrap().columns.len(),
+        2
+    );
+    assert_eq!(
+        private.data.tables.values().next().unwrap().columns.len(),
+        3
+    );
 
     let error = engine
         .sql("UPDATE docs SET body='failed'; SELECT 1/0", &[])
@@ -116,8 +122,14 @@ fn transaction_generations_preserve_private_savepoint_and_failed_statement_state
     drop(engine);
     assert_eq!(image(&committed), committed_image);
     assert_eq!(image(&private), private_image);
-    assert_eq!(committed.tables.values().next().unwrap().columns.len(), 2);
-    assert_eq!(private.tables.values().next().unwrap().columns.len(), 3);
+    assert_eq!(
+        committed.data.tables.values().next().unwrap().columns.len(),
+        2
+    );
+    assert_eq!(
+        private.data.tables.values().next().unwrap().columns.len(),
+        3
+    );
 }
 
 #[test]
@@ -137,7 +149,7 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
     });
     assert!(allocated.bytes_total < 64 * 1024, "{allocated:?}");
     let snapshot = snapshot.unwrap();
-    let retained = snapshot.tables.values().next().unwrap();
+    let retained = snapshot.data.tables.values().next().unwrap();
     assert!(Arc::ptr_eq(&columns, &retained.columns));
     assert!(Arc::ptr_eq(&constraints, &retained.key_constraints));
 

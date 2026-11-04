@@ -13,6 +13,7 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 3;
 
+pub mod capture;
 pub mod reference;
 pub mod wrappers;
 pub use reference::ForeignServerReference;

@@ -16,6 +16,23 @@ use parts::{Parts, Slot};
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyMode {
+    Immutable,
+    Mutable,
+    Capture,
+}
+
+impl From<bool> for CopyMode {
+    fn from(mutable: bool) -> Self {
+        if mutable {
+            Self::Mutable
+        } else {
+            Self::Immutable
+        }
+    }
+}
+
 enum Memory {
     Ordinary,
     Immutable(MemoryReservation),
@@ -39,13 +56,21 @@ struct Frame<'s, 'c> {
 }
 
 impl<'s, 'c> Frame<'s, 'c> {
-    fn new(source: &'s ScalarExpr, control: ProductionControl<'c>, mutable: bool) -> Result<Self> {
+    fn new(source: &'s ScalarExpr, control: ProductionControl<'c>, mode: CopyMode) -> Result<Self> {
         control.check()?;
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(control)),
-            owned_children: control.budget().filter(|_| mutable).map(BudgetedVec::new),
+            owned_children: control
+                .budget()
+                .filter(|_| mode == CopyMode::Mutable)
+                .map(BudgetedVec::new),
         };
-        let parts = Parts::new(source, &mut lowering)?;
+        let parts = match (mode, source) {
+            (CopyMode::Capture, ScalarExpr::RetainedLiteral(literal)) => Parts::Leaf(
+                ScalarExpr::RetainedLiteral(literal.capture_with_control(&control)?),
+            ),
+            _ => Parts::new(source, &mut lowering)?,
+        };
         Ok(Self {
             source,
             parts,
@@ -175,14 +200,14 @@ impl<'s, 'c> Stack<'s, 'c> {
     }
 }
 
-fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mutable: bool) -> Result<Copied> {
-    let mut current = Frame::new(source, control, mutable)?;
+fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mode: CopyMode) -> Result<Copied> {
+    let mut current = Frame::new(source, control, mode)?;
     let mut stack = Stack::new(control);
     loop {
         control.check()?;
         if let Some(child) = current.next_child()? {
             stack.push(current)?;
-            current = Frame::new(child, control, mutable)?;
+            current = Frame::new(child, control, mode)?;
         } else {
             let child = current.finish()?;
             let Some(mut parent) = stack.pop() else {
@@ -198,7 +223,7 @@ pub(super) fn mutable(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr> {
-    let Copied { expression, memory } = copy(source, control, true)?;
+    let Copied { expression, memory } = copy(source, control, CopyMode::Mutable)?;
     Ok(OwnedScalarExpr {
         expression,
         memory: match memory {
@@ -213,7 +238,22 @@ pub(super) fn immutable(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<Produced<ScalarExpr>> {
-    let Copied { expression, memory } = copy(source, control, false)?;
+    retained(source, control, CopyMode::Immutable)
+}
+
+pub(super) fn capture(
+    source: &ScalarExpr,
+    control: ProductionControl<'_>,
+) -> Result<Produced<ScalarExpr>> {
+    retained(source, control, CopyMode::Capture)
+}
+
+fn retained(
+    source: &ScalarExpr,
+    control: ProductionControl<'_>,
+    mode: CopyMode,
+) -> Result<Produced<ScalarExpr>> {
+    let Copied { expression, memory } = copy(source, control, mode)?;
     Ok(control.finish(
         expression,
         match memory {

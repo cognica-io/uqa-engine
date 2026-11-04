@@ -10,11 +10,15 @@ use super::{Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot};
 use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+mod tests;
+
 impl Engine {
     pub(super) fn snapshot_transaction_data(
         &self,
     ) -> Result<Option<std::sync::Arc<EngineDataSnapshot>>, SQLError> {
         let mut tables = BTreeMap::new();
+        let mut owners = BTreeMap::new();
         for (name, table) in self.storage.tables.read().iter() {
             if self.storage.backend.is_some()
                 && table.persistence != uqa_sql::ast::RelationPersistence::Temporary
@@ -41,7 +45,6 @@ impl Engine {
             tables.insert(
                 name.clone(),
                 TableDataSnapshot {
-                    state: table.clone(),
                     security: table.security.snapshot(),
                     storage_generation: table.storage_generation(),
                     document_store,
@@ -77,10 +80,15 @@ impl Engine {
                         .load(std::sync::atomic::Ordering::Acquire),
                 },
             );
+            owners.insert(name.clone(), table.clone());
         }
         Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
-            tables,
-            durable: self.durable.snapshot(),
+            table_owners: owners,
+            data: std::sync::Arc::new(crate::EngineSnapshotData {
+                tables,
+                memory_membership: self.storage.tables.memory_snapshot(),
+                durable: self.durable.snapshot(),
+            }),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
         })))
     }
@@ -94,22 +102,34 @@ impl Engine {
         snapshot: &EngineDataSnapshot,
     ) -> Result<(), SQLError> {
         self.clear_bayesian_params_cache();
-        {
+        if let Some(membership) = &snapshot.data.memory_membership {
+            self.storage.tables.restore_memory(
+                membership,
+                snapshot
+                    .table_owners
+                    .iter()
+                    .map(|(name, table)| (name.clone(), table.clone())),
+            );
+        } else {
             let mut tables = self.storage.tables.write();
-            tables.retain(|name, table| {
-                snapshot.tables.contains_key(name)
-                    || (self.storage.backend.is_some()
-                        && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
-            });
-            for (name, table_snapshot) in &snapshot.tables {
+            tables
+                .retain(|name, table| {
+                    snapshot.table_owners.contains_key(name)
+                        || (self.storage.backend.is_some()
+                            && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+                })
+                .map_err(|err| Self::storage_tx_error("ROLLBACK table membership", &err))?;
+            for (name, table) in &snapshot.table_owners {
                 // DROP followed by same-name CREATE installs another object; undo must restore the captured incarnation as well as its contents.
-                tables.insert(name.clone(), table_snapshot.state.clone());
+                tables
+                    .insert(name.clone(), table.clone())
+                    .map_err(|err| Self::storage_tx_error("ROLLBACK table membership", &err))?;
             }
         }
-        for table_snapshot in snapshot.tables.values() {
-            let table = &table_snapshot.state;
+        for (name, table_snapshot) in &snapshot.data.tables {
+            let table = &snapshot.table_owners[name];
             table.security.restore(&table_snapshot.security);
-            table_snapshot.restore_stores()?;
+            table_snapshot.restore_stores(table)?;
             table.fts_fields.restore(&table_snapshot.fts_fields);
             table.columns.restore(&table_snapshot.columns);
             *table.columns_declared.write() = table_snapshot.columns_declared;
@@ -147,7 +167,7 @@ impl Engine {
                 std::sync::atomic::Ordering::Release,
             );
         }
-        self.durable.restore(&snapshot.durable);
+        self.durable.restore(&snapshot.data.durable);
         self.clear_regtype_output_cache();
         *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
         Ok(())
@@ -155,8 +175,7 @@ impl Engine {
 }
 
 impl TableDataSnapshot {
-    fn restore_stores(&self) -> Result<(), SQLError> {
-        let table = &self.state;
+    fn restore_stores(&self, table: &crate::TableState) -> Result<(), SQLError> {
         let document_store = self
             .document_store
             .writable_snapshot()

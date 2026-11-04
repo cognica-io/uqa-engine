@@ -139,8 +139,10 @@ impl MemoryCaptureSource for VectorIndexes {
             let capture = index.memory_capture().ok_or_else(|| {
                 StorageBackendError::Other("vector owner lacks memory capture admission".into())
             })?;
-            let (field, memory) = copy_field(field, control)?;
-            indexes.insert(field, Budgeted::new(capture.key()?, memory))?;
+            let key = capture.key()?;
+            let (field, mut memory) = copy_field(field, control)?;
+            memory.grow(key.retained_source_bytes())?;
+            indexes.insert(field, Budgeted::new(key, memory))?;
         }
         control.check()?;
         Ok(CapturedVectorIndexes {
@@ -157,11 +159,10 @@ impl CapturedVectorIndexes {
         Ok(self.indexes.iter().map(|(field, _)| field.as_str()))
     }
 
-    /// Resolve a field using its retained identity before consulting current membership. A removed owner preserves its image before unpublication; the same field's replacement can never supply bytes for the old identity.
+    /// Resolve a field through its selected source identity without borrowing current membership. A removed owner preserves its image before unpublication; the same field's replacement can never supply bytes for the old identity.
     pub fn image(
         &self,
         field: &str,
-        current: Option<&VectorIndexes>,
         cut: &MemoryCapture,
     ) -> StorageBackendResult<Arc<Budgeted<VectorImageSnapshot>>> {
         self.control.check()?;
@@ -174,22 +175,49 @@ impl CapturedVectorIndexes {
         let key = self.indexes.get(field).ok_or_else(|| {
             StorageBackendError::Other("vector field is absent from captured membership".into())
         })?;
-        if let Some(image) = key.retained(cut)? {
-            return Ok(image);
+        key.captured(cut)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector_index::MemoryVectorIndex;
+
+    #[test]
+    fn captured_membership_admits_weak_source_storage_before_publication() {
+        let registry = MemoryCaptureRegistry::new();
+        let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+        source
+            .write()
+            .live_mut()
+            .unwrap()
+            .insert("embedding".into(), Box::new(MemoryVectorIndex::new(2)))
+            .unwrap();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cut = registry.capture(&control).unwrap();
+        let captured = source.captured(&cut).unwrap();
+        for (name, key) in &captured.indexes {
+            assert_eq!(
+                key.reserved_bytes(),
+                name.capacity() + key.retained_source_bytes()
+            );
+            assert!(key.retained_source_bytes() > 0);
+            assert!(key.retained(&cut).unwrap().is_none());
         }
-        if let Some(index) = current
-            .and_then(|current| current.get(field))
-            .and_then(VectorIndex::memory_capture)
-        {
-            if key.same_source(&index.key()?) {
-                return index.captured(cut);
-            }
-        }
-        // Current membership may have changed while an exporter acquired its outer read guard. Retirement has already published the old image by that point.
-        key.retained(cut)?.ok_or_else(|| {
-            StorageBackendError::Other(
-                "captured vector source disappeared without retirement".into(),
-            )
-        })
+        let insufficient = StorageReadControl::with_limit(control.memory().used() - 1);
+        let limited = registry.capture(&insufficient).unwrap();
+        assert!(matches!(
+            source.captured(&limited),
+            Err(StorageBackendError::Memory(_))
+        ));
+        assert_eq!(source.read()["embedding"].count().unwrap(), 0);
+        assert!(cut.check().is_ok());
+        drop((source, registry, limited));
+        assert_eq!(insufficient.memory().used(), 0);
+        drop(cut);
+        assert!(control.memory().used() > 0);
+        drop(captured);
+        assert_eq!(control.memory().used(), 0);
     }
 }

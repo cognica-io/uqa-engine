@@ -18,11 +18,11 @@ fn suspend_ancestors<'s, 'c>(
     mutable: bool,
 ) -> (Stack<'s, 'c>, Frame<'s, 'c>) {
     let mut stack = Stack::new(control);
-    let mut current = Frame::new(source, control, mutable).unwrap();
+    let mut current = Frame::new(source, control, mutable.into()).unwrap();
     for _ in 0..8 {
         let child = current.next_child().unwrap().unwrap();
         stack.push(current).unwrap();
-        current = Frame::new(child, control, mutable).unwrap();
+        current = Frame::new(child, control, mutable.into()).unwrap();
     }
     (stack, current)
 }
@@ -43,13 +43,13 @@ fn cancel_partial(
 ) -> Result<()> {
     let (_stack, mut frame) = suspend_ancestors(source, control, mutable);
     let first = frame.next_child()?.expect("first row child");
-    frame.attach(copy(first, control, mutable)?)?;
+    frame.attach(copy(first, control, mutable.into())?)?;
     if boundary == 0 {
         cancel.cancel();
         return frame.next_child().map(drop);
     }
     let second = frame.next_child()?.expect("second row child");
-    let child = copy(second, control, mutable)?;
+    let child = copy(second, control, mutable.into())?;
     if boundary == 1 {
         cancel.cancel();
         return frame.attach(child);
@@ -117,10 +117,10 @@ fn unwinding_partial_case_construction_releases_unpaired_condition_and_pending_r
             let (_stack, mut frame) = suspend_ancestors(&source, control, mutable);
             let condition = frame.next_child().unwrap().expect("CASE condition");
             frame
-                .attach(copy(condition, control, mutable).unwrap())
+                .attach(copy(condition, control, mutable.into()).unwrap())
                 .unwrap();
             let result = frame.next_child().unwrap().expect("CASE result");
-            let _pending = copy(result, control, mutable).unwrap();
+            let _pending = copy(result, control, mutable.into()).unwrap();
             panic!("constructor unwind");
         }));
         assert!(result.is_err());

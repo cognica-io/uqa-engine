@@ -37010,10 +37010,10 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
-      "test": "memory_engine_capture_excludes_temporary_source_retention",
+      "test": "memory_engine_capture_excludes_temporary_table_payloads",
       "cases": 1,
       "source": "crates/uqa-engine/src/state/memory_capture_tests.rs",
-      "capability": "Temporary source capture exclusion",
+      "capability": "Temporary table payload capture exclusion",
       "workload": "Capture while a large temporary table exists, then update, truncate, drop it and close the Engine.",
       "invariant": "Temporary document, text and vector owners stay unregistered; their mutation and retirement add no backup retention.",
       "case_names": [
@@ -37510,6 +37510,1215 @@
       "capability": "Authority capture failure isolation",
       "workload": "Revoke a real schema grant with independent insufficient and sufficient capture limits.",
       "invariant": "The grant mutation completes, only the unfunded cut fails and the other capture retains the original authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_capture_preserves_incarnations_revisions_attributes_and_exact_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Role definition capture",
+      "workload": "Capture all seven role attributes, maximum tuple revision, exact names and independent identity before source loss.",
+      "invariant": "Every role field and ordered attribute survives under admitted output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_capture_keeps_distinct_incarnations_grant_paths_and_all_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Membership identity capture",
+      "workload": "Capture multiple grant paths and recycled role OIDs with distinct incarnations.",
+      "invariant": "Endpoint incarnations, row identities and all membership flags remain distinct and exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_capture_uses_independent_admission_and_retires_failed_production",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/capture/tests.rs",
+      "capability": "Role capture admission",
+      "workload": "Capture denied large role/grantor names and an independently admitted session binding; cancel original and capture controls.",
+      "invariant": "Failed output retains no reservation; captured bindings do not retain source session admission or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_role_capture_preserves_rollback_membership_and_same_name_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/roles.rs",
+      "capability": "Actual Engine role generations",
+      "workload": "Capture real SQL roles and memberships before savepoint rollback, rename, same-name replacement and unread Engine closure.",
+      "invariant": "Selected tuple versions and grant paths remain unchanged and retain original capture cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "underfunded_role_capture_does_not_abort_role_or_membership_changes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/roles.rs",
+      "capability": "Role capture failure isolation",
+      "workload": "Alter and revoke real role state with independent denied and funded captures.",
+      "invariant": "Ordinary publication completes, only the underfunded cut fails and all capture reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_system_authority_keeps_absent_empty_and_tombstone_acl_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Stored system ACL identity",
+      "workload": "Capture absent, empty and nonempty system table ACLs and empty column entries with independent tuple identities.",
+      "invariant": "Capture preserves stored tuple identity and optional states without projecting effective privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_and_foreign_authority_preserve_complete_tuple_and_bound_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Routine and foreign ACL capture",
+      "workload": "Capture exact routine OIDs, revisions and grant paths and qualified foreign authority with removed-column revisions.",
+      "invariant": "All bound identities, ACLs, exact names and revision-only entries survive source loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_authority_capture_rejects_denied_payload_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/capture/relations/tests.rs",
+      "capability": "Relation authority admission",
+      "workload": "Produce large routine ACLs, late system-column names and qualified foreign names under denied and cancelled controls.",
+      "invariant": "No partial output or reservation survives failure; original cancellation is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/relation_authority.rs",
+      "capability": "Actual Engine relation authority",
+      "workload": "Capture SQL routine, system and foreign grants before rollback, replacement and unread Engine closure.",
+      "invariant": "Every selected ACL tuple and grant path retains its original identity and cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_relation_authority_capture_preserves_grants_and_other_capture_owners",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/relation_authority.rs",
+      "capability": "Relation authority failure isolation",
+      "workload": "Revoke system, built-in routine and foreign-column grants with independent denied and funded cuts.",
+      "invariant": "Ordinary authority publication completes and only the denied capture fails without retained leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_types_keep_exact_identity_acl_order_keys_support_and_dropped_attributes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Stored type definition capture",
+      "workload": "Capture complete domains, enums, composites, ranges and shells with exact keys and nested state.",
+      "invariant": "Every identity, ACL, enum order key, support reference and dropped slot survives; measured live bytes equal admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_domain_constants_detach_source_owners_and_preserve_value_bits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Independent stored type constants",
+      "workload": "Capture a bound domain constant after source cancellation, then retire the source allowance.",
+      "invariant": "Captured values retain exact nested string and NaN bits without sharing source payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_capture_denies_large_nested_payloads_and_releases_partial_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/types/tests.rs",
+      "capability": "Type capture admission",
+      "workload": "Capture large late defaults, labels, attributes, multirange names and ACLs under denied and cancelled controls.",
+      "invariant": "Production rejects the original failure and releases every partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_type_capture_preserves_definitions_through_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/types.rs",
+      "capability": "Actual Engine type generations",
+      "workload": "Capture SQL domain/enum/composite/shell catalogs and stored range generations before rollback, same-name replacement and unread Engine closure.",
+      "invariant": "Selected definitions and identities remain exact; retained children keep original cancellation after cut release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_type_capture_keeps_type_ddl_and_independent_cuts_usable",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/types.rs",
+      "capability": "Type capture failure isolation",
+      "workload": "Alter and replace a domain with independent underfunded and funded captures.",
+      "invariant": "DDL completes, only the underfunded cut fails and all admitted capture memory retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_sequence_identities_preserve_exact_names_oid_claims_and_persistence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Sequence identity generations",
+      "workload": "Capture quoted sequence names, distinct incarnations, maximal OID claims and each persistence kind.",
+      "invariant": "Every original name, identity, claim and persistence value remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_graph_catalog_identities_keep_every_allocated_label_object",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Graph catalog identity capture",
+      "workload": "Capture a named graph with every label companion OID and constraint entry.",
+      "invariant": "All source fields survive source loss and measured retained bytes equal admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "identity_capture_rejects_denied_names_nested_constraints_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/identities/tests.rs",
+      "capability": "Catalog identity admission",
+      "workload": "Capture large qualified names and late graph constraint names under denied and cancelled controls.",
+      "invariant": "Partial reservations retire and the original cancellation remains authoritative.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_capture_preserves_extreme_positions_definition_and_owner_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture.rs",
+      "capability": "Selected sequence state capture",
+      "workload": "Retain extreme positions, an uncalled value, cache/log state and immutable owner/definition identities.",
+      "invariant": "Exact state survives while denied large names and cancellation release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "comment_capture_preserves_addresses_and_exact_text_with_independent_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/capture.rs",
+      "capability": "Object comment capture",
+      "workload": "Capture descriptions with shared OIDs but different catalog classes and subobjects.",
+      "invariant": "Address distinctions and text bytes remain exact, with no leak on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_capture_keeps_original_encoded_index_and_scoring_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/capture.rs",
+      "capability": "Encoded catalog capture",
+      "workload": "Capture complete index rows and opaque scoring strings with significant formatting and repeated JSON keys.",
+      "invariant": "Original payloads survive without normalization and measured live allocation equals admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_capture_rejects_large_late_payloads_and_cancellation_without_leaks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/capture.rs",
+      "capability": "Encoded metadata admission",
+      "workload": "Capture large late index definitions and scoring strings under denied and cancelled controls.",
+      "invariant": "No partial output or retained reservation survives either failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_metadata_capture_preserves_identity_position_and_encoded_values_across_lifecycle",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/identities.rs",
+      "capability": "Actual Engine catalog metadata",
+      "workload": "Capture eight metadata owners through real SQL, graph and scoring changes, rollback, replacement and unread closure.",
+      "invariant": "Every original identity, position and encoded value survives with original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_metadata_capture_does_not_prevent_scoring_parameter_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/identities.rs",
+      "capability": "Metadata failure isolation",
+      "workload": "Replace large scoring parameters with independent denied and funded captures.",
+      "invariant": "Normal publication succeeds, only the denied cut fails and all capture memory retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_wrapper_capture_preserves_every_handler_and_bound_callback_without_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign wrapper descriptor capture",
+      "workload": "Capture native, missing and bound-function handlers with validator references and ordered options.",
+      "invariant": "Exact names, handler variants, bound identities and options survive with actual allocation equal to admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_server_capture_keeps_option_order_legacy_absence_and_original_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign server descriptor capture",
+      "workload": "Capture current and legacy server metadata with distinct optional fields and option declaration order.",
+      "invariant": "Captured server identities, wrapper references, option bytes and absent fields exactly match the originals.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_descriptor_capture_rejects_unfunded_options_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/foreign/tests.rs",
+      "capability": "Foreign descriptor admission",
+      "workload": "Capture large late wrapper/server options under insufficient memory and cancel the original control.",
+      "invariant": "Denied or cancelled construction retains no partial descriptor or memory lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_keeps_complete_declarations_slots_references_and_option_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign table definition capture",
+      "workload": "Capture a qualified table with a dropped slot, constraints, noncanonical float bits, public OIDs and server binding.",
+      "invariant": "Every declaration, identity and option remains exact and actual live allocation matches admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_detaches_retained_defaults_from_the_source_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign default ownership",
+      "workload": "Capture a retained large default after cancelling its source control and then destroy the source.",
+      "invariant": "The source allowance retires independently while the captured original default remains owned by its capture allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_table_capture_rejects_late_options_and_cancellation_without_partial_retention",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/capture/tests.rs",
+      "capability": "Foreign table admission",
+      "workload": "Capture a large late option under a small allowance and repeat after original cancellation.",
+      "invariant": "Both failures release all copied declarations and option reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Memory foreign catalog lifecycle",
+      "workload": "Use actual wrapper/server/table SQL, dropped columns, rollback, same-name replacement and unread Engine closure.",
+      "invariant": "Captured definitions and original identity links survive; independently retained children keep original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_foreign_capture_keeps_ordinary_ddl_and_independent_cuts_usable",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Foreign catalog failure isolation",
+      "workload": "Drop and recreate a wrapper with large options under independent denied and funded captures.",
+      "invariant": "Ordinary DDL succeeds, the denied cut stays failed and the funded cut retains the original descriptor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_keeps_exact_sequences_and_evaluated_pairs_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Materialized path capture",
+      "workload": "Capture built indexes containing empty, absent and separator-bearing label sequences, then destroy their graph and source.",
+      "invariant": "Every evaluated pair and sequence boundary survives without retaining the source map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_admits_large_labels_and_pairs_before_copy_and_retires_failures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Path capture admission",
+      "workload": "Copy 32 KiB labels or 20,000 pairs under denied and independent funded allowances, then cancel and retire owners.",
+      "invariant": "Large payloads cannot escape admission; failures and final owners release their exact independent charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_capture_rejects_query_views_without_evaluating_the_graph",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/capture/tests.rs",
+      "capability": "Path capture storage boundary",
+      "workload": "Attempt memory capture of a query view bound to a nonexistent graph.",
+      "invariant": "The owner rejects the representation without graph evaluation or retained payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_path_capture_preserves_evaluated_pairs_through_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Memory path registry lifecycle",
+      "workload": "Build an actual path index, invalidate it through graph mutation, roll back, replace its graph and close the Engine.",
+      "invariant": "Original materialized pairs remain exact and retained children keep original cancellation after cut retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_path_capture_preserves_ordinary_updates_and_independent_cuts",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Memory path failure isolation",
+      "workload": "Drop and recreate a large-definition index under denied and funded captures.",
+      "invariant": "Ordinary publication succeeds while only the denied cut fails and funded capture retains original pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_detaches_resolved_descriptor_without_reopening_files_or_retaining_pipeline",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Resolved analyzer capture",
+      "workload": "Delete a resolved synonym source, measure capture allocation and destroy the compiled pipeline.",
+      "invariant": "Canonical descriptor bytes survive without file resolution or a retained pipeline; live allocation equals admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_rejects_unfunded_and_cancelled_descriptor_copies_without_leases",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Analyzer descriptor admission",
+      "workload": "Capture an ordinary descriptor under zero memory and original cancellation.",
+      "invariant": "Both typed failures release every partial lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_capture_keeps_every_enabled_dictionary_byte_and_independent_allowance",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/resources/capture/tests.rs",
+      "capability": "Analyzer dictionary capture",
+      "workload": "Copy every enabled language dictionary and deny its payload under a descriptor-sized allowance.",
+      "invariant": "Kinds, hashes and all encoded bytes remain exact in independent buffers; denial releases earlier descriptor allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_preserves_bytes_after_source_loss_and_last_owner_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Captured analyzer framing",
+      "workload": "Capture an analyzer twice, drop its compiled source and independently retire snapshot clones.",
+      "invariant": "Captured output equals the original versioned image and each allowance survives only its own final owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_retains_original_and_invoking_cancellation_between_short_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Captured analyzer controls",
+      "workload": "Cancel original or invoking controls during three-byte output attempts and deny capture under zero memory.",
+      "invariant": "Output stops with the original typed cancellation, independent scopes remain distinct and every lease retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_capture_image_releases_imported_dictionary_owners_before_snapshot_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Imported analyzer resource detachment",
+      "workload": "Import each enabled dictionary image, capture it, destroy its import owner and reconstruct from the retained image.",
+      "invariant": "Source input admission retires independently while exact image bytes and complete token observations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_analyzer_capture_preserves_independent_sides_names_owner_and_last_phase",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/capture/tests.rs",
+      "capability": "Field analyzer binding capture",
+      "workload": "Capture distinct historical sides and all owner/phase states, including unnamed defaults, then retain one child.",
+      "invariant": "Keys, names, exact images and assignment metadata survive; retained image children keep original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_analyzer_capture_releases_prior_sides_when_a_late_name_is_denied_or_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/capture/tests.rs",
+      "capability": "Field analyzer admission",
+      "workload": "Capture an ordinary binding followed by a 32 KiB table key under insufficient memory and cancellation.",
+      "invariant": "Failed production releases previously constructed images, names and registry buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_analyzer_capture_keeps_named_and_historical_field_revisions_through_rollback_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/analyzers.rs",
+      "capability": "Memory analyzer registry lifecycle",
+      "workload": "Assign different index/search revisions under one name, roll back changes, replace the table/name and close the Engine.",
+      "invariant": "Named and historical field images stay exact; independently retained children preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_analyzer_capture_preserves_replacement_and_independently_funded_images",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/analyzers.rs",
+      "capability": "Memory analyzer failure isolation",
+      "workload": "Replace a large-name analyzer while independent denied and funded cuts are active.",
+      "invariant": "Ordinary replacement succeeds, only the denied cut fails and the funded image retains the original revision.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_preserves_complete_declarations_bound_identities_and_enable_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger definition capture",
+      "workload": "Capture ordinary, constraint, transition and INSTEAD OF declarations with every enable mode and legacy optional state.",
+      "invariant": "Every declaration field and allocated identity survives; measured live allocation equals admission and empty relation entries remain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_detaches_retained_condition_constants_from_cancelled_source_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger condition ownership",
+      "workload": "Capture a large retained condition literal after cancelling its source owner and then retire that source.",
+      "invariant": "The original source allowance retires independently while exact literal representation and collation remain captured.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_capture_releases_prior_definitions_on_late_argument_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/events/tests.rs",
+      "capability": "Trigger definition admission",
+      "workload": "Capture an ordinary trigger followed by a 32 KiB argument under insufficient memory and cancellation.",
+      "invariant": "Denied production releases earlier definitions and all partial payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_trigger_capture_preserves_bound_definitions_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Memory trigger catalog lifecycle",
+      "workload": "Create actual triggers with bound WHEN routines, change enable state, roll back, replace table/routine identities and close the Engine.",
+      "invariant": "Selected definitions and original identities remain exact; retained catalog children preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_trigger_capture_preserves_ordinary_ddl_and_independently_funded_definitions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Memory trigger failure isolation",
+      "workload": "Drop a trigger carrying a 64 KiB argument while denied and funded captures coexist.",
+      "invariant": "Ordinary DDL succeeds, the funded cut preserves the old definition and both allowances retire independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_capture_preserves_relational_syntax_materialized_bits_and_full_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests.rs",
+      "capability": "Stored view representation",
+      "workload": "Capture relational queries and evaluated materialized rows with full authority.",
+      "invariant": "Bindings, row order, floating-point bits, type/collation metadata and ACL identities survive; allocation equals admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_capture_detaches_constants_and_excludes_execution_only_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests.rs",
+      "capability": "Stored query ownership",
+      "workload": "Capture a retained literal from a cancelled source beside a large executable query cache.",
+      "invariant": "Controlled and uncontrolled captures detach constants and exclude transient analysis and session owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_capture_releases_prior_rows_and_catalog_entries_on_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests.rs",
+      "capability": "Stored view admission",
+      "workload": "Capture multiple catalog entries with a late oversized materialized value.",
+      "invariant": "Denied or cancelled captures retire every partial row and earlier catalog entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_capture_rejects_execution_scoped_rows_before_retaining_their_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests.rs",
+      "capability": "Stored source boundaries",
+      "workload": "Attempt to capture a view query containing an execution-only retained row source.",
+      "invariant": "Non-persistable sources fail at the SQL owner and leave no retained admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_capture_detaches_nested_evaluated_constants_without_changing_ordinary_copies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/tests/capture.rs",
+      "capability": "Stored scalar ownership",
+      "workload": "Capture a retained constant beneath 128 constructors after cancelling its source.",
+      "invariant": "Captured value/type/collation survive independent source retirement; ordinary copies retain their prior sharing semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_capture_releases_prior_constants_on_payload_denial_and_preserves_read_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/tests/capture.rs",
+      "capability": "Stored scalar failure isolation",
+      "workload": "Fail after a completed constant through a large payload, unreadable source or either cancellation scope.",
+      "invariant": "Partial owners retire and original SQL diagnostics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_view_capture_preserves_definitions_and_evaluated_rows_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/views.rs",
+      "capability": "Memory view catalog lifecycle",
+      "workload": "Create actual ordinary and materialized views, refresh volatile results, roll back, replace and close unread.",
+      "invariant": "Selected query definitions, relation identities and original evaluated rows remain exact with original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_view_capture_preserves_ddl_and_independently_funded_materialized_rows",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/views.rs",
+      "capability": "Memory view failure isolation",
+      "workload": "Drop an oversized materialized view while denied and funded captures coexist.",
+      "invariant": "Ordinary DDL succeeds and the independently funded capture retains original rows until its final owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_preserves_overload_order_attributes_identities_and_bound_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_detaches_constants_and_discards_transient_source_window_and_parameter_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_releases_earlier_overloads_on_late_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_rejects_execution_only_rows_in_stored_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/routines/tests.rs",
+      "capability": "Stored routine capture",
+      "workload": "Capture source and SQL-standard bodies, defaults, attributes, identities, retained constants and transient owners under independent controls.",
+      "invariant": "Exact overload order, stored syntax and bound plans survive; source owners retire, execution-only sources fail and partial allocations release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_preserves_actions_bindings_dependency_sets_and_enable_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_detaches_condition_payloads_without_reallocating_old_new_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "rule_capture_releases_prior_entries_when_late_dependencies_are_denied_or_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/rules/tests.rs",
+      "capability": "Stored rewrite-rule capture",
+      "workload": "Capture actions, OLD/NEW condition plans, dependency sets, enable modes and retained literals with late denial and cancellation.",
+      "invariant": "Original identities and ordered sets survive without rebinding or invocation; independent payloads and failed partial entries release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_routine_capture_preserves_bound_and_unexamined_bodies_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/routines.rs",
+      "capability": "Memory routine catalog lifecycle",
+      "workload": "Exercise actual DDL, deferred invalid bodies, replacement, savepoint rollback, unread closure and denied/funded cuts.",
+      "invariant": "Selected declarations and bound SQL remain exact without source compilation; ordinary DDL and independently funded captures remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_routine_capture_preserves_ddl_and_independently_funded_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/routines.rs",
+      "capability": "Memory routine catalog lifecycle",
+      "workload": "Exercise actual DDL, deferred invalid bodies, replacement, savepoint rollback, unread closure and denied/funded cuts.",
+      "invariant": "Selected declarations and bound SQL remain exact without source compilation; ordinary DDL and independently funded captures remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_rule_capture_preserves_bound_conditions_dependencies_and_modes_through_rollback_replacement_and_unread_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/rules.rs",
+      "capability": "Memory rewrite-rule catalog lifecycle",
+      "workload": "Exercise actual rule actions, bound conditions, dependencies, modes, rollback, same-name replacement, unread closure and denied/funded cuts.",
+      "invariant": "Selected rules retain original OIDs and OLD/NEW references; failure cannot change ordinary DDL or another cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_rule_capture_preserves_ddl_and_independently_funded_actions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/rules.rs",
+      "capability": "Memory rewrite-rule catalog lifecycle",
+      "workload": "Exercise actual rule actions, bound conditions, dependencies, modes, rollback, same-name replacement, unread closure and denied/funded cuts.",
+      "invariant": "Selected rules retain original OIDs and OLD/NEW references; failure cannot change ordinary DDL or another cut.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "keys_read_unchanged_sources_and_preserve_the_selected_incarnation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory source key generation identity",
+      "workload": "Read an unchanged source, hold its writer, replace its identity and close all source owners.",
+      "invariant": "Reads reuse the selected immutable value; foreign cuts and later identities cannot substitute live values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "keys_do_not_retain_later_source_payloads_and_frozen_values_keep_their_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key ownership and payload growth",
+      "workload": "Capture 128 bytes, replace with 512 KiB, clone a key and close the source.",
+      "invariant": "Key clones allocate no bytes, later payload owners are released, and retained output keeps its original cancellation and lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_reads_keep_independent_admission_and_cancel_while_waiting_for_a_writer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key admission and cancellation",
+      "workload": "Read one source through independent limits, then deterministically cancel a reader waiting for a writer.",
+      "invariant": "Failed or cancelled cuts remain terminal, the independent capture stays exact and all leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_reads_racing_source_retirement_observe_the_completed_preservation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Memory key retirement ordering",
+      "workload": "Pause source retirement during freeze and concurrently read its weak identity.",
+      "invariant": "The source remains selectable until preservation completes; both reads share the exact frozen value and release admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "a_source_that_unwinds_during_retirement_cannot_leave_a_usable_incomplete_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/keys.rs",
+      "capability": "Incomplete memory cut rejection",
+      "workload": "Unwind a source retirement, then read its key and cancel a cut with another archived source.",
+      "invariant": "The missing selected value invalidates the cut, releases its archive and remains the first terminal error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_vector_membership_reads_unchanged_sources_without_the_collection_guard",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests.rs",
+      "capability": "Independent memory vector membership reads",
+      "workload": "Retain exact, IVF, HNSW and DiskANN membership and first-read unchanged children while the live collection is exclusively borrowed.",
+      "invariant": "Captured images match independently encoded original bytes without borrowing current membership and retain cancellation after source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "captured_membership_admits_weak_source_storage_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/capture.rs",
+      "capability": "Memory membership source storage admission",
+      "workload": "Capture vector membership, reject a second allowance one byte below its complete retention and close the source.",
+      "invariant": "Fixed weak source storage and copied names are reserved before publication; failure isolates the cut and final ownership releases every lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "immutable_deletions_and_insertions_preserve_every_retained_root",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable map composition",
+      "workload": "Compose inserts, removals and retained roots against an independent ordered-map oracle.",
+      "invariant": "Every current and retained root preserves exact entries, cardinality and AVL balance; final retirement releases all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "deletion_rotations_preserve_order_and_retire_unreachable_nodes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable deletion rotations",
+      "workload": "Insert and delete 128 keys in each forward/reverse order while retaining predecessor roots.",
+      "invariant": "Each predecessor stays unchanged and the surviving root owns exactly its structural payload after predecessor retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "deletion_admission_failure_and_absent_keys_preserve_the_original_root",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Immutable deletion admission",
+      "workload": "Deny deletion admission at varied limits and remove an absent key with no available storage.",
+      "invariant": "Denied successors preserve the original entries and allowance; absent keys allocate zero bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_removal_and_empty_successors_need_no_additional_storage",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Borrowed-key removal",
+      "workload": "Remove a string entry through a borrowed key while all remaining allowance is held.",
+      "invariant": "The empty successor allocates nothing, and the original root remains readable until its final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "large_immutable_removal_and_snapshot_iteration_have_bounded_work_and_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/removal.rs",
+      "capability": "Bounded immutable deletion",
+      "workload": "Remove one key from 32768 entries and iterate the retained original root.",
+      "invariant": "Removal allocates at most 8192 bytes and performs at most 64 comparisons; snapshot iteration allocates zero bytes and returns every original entry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_preserves_unread_incarnations_without_retaining_live_tables",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Memory table membership lifetime",
+      "workload": "Capture actual SQL tables, optionally rename/drop/recreate them and close Engine before reading the selected sources.",
+      "invariant": "Original names, object/OID identities, columns and rows survive without retaining TableState; all 22 source wrappers use the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_rollback_restores_the_original_root_without_another_live_map_owner",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Memory table membership rollback",
+      "workload": "Create/drop/replace tables inside a transaction and savepoint, then roll both back.",
+      "invariant": "Undo restores the original membership entry identity and table contents while retaining no extra live table-map owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_membership_capture_does_not_copy_the_relation_corpus_or_temporary_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Constant-work table membership capture",
+      "workload": "Capture 1 and 128 durable tables alongside a temporary table with one MiB of metadata.",
+      "invariant": "Both captures allocate the same fixed bytes below 4096, retain only durable membership and release all capture admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_table_membership_retention_does_not_consume_publication_or_an_independent_cut",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Table membership failure isolation",
+      "workload": "Retain the same membership with insufficient and sufficient controls before creating another table.",
+      "invariant": "Only the denied cut fails; publication and the funded cut remain valid, cancellation stops reads and final retirement releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_membership_retention_keeps_unique_maps_in_place",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/tests.rs",
+      "capability": "Persistent table membership retention",
+      "workload": "Retain 127 of 128 table handles through the unregistered persistent registry owner.",
+      "invariant": "A unique live map allocates zero bytes, visits each predicate once and preserves retained table identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "durable_view_capture_excludes_temporary_payloads_before_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests/durable.rs",
+      "capability": "Durable view payload admission",
+      "workload": "Compare capture allocation with permanent/unlogged views alone and with three MiB of temporary names and payloads.",
+      "invariant": "Temporary entries add no output allocation or retained bytes; selected identities, syntax, order and persistence remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporary_only_view_capture_skips_session_owners_with_zero_payload_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/definition_capture/views/tests/durable.rs",
+      "capability": "Temporary view exclusion",
+      "workload": "Capture a temporary-only catalog containing an execution-scoped row source with zero payload allowance, then cancel it.",
+      "invariant": "Excluded session owners are never copied or validated as durable syntax; empty and temporary-only captures still observe cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_view_membership_excludes_temporary_definitions_through_rollback_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/views.rs",
+      "capability": "Memory Engine durable view membership",
+      "workload": "Capture a permanent view beside a one-MiB same-name temporary view under 32 KiB; replace and roll back definitions and close the source unread.",
+      "invariant": "Only the selected permanent incarnation survives, temporary payloads consume no backup admission, and cancellation and final release remain attached to the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "transaction_data_retention_releases_live_table_owners_after_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Independent transaction data ownership",
+      "workload": "Retain outer and savepoint data, grow and replace a live table, roll back replacement, commit and close the Engine.",
+      "invariant": "Retained data keeps exact original rows, columns and catalog roots while the original mutable TableState is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "outer_transaction_data_is_readable_while_a_long_callback_holds_private_savepoints",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Committed transaction source access",
+      "workload": "Hold a callback after private updates and a savepoint, select its outer data using the available transaction-state lock, then finish and mutate again.",
+      "invariant": "Selection allocates no memory, requires no callback completion and preserves only the outer transaction generation through later commits and Engine loss.",
       "case_names": [
         ""
       ]

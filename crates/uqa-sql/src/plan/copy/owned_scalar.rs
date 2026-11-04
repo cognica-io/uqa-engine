@@ -40,12 +40,11 @@ impl Copying<'_> {
             if let Some(owners) = &mut owners {
                 owners.push(memory).expect("scalar owner slot was admitted");
             } else {
-                self.memory
-                    .absorb(memory.expect("controlled scalar").into_reservation());
+                self.absorb(Some(memory.expect("controlled scalar").into_reservation()));
             }
         }
         let (output, memory) = output.into_parts();
-        self.memory.absorb(memory);
+        self.absorb(Some(memory));
         self.scalar_items = owners;
         Ok(output)
     }

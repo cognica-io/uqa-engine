@@ -33,7 +33,7 @@ syntax_enum!(crate::plan::CommandPlan {
     ShowVariable { name },
     Discard { target },
     Load { library },
-    Explain { options, body, unbound_parameters },
+    Explain { options, body, unbound_parameters = None },
     Analyze { table },
     Vacuum(value0),
     LockTable(value0),

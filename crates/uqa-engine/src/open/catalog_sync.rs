@@ -309,9 +309,9 @@ impl Engine {
         latest: &Engine,
         target_versions: CatalogVersions,
     ) -> StorageBackendResult<()> {
-        let previous_tables = self.storage.tables.read().clone();
+        let previous_tables = self.storage.tables.snapshot();
         let (merged_tables, latest_baseline) =
-            self.merged_latest_fixed_snapshot_table_catalog(latest, &previous_tables)?;
+            self.merged_latest_fixed_snapshot_table_catalog(latest, previous_tables.tables())?;
         let previous_durable = self.durable.snapshot();
         let temporary_views = self
             .durable
@@ -328,7 +328,7 @@ impl Engine {
         self.durable.views.write().extend(temporary_views);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
-            *self.storage.tables.write() = previous_tables.clone();
+            self.storage.tables.restore(&previous_tables);
             self.durable.restore(&previous_durable);
             self.store_seen_catalog_versions(previous_versions);
             self.clear_regtype_output_cache();
@@ -337,6 +337,7 @@ impl Engine {
         };
         for (relation, table) in &merged_tables {
             let already_bound = previous_tables
+                .tables()
                 .values()
                 .any(|previous| Arc::ptr_eq(previous, table));
             if table.persistence == uqa_sql::ast::RelationPersistence::Temporary || already_bound {
@@ -349,7 +350,7 @@ impl Engine {
                 return Err(error);
             }
         }
-        *self.storage.tables.write() = merged_tables;
+        self.storage.tables.write().replace(merged_tables)?;
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         self.clear_sql_statement_cache();
@@ -680,7 +681,7 @@ impl Engine {
                 })
                 .map(|(relation, table)| (relation.clone(), table.clone())),
         );
-        *self.storage.tables.write() = rebound;
+        self.storage.tables.write().replace(rebound)?;
 
         // Restore per-field analyzers and IVF/HNSW bindings on the newly
         // created session-local stores. These registries are logical state

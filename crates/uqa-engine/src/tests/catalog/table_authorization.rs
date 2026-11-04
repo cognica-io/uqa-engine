@@ -127,7 +127,8 @@ fn bound_authorization_retains_the_selected_table_generation_after_registry_repl
         .tables
         .try_write()
         .expect("binding must release the actual registry guard")
-        .insert(name, replacement);
+        .insert(name, replacement)
+        .unwrap();
     assert_eq!(selected.column_names(), ["id"]);
     assert_eq!(
         engine.bound_table_column_names("public.original").unwrap(),

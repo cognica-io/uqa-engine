@@ -10,9 +10,20 @@ use crate::Engine;
 use std::sync::Arc;
 use uqa_storage::read_control::StorageReadControl;
 
+mod analyzers;
 mod catalog_authority;
+mod foreign;
+mod identities;
 mod metadata;
+mod paths;
+mod relation_authority;
 mod resources;
+mod roles;
+mod routines;
+mod rules;
+mod triggers;
+mod types;
+mod views;
 
 fn sql(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
@@ -113,7 +124,7 @@ fn memory_engine_capture_preserves_physical_sources_across_rollback_replacement_
                     .unwrap()
                     .capture(&control)
                     .unwrap(),
-                engine.storage.tables.snapshot(),
+                engine.storage.tables.live_snapshot(),
             )
         };
         assert!(control.memory().used() < 4096);
@@ -134,9 +145,7 @@ fn memory_engine_capture_preserves_physical_sources_across_rollback_replacement_
             "{method}"
         );
         assert_eq!(text_image(&***captured_text), text, "{method}");
-        let image = captured_vectors
-            .image("embedding", Some(&table.vector_indexes.read()), &cut)
-            .unwrap();
+        let image = captured_vectors.image("embedding", &cut).unwrap();
         let mut bytes = Vec::new();
         image
             .write_image(&mut bytes, &StorageReadControl::with_limit(16 << 20))
@@ -216,7 +225,7 @@ fn memory_engine_capture_retains_unread_sources_before_the_last_engine_owner_clo
             text
         );
         let vectors = vector_key.retained(&cut).unwrap().unwrap();
-        let image = vectors.image("embedding", None, &cut).unwrap();
+        let image = vectors.image("embedding", &cut).unwrap();
         let mut bytes = Vec::new();
         image
             .write_image(&mut bytes, &StorageReadControl::with_limit(1 << 20))
@@ -247,17 +256,20 @@ fn memory_engine_capture_membership_registration_has_no_relation_or_document_cop
             let _statement = engine.lock_statement_gate();
             captured = Some((
                 registry.capture(&control).unwrap(),
-                engine.storage.tables.snapshot(),
+                engine.storage.tables.live_snapshot(),
             ));
         });
         assert!(allocated.bytes_total < 4096, "{count}: {allocated:?}");
         let (cut, tables) = captured.unwrap();
         assert_eq!(tables.len(), count);
-        assert!(Arc::ptr_eq(&tables, &engine.storage.tables.snapshot()));
+        assert!(Arc::ptr_eq(&tables, &engine.storage.tables.live_snapshot()));
         sql(&engine, "CREATE TABLE later(id integer)");
         assert_eq!(tables.len(), count);
         assert_eq!(engine.storage.tables.read().len(), count + 1);
-        assert!(!Arc::ptr_eq(&tables, &engine.storage.tables.snapshot()));
+        assert!(!Arc::ptr_eq(
+            &tables,
+            &engine.storage.tables.live_snapshot()
+        ));
         drop((cut, tables));
         assert_eq!(control.memory().used(), 0);
     }
@@ -291,23 +303,22 @@ fn memory_engine_capture_failure_preserves_transaction_progress_and_other_cuts()
 }
 
 #[test]
-fn memory_engine_capture_excludes_temporary_source_retention() {
-    let empty = Engine::new();
-    let baseline = StorageReadControl::with_limit(4096);
-    let empty_cut = empty
+fn memory_engine_capture_excludes_temporary_table_payloads() {
+    let definition = "CREATE TEMP TABLE temp_docs(id integer, body text, embedding vector(2)); CREATE INDEX temp_text ON temp_docs USING gin(body)";
+    let engine = Engine::new();
+    sql(&engine, definition);
+    let baseline = StorageReadControl::with_limit(1 << 20);
+    let empty_cut = engine
         .storage
         .memory_capture
         .as_ref()
         .unwrap()
         .capture(&baseline)
         .unwrap();
-    drop(empty);
-    empty_cut.check().unwrap();
-    let empty_peak = baseline.memory().peak();
-    drop(empty_cut);
-    assert_eq!(baseline.memory().used(), 0);
-    let engine = Engine::new();
-    sql(&engine, "CREATE TEMP TABLE temp_docs(id integer, body text, embedding vector(2)); CREATE INDEX temp_text ON temp_docs USING gin(body); INSERT INTO temp_docs VALUES(1,repeat('x',65536),ARRAY[1.0,0.0])");
+    sql(
+        &engine,
+        "INSERT INTO temp_docs VALUES(1,repeat('x',65536),ARRAY[1.0,0.0])",
+    );
     let table = engine.table("temp_docs").unwrap().unwrap();
     assert!(table.document_store.key().is_err());
     assert!(table.inverted_index.key().is_err());
@@ -316,7 +327,8 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
     assert!(table.columns.key().is_err());
     assert!(table.hierarchy.key().is_err());
     assert!(table.dropped_attributes.key().is_err());
-    let control = StorageReadControl::with_limit(4096);
+    // Both cuts contain the same catalog definitions; populated temporary stores must add no capture retention.
+    let control = StorageReadControl::with_limit(1 << 20);
     let cut = engine
         .storage
         .memory_capture
@@ -326,8 +338,10 @@ fn memory_engine_capture_excludes_temporary_source_retention() {
         .unwrap();
     sql(&engine, "UPDATE temp_docs SET body='changed',embedding=ARRAY[0.0,1.0]; TRUNCATE temp_docs; DROP TABLE temp_docs");
     drop((table, engine));
+    empty_cut.check().unwrap();
     cut.check().unwrap();
-    assert_eq!(control.memory().peak(), empty_peak);
-    drop(cut);
+    assert_eq!(control.memory().used(), baseline.memory().used());
+    drop((cut, empty_cut));
+    assert_eq!(baseline.memory().used(), 0);
     assert_eq!(control.memory().used(), 0);
 }

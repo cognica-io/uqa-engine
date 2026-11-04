@@ -9,6 +9,14 @@
 use crate::{plan::copy::SyntaxProduction, SQLError};
 use uqa_core::memory::{Produced, ProductionControl};
 
+pub mod events;
+pub mod foreign;
+pub mod identities;
+pub mod routines;
+pub mod rules;
+pub mod types;
+pub mod views;
+
 macro_rules! capture_list {
     ($($name:ident: $ty:ty),* $(,)?) => {$ (
         pub fn $name(values: &[$ty], control: &ProductionControl<'_>) -> Result<Produced<Vec<$ty>>, SQLError> {

@@ -7,7 +7,7 @@
 //! Registry adapters retain immutable resource owners through their owning image interfaces.
 
 use super::{CatalogCell, DurableCatalogState};
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_core::memory::{Budgeted, BudgetedMap, ProductionControl};
 use uqa_storage::{
     memory_capture::MemoryCaptureRegistry, read_control::StorageReadControl, StorageBackendResult,
@@ -35,14 +35,39 @@ impl DurableCatalogState {
                     uqa_ml::DeepModel::capture_image_with_control,
                 )
             })?;
+        state.path_indexes = CatalogCell::capture_resource(
+            state.path_indexes.snapshot(),
+            registry,
+            |values, control| {
+                resources(
+                    values,
+                    control,
+                    uqa_graph::PathIndex::capture_memory_with_control,
+                )
+            },
+        )?;
+        state.named_analyzers = CatalogCell::capture_resource(
+            state.named_analyzers.snapshot(),
+            registry,
+            |values, control| {
+                resources(values, control, |source, control| {
+                    uqa_storage::analyzer_image::AnalyzerImageSnapshot::capture(source, control)
+                })
+            },
+        )?;
+        state.table_field_analyzers = CatalogCell::capture_resource(
+            state.table_field_analyzers.snapshot(),
+            registry,
+            uqa_storage::analyzer_binding::capture::fields,
+        )?;
         Ok(state)
     }
 }
 
 fn resources<T, F>(
-    values: &BTreeMap<String, Arc<T>>,
+    values: &BTreeMap<String, T>,
     control: &StorageReadControl,
-    capture: fn(&Arc<T>, &StorageReadControl) -> StorageBackendResult<F>,
+    capture: fn(&T, &StorageReadControl) -> StorageBackendResult<F>,
 ) -> StorageBackendResult<Budgeted<CapturedResources<F>>> {
     control.check()?;
     let production = ProductionControl::new(

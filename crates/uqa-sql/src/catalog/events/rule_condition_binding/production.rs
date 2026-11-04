@@ -15,6 +15,25 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl};
 
 impl RuleConditionBinding {
+    /// Copy the stored binding without allocating new process-local relation identities.
+    pub fn capture_binding(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        let output = SyntaxProduction::new(*control);
+        let Self {
+            old_relation,
+            new_relation,
+            columns,
+        } = self;
+        let captured = Self {
+            old_relation: *old_relation,
+            new_relation: *new_relation,
+            columns: output.copy(columns)?,
+        };
+        output.finish(captured)
+    }
+
     pub fn refresh_columns_with_control(
         &self,
         columns: &[ColumnDef],
