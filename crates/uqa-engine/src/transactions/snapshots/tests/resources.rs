@@ -110,9 +110,10 @@ fn same_metadata(selected: &SnapshotCut, original_oids: &BTreeMap<String, GraphC
         .scoring_params
         .captured(&selected.cut)
         .unwrap();
+    assert_eq!(scoring.get().unwrap().iter().count(), 1);
     assert_eq!(
-        scoring.get().unwrap(),
-        &[("saved".into(), "{\"alpha\":0.25}".into())]
+        scoring.get().unwrap().get("saved").map(String::as_str),
+        Some("{\"alpha\":0.25}")
     );
     let oids = selected
         .catalogs

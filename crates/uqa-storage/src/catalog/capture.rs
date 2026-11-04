@@ -98,26 +98,6 @@ pub fn selected_indexes(
         .unwrap_or_else(|_| unreachable!("storage capture owns an allowance")))
 }
 
-pub fn scoring_params(
-    values: &BTreeMap<String, String>,
-    control: &StorageReadControl,
-) -> StorageBackendResult<Budgeted<Vec<(String, String)>>> {
-    let control = production(control);
-    let mut entries = ProductionVec::new(control);
-    entries.reserve(values.len())?;
-    for (name, value) in values {
-        let (name, key_memory) = control.copy_text(name)?.into_parts();
-        let (value, value_memory) = control.copy_text(value)?.into_parts();
-        entries.push_produced(
-            control.finish((name, value), control.combine(key_memory, value_memory))?,
-        )?;
-    }
-    Ok(entries
-        .finish()?
-        .into_budgeted()
-        .unwrap_or_else(|_| unreachable!("storage capture owns an allowance")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,10 +136,12 @@ mod tests {
         assert_eq!(after.parameters_json, before.parameters_json);
         assert_eq!(after.definition_json, before.definition_json);
         drop(source);
-        let parameters =
-            BTreeMap::from([("exact signal".into(), "{ \"x\": 1.00, \"x\": 2 }".into())]);
-        let values = scoring_params(&parameters, &control).unwrap();
-        assert!(values.iter().map(|(k, v)| (k, v)).eq(parameters.iter()));
+        let mut parameters = crate::catalog::scoring_params::ScoringParameters::default();
+        parameters
+            .insert("exact signal".into(), "{ \"x\": 1.00, \"x\": 2 }".into())
+            .unwrap();
+        let values = parameters.capture(&control).unwrap();
+        assert!(values.iter().eq(parameters.iter()));
         drop((parameters, values, saved));
         assert_eq!(control.memory().used(), 0);
     }
@@ -169,15 +151,18 @@ mod tests {
         let mut row = row();
         row.definition_json = Some("x".repeat(32768));
         let source = BTreeMap::from([(row.relation.clone(), row)]);
-        let parameters = BTreeMap::from([("signal".into(), "x".repeat(32768))]);
+        let mut parameters = crate::catalog::scoring_params::ScoringParameters::default();
+        parameters
+            .insert("signal".into(), "x".repeat(32768))
+            .unwrap();
         let control = StorageReadControl::with_limit(4096);
         assert!(indexes(&source, &control).is_err());
         assert_eq!(control.memory().used(), 0);
-        assert!(scoring_params(&parameters, &control).is_err());
+        assert!(parameters.capture(&control).is_err());
         assert_eq!(control.memory().used(), 0);
         control.cancellation().cancel();
         assert!(indexes(&source, &control).is_err());
-        assert!(scoring_params(&parameters, &control).is_err());
+        assert!(parameters.capture(&control).is_err());
         assert_eq!(control.memory().used(), 0);
     }
 }

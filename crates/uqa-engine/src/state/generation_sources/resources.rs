@@ -56,5 +56,5 @@ resource_sources! {
         |values, control| resources(values, control, uqa_graph::PathIndex::capture_memory_with_control);
     named_analyzers: BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>> => CapturedResources<uqa_storage::analyzer_image::AnalyzerImageSnapshot>,
         |values, control| resources(values, control, |source, control| uqa_storage::analyzer_image::AnalyzerImageSnapshot::capture(source, control));
-    scoring_params: BTreeMap<String, String> => Vec<(String, String)>, uqa_storage::catalog::capture::scoring_params;
+    scoring_params: uqa_storage::catalog::scoring_params::ScoringParameters => uqa_storage::catalog::scoring_params::CapturedScoringParameters, uqa_storage::catalog::scoring_params::ScoringParameters::capture;
 }

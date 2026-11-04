@@ -37860,7 +37860,7 @@
       "source": "crates/uqa-storage/src/catalog/capture.rs",
       "capability": "Encoded catalog capture",
       "workload": "Capture complete index rows and opaque scoring strings with significant formatting and repeated JSON keys.",
-      "invariant": "Original payloads survive without normalization and measured live allocation equals admission.",
+      "invariant": "Original payloads survive without normalization; copied index allocation equals admission and scoring metadata shares an independently admitted immutable root.",
       "case_names": [
         ""
       ]
@@ -39462,6 +39462,71 @@
       "capability": "Failed-frame committed selection",
       "workload": "Fail a memory transaction after private changes, capture its original state and perform native rollback.",
       "invariant": "Capture neither clears failure nor consumes recovery, and its admitted original row survives transaction completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_capture_admission_does_not_visit_or_copy_catalog_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/tests.rs",
+      "capability": "Scoring catalog capture admission",
+      "workload": "Capture 1, 64 and 4,096 one-KiB encoded parameters under independent allowances, then close the source.",
+      "invariant": "Capture allocates no heap objects, funds the full retained footprint independently and preserves ordered originals through closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_root_updates_share_unrelated_payloads_and_preserve_native_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/tests.rs",
+      "capability": "Scoring catalog mutation work",
+      "workload": "Capture 4,096 one-KiB parameters, replace and remove entries, add four MiB of later data, restore and clear the source.",
+      "invariant": "Each update allocates less than 32 KiB, unrelated payload identities stay shared, exact encoded originals survive and retained admission does not grow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_failed_mutations_preserve_membership_and_retention_accounting",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/tests.rs",
+      "capability": "Scoring catalog failure atomicity",
+      "workload": "Exhaust the source tree allowance during replacement, insertion, removal and complete-root replacement.",
+      "invariant": "Failed updates preserve membership, values and retained-byte totals; later successful operations and final release remain valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_capture_charges_string_capacities_and_rejects_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/tests.rs",
+      "capability": "Scoring catalog retention limits",
+      "workload": "Capture short strings with large spare capacities under exact and insufficient allowances, cancel and replace the source.",
+      "invariant": "Admission charges capacities and structural storage, rejected captures retain no memory and independent selected roots remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/identities.rs",
+      "capability": "Committed scoring catalog generations",
+      "workload": "Capture an actual memory Engine with a four-MiB parameter, update another signal, roll back savepoints, grow later data and close the Engine.",
+      "invariant": "Capture and subsequent publication each allocate below 512 KiB; selected payload identities, bytes and retention remain unchanged, and original cancellation survives closure.",
       "case_names": [
         ""
       ]

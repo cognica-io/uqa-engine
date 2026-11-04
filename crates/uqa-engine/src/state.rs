@@ -175,7 +175,10 @@ pub(super) struct DurableCatalogState {
         BTreeMap<String, Arc<DeepModel>>,
         resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
     >,
-    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>, Vec<(String, String)>>,
+    pub(super) scoring_params: CatalogCell<
+        uqa_storage::catalog::scoring_params::ScoringParameters,
+        uqa_storage::catalog::scoring_params::CapturedScoringParameters,
+    >,
     pub(super) views: CatalogCell<
         BTreeMap<RelationIdentity, StoredView>,
         uqa_sql::catalog::definition_capture::views::CapturedViews,
@@ -308,7 +311,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, Arc<DeepModel>>>,
-    pub(super) scoring_params: Arc<BTreeMap<String, String>>,
+    pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: Arc<BoundDatabaseSecurity>,
@@ -354,7 +357,9 @@ impl DurableCatalogState {
             composites: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
-            scoring_params: CatalogCell::new(BTreeMap::new()),
+            scoring_params: CatalogCell::new(
+                uqa_storage::catalog::scoring_params::ScoringParameters::default(),
+            ),
             views: CatalogCell::new(BTreeMap::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
             database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),

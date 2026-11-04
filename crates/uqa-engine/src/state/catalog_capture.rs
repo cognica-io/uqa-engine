@@ -183,7 +183,7 @@ impl DurableCatalogState {
         self.scoring_params = CatalogCell::capture_resource(
             self.scoring_params.snapshot(),
             registry,
-            uqa_storage::catalog::capture::scoring_params,
+            uqa_storage::catalog::scoring_params::ScoringParameters::capture,
         )?;
         Ok(())
     }

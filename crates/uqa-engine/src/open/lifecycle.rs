@@ -541,7 +541,7 @@ impl Engine {
             engine.durable.models.write().insert(name, Arc::new(model));
         }
         for (name, json) in restore_catalog.load_all_scoring_params()? {
-            engine.durable.scoring_params.write().insert(name, json);
+            engine.durable.scoring_params.write().insert(name, json)?;
         }
         // Initial catalog migrations and physical-index repairs above may
         // commit. Establish the backend monitor baseline only after every
