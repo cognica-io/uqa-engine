@@ -47,27 +47,27 @@ impl DurableCatalogState {
         self.domains = CatalogCell::capture_source(
             self.domains.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::domains,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.enums = CatalogCell::capture_source(
             self.enums.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::enums,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.composites = CatalogCell::capture_source(
             self.composites.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::composites,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.ranges = CatalogCell::capture_source(
             self.ranges.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::ranges,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         self.shells = CatalogCell::capture_source(
             self.shells.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::types::shells,
+            uqa_sql::catalog::type_definitions::TypeDefinitions::capture,
         )?;
         Ok(())
     }

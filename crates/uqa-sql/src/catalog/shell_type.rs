@@ -27,12 +27,12 @@ pub struct StoredShellType {
 
 /// Reject inconsistent names, duplicate identities and stale owner incarnations before publishing any restored shell.
 pub fn validate_shell_registry(
-    registry: &BTreeMap<String, StoredShellType>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredShellType>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
             return Err(format!("invalid or duplicate shell identity for `{name}`"));
         }
@@ -75,7 +75,7 @@ mod tests {
         let registry = BTreeMap::from([("public.pending".into(), shell.clone())]);
         validate_shell_registry(&registry, &roles).unwrap();
         let encoded = serde_json::to_string(&registry).unwrap();
-        let decoded = serde_json::from_str(&encoded).unwrap();
+        let decoded: BTreeMap<String, StoredShellType> = serde_json::from_str(&encoded).unwrap();
         validate_shell_registry(&decoded, &roles).unwrap();
         for corrupt in 0..5 {
             let mut changed = shell.clone();

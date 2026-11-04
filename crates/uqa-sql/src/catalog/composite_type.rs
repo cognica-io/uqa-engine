@@ -142,12 +142,12 @@ impl<Owner> StoredComposite<Owner> {
 
 /// Check the definitions restored or published as one registry: identities and OIDs are unique, names agree with their keys, attribute numbers ascend and live names are distinct, and owners exist.
 pub fn validate_composite_registry(
-    registry: &BTreeMap<String, StoredComposite>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredComposite>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
             return Err(format!(
                 "invalid or duplicate composite identity for `{name}`"

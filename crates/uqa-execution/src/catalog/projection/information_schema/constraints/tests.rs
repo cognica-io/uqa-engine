@@ -60,19 +60,21 @@ fn fixture() -> CatalogReadView {
         object_id: [6; 16],
         oid: 30_003,
     });
-    Arc::make_mut(&mut snapshot.definitions.domains).insert(
-        "public.positive".into(),
-        StoredDomain {
-            object_id: [7; 16],
-            oid: 30_004,
-            array_oid: Some(30_005),
-            identity: RelationIdentity::new("public", "positive"),
-            owner: RoleIdentity::BOOTSTRAP,
-            definition,
-            array_name: None,
-            usage_acl: None,
-        },
-    );
+    Arc::make_mut(&mut snapshot.definitions.domains)
+        .insert(
+            "public.positive".into(),
+            StoredDomain {
+                object_id: [7; 16],
+                oid: 30_004,
+                array_oid: Some(30_005),
+                identity: RelationIdentity::new("public", "positive"),
+                owner: RoleIdentity::BOOTSTRAP,
+                definition,
+                array_name: None,
+                usage_acl: None,
+            },
+        )
+        .unwrap();
     CatalogReadView::new(snapshot)
 }
 
@@ -115,9 +117,12 @@ fn domain_constraint_visibility_uses_the_retained_type_usage_acl() {
     let original = fixture();
     let mut snapshot = original.snapshot().clone();
     Arc::make_mut(&mut snapshot.definitions.domains)
-        .get_mut("public.positive")
+        .edit("public.positive", |domain| {
+            domain.usage_acl = Some(Vec::new());
+            Ok(())
+        })
         .unwrap()
-        .usage_acl = Some(Vec::new());
+        .unwrap();
     let restricted = CatalogReadView::new(snapshot);
     let mut resolution = CatalogServices::default().resolution;
     resolution.current_user = "reader".into();
@@ -146,9 +151,6 @@ fn domain_constraint_visibility_uses_the_retained_type_usage_acl() {
 fn requested_constraint_names_do_not_deparse_unselected_expressions() {
     let catalog = fixture();
     let mut snapshot = catalog.snapshot().clone();
-    let domain = Arc::make_mut(&mut snapshot.definitions.domains)
-        .get_mut("public.positive")
-        .unwrap();
     let Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN positive AS integer CHECK(missing_routine(VALUE))")
             .unwrap()
@@ -156,7 +158,13 @@ fn requested_constraint_names_do_not_deparse_unselected_expressions() {
     else {
         panic!("domain");
     };
-    domain.definition.checks[0].expression = definition.checks[0].expression.clone();
+    Arc::make_mut(&mut snapshot.definitions.domains)
+        .edit("public.positive", |domain| {
+            domain.definition.checks[0].expression = definition.checks[0].expression.clone();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let mut request = CatalogRequest::columns(["constraint_name".into()]);
     request.require_name("constraint_name".into(), "domain_positive".into());

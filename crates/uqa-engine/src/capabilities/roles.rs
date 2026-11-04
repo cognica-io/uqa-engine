@@ -212,7 +212,10 @@ impl RoleDependencyCatalog for Engine {
     }
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+    ) -> RoleDependencyRead<
+        '_,
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    > {
         Box::new(self.durable.domains.read())
     }
 }

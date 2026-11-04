@@ -39,20 +39,18 @@ pub fn drop_composite_attribute(
         &AttributeChange::Drop(name.to_string()),
     )?;
     let mut registry = before.clone();
-    let attribute = registry
-        .get_mut(&key)
-        .and_then(|definition| {
-            definition
-                .attributes
-                .iter_mut()
-                .find(|attribute| !attribute.dropped && attribute.name == name)
-        })
+    let mut definition = definition.clone();
+    let attribute = definition
+        .attributes
+        .iter_mut()
+        .find(|attribute| !attribute.dropped && attribute.name == name)
         .ok_or_else(|| {
             SQLError::Internal(format!(
                 "attribute `{name}` of composite type `{key}` disappeared before its removal"
             ))
         })?;
     attribute.dropped = true;
+    registry.insert(key, definition)?;
     composite_type::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     super::values::rebuild_indexes(&context.values, rebuild)?;

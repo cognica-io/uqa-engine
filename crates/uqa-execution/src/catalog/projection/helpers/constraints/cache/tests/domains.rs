@@ -34,7 +34,8 @@ fn with_domains(catalog: &CatalogReadView, unrelated: usize) -> CatalogReadView 
             usage_acl: None,
         };
         Arc::make_mut(&mut snapshot.definitions.domains)
-            .insert(domain.identity.qualified_name(), domain);
+            .insert(domain.identity.qualified_name(), domain)
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }
@@ -119,23 +120,33 @@ fn domain_addresses_preserve_first_match_and_ignore_unassigned_identities() {
     let catalog = with_domains(&fixture(0), 1);
     let mut snapshot = catalog.snapshot().clone();
     let domains = Arc::make_mut(&mut snapshot.definitions.domains);
-    let first = domains.get_mut("public.positive_000").unwrap();
-    first.definition.checks[0]
-        .catalog_identity
-        .as_mut()
+    domains
+        .edit("public.positive_000", |first| {
+            first.definition.checks[0]
+                .catalog_identity
+                .as_mut()
+                .unwrap()
+                .oid = 90_002;
+            Ok(())
+        })
         .unwrap()
-        .oid = 90_002;
-    let second = domains.get_mut("public.positive_001").unwrap();
-    second
-        .definition
-        .not_null
-        .as_mut()
+        .unwrap();
+    domains
+        .edit("public.positive_001", |second| {
+            second
+                .definition
+                .not_null
+                .as_mut()
+                .unwrap()
+                .catalog_identity
+                .as_mut()
+                .unwrap()
+                .oid = 90_002;
+            second.definition.checks[0].catalog_identity = None;
+            Ok(())
+        })
         .unwrap()
-        .catalog_identity
-        .as_mut()
-        .unwrap()
-        .oid = 90_002;
-    second.definition.checks[0].catalog_identity = None;
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     assert!(matches!(
@@ -165,11 +176,12 @@ fn domain_addresses_remain_with_their_original_generation() {
     let mut snapshot = catalog.snapshot().clone();
     let domains = Arc::make_mut(&mut snapshot.definitions.domains);
     domains
-        .get_mut("public.positive_000")
+        .edit("public.positive_000", |domain| {
+            domain.definition.checks[0].validated = false;
+            Ok(())
+        })
         .unwrap()
-        .definition
-        .checks[0]
-        .validated = false;
+        .unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     let Some(DomainConstraint::Check(_, changed)) =
         domain_constraint_by_oid(&current, &resolution, 90_003).unwrap()

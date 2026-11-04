@@ -26,11 +26,15 @@ pub fn restore_constructors(
         catalog: context.schema,
         binding: &binding,
     };
-    for domain in candidate.values_mut() {
-        changed |= uqa_sql::schema::domains::restore_composite_constructors(
+    for (name, original) in before.iter() {
+        let mut domain = original.clone();
+        if uqa_sql::schema::domains::restore_composite_constructors(
             &schema,
             &mut domain.definition,
-        )?;
+        )? {
+            candidate.insert(name.clone(), domain)?;
+            changed = true;
+        }
     }
     if changed {
         if !allow_migration {

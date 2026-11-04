@@ -30,10 +30,12 @@ pub(super) fn domain(name: &str, id: u8) -> StoredDomain {
 }
 
 fn registry(domains: Vec<StoredDomain>) -> DomainRegistry {
-    domains
-        .into_iter()
-        .map(|domain| (domain.identity.qualified_name(), domain))
-        .collect()
+    DomainRegistry::try_from_iter(
+        domains
+            .into_iter()
+            .map(|domain| (domain.identity.qualified_name(), domain)),
+    )
+    .unwrap()
 }
 
 #[test]

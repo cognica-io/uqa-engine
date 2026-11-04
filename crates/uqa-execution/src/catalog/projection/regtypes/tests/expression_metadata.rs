@@ -54,19 +54,22 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     else {
         panic!("domain");
     };
-    snapshot.definitions.domains = Arc::new(BTreeMap::from([(
-        "hidden.positive".into(),
-        StoredDomain {
-            object_id: [2; 16],
-            oid: 60_000,
-            array_oid: Some(60_001),
-            identity: RelationIdentity::new("hidden", "positive"),
-            owner: RoleIdentity::BOOTSTRAP,
-            definition,
-            array_name: None,
-            usage_acl: None,
-        },
-    )]));
+    snapshot.definitions.domains = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+            "hidden.positive".into(),
+            StoredDomain {
+                object_id: [2; 16],
+                oid: 60_000,
+                array_oid: Some(60_001),
+                identity: RelationIdentity::new("hidden", "positive"),
+                owner: RoleIdentity::BOOTSTRAP,
+                definition,
+                array_name: None,
+                usage_acl: None,
+            },
+        )]))
+        .unwrap(),
+    );
     let Statement::CreateFunction(mut definition) = uqa_sql::compile("CREATE FUNCTION hidden.echo(n regtype DEFAULT 'hidden.positive'::regtype) RETURNS regtype LANGUAGE SQL AS 'SELECT n'").unwrap().remove(0) else { panic!("function"); };
     definition.params[0].default = Some(constant(60_000, "regtype"));
     definition.catalog_oid = Some(70_000);

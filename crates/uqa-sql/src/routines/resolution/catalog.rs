@@ -13,10 +13,10 @@ use crate::{
     routines::{declaration::RoutineTypeCatalog, SQLUserFunction},
     SQLError,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 /// The original immutable domain allocation captured for one signature-matching pass.
-pub type RoutineTypeSnapshot = Arc<BTreeMap<String, StoredDomain>>;
+pub type RoutineTypeSnapshot = Arc<crate::catalog::type_definitions::TypeDefinitions<StoredDomain>>;
 pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot;
     fn routine_search_path(&self) -> Vec<String>;

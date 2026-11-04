@@ -20,6 +20,7 @@ pub mod node_tree;
 pub mod oids;
 pub mod resolution;
 pub mod result_type;
+pub mod type_definitions;
 pub mod type_metadata;
 mod type_production;
 pub use type_production::system_catalog_domain_with_control;

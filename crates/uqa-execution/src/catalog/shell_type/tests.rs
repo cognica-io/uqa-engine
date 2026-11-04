@@ -20,7 +20,7 @@ fn shell_records_require_one_exact_oid_claim_and_a_known_format() {
         owner: RoleIdentity::BOOTSTRAP,
         usage_acl: None,
     };
-    let registry = ShellRegistry::from([("public.pending".into(), shell)]);
+    let registry = ShellRegistry::try_from_iter([("public.pending".into(), shell)]).unwrap();
     for corruption in 0..5 {
         let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
         assert!(restore(&catalog, &roles).unwrap().is_empty());

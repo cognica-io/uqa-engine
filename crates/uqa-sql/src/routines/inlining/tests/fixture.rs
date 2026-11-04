@@ -20,12 +20,9 @@ use crate::{
     type_resolution::{BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload},
     ColumnType, SQLNotice,
 };
-use std::{
-    collections::BTreeMap,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 
 pub(super) struct Catalog {
@@ -191,7 +188,7 @@ impl VolatilityCatalog for Catalog {
 }
 impl RoutineOverloadCatalog for Catalog {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::new(BTreeMap::new())
+        Arc::default()
     }
     fn routine_search_path(&self) -> Vec<String> {
         vec!["public".into()]

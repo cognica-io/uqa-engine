@@ -128,7 +128,9 @@ fn domains(
     let before = context.domain_registry().clone();
     let mut next = before.clone();
     let mut changed = false;
-    for domain in next.values_mut() {
+    for (name, original) in before.iter() {
+        let mut domain = original.clone();
+        let mut rewritten = false;
         let schema = uqa_sql::RowSchema::with_types(
             vec!["value".into()],
             vec![Some(domain.definition.base.clone())],
@@ -140,7 +142,11 @@ fn domains(
                 .iter_mut()
                 .map(|check| &mut check.expression),
         ) {
-            changed |= change.expression_in_schema(expression, &schema)?;
+            rewritten |= change.expression_in_schema(expression, &schema)?;
+        }
+        if rewritten {
+            next.insert(name.clone(), domain)?;
+            changed = true;
         }
     }
     if changed {

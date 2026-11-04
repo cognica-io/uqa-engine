@@ -141,7 +141,9 @@ pub struct CatalogDefinitionSnapshot {
         >,
     >,
 
-    pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
+    pub domains: Arc<
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    >,
     pub enums: Arc<enum_type::EnumRegistry>,
     pub ranges: Arc<range_type::RangeRegistry>,
     pub shells: Arc<shell_type::ShellRegistry>,

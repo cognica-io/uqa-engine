@@ -135,13 +135,13 @@ impl StoredRange {
 
 /// Check persisted structure and authority before exposing a generation. Declaration binding separately resolves the subtype, class, collation and support signatures against the complete catalog.
 pub fn validate_range_registry(
-    registry: &BTreeMap<String, StoredRange>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredRange>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut names = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         for identity in [definition.object_id, definition.multirange.object_id] {
             if identity == [0; 16] || !identities.insert(identity) {
                 return Err(format!("invalid or duplicate range identity for `{name}`"));

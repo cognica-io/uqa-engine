@@ -472,11 +472,15 @@ fn enum_scenario(reference: &serde_json::Value, domain: bool) -> EnumScenario {
     second.identity.name.push_str("_other");
     let mut snapshot = catalog(first.clone()).snapshot().clone();
     Arc::make_mut(&mut snapshot.definitions.ranges)
-        .insert(second.identity.qualified_name(), second.clone());
-    snapshot.definitions.enums = Arc::new(BTreeMap::from([
-        (first_enum.identity.qualified_name(), first_enum),
-        (second_enum.identity.qualified_name(), second_enum),
-    ]));
+        .insert(second.identity.qualified_name(), second.clone())
+        .unwrap();
+    snapshot.definitions.enums = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([
+            (first_enum.identity.qualified_name(), first_enum),
+            (second_enum.identity.qualified_name(), second_enum),
+        ]))
+        .unwrap(),
+    );
     let values = Values(crate::catalog::CatalogReadView::new(snapshot));
     EnumScenario {
         values,

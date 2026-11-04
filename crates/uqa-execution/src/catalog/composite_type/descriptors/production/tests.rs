@@ -36,13 +36,16 @@ fn definition(oid: u32, attribute: String) -> StoredComposite {
 
 #[test]
 fn controlled_cache_miss_owns_only_the_selected_definition() {
-    let registry = Arc::new(CompositeRegistry::from([
-        ("public.small".into(), definition(80001, "selected".into())),
-        (
-            "public.unrelated".into(),
-            definition(81001, "unrelated".repeat(128 * 1024)),
-        ),
-    ]));
+    let registry = Arc::new(
+        CompositeRegistry::try_from_iter([
+            ("public.small".into(), definition(80001, "selected".into())),
+            (
+                "public.unrelated".into(),
+                definition(81001, "unrelated".repeat(128 * 1024)),
+            ),
+        ])
+        .unwrap(),
+    );
     let cache = CompositeDescriptorCache::default();
     let budget = MemoryBudget::new(16 * 1024);
     let token = CancellationToken::new();
@@ -77,10 +80,13 @@ fn controlled_cache_miss_owns_only_the_selected_definition() {
 
 #[test]
 fn retained_cache_generation_is_shared_without_new_payload_or_cross_generation_reuse() {
-    let registry = Arc::new(CompositeRegistry::from([(
-        "public.record".into(),
-        definition(80001, "original".into()),
-    )]));
+    let registry = Arc::new(
+        CompositeRegistry::try_from_iter([(
+            "public.record".into(),
+            definition(80001, "original".into()),
+        )])
+        .unwrap(),
+    );
     let cache = CompositeDescriptorCache::default();
     let original = cache.descriptor(&registry, 80001).unwrap();
     let budget = MemoryBudget::new(0);
@@ -96,10 +102,13 @@ fn retained_cache_generation_is_shared_without_new_payload_or_cross_generation_r
         assert_eq!(selected.reserved_bytes(), 0);
     });
     assert_eq!(allocation.count_total, 0);
-    let changed = Arc::new(CompositeRegistry::from([(
-        "public.record".into(),
-        definition(80001, "changed".into()),
-    )]));
+    let changed = Arc::new(
+        CompositeRegistry::try_from_iter([(
+            "public.record".into(),
+            definition(80001, "changed".into()),
+        )])
+        .unwrap(),
+    );
     assert_eq!(
         cache
             .descriptor_with_control(&changed, 80001, &control)

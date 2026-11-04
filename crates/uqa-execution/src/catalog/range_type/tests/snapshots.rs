@@ -85,8 +85,13 @@ fn restored_ranges_reject_cross_family_identity_and_namespace_collisions() {
                 .name
                 .clone_from(&range.multirange.identity.name),
         }
-        snapshot.definitions.shells =
-            Arc::new(BTreeMap::from([(shell.identity.qualified_name(), shell)]));
+        snapshot.definitions.shells = Arc::new(
+            uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+                shell.identity.qualified_name(),
+                shell,
+            )]))
+            .unwrap(),
+        );
         assert!(
             validate_catalog(&crate::catalog::CatalogReadView::new(snapshot)).is_err(),
             "collision {collision}"

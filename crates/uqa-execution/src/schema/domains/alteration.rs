@@ -197,7 +197,7 @@ fn publish<S: Clone + 'static>(
         .map_err(uqa_sql::schema::constraint_metadata::ConstraintMetadataError::into_sql_error)?;
     let before = context.types.registries.domains.domain_registry().clone();
     let mut registry = before.clone();
-    registry.insert(domain.identity.qualified_name(), domain.clone());
+    registry.insert(domain.identity.qualified_name(), domain.clone())?;
     domain::publish(context.types.registries.domains, &before, registry)?;
     context.types.changes.catalog_registry_changed();
     Ok(())

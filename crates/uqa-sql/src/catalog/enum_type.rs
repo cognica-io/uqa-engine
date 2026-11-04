@@ -280,12 +280,12 @@ impl<Owner> StoredEnum<Owner> {
 
 /// Validate a complete enum registry before restoration exposes it or publication persists it.
 pub fn validate_enum_registry(
-    registry: &BTreeMap<String, StoredEnum>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredEnum>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
-    for (name, definition) in registry {
+    for (name, definition) in registry.iter() {
         if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
             return Err(format!("invalid or duplicate enum identity for `{name}`"));
         }

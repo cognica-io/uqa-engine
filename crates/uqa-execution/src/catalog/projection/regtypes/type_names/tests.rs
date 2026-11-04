@@ -49,8 +49,13 @@ pub(super) fn fixture() -> CatalogReadView {
         array_name: Some("_budget_domain".into()),
         usage_acl: None,
     };
-    snapshot.definitions.domains =
-        Arc::new(BTreeMap::from([("public.budget_domain".into(), domain)]));
+    snapshot.definitions.domains = Arc::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+            "public.budget_domain".into(),
+            domain,
+        )]))
+        .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 

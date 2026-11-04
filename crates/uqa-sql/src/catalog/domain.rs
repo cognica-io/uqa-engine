@@ -81,7 +81,7 @@ impl StoredDomain<String> {
 
 /// Validate the complete catalog before any durable conversion or registry publication.
 pub fn validate_domain_registry(
-    registry: &BTreeMap<String, StoredDomain>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     validate_domain_definitions(registry, roles)?;
@@ -94,14 +94,14 @@ pub fn validate_domain_registry(
 
 /// Early restoration validates authority and supplied identities before any missing legacy constraint metadata is allocated.
 pub fn validate_domain_definitions(
-    registry: &BTreeMap<String, StoredDomain>,
+    registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
     let mut constraint_objects = BTreeSet::new();
     let mut constraint_oids = BTreeSet::new();
-    for (name, domain) in registry {
+    for (name, domain) in registry.iter() {
         // A domain with a recorded array OID drew both OIDs from the database's counter; an earlier one derives its OID from its identity.
         let oids_valid = match domain.array_oid {
             Some(array_oid) => {

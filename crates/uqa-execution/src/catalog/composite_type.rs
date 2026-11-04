@@ -20,7 +20,7 @@ pub mod relations;
 pub use descriptors::CompositeDescriptorCache;
 
 /// Registered standalone composite types keyed by qualified type name.
-pub type CompositeRegistry = BTreeMap<String, StoredComposite>;
+pub type CompositeRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredComposite>;
 pub type CompositeRegistryRead<'a> = Box<dyn Deref<Target = CompositeRegistry> + 'a>;
 
 pub trait CompositeRegistryPublication {

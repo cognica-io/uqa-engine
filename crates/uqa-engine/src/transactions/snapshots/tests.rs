@@ -20,6 +20,7 @@ mod resources;
 mod sequence_values;
 mod sequences;
 mod table_metadata;
+mod type_roots;
 
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();

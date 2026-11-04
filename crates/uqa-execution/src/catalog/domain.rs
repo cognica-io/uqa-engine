@@ -20,7 +20,7 @@ mod restoration;
 pub use restoration::{finish_restore, restore, DomainRestoreState, RestoredDomains};
 
 pub const DOMAINS_METADATA_KEY: &str = "sql_domains_json";
-pub type DomainRegistry = BTreeMap<String, StoredDomain>;
+pub type DomainRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain>;
 pub type DomainRegistryRead<'a> = Box<dyn Deref<Target = DomainRegistry> + 'a>;
 
 pub trait DomainRegistryPublication: RoleCatalogGuards {
@@ -59,9 +59,13 @@ fn merge_private_records(
     for name in names {
         if is_private(&name)? {
             if let Some(domain) = current.get(&name) {
-                Arc::make_mut(&mut committed).insert(name, domain.clone());
+                Arc::make_mut(&mut committed)
+                    .insert(name, domain.clone())
+                    .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             } else {
-                Arc::make_mut(&mut committed).remove(&name);
+                Arc::make_mut(&mut committed)
+                    .remove(&name)
+                    .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             }
         }
     }

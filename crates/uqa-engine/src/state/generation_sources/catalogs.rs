@@ -63,11 +63,11 @@ macro_rules! catalog_sources {
 }
 
 catalog_sources! {
-    domains: BTreeMap<String, StoredDomain> => Vec<(String, StoredDomain)>, uqa_sql::catalog::definition_capture::types::domains;
-    enums: BTreeMap<String, StoredEnum> => Vec<(String, StoredEnum)>, uqa_sql::catalog::definition_capture::types::enums;
-    composites: BTreeMap<String, StoredComposite> => Vec<(String, StoredComposite)>, uqa_sql::catalog::definition_capture::types::composites;
-    ranges: BTreeMap<String, StoredRange> => Vec<(String, StoredRange)>, uqa_sql::catalog::definition_capture::types::ranges;
-    shells: BTreeMap<String, StoredShellType> => Vec<(String, StoredShellType)>, uqa_sql::catalog::definition_capture::types::shells;
+    domains: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredDomain>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
+    enums: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredEnum> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredEnum>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
+    composites: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredComposite> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredComposite>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
+    ranges: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredRange> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredRange>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
+    shells: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredShellType> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredShellType>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
     schemas: BTreeMap<String, BoundSchemaSecurity> => Vec<(String, BoundSchemaSecurity)>, uqa_sql::catalog::security::capture::schemas;
     views: BTreeMap<RelationIdentity, StoredView> => CapturedViews, uqa_sql::catalog::definition_capture::views::durable_views;
     sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;

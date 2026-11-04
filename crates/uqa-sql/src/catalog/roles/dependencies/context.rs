@@ -45,7 +45,10 @@ pub trait RoleDependencyCatalog:
     fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>>;
+    ) -> RoleDependencyRead<
+        '_,
+        crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
+    >;
 }
 
 pub trait RoleForeignPersistenceRead {

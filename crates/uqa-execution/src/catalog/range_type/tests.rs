@@ -89,7 +89,7 @@ impl RangeRegistryPublication for Publication {
 
 #[test]
 fn range_records_require_all_four_exact_claims_and_a_known_format() {
-    let registry = RangeRegistry::from([("public.r".into(), definition())]);
+    let registry = RangeRegistry::try_from_iter([("public.r".into(), definition())]).unwrap();
     for corruption in 0..9 {
         let publication = Publication::default();
         assert!(restore(&publication.catalog, &roles()).unwrap().is_empty());
@@ -134,7 +134,7 @@ fn range_records_require_all_four_exact_claims_and_a_known_format() {
 #[test]
 fn range_publication_preserves_independent_changes_and_rejects_stale_replacement() {
     let publication = Publication::default();
-    let original = RangeRegistry::from([("public.r".into(), definition())]);
+    let original = RangeRegistry::try_from_iter([("public.r".into(), definition())]).unwrap();
     publish(&publication, &RangeRegistry::new(), original.clone()).unwrap();
     let mut other = definition();
     other.identity.schema = "another".into();
@@ -148,13 +148,18 @@ fn range_publication_preserves_independent_changes_and_rejects_stale_replacement
     publish(
         &publication,
         &RangeRegistry::new(),
-        RangeRegistry::from([("another.r".into(), other)]),
+        RangeRegistry::try_from_iter([("another.r".into(), other)]).unwrap(),
     )
     .unwrap();
     let mut renamed = original.clone();
-    let multi = &mut renamed.get_mut("public.r").unwrap().multirange;
-    multi.identity = RelationIdentity::new("moved", "renamed");
-    multi.array_name = "_renamed".into();
+    renamed
+        .edit("public.r", |definition| {
+            definition.multirange.identity = RelationIdentity::new("moved", "renamed");
+            definition.multirange.array_name = "_renamed".into();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     publish(&publication, &original, renamed.clone()).unwrap();
     let restored = restore(&publication.catalog, &roles()).unwrap();
     assert_eq!(restored.len(), 2);
@@ -183,10 +188,9 @@ fn catalog(definition: StoredRange) -> crate::catalog::CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
         .snapshot()
         .clone();
-    snapshot.definitions.ranges = Arc::new(RangeRegistry::from([(
-        definition.identity.qualified_name(),
-        definition,
-    )]));
+    snapshot.definitions.ranges = Arc::new(
+        RangeRegistry::try_from_iter([(definition.identity.qualified_name(), definition)]).unwrap(),
+    );
     snapshot.definitions.roles = Arc::new(roles());
     snapshot.definitions.schemas = Arc::new(BTreeMap::from([(
         "public".into(),

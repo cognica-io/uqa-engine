@@ -137,10 +137,12 @@ fn invalid_legacy_candidates_are_rejected_before_any_conversion_write() {
 #[test]
 fn malformed_aggregate_catalogs_never_fall_back_to_legacy_names() {
     let (catalog, roles) = fixture();
-    let registry = legacy()
-        .into_iter()
-        .map(|(name, domain)| (name, domain.bind_owner(&roles).unwrap()))
-        .collect();
+    let registry = DomainRegistry::try_from_iter(
+        legacy()
+            .into_iter()
+            .map(|(name, domain)| (name, domain.bind_owner(&roles).unwrap())),
+    )
+    .unwrap();
     let current: serde_json::Value =
         serde_json::from_str(&encode(&registry, &roles).unwrap()).unwrap();
     for corruption in 0..5 {
@@ -196,10 +198,10 @@ fn empty_catalog_conversion_is_initial_only_and_idempotent() {
 #[test]
 fn unchanged_domain_metadata_selects_the_committed_registry_and_validates_its_authority() {
     let (catalog, roles) = fixture();
-    let committed = Arc::new(BTreeMap::from([(
-        "public.positive".into(),
-        records::domain("positive", 1),
-    )]));
+    let committed = Arc::new(
+        DomainRegistry::try_from_iter([("public.positive".into(), records::domain("positive", 1))])
+            .unwrap(),
+    );
     let current = Arc::default();
     let selected = merge_private(Some(&catalog), &current, Arc::clone(&committed), &roles).unwrap();
     assert!(Arc::ptr_eq(&selected, &committed));

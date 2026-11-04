@@ -19,7 +19,7 @@ mod records;
 pub use labels::EnumLabelCache;
 
 /// Registered enum types keyed by qualified type name.
-pub type EnumRegistry = BTreeMap<String, StoredEnum>;
+pub type EnumRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredEnum>;
 pub type EnumRegistryRead<'a> = Box<dyn Deref<Target = EnumRegistry> + 'a>;
 
 pub trait EnumRegistryPublication {

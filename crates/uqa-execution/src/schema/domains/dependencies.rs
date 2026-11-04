@@ -7,11 +7,13 @@
 //! Remove domains, enums, composite types and domain constraints, each once what depends on it has been removed.
 
 use crate::schema::namespaces::NamespaceCatalogChanges;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_sql::{catalog::domain::StoredDomain, SQLError};
 
 pub trait DomainDependencyCatalog {
-    fn domain_definitions(&self) -> BTreeMap<String, StoredDomain>;
+    fn domain_definitions(
+        &self,
+    ) -> uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain>;
 }
 pub use crate::catalog::domain::DomainRegistryPublication;
 pub struct DomainDependencyContext<'a> {
@@ -31,9 +33,10 @@ pub fn remove_domain_constraint(
 ) -> Result<(), SQLError> {
     let before = context.catalog.domain_definitions();
     let mut registry = before.clone();
-    let stored = registry
-        .values_mut()
-        .find(|stored| stored.oid == domain)
+    let (key, mut stored) = before
+        .iter()
+        .find(|(_, stored)| stored.oid == domain)
+        .map(|(key, stored)| (key.clone(), stored.clone()))
         .ok_or_else(|| {
             SQLError::Internal(format!("domain {domain} disappeared before its constraint"))
         })?;
@@ -49,6 +52,7 @@ pub fn remove_domain_constraint(
     {
         stored.definition.not_null = None;
     }
+    registry.insert(key, stored)?;
     crate::catalog::domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
@@ -62,7 +66,7 @@ pub fn remove_types(
     let before = context.catalog.domain_definitions();
     if before.values().any(|domain| targets.contains(&domain.oid)) {
         let mut registry = before.clone();
-        registry.retain(|_, domain| !targets.contains(&domain.oid));
+        registry.retain(|_, domain| !targets.contains(&domain.oid))?;
         crate::catalog::domain::publish(context.publication, &before, registry)?;
     }
     let shells_before = context.shells.shell_registry().clone();
@@ -71,7 +75,7 @@ pub fn remove_types(
         .any(|definition| targets.contains(&definition.oid))
     {
         let mut shells = shells_before.clone();
-        shells.retain(|_, definition| !targets.contains(&definition.oid));
+        shells.retain(|_, definition| !targets.contains(&definition.oid))?;
         crate::catalog::shell_type::publish(context.shells, &shells_before, shells)?;
     }
     let enums_before = context.enums.enum_registry().clone();
@@ -80,7 +84,7 @@ pub fn remove_types(
         .any(|definition| targets.contains(&definition.oid))
     {
         let mut enums = enums_before.clone();
-        enums.retain(|_, definition| !targets.contains(&definition.oid));
+        enums.retain(|_, definition| !targets.contains(&definition.oid))?;
         crate::catalog::enum_type::publish(context.enums, &enums_before, enums)?;
     }
     let composites_before = context.composites.composite_registry().clone();
@@ -89,7 +93,7 @@ pub fn remove_types(
         .any(|definition| targets.contains(&definition.oid))
     {
         let mut composites = composites_before.clone();
-        composites.retain(|_, definition| !targets.contains(&definition.oid));
+        composites.retain(|_, definition| !targets.contains(&definition.oid))?;
         crate::catalog::composite_type::publish(
             context.composites,
             &composites_before,

@@ -26,7 +26,7 @@ mod validation;
 pub(crate) use descriptors::RangeDescriptors;
 pub use validation::validate_catalog;
 
-pub type RangeRegistry = BTreeMap<String, StoredRange>;
+pub type RangeRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredRange>;
 pub type RangeRegistryRead<'a> = Box<dyn Deref<Target = RangeRegistry> + 'a>;
 
 pub trait RangeRegistryPublication {

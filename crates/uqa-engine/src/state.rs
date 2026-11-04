@@ -10,7 +10,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
+use uqa_sql::catalog::{
+    events::{RuleCatalog, StoredTrigger},
+    type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
+};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
@@ -144,20 +147,20 @@ pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
     pub(super) domains: CatalogCell<
-        BTreeMap<String, super::domains::StoredDomain>,
-        Vec<(String, super::domains::StoredDomain)>,
+        TypeDefinitions<super::domains::StoredDomain>,
+        CapturedTypeDefinitions<super::domains::StoredDomain>,
     >,
     pub(super) enums: CatalogCell<
         uqa_execution::catalog::enum_type::EnumRegistry,
-        Vec<(String, uqa_sql::catalog::enum_type::StoredEnum)>,
+        CapturedTypeDefinitions<uqa_sql::catalog::enum_type::StoredEnum>,
     >,
     pub(super) ranges: CatalogCell<
         uqa_execution::catalog::range_type::RangeRegistry,
-        Vec<(String, uqa_sql::catalog::range_type::StoredRange)>,
+        CapturedTypeDefinitions<uqa_sql::catalog::range_type::StoredRange>,
     >,
     pub(super) shells: CatalogCell<
         uqa_execution::catalog::shell_type::ShellRegistry,
-        Vec<(String, uqa_sql::catalog::shell_type::StoredShellType)>,
+        CapturedTypeDefinitions<uqa_sql::catalog::shell_type::StoredShellType>,
     >,
     pub(super) comments: CatalogCell<
         uqa_execution::catalog::comments::CommentRegistry,
@@ -165,7 +168,7 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) composites: CatalogCell<
         uqa_execution::catalog::composite_type::CompositeRegistry,
-        Vec<(String, uqa_sql::catalog::composite_type::StoredComposite)>,
+        CapturedTypeDefinitions<uqa_sql::catalog::composite_type::StoredComposite>,
     >,
     pub(super) graphs: CatalogCell<
         BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>,
@@ -303,7 +306,7 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
+    pub(super) domains: Arc<TypeDefinitions<super::domains::StoredDomain>>,
     pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
     pub(super) ranges: Arc<uqa_execution::catalog::range_type::RangeRegistry>,
     pub(super) shells: Arc<uqa_execution::catalog::shell_type::ShellRegistry>,
@@ -349,12 +352,12 @@ pub(super) struct DurableCatalogSnapshot {
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
-            domains: CatalogCell::new(BTreeMap::new()),
-            enums: CatalogCell::new(BTreeMap::new()),
-            ranges: CatalogCell::new(BTreeMap::new()),
-            shells: CatalogCell::new(BTreeMap::new()),
+            domains: CatalogCell::new(TypeDefinitions::new()),
+            enums: CatalogCell::new(TypeDefinitions::new()),
+            ranges: CatalogCell::new(TypeDefinitions::new()),
+            shells: CatalogCell::new(TypeDefinitions::new()),
             comments: CatalogCell::new(BTreeMap::new()),
-            composites: CatalogCell::new(BTreeMap::new()),
+            composites: CatalogCell::new(TypeDefinitions::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
             scoring_params: CatalogCell::new(

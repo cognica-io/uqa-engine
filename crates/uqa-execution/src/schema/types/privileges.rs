@@ -264,25 +264,25 @@ fn publish(context: &TypeLifecycleContext<'_>, object: TypeObject) -> Result<(),
         TypeObject::Shell(definition) => {
             let before = context.shells.shell_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), definition);
+            registry.insert(definition.identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)
         }
         TypeObject::Enum(definition) => {
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), definition);
+            registry.insert(definition.identity.qualified_name(), definition)?;
             enum_type::publish(context.registries.enums, &before, registry)
         }
         TypeObject::Domain(definition) => {
             let before = context.registries.domains.domain_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), *definition);
+            registry.insert(definition.identity.qualified_name(), *definition)?;
             domain::publish(context.registries.domains, &before, registry)
         }
         TypeObject::Composite(definition) => {
             let before = context.registries.composites.composite_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), *definition);
+            registry.insert(definition.identity.qualified_name(), *definition)?;
             crate::catalog::composite_type::publish(
                 context.registries.composites,
                 &before,

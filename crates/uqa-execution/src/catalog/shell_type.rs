@@ -19,7 +19,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::type_records::{TypeRecord, TypeRecordFormat};
 
-pub type ShellRegistry = BTreeMap<String, StoredShellType>;
+pub type ShellRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredShellType>;
 pub type ShellRegistryRead<'a> = Box<dyn Deref<Target = ShellRegistry> + 'a>;
 
 pub trait ShellRegistryPublication {

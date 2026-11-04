@@ -159,18 +159,20 @@ fn duplicate_arrays_and_explicit_type_collisions_are_rejected() {
     snapshot
         .tables
         .remove(&RelationIdentity::new("public", "second"));
-    Arc::make_mut(&mut snapshot.definitions.enums).insert(
-        "public._same".into(),
-        uqa_sql::catalog::enum_type::StoredEnum {
-            object_id: [10; 16],
-            oid: 47_002,
-            array_oid: 47_003,
-            array_name: "__same".into(),
-            identity: RelationIdentity::new("public", "_same"),
-            owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            labels: Vec::new(),
-            usage_acl: None,
-        },
-    );
+    Arc::make_mut(&mut snapshot.definitions.enums)
+        .insert(
+            "public._same".into(),
+            uqa_sql::catalog::enum_type::StoredEnum {
+                object_id: [10; 16],
+                oid: 47_002,
+                array_oid: 47_003,
+                array_name: "__same".into(),
+                identity: RelationIdentity::new("public", "_same"),
+                owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                labels: Vec::new(),
+                usage_acl: None,
+            },
+        )
+        .unwrap();
     assert!(validate(&CatalogReadView::new(snapshot)).is_err());
 }

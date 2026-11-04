@@ -91,7 +91,8 @@ pub fn finish_restore(
         resolution,
         assigned: BTreeSet::new(),
     };
-    for domain in registry.values_mut() {
+    for (name, original) in domains.iter() {
+        let mut domain = original.clone();
         let names = schemas
             .entry(domain.identity.schema.clone())
             .or_insert_with(|| {
@@ -116,6 +117,9 @@ pub fn finish_restore(
                 .filter_map(|constraint| constraint.name.clone()),
         );
         constraints::materialize(&mut domain.definition, &mut allocator).map_err(invalid)?;
+        registry
+            .insert(name.clone(), domain)
+            .map_err(|error| StorageBackendError::backend("domain restoration", error))?;
     }
     validate_domain_registry(&registry, roles).map_err(invalid)?;
     records::migrate(storage, &registry)?;

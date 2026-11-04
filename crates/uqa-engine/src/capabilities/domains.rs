@@ -108,7 +108,6 @@ impl DomainDeclarationBinding for Engine {
         )
     }
 }
-use std::collections::BTreeMap;
 use uqa_execution::schema::domains::dependencies::{
     DomainDependencyCatalog, DomainDependencyContext, DomainRegistryPublication,
 };
@@ -126,7 +125,9 @@ impl Engine {
     }
 }
 impl DomainDependencyCatalog for Engine {
-    fn domain_definitions(&self) -> BTreeMap<String, StoredDomain> {
+    fn domain_definitions(
+        &self,
+    ) -> uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain> {
         self.durable.domains.read().clone()
     }
 }
@@ -139,7 +140,7 @@ impl DomainRegistryPublication for Engine {
     }
     fn publish_domain_definitions(
         &self,
-        registry: BTreeMap<String, StoredDomain>,
+        registry: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain>,
     ) -> Result<(), SQLError> {
         *self.durable.domains.write() = registry;
         self.publish_catalog_constraint_tuples()
