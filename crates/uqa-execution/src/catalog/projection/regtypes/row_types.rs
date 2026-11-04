@@ -12,6 +12,30 @@ use uqa_sql::{ast::ColumnType, schema::domains::removal::RowTypeRelation, SQLErr
 use crate::catalog::context::CatalogContext;
 use crate::catalog::view::StoredViewKind;
 
+/// Resolve the generated array's original element through native type and relation identities without constructing column descriptors.
+pub fn type_object_array_element(context: &CatalogContext<'_>, oid: u32) -> Option<u32> {
+    let catalog = context.catalog_read_view();
+    let element = catalog
+        .domains()
+        .find_map(|domain| {
+            (uqa_sql::catalog::type_metadata::pg_domain_array_oid(domain.oid, domain.array_oid)
+                == i64::from(oid))
+            .then_some(domain.oid)
+        })
+        .or_else(|| {
+            catalog
+                .enums()
+                .find_map(|definition| (definition.array_oid == oid).then_some(definition.oid))
+        })
+        .or_else(|| {
+            catalog
+                .composites()
+                .find_map(|definition| (definition.array_oid == oid).then_some(definition.oid))
+        })
+        .or_else(|| crate::catalog::composite_type::relations::array_element(&catalog, oid));
+    element
+}
+
 /// Find the table, view, materialized view or foreign table whose row type has this OID. The relation name uses `regclass` output, which qualifies names hidden by the search path.
 pub fn row_type_relation(
     context: &CatalogContext<'_>,
@@ -22,7 +46,8 @@ pub fn row_type_relation(
     let describe = |kind: &'static str,
                     relation_oid: i64,
                     identity: &RelationIdentity,
-                    owner: RoleIdentity|
+                    owner: RoleIdentity,
+                    persistence: uqa_sql::ast::RelationPersistence|
      -> Result<Option<RowTypeRelation>, SQLError> {
         let name = super::resolve_regtype_output(context, &ColumnType::Regclass, relation_oid)
             .map_err(SQLError::Internal)?
@@ -33,6 +58,7 @@ pub fn row_type_relation(
             local_name: identity.name.clone(),
             owner,
             schema: identity.schema.clone(),
+            persistence,
         }))
     };
     let snapshot = catalog.snapshot();
@@ -43,6 +69,7 @@ pub fn row_type_relation(
                 i64::from(table.catalog_oids.relation),
                 identity,
                 table.security.role_owner,
+                table.persistence,
             );
         }
     }
@@ -57,6 +84,7 @@ pub fn row_type_relation(
                 super::super::view_relation_oid(view),
                 identity,
                 view.security.role_owner,
+                view.persistence,
             );
         }
     }
@@ -72,6 +100,7 @@ pub fn row_type_relation(
                 super::super::foreign_table_relation_oid(table),
                 identity,
                 owner,
+                table.persistence,
             );
         }
     }

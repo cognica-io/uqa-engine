@@ -13,6 +13,7 @@ use uqa_storage::read_control::StorageReadControl;
 mod analyzers;
 mod catalog_authority;
 mod foreign;
+mod graphs;
 mod identities;
 mod metadata;
 mod paths;

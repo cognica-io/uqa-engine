@@ -11,7 +11,7 @@ use uqa_graph::{EdgePattern, GMatch, GraphPattern, GraphStore, MemoryGraphStore,
 
 fn social_graph() -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     for (id, name) in [(1, "Alice"), (2, "Bob"), (3, "Carol"), (4, "Dave")] {
         let mut vertex = Vertex::new(id, "person");
         vertex
@@ -79,7 +79,7 @@ fn negated_edge_filters_match() {
 #[test]
 fn negated_edge_removes_all() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.add_vertex(Vertex::new(1, "a"), "g").unwrap();
     store.add_vertex(Vertex::new(2, "b"), "g").unwrap();
     store.add_edge(Edge::new(10, 1, 2, "knows"), "g").unwrap();
@@ -97,7 +97,7 @@ fn negated_edge_removes_all() {
 #[test]
 fn negated_only_pattern() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.add_vertex(Vertex::new(1, "a"), "g").unwrap();
     store.add_vertex(Vertex::new(2, "b"), "g").unwrap();
     store.add_vertex(Vertex::new(3, "c"), "g").unwrap();
@@ -114,7 +114,7 @@ fn negated_only_pattern() {
 #[test]
 fn negated_edge_no_label() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.add_vertex(Vertex::new(1, "a"), "g").unwrap();
     store.add_vertex(Vertex::new(2, "b"), "g").unwrap();
     store.add_vertex(Vertex::new(3, "c"), "g").unwrap();

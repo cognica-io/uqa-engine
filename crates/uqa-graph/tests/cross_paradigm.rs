@@ -92,7 +92,7 @@ fn text_to_graph_creates_token_cooccurrence() {
 #[test]
 fn vertex_embedding_scores_by_cosine() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mut a = Vertex::new(1, "Doc");
     a.properties
         .insert("embedding".into(), vec_value(&[1.0, 0.0]));
@@ -125,7 +125,7 @@ fn vertex_embedding_scores_by_cosine() {
 #[test]
 fn semantic_graph_search_filters_neighbors_by_similarity() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mut a = Vertex::new(1, "Doc");
     a.properties
         .insert("embedding".into(), vec_value(&[1.0, 0.0]));
@@ -158,7 +158,7 @@ fn semantic_graph_search_filters_neighbors_by_similarity() {
 #[test]
 fn vector_enhanced_match_filters_pattern_results() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mut alice = Vertex::new(1, "Person");
     alice
         .properties

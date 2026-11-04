@@ -18,7 +18,7 @@ fn corpus() -> MemoryGraphStore {
     // 1 -knows-> 2 -knows-> 3 -follows-> 4
     //                       |-likes-> 5
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for vid in 1..=5 {
         g.add_vertex(Vertex::new(vid, "n"), "g").unwrap();
     }

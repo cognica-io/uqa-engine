@@ -1607,8 +1607,8 @@
       "cases": 1,
       "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
       "capability": "Graph image memory admission",
-      "workload": "Sweep every insufficient allowance, admit the exact successful payload and reject overflowing advertised cardinality.",
-      "invariant": "All limits preserve typed memory failures, peak remains within allowance, and every candidate releases its complete charge.",
+      "workload": "Sweep every insufficient construction allowance, admit the exact successful peak, retain imported data through a surviving native clone and reject overflowing advertised cardinality.",
+      "invariant": "All limits preserve typed memory failures and bounded peak; immutable native owners retain the original allowance through cloning and release it only after final retirement.",
       "case_names": [
         ""
       ]
@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -41385,6 +41385,224 @@
       "capability": "Path registry transaction recovery",
       "workload": "Deny creation, replacement, deletion, graph mutation and graph deletion on memory, native SQLite, SQLite KV and redb, then roll back, reuse and reopen.",
       "invariant": "Typed 53200 admission failures preserve original definitions, evaluated pairs and graph membership; funded operations and persistent reopen retain their exact results.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_roots_capture_and_clone_without_visiting_primary_entities",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph ownership",
+      "workload": "Capture and clone 1, 64 and 4,096 entities and labels; replace one entity and allocate from an existing label before retiring the source.",
+      "invariant": "Cloning allocates nothing, capture allocates one wrapper, selected mutation allocates less than 128 KiB, and independent exact leases retain unchanged evaluated images until final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_publication_denial_preserves_all_roots_and_identity_counters",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph publication admission",
+      "workload": "Exhaust the native allowance at seven levels during twenty graph, entity, membership, label and identity operations.",
+      "invariant": "Every rejected operation preserves the complete encoded state and counters, propagates typed memory failure and supports subsequent successful reuse without leaking reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_nested_transactions_restore_complete_roots_after_errors_and_panics",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph transaction roots",
+      "workload": "Change shared graph generations through nested transaction failure, outer failure, panic and a later successful transaction.",
+      "invariant": "Every failed boundary restores its entering image and identities; the later commit succeeds and retirement releases all native admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "native_graph_admission_failure_preserves_engine_rollback_and_reuse",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/graph_delta_and_path_index.rs",
+      "capability": "Native graph transaction admission",
+      "workload": "Exhaust graph memory during implicit and explicit Engine mutations, roll back while the allowance remains exhausted, then reuse the session and retire its source.",
+      "invariant": "Typed 53200 failure preserves graph entities and path-index results; rollback needs no graph allocation, subsequent mutation succeeds, and the independent captured image retains its original data and releases its leases after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_capture_and_selected_publication_retain_native_roots_without_enumeration",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph-resource membership",
+      "workload": "Capture 1, 64 and 4,096 registered graph handles, replace one selected graph and retire every source.",
+      "invariant": "Capture allocates no membership nodes; selected publication stays below 16 KiB; exact admission, independent controls and escaping images retain original data and release all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_denial_preserves_membership_capability_and_original_child_control",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph-resource publication",
+      "workload": "Deny replacement, deletion and rename with no remaining native allowance, then publish and retire the source.",
+      "invariant": "Rejected candidates preserve every original entry and footprint; subsequent changes succeed and escaping children obey original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_provider_capability_and_child_admission_follow_their_owning_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Graph-resource capture admission",
+      "workload": "Replace a memory handle with a physical provider handle across failed and successful admission, then exhaust selected-child output allowance.",
+      "invariant": "The generation capability rejects physical sources without enumeration, failed child admission leaves the root allowance intact, repeated children allocate nothing and independent capture remains valid after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_graph_capture_keeps_original_membership_after_rename_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/graphs.rs",
+      "capability": "Committed graph membership",
+      "workload": "Capture 64 Engine graphs, rename and drop across savepoint rollback and commit, then close the Engine.",
+      "invariant": "Captured membership and image bytes remain original; an escaping selected image retains its source, unrelated graphs retire and final release returns every capture lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_graph_catalog_denial_rolls_back_entities_names_and_path_definitions",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/graphs.rs",
+      "capability": "Graph catalog transaction admission",
+      "workload": "Deny graph creation, deletion, rename and implicit/explicit entity publication on memory, native SQLite, SQLite KV and redb, then reuse and reopen persistent providers.",
+      "invariant": "Typed 53200 failure preserves names, entities and path definitions; rollback works under exhaustion and later successful publication persists without leaking native reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_restoration_reuses_unchanged_membership_and_discards_failed_successors",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests.rs",
+      "capability": "Native graph membership restoration",
+      "workload": "Restore unchanged physical graph names under zero native allowance, then add and remove names across denied node admission and a failed physical-handle factory.",
+      "invariant": "Unchanged membership needs no native node or new handle; failed successors preserve original membership and release temporary leases; successful restoration shares unselected handles.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_type_description_lifetime_follows_relations_and_array_elements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/type_objects/tests.rs",
+      "capability": "Type description lifetime binding",
+      "workload": "Resolve scalar and generated array row types with temporary, permanent and unlogged persistence, including names with opposite namespace spelling.",
+      "invariant": "Actual relation persistence and original role identity govern both scalar and array descriptions; built-in types remain durable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_scope_changes_publish_complete_roots_or_preserve_original_eligibility",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/tests.rs",
+      "capability": "Native description partition publication",
+      "workload": "Move selected descriptions between durable and temporary roots under seven admission allowances, retaining original roots and unrelated entries.",
+      "invariant": "Every successful candidate has one address in exactly one partition; failed preparation preserves exact texts, eligibility, entry identity and native leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_source_selection_is_allocation_free_and_releases_unselected_temporary_text",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/snapshot/tests.rs",
+      "capability": "Bounded original comment selection",
+      "workload": "Retain native sources with 1, 64 and 4096 durable and temporary entries beside a four-MiB temporary value, replace source text and retire the original registry.",
+      "invariant": "Source selection allocates nothing and retains no temporary payload; freezing preserves exact original durable descriptions and all native/capture leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "temporary_descriptions_survive_refresh_without_entering_durable_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments.rs",
+      "capability": "Native comment restoration and persistence",
+      "workload": "Publish durable and temporary descriptions, refresh an existing owner and a fresh owner, merge private state, change scope and delete both classes.",
+      "invariant": "Session refresh shares the original temporary root, fresh opens contain only durable descriptions and scope changes atomically update native eligibility and stored metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_comment_lifetime_matches_postgresql_through_rollback_capture_and_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments/native.rs",
+      "capability": "Engine description lifetime",
+      "workload": "Run the PostgreSQL 18.4 description fixture on memory, native SQLite, SQLite KV and redb; retain an original source across owner/rename/savepoint/rollback changes and closure.",
+      "invariant": "All public descriptions match the independent oracle; durable capture retains only original durable text, temporary metadata is never stored and persistent reopen matches a fresh PostgreSQL session.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_comment_denial_preserves_durable_and_temporary_roots_and_later_use",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/comments/native.rs",
+      "capability": "Engine description admission recovery",
+      "workload": "Exhaust native admission for implicit and explicit durable/temporary COMMENT operations on all four providers, roll back and continue writing/deleting.",
+      "invariant": "53200 preserves both native partitions and stored metadata, rollback needs no repair guard and subsequent operations reclaim every native lease.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",

@@ -17,10 +17,6 @@ use information_schema::constraint_usage::{
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::constraints::ConstraintIdentity;
 
-pub(crate) use events::{
-    trigger_catalog_oid_for_relation, trigger_constraint_catalog_oid_for_relation,
-};
-pub(crate) use pg_catalog::attrdef_catalog_oid;
 pub use uqa_sql::catalog::domain::domain_object_oid;
 
 mod identity_claims;
@@ -425,7 +421,8 @@ pub use regtypes::{
     resolve_regcollation_oid, resolve_regnamespace_oid, resolve_regobject_oid,
     resolve_regproc_input_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
     resolve_regtype_output, resolve_type_object_oid, resolved_relation_dependency_with_control,
-    row_type_relation, shell_type_oid, type_privilege_oid, RegtypeOutputCatalog,
+    row_type_relation, shell_type_oid, type_object_array_element, type_privilege_oid,
+    RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(

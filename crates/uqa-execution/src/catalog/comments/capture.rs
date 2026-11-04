@@ -22,36 +22,39 @@ mod tests {
     use super::*;
     use crate::catalog::comments::CommentAddress;
     use uqa_core::{memory::MemoryBudget, CancellationToken};
-    use uqa_sql::catalog::dependencies::ObjectAddress;
+    use uqa_sql::{ast::RelationPersistence, catalog::dependencies::ObjectAddress};
 
     #[test]
     fn comment_capture_preserves_addresses_and_exact_text_with_independent_admission() {
-        let source = CommentRegistry::try_from_iter([
-            (
-                CommentAddress::from(ObjectAddress {
-                    class_id: 1259,
-                    object_id: 20_001,
-                    sub_id: 0,
-                }),
-                "object".into(),
-            ),
-            (
-                CommentAddress::from(ObjectAddress {
-                    class_id: 1259,
-                    object_id: 20_001,
-                    sub_id: 3,
-                }),
-                "column 한글\n".into(),
-            ),
-            (
-                CommentAddress::from(ObjectAddress {
-                    class_id: 1247,
-                    object_id: 20_001,
-                    sub_id: 0,
-                }),
-                "type".into(),
-            ),
-        ])
+        let source = CommentRegistry::try_from_iter(
+            [
+                (
+                    CommentAddress::from(ObjectAddress {
+                        class_id: 1259,
+                        object_id: 20_001,
+                        sub_id: 0,
+                    }),
+                    "object".into(),
+                ),
+                (
+                    CommentAddress::from(ObjectAddress {
+                        class_id: 1259,
+                        object_id: 20_001,
+                        sub_id: 3,
+                    }),
+                    "column 한글\n".into(),
+                ),
+                (
+                    CommentAddress::from(ObjectAddress {
+                        class_id: 1247,
+                        object_id: 20_001,
+                        sub_id: 0,
+                    }),
+                    "type".into(),
+                ),
+            ]
+            .map(|(address, text)| (address, text, RelationPersistence::Permanent)),
+        )
         .unwrap();
         let memory = MemoryBudget::new(4096);
         let token = CancellationToken::new();
@@ -62,14 +65,17 @@ mod tests {
         assert_eq!(captured.len(), 3);
         drop(captured);
         assert_eq!(memory.used(), 0);
-        let source = CommentRegistry::try_from_iter([(
-            CommentAddress::from(ObjectAddress {
-                class_id: 1259,
-                object_id: 20_002,
-                sub_id: 1,
-            }),
-            "x".repeat(32768),
-        )])
+        let source = CommentRegistry::try_from_iter(
+            [(
+                CommentAddress::from(ObjectAddress {
+                    class_id: 1259,
+                    object_id: 20_002,
+                    sub_id: 1,
+                }),
+                "x".repeat(32768),
+            )]
+            .map(|(address, text)| (address, text, RelationPersistence::Permanent)),
+        )
         .unwrap();
         assert_eq!(
             comments(&source, &control).unwrap_err().sqlstate(),

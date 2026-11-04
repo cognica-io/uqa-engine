@@ -21,7 +21,7 @@ fn encode(store: &MemoryGraphStore) -> Vec<u8> {
     bytes
 }
 
-fn decode(bytes: &[u8], control: &StorageReadControl) -> Budgeted<MemoryGraphStore> {
+fn decode(bytes: &[u8], control: &StorageReadControl) -> MemoryGraphStore {
     MemoryGraphStore::read_image(&mut &bytes[..], control).unwrap()
 }
 
@@ -69,7 +69,7 @@ fn edge_ids(store: &MemoryGraphStore, graph: &str) -> BTreeSet<u64> {
 
 fn source() -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.add_vertex(Vertex::new(1, "p"), "g").unwrap();
     store.add_vertex(Vertex::new(2, "p"), "g").unwrap();
     store.add_edge(Edge::new(4, 1, 2, "r"), "g").unwrap();
@@ -103,11 +103,10 @@ fn memory_graph_images_match_independent_wire_and_empty_allocation_fixtures() {
         }
         assert_eq!(encode(&source), expected);
         let restored = decode(&expected, &control);
-        let (mut restored, lease) = restored.into_parts();
+        let mut restored = restored;
         assert_eq!(restored.next_vertex_id().unwrap(), source.next_vertex_id);
         assert_eq!(restored.next_edge_id().unwrap(), source.next_edge_id);
         drop(restored);
-        drop(lease);
     }
     assert_eq!(control.memory().used(), 0);
 }
@@ -141,8 +140,8 @@ fn memory_graph_images_preserve_evaluated_properties_memberships_and_algebra() {
     source.add_edge(Edge::new(5, 1, 1, "loop"), "g").unwrap();
     source.add_edge(Edge::new(6, 1, 2, "r"), "g").unwrap();
     source.copy_graph("g", "copy").unwrap();
-    source.create_graph("empty");
-    source.create_graph("only_vertices");
+    source.create_graph("empty").unwrap();
+    source.create_graph("only_vertices").unwrap();
     source
         .add_vertex(Vertex::new(2, "p"), "only_vertices")
         .unwrap();
@@ -169,7 +168,7 @@ fn memory_graph_images_preserve_evaluated_properties_memberships_and_algebra() {
         BTreeSet::from([1])
     );
     assert_eq!(
-        restored.graphs["difference"].edge_ids,
+        restored.graphs.get("difference").unwrap().edge_ids.to_set(),
         BTreeSet::from([4, 5, 6])
     );
     assert!(restored.vertex_graphs(99).is_empty());
@@ -224,15 +223,16 @@ fn memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation
     second.register_label("alias", LabelKind::Edge).unwrap();
     second.next_sequence(3).unwrap();
     second.next_sequence(3).unwrap();
-    source.import_label_registry("future", &first);
-    source.import_label_registry("future", &second);
+    source.import_label_registry("future", &first).unwrap();
+    source.import_label_registry("future", &second).unwrap();
     // Import merging preserves label aliases and tombstones even where IDs overlap; image decoding must not invent a registry migration.
     second.remove_label("alias");
-    source.import_label_registry("future", &second);
-    let registry = source.label_registries.get_mut("future").unwrap();
+    source.import_label_registry("future", &second).unwrap();
+    let mut registry = source.native_registry("future");
     registry.allocation_id = [19; 16];
-    registry.kinds.remove("first");
-    let expected_registry = serde_json::to_value(&*registry).unwrap();
+    registry.kinds.remove("first").unwrap();
+    let expected_registry = serde_json::to_value(registry.to_record()).unwrap();
+    source.put_registry("future", registry).unwrap();
     let bytes = encode(&source);
     let control = StorageReadControl::with_limit(1 << 20);
     let restored = decode(&bytes, &control);
@@ -240,7 +240,7 @@ fn memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation
         serde_json::to_value(restored.label_registry("future")).unwrap(),
         expected_registry
     );
-    let (mut restored, lease) = restored.into_parts();
+    let mut restored = restored;
     for _ in 0..3 {
         assert_eq!(
             restored.next_vertex_id().unwrap(),
@@ -256,7 +256,7 @@ fn memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation
         );
     }
     for store in [&mut source, &mut restored] {
-        store.create_graph("future");
+        store.create_graph("future").unwrap();
     }
     assert_eq!(
         restored.allocate_vertex_id("first", "future"),
@@ -268,14 +268,13 @@ fn memory_graph_images_preserve_unused_ids_registry_merges_and_future_allocation
     );
     assert_eq!(encode(&restored), encode(&source));
     drop(restored);
-    drop(lease);
     assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
 fn memory_graph_images_keep_label_drop_edges_and_empty_index_observations() {
     let mut source = MemoryGraphStore::new();
-    source.create_graph("g");
+    source.create_graph("g").unwrap();
     let a = source.allocate_vertex_id("old", "g").unwrap();
     let b = source.allocate_vertex_id("keep", "g").unwrap();
     let edge = source.allocate_edge_id("link", "g").unwrap();
@@ -301,13 +300,12 @@ fn memory_graph_images_keep_label_drop_edges_and_empty_index_observations() {
         BTreeSet::from([3])
     );
     assert_eq!(encode(&restored), bytes);
-    let (mut restored, lease) = restored.into_parts();
+    let mut restored = restored;
     assert_eq!(
         restored.allocate_vertex_id("old", "g").unwrap(),
         source.allocate_vertex_id("old", "g").unwrap()
     );
     drop(restored);
-    drop(lease);
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -357,46 +355,63 @@ fn memory_graph_images_reject_corrupt_derived_sources_before_output() {
         let mut broken = original.clone();
         match case {
             0 => {
-                broken.vertices.remove(&1);
+                broken.vertices.remove(&1).unwrap();
             }
             1 => {
-                broken.edges.get_mut(&4).unwrap().edge_id = 9;
+                let mut edge = broken.edges.get(&4).unwrap().clone();
+                edge.edge_id = 9;
+                let bytes = super::super::publication::entity_bytes(
+                    &edge.label,
+                    &edge.properties,
+                    broken.edges.budget(),
+                )
+                .unwrap();
+                broken.edges.insert(4, edge, bytes, bytes).unwrap();
             }
             2 => {
-                broken.vertex_membership.get_mut(&1).unwrap().clear();
+                broken
+                    .vertex_membership
+                    .insert(
+                        1,
+                        super::super::NativeSet::new(broken.vertex_membership.budget()),
+                        0,
+                        0,
+                    )
+                    .unwrap();
             }
             3 => {
-                broken
-                    .edge_membership
-                    .get_mut(&4)
-                    .unwrap()
-                    .insert("unknown".into());
+                super::super::publication::membership(
+                    &mut broken.edge_membership,
+                    4,
+                    "unknown",
+                    true,
+                )
+                .unwrap();
             }
-            4 => {
-                broken.graphs.get_mut("g").unwrap().adj_out.clear();
-            }
-            5 => {
-                broken
-                    .graphs
-                    .get_mut("g")
-                    .unwrap()
-                    .adj_in
-                    .entry(999)
-                    .or_default()
-                    .insert(4);
-            }
-            6 => {
-                broken.graphs.get_mut("g").unwrap().label_index.clear();
-            }
-            7 => {
-                broken
-                    .graphs
-                    .get_mut("g")
-                    .unwrap()
-                    .vertex_label_index
-                    .entry("wrong".into())
-                    .or_default()
-                    .insert(1);
+            4..=7 => {
+                let mut partition = broken.partition_candidate("g").unwrap();
+                match case {
+                    4 => partition.adj_out.clear(),
+                    5 => {
+                        let mut ids = super::super::NativeSet::new(partition.adj_in.budget());
+                        ids.insert(4, 0).unwrap();
+                        let bytes = ids.retained_bytes().unwrap();
+                        partition.adj_in.insert(999, ids, 0, bytes).unwrap();
+                    }
+                    6 => partition.label_index.clear(),
+                    7 => {
+                        let mut ids =
+                            super::super::NativeSet::new(partition.vertex_label_index.budget());
+                        ids.insert(1, 0).unwrap();
+                        let bytes = ids.retained_bytes().unwrap();
+                        partition
+                            .vertex_label_index
+                            .insert_named("wrong", ids, 0, bytes)
+                            .unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                broken.put_partition("g", partition).unwrap();
             }
             _ => unreachable!(),
         }
@@ -416,11 +431,13 @@ fn memory_graph_images_admit_private_candidates_and_release_every_failure() {
     let bytes = fixture([1, 2], [1, 2], 4, 3);
     let unlimited = StorageReadControl::with_limit(1 << 20);
     let image = decode(&bytes, &unlimited);
-    let retained = image.reserved_bytes();
-    assert_eq!(retained, unlimited.memory().used());
+    let retained = unlimited.memory().used();
+    let required = unlimited.memory().peak();
+    assert!(retained > 0);
+    assert!(required >= retained);
     drop(image);
     assert_eq!(unlimited.memory().used(), 0);
-    for limit in 0..retained {
+    for limit in 0..required {
         let control = StorageReadControl::with_limit(limit);
         assert!(matches!(
             MemoryGraphStore::read_image(&mut bytes.as_slice(), &control),
@@ -429,10 +446,14 @@ fn memory_graph_images_admit_private_candidates_and_release_every_failure() {
         assert_eq!(control.memory().used(), 0);
         assert!(control.memory().peak() <= limit);
     }
-    let exact = StorageReadControl::with_limit(retained);
+    let exact = StorageReadControl::with_limit(required);
     let image = decode(&bytes, &exact);
-    assert_eq!(image.reserved_bytes(), retained);
+    assert_eq!(exact.memory().used(), retained);
+    let saved = image.clone();
     drop(image);
+    assert_eq!(exact.memory().used(), retained);
+    assert_eq!(encode(&saved), bytes);
+    drop(saved);
     assert_eq!(exact.memory().used(), 0);
     let mut huge = b"UQAGRA01".to_vec();
     for n in [1_u64, 1, u64::MAX] {
@@ -463,12 +484,11 @@ fn memory_graph_images_stream_large_borrowed_properties_with_bounded_io() {
         }
     }
     let mut source = source();
-    source
-        .vertices
-        .get_mut(&1)
-        .unwrap()
+    let mut vertex = source.get_vertex(1).unwrap().clone();
+    vertex
         .properties
         .insert("blob".into(), Value::Bytes(vec![37; 2 << 20]));
+    source.insert_raw_vertex(vertex).unwrap();
     let control = StorageReadControl::with_limit(1);
     let mut sink = Sink::default();
     assert_eq!(

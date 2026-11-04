@@ -5,8 +5,9 @@
 //
 
 use super::*;
-use crate::catalog::test_support::empty_catalog;
+use crate::catalog::comments::CommentAddress;
 use std::collections::BTreeMap;
+use uqa_sql::{ast::RelationPersistence, catalog::dependencies::*};
 use uqa_storage::memory_capture::MemoryCaptureRegistry;
 
 fn address(class_id: u32, object_id: u32, sub_id: i32) -> CommentAddress {
@@ -18,74 +19,56 @@ fn address(class_id: u32, object_id: u32, sub_id: i32) -> CommentAddress {
 }
 
 fn fixture() -> CommentCaptureSource {
-    let mut definitions = empty_catalog().snapshot().definitions.clone();
-    let relation = RelationIdentity::new("public", "temporary_membership");
-    let permanent = RelationIdentity::new("pg_temp_99", "permanent_membership");
-    let unlogged = RelationIdentity::new("public", "unlogged_membership");
-    let legacy = RelationCatalogOids::legacy(RelationOidKind::Table, &[1; 16]);
-    definitions.comments = Arc::new(
-        CommentRegistry::try_from_iter([
-            (
-                address(RELATION_CLASS, legacy.relation, 0),
-                "x".repeat(1 << 20),
-            ),
-            (
-                address(RELATION_CLASS, legacy.relation, 3),
-                "temporary column".into(),
-            ),
-            (
-                address(TYPE_CLASS, legacy.row_type.unwrap(), 0),
-                "temporary row".into(),
-            ),
-            (
-                address(999, legacy.relation, 3),
-                "opaque class 한글\n".into(),
-            ),
-            (address(RELATION_CLASS, 90_001, 0), "permanent".into()),
-            (address(RELATION_CLASS, 90_002, 1), "unlogged column".into()),
-            (address(RELATION_CLASS, 90_003, 0), "dangling".into()),
-            (
-                address(NAMESPACE_CLASS, 90_004, 0),
-                "temporary namespace".into(),
-            ),
-            (
-                address(NAMESPACE_CLASS, 90_005, 0),
-                "temporary toast namespace".into(),
-            ),
-        ])
-        .unwrap(),
-    );
-    let hierarchy = TableHierarchy::default();
-    let tables = [
-        (&relation, RelationPersistence::Temporary, None),
-        (&permanent, RelationPersistence::Permanent, Some(90_001)),
-        (&unlogged, RelationPersistence::Unlogged, Some(90_002)),
-    ]
-    .map(|(relation, persistence, oid)| CommentTableSource {
-        relation,
-        object_id: [1; 16],
-        persistence,
-        catalog_oids: oid.map(|relation| RelationCatalogOids {
-            relation,
-            row_type: None,
-            array_type: None,
-            rule: None,
-        }),
-        columns: &[],
-        checks: &[],
-        keys: &[],
-        foreign_keys: &[],
-        hierarchy: &hierarchy,
-    });
-    CommentCaptureSource::new(
-        &definitions,
-        tables,
-        Some(TemporaryNamespaceOids {
-            namespace: 90_004,
-            toast_namespace: 90_005,
-        }),
-    )
-    .unwrap()
+    use RelationPersistence::{Permanent, Temporary, Unlogged};
+    let comments = CommentRegistry::try_from_iter([
+        (
+            address(RELATION_CLASS, 80_001, 0),
+            "x".repeat(1 << 20),
+            Temporary,
+        ),
+        (
+            address(RELATION_CLASS, 80_001, 3),
+            "temporary column".into(),
+            Temporary,
+        ),
+        (
+            address(TYPE_CLASS, 80_002, 0),
+            "temporary row".into(),
+            Temporary,
+        ),
+        (
+            address(999, 80_001, 3),
+            "opaque class 한글\n".into(),
+            Permanent,
+        ),
+        (
+            address(RELATION_CLASS, 90_001, 0),
+            "permanent".into(),
+            Permanent,
+        ),
+        (
+            address(RELATION_CLASS, 90_002, 1),
+            "unlogged column".into(),
+            Unlogged,
+        ),
+        (
+            address(RELATION_CLASS, 90_003, 0),
+            "dangling".into(),
+            Permanent,
+        ),
+        (
+            address(NAMESPACE_CLASS, 90_004, 0),
+            "temporary namespace".into(),
+            Temporary,
+        ),
+        (
+            address(NAMESPACE_CLASS, 90_005, 0),
+            "temporary toast namespace".into(),
+            Temporary,
+        ),
+    ])
+    .unwrap();
+    CommentCaptureSource::new(&comments)
 }
 
 #[test]
@@ -112,7 +95,13 @@ fn comment_selection_excludes_original_temporary_addresses_before_payload_admiss
         .map(|(address, text)| (*address, text.clone()))
         .collect::<BTreeMap<_, _>>();
     let selected_only = CommentCaptureSource {
-        comments: Arc::new(CommentRegistry::try_from_iter(expected.clone()).unwrap()),
+        comments: CommentRegistry::try_from_iter(
+            expected
+                .clone()
+                .into_iter()
+                .map(|(address, text)| (address, text, RelationPersistence::Permanent)),
+        )
+        .unwrap(),
     };
     let other = StorageReadControl::with_limit(4096);
     let mut value = None;
@@ -140,7 +129,7 @@ fn comment_selection_excludes_original_temporary_addresses_before_payload_admiss
 #[test]
 fn comment_generation_retirement_preserves_independent_capture_controls() {
     let source = fixture();
-    let weak = Arc::downgrade(&source.comments);
+    let native = source.comments.budget().clone();
     let registry = MemoryCaptureRegistry::new();
     let cell = registry.cell(source).unwrap();
     let key = cell.key().unwrap();
@@ -151,7 +140,7 @@ fn comment_generation_retirement_preserves_independent_capture_controls() {
     assert!(key.retained(&cut).unwrap().is_none());
     cancelled.cancellation().cancel();
     drop(cell);
-    assert!(weak.upgrade().is_none());
+    assert!(native.used() > 0);
     assert!(failed.check().is_err());
     drop(failed);
     assert_eq!(cancelled.memory().used(), 0);
@@ -162,4 +151,68 @@ fn comment_generation_retirement_preserves_independent_capture_controls() {
     assert!(captured.get().is_err());
     drop(captured);
     assert_eq!(control.memory().used(), 0);
+    assert_eq!(native.used(), 0);
+}
+
+#[test]
+fn native_comment_source_selection_is_allocation_free_and_releases_unselected_temporary_text() {
+    use uqa_core::memory::MemoryBudget;
+    for count in [1, 64, 4096] {
+        let native = MemoryBudget::new(16 << 20);
+        let mut comments = CommentRegistry::with_budget(&native);
+        for id in 0..count {
+            comments
+                .insert(
+                    address(TYPE_CLASS, id + 1, 0),
+                    "original",
+                    RelationPersistence::Permanent,
+                )
+                .unwrap();
+            comments
+                .insert(
+                    address(TYPE_CLASS, id + 10_000, 0),
+                    "temporary",
+                    RelationPersistence::Temporary,
+                )
+                .unwrap();
+        }
+        comments
+            .insert(
+                address(TYPE_CLASS, 99_999, 0),
+                &"x".repeat(4 << 20),
+                RelationPersistence::Temporary,
+            )
+            .unwrap();
+        let mut selected = None;
+        let work = allocation_counter::measure(|| {
+            selected = Some(CommentCaptureSource::new(&comments));
+        });
+        assert_eq!(work.count_total, 0, "{count}: {work:?}");
+        let selected = selected.unwrap();
+        let before = native.used();
+        comments
+            .insert(
+                address(TYPE_CLASS, 1, 0),
+                "replacement",
+                RelationPersistence::Permanent,
+            )
+            .unwrap();
+        drop(comments);
+        assert!(before - native.used() >= 4 << 20);
+        let control = StorageReadControl::with_limit(4 << 20);
+        let captured = selected.freeze(&control).unwrap();
+        drop(selected);
+        assert_eq!(
+            captured.get().unwrap().len(),
+            usize::try_from(count).unwrap()
+        );
+        assert!(captured
+            .get()
+            .unwrap()
+            .iter()
+            .all(|(_, text)| text == "original"));
+        drop(captured);
+        assert_eq!(native.used(), 0);
+        assert_eq!(control.memory().used(), 0);
+    }
 }

@@ -15,11 +15,12 @@ use uqa_core::{
     },
     CancellationToken,
 };
-use uqa_sql::SQLError;
+use uqa_sql::{ast::RelationPersistence, SQLError};
 
 #[derive(Clone)]
 pub struct CommentRegistry {
-    values: RetainedMap<CommentAddress, Budgeted<String>>,
+    durable: RetainedMap<CommentAddress, Budgeted<String>>,
+    temporary: RetainedMap<CommentAddress, Budgeted<String>>,
 }
 
 impl Default for CommentRegistry {
@@ -35,32 +36,44 @@ impl CommentRegistry {
 
     pub fn with_budget(memory: &MemoryBudget) -> Self {
         Self {
-            values: RetainedMap::new(memory),
+            durable: RetainedMap::new(memory),
+            temporary: RetainedMap::new(memory),
         }
     }
 
     pub fn budget(&self) -> &MemoryBudget {
-        self.values.budget()
+        self.durable.budget()
     }
 
     pub fn len(&self) -> usize {
-        self.values.len()
+        self.durable.len() + self.temporary.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.durable.is_empty() && self.temporary.is_empty()
     }
 
     pub fn get(&self, address: &CommentAddress) -> Option<&String> {
-        self.values.get(address).map(|text| &**text)
+        self.durable
+            .get(address)
+            .or_else(|| self.temporary.get(address))
+            .map(|text| &**text)
     }
 
     pub fn iter(&self) -> CommentIter<'_> {
-        CommentIter(self.values.iter())
+        CommentIter::new(self.durable.iter(), self.temporary.iter())
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &CommentAddress> {
         self.iter().map(|(address, _)| address)
+    }
+
+    pub(super) fn durable_iter(&self) -> impl Iterator<Item = (&CommentAddress, &String)> {
+        self.durable.iter().map(|(key, text)| (key, &**text))
+    }
+
+    pub(super) fn durable_get(&self, address: &CommentAddress) -> Option<&String> {
+        self.durable.get(address).map(|text| &**text)
     }
 
     pub fn range(
@@ -68,38 +81,83 @@ impl CommentRegistry {
         range: RangeInclusive<CommentAddress>,
     ) -> impl Iterator<Item = (&CommentAddress, &String)> {
         let end = *range.end();
-        CommentIter(self.values.range_from(Bound::Included(range.start())))
-            .take_while(move |(address, _)| **address <= end)
+        CommentIter::new(
+            self.durable.range_from(Bound::Included(range.start())),
+            self.temporary.range_from(Bound::Included(range.start())),
+        )
+        .take_while(move |(address, _)| **address <= end)
     }
 
     /// Admit the selected text and changed tree path before replacing this root.
-    pub fn insert(&mut self, address: CommentAddress, text: &str) -> Result<(), SQLError> {
+    pub fn insert(
+        &mut self,
+        address: CommentAddress,
+        text: &str,
+        persistence: RelationPersistence,
+    ) -> Result<(), SQLError> {
         let cancellation = CancellationToken::new();
-        let control = ProductionControl::new(self.budget(), &cancellation, &cancellation);
+        let memory = if persistence == RelationPersistence::Temporary {
+            self.temporary.budget()
+        } else {
+            self.durable.budget()
+        };
+        let control = ProductionControl::new(memory, &cancellation, &cancellation);
         let text = control
             .copy_text(text)?
             .into_budgeted()
             .unwrap_or_else(|_| unreachable!("native comments use admitted construction"));
         let bytes = text.reserved_bytes();
-        self.values.insert(address, text, bytes)?;
+        let mut candidate = self.clone();
+        if persistence == RelationPersistence::Temporary {
+            candidate.durable.remove(&address)?;
+            candidate.temporary.insert(address, text, bytes)?;
+        } else {
+            candidate.temporary.remove(&address)?;
+            candidate.durable.insert(address, text, bytes)?;
+        }
+        *self = candidate;
         Ok(())
     }
 
     pub fn remove(&mut self, address: &CommentAddress) -> Result<bool, SQLError> {
-        Ok(self.values.remove(address)?)
+        if self.durable.get(address).is_some() {
+            Ok(self.durable.remove(address)?)
+        } else {
+            Ok(self.temporary.remove(address)?)
+        }
+    }
+
+    pub fn is_temporary(&self, address: &CommentAddress) -> bool {
+        self.temporary.get(address).is_some()
+    }
+
+    /// Select the original durable root without retaining temporary descriptions or consulting object catalogs.
+    pub(super) fn durable_generation(&self) -> Self {
+        Self {
+            durable: self.durable.clone(),
+            temporary: RetainedMap::new(self.budget()),
+        }
+    }
+
+    /// A physical catalog refresh changes durable descriptions while preserving the same session's temporary generation.
+    pub(super) fn with_temporary_from(&self, session: &Self) -> Self {
+        Self {
+            durable: self.durable.clone(),
+            temporary: session.temporary.clone(),
+        }
     }
 
     pub fn try_from_iter(
-        values: impl IntoIterator<Item = (CommentAddress, String)>,
+        values: impl IntoIterator<Item = (CommentAddress, String, RelationPersistence)>,
     ) -> Result<Self, SQLError> {
         let mut result = Self::new();
-        for (address, text) in values {
-            result.insert(address, &text)?;
+        for (address, text, persistence) in values {
+            result.insert(address, &text, persistence)?;
         }
         Ok(result)
     }
 
-    /// Independently admit the cached complete footprint without copying or visiting entries.
+    /// Independently admit the cached durable footprint without copying or visiting entries. Temporary descriptions belong to their session and are not retained.
     pub fn capture(
         &self,
         control: &ProductionControl<'_>,
@@ -108,7 +166,7 @@ impl CommentRegistry {
         let memory = control.budget().ok_or_else(|| {
             SQLError::Internal("comment capture requires an admitted control".into())
         })?;
-        let (values, memory) = self.values.capture(memory)?.into_parts();
+        let (values, memory) = self.durable.capture(memory)?.into_parts();
         Ok(control.finish(CapturedComments { values }, Some(memory))?)
     }
 }
@@ -121,7 +179,18 @@ impl std::fmt::Debug for CommentRegistry {
 
 impl PartialEq for CommentRegistry {
     fn eq(&self, other: &Self) -> bool {
-        self.len() == other.len() && self.iter().eq(other.iter())
+        self.durable.len() == other.durable.len()
+            && self.temporary.len() == other.temporary.len()
+            && self
+                .durable
+                .iter()
+                .map(|(key, text)| (key, &**text))
+                .eq(other.durable.iter().map(|(key, text)| (key, &**text)))
+            && self
+                .temporary
+                .iter()
+                .map(|(key, text)| (key, &**text))
+                .eq(other.temporary.iter().map(|(key, text)| (key, &**text)))
     }
 }
 
@@ -135,13 +204,33 @@ impl std::ops::Index<&CommentAddress> for CommentRegistry {
     }
 }
 
-pub struct CommentIter<'a>(RetainedMapIter<'a, CommentAddress, Budgeted<String>>);
+pub struct CommentIter<'a> {
+    durable: std::iter::Peekable<RetainedMapIter<'a, CommentAddress, Budgeted<String>>>,
+    temporary: std::iter::Peekable<RetainedMapIter<'a, CommentAddress, Budgeted<String>>>,
+}
+
+impl<'a> CommentIter<'a> {
+    fn new(
+        durable: RetainedMapIter<'a, CommentAddress, Budgeted<String>>,
+        temporary: RetainedMapIter<'a, CommentAddress, Budgeted<String>>,
+    ) -> Self {
+        Self {
+            durable: durable.peekable(),
+            temporary: temporary.peekable(),
+        }
+    }
+}
 
 impl<'a> Iterator for CommentIter<'a> {
     type Item = (&'a CommentAddress, &'a String);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(address, text)| (address, &**text))
+        let selected = match (self.durable.peek(), self.temporary.peek()) {
+            (Some((a, _)), Some((b, _))) if a > b => self.temporary.next(),
+            (Some(_), _) => self.durable.next(),
+            (None, _) => self.temporary.next(),
+        };
+        selected.map(|(address, text)| (address, &**text))
     }
 }
 
@@ -172,8 +261,8 @@ impl CapturedComments {
         self.values.get(address).map(|text| &**text)
     }
 
-    pub fn iter(&self) -> CommentIter<'_> {
-        CommentIter(self.values.iter())
+    pub fn iter(&self) -> impl Iterator<Item = (&CommentAddress, &String)> {
+        self.values.iter().map(|(key, text)| (key, &**text))
     }
 }
 

@@ -26,7 +26,6 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
@@ -138,7 +137,7 @@ pub struct CatalogDefinitionSnapshot {
     pub shells: Arc<shell_type::ShellRegistry>,
     pub comments: Arc<comments::CommentRegistry>,
     pub composites: Arc<composite_type::CompositeRegistry>,
-    pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
+    pub graphs: Arc<uqa_graph::GraphCatalog>,
     pub views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub catalog_indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
     pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,

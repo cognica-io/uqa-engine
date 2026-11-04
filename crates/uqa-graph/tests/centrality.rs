@@ -15,7 +15,7 @@ use uqa_graph::{
 fn linear_corpus() -> MemoryGraphStore {
     // 1 -> 2 -> 3 -> 4
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=4 {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
@@ -28,7 +28,7 @@ fn linear_corpus() -> MemoryGraphStore {
 fn star_corpus() -> MemoryGraphStore {
     // 1 -> 2 (hub), all others -> 2.
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=4 {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
@@ -86,7 +86,7 @@ fn hits_sets_hub_authority_fields() {
 fn betweenness_finds_bridge_vertex() {
     // Bridge: 1 - 2 - 3, with 2 the only path between 1 and 3.
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=3 {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
@@ -101,7 +101,7 @@ fn betweenness_finds_bridge_vertex() {
 #[test]
 fn message_passing_propagates_initial_property() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mut alice = Vertex::new(1, "Person");
     alice.properties.insert("score".into(), Value::Int(10));
     let mut bob = Vertex::new(2, "Person");
@@ -132,7 +132,7 @@ fn message_passing_rejects_lossy_or_non_numeric_features() {
         Value::Float(f64::NAN),
     ] {
         let mut g = MemoryGraphStore::new();
-        g.create_graph("g");
+        g.create_graph("g").unwrap();
         let mut vertex = Vertex::new(1, "n");
         vertex.properties.insert("score".into(), bad);
         g.add_vertex(vertex, "g").unwrap();
@@ -146,7 +146,7 @@ fn message_passing_rejects_lossy_or_non_numeric_features() {
 #[test]
 fn message_passing_rejects_non_finite_accumulation_and_layer_exhaustion() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for id in 1..=2 {
         let mut vertex = Vertex::new(id, "n");
         vertex

@@ -22,7 +22,9 @@ mod row_types;
 pub use format_type::{format_type_name, format_type_name_with_control, format_type_value};
 use relation_oid::lookup_regclass_oid;
 pub use relation_oid::resolve_bound_regclass_oid;
-pub use row_types::{format_type_object, resolve_type_object_oid, row_type_relation};
+pub use row_types::{
+    format_type_object, resolve_type_object_oid, row_type_relation, type_object_array_element,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

@@ -16,7 +16,7 @@ use uqa_graph::{
 
 fn fresh() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     g
 }
 

@@ -8,8 +8,7 @@
 
 use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
-use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
-use uqa_graph::GraphStoreHandle;
+use std::{borrow::Cow, collections::BTreeMap};
 use uqa_sql::catalog::graph_oids::GraphOidRegistry;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
@@ -24,7 +23,7 @@ use uqa_sql::{
 };
 
 struct GraphNamesGuard<'a> {
-    graphs: MappedRwLockReadGuard<'a, BTreeMap<String, Arc<GraphStoreHandle>>>,
+    graphs: MappedRwLockReadGuard<'a, uqa_graph::GraphCatalog>,
     oids: MappedRwLockReadGuard<'a, GraphOidRegistry>,
 }
 impl GraphNamespaceRead for GraphNamesGuard<'_> {

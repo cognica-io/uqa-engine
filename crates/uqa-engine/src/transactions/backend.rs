@@ -293,8 +293,10 @@ impl Engine {
             Ok((FixedTransactionSnapshot::Pinned(snapshot), graph_store))
         } else {
             let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
-            let graph_snapshot =
-                self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
+            let graphs = self.visible_graph_handles().map_err(|error| {
+                uqa_execution::storage_errors::storage_error("select graph snapshot", &error)
+            })?;
+            let graph_snapshot = self.detach_graph_storage_snapshot(&graphs)?;
             self.restart_unwritten_backend_reader(stack)?;
             Ok((FixedTransactionSnapshot::Detached(snapshot), graph_snapshot))
         }

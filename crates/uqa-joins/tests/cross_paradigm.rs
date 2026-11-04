@@ -131,7 +131,7 @@ fn hybrid_join_filters_by_structured_field_and_cosine() {
 #[test]
 fn graph_join_emits_pairs_connected_by_edge() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=3 {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
@@ -163,7 +163,7 @@ fn graph_join_emits_pairs_connected_by_edge() {
 #[test]
 fn cross_paradigm_join_bridges_vertex_property_to_doc_field() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mut alice = Vertex::new(1, "Person");
     alice
         .properties
@@ -260,7 +260,7 @@ fn hybrid_join_rejects_zero_norm_vector() {
 #[test]
 fn cross_paradigm_join_rejects_missing_vertex_and_non_finite_scores() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let right = vec![entry(
         10,
         fields(&[("email", Value::Str("alice@example.com".into()))]),

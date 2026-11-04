@@ -22,18 +22,16 @@ impl MemoryGraphStore {
 
     #[cfg(test)]
     pub(crate) fn remove_edge_record_for_corruption_test(&mut self, edge_id: EdgeId) {
-        self.edges.remove(&edge_id);
+        self.edges.remove(&edge_id).unwrap();
     }
 
     #[cfg(test)]
     pub(super) fn remove_vertex_record_for_corruption_test(&mut self, vertex_id: VertexId) {
-        self.vertices.remove(&vertex_id);
+        self.vertices.remove(&vertex_id).unwrap();
     }
 
-    pub(super) fn require_partition_mut(&mut self, name: &str) -> GraphStoreResult<&mut Partition> {
-        self.graphs
-            .get_mut(name)
-            .ok_or_else(|| GraphStoreError::UnknownGraph(name.to_string()))
+    pub(super) fn partition_candidate(&self, name: &str) -> GraphStoreResult<Partition> {
+        self.require_partition(name).cloned()
     }
 
     pub(super) fn require_partition(&self, name: &str) -> GraphStoreResult<&Partition> {
@@ -107,7 +105,7 @@ impl MemoryGraphStore {
         }
         let label_id = graphid_label_id(vertex_id);
         if self
-            .label_registry(graph)
+            .native_registry(graph)
             .dropped_label_ids
             .contains(&label_id)
         {
@@ -118,32 +116,35 @@ impl MemoryGraphStore {
         )))
     }
 
-    pub(super) fn ensure_partition(&mut self, name: &str) {
+    pub(super) fn create_partition(&mut self, name: &str) -> GraphStoreResult<()> {
         if !self.graphs.contains_key(name) {
-            self.graphs.insert(name.to_string(), Partition::default());
+            self.put_partition(name, Partition::new(self.graphs.budget()))?;
         }
+        Ok(())
     }
 
-    pub(super) fn release_vertex_if_orphan(&mut self, vertex_id: VertexId) {
-        let still_referenced = self
+    pub(super) fn release_vertex_if_orphan(&mut self, id: VertexId) -> GraphStoreResult<()> {
+        if self
             .vertex_membership
-            .get(&vertex_id)
-            .is_some_and(|set| !set.is_empty());
-        if !still_referenced {
-            self.vertices.remove(&vertex_id);
-            self.vertex_membership.remove(&vertex_id);
+            .get(&id)
+            .is_none_or(super::NativeSet::is_empty)
+        {
+            self.vertices.remove(&id)?;
+            self.vertex_membership.remove(&id)?;
         }
+        Ok(())
     }
 
-    pub(super) fn release_edge_if_orphan(&mut self, edge_id: EdgeId) {
-        let still_referenced = self
+    pub(super) fn release_edge_if_orphan(&mut self, id: EdgeId) -> GraphStoreResult<()> {
+        if self
             .edge_membership
-            .get(&edge_id)
-            .is_some_and(|set| !set.is_empty());
-        if !still_referenced {
-            self.edges.remove(&edge_id);
-            self.edge_membership.remove(&edge_id);
+            .get(&id)
+            .is_none_or(super::NativeSet::is_empty)
+        {
+            self.edges.remove(&id)?;
+            self.edge_membership.remove(&id)?;
         }
+        Ok(())
     }
 
     pub(super) fn populate_graph_from_ids(
@@ -152,51 +153,46 @@ impl MemoryGraphStore {
         edge_ids: &BTreeSet<EdgeId>,
         target: &str,
     ) -> GraphStoreResult<()> {
-        let vertices = vertex_ids
-            .iter()
-            .map(|id| {
-                self.vertices.get(id).cloned().ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!(
-                        "graph membership references missing vertex {id}"
-                    ))
-                })
-            })
-            .collect::<GraphStoreResult<Vec<_>>>()?;
-        let edges = edge_ids
-            .iter()
-            .map(|id| {
-                self.edges.get(id).cloned().ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!(
-                        "graph membership references missing edge {id}"
-                    ))
-                })
-            })
-            .collect::<GraphStoreResult<Vec<_>>>()?;
-
-        self.ensure_partition(target);
-        for vertex in vertices {
-            let id = vertex.vertex_id;
-            self.require_partition_mut(target)?.add_vertex(&vertex);
-            self.vertex_membership
-                .entry(id)
-                .or_default()
-                .insert(target.to_string());
+        for id in vertex_ids {
+            if !self.vertices.contains_key(id) {
+                return Err(GraphStoreError::CorruptGraph(format!(
+                    "graph membership references missing vertex {id}"
+                )));
+            }
         }
-        for edge in edges {
-            let id = edge.edge_id;
-            self.require_partition_mut(target)?.add_edge(&edge);
-            self.edge_membership
-                .entry(id)
-                .or_default()
-                .insert(target.to_string());
+        for id in edge_ids {
+            if !self.edges.contains_key(id) {
+                return Err(GraphStoreError::CorruptGraph(format!(
+                    "graph membership references missing edge {id}"
+                )));
+            }
         }
-        Ok(())
+        self.publish(|state| {
+            let mut partition = state
+                .graphs
+                .get(target)
+                .cloned()
+                .unwrap_or_else(|| Partition::new(state.graphs.budget()));
+            for id in vertex_ids {
+                partition.add_vertex(state.vertices.get(id).expect("validated vertex"))?;
+                super::publication::membership(&mut state.vertex_membership, *id, target, true)?;
+            }
+            for id in edge_ids {
+                partition.add_edge(state.edges.get(id).expect("validated edge"))?;
+                super::publication::membership(&mut state.edge_membership, *id, target, true)?;
+            }
+            state.put_partition(target, partition)
+        })
     }
 
     /// Insert a vertex into the global registry without attaching it
     /// to any graph. Used by the `SQLite`-backed store on hydration
     /// before membership is restored from the persisted catalog.
     pub fn insert_raw_vertex(&mut self, vertex: Vertex) -> GraphStoreResult<()> {
+        self.publish(|state| state.insert_raw_vertex_candidate(vertex))
+    }
+
+    fn insert_raw_vertex_candidate(&mut self, vertex: Vertex) -> GraphStoreResult<()> {
         let next = if vertex.vertex_id >= self.next_vertex_id {
             vertex.vertex_id.checked_add(1).ok_or_else(|| {
                 GraphStoreError::IdExhausted("raw vertex id counter overflow".into())
@@ -204,7 +200,13 @@ impl MemoryGraphStore {
         } else {
             self.next_vertex_id
         };
-        self.vertices.insert(vertex.vertex_id, vertex);
+        let bytes = super::publication::entity_bytes(
+            &vertex.label,
+            &vertex.properties,
+            self.vertices.budget(),
+        )?;
+        self.vertices
+            .insert(vertex.vertex_id, vertex, bytes, bytes)?;
         self.next_vertex_id = next;
         Ok(())
     }
@@ -213,6 +215,10 @@ impl MemoryGraphStore {
     /// validation is deferred until `attach_edge`, when the graph's persisted
     /// label tombstones are available.
     pub fn insert_raw_edge(&mut self, edge: Edge) -> GraphStoreResult<()> {
+        self.publish(|state| state.insert_raw_edge_candidate(edge))
+    }
+
+    fn insert_raw_edge_candidate(&mut self, edge: Edge) -> GraphStoreResult<()> {
         let next = if edge.edge_id >= self.next_edge_id {
             edge.edge_id.checked_add(1).ok_or_else(|| {
                 GraphStoreError::IdExhausted("raw edge id counter overflow".into())
@@ -220,7 +226,9 @@ impl MemoryGraphStore {
         } else {
             self.next_edge_id
         };
-        self.edges.insert(edge.edge_id, edge);
+        let bytes =
+            super::publication::entity_bytes(&edge.label, &edge.properties, self.edges.budget())?;
+        self.edges.insert(edge.edge_id, edge, bytes, bytes)?;
         self.next_edge_id = next;
         Ok(())
     }
@@ -228,40 +236,35 @@ impl MemoryGraphStore {
     /// Attach a previously inserted vertex to the named graph. The
     /// graph must already exist (`create_graph`).
     pub fn attach_vertex(&mut self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<()> {
-        let vertex = self.vertices.get(&vertex_id).cloned().ok_or_else(|| {
-            GraphStoreError::CorruptGraph(format!("cannot attach missing vertex {vertex_id}"))
-        })?;
-        let part = self.require_partition_mut(graph)?;
-        part.add_vertex(&vertex);
-        self.vertex_membership
-            .entry(vertex_id)
-            .or_default()
-            .insert(graph.to_string());
-        Ok(())
+        self.publish(|state| {
+            let vertex = state.vertices.get(&vertex_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("cannot attach missing vertex {vertex_id}"))
+            })?;
+            let mut partition = state.partition_candidate(graph)?;
+            partition.add_vertex(vertex)?;
+            super::publication::membership(&mut state.vertex_membership, vertex_id, graph, true)?;
+            state.put_partition(graph, partition)
+        })
     }
 
     pub fn attach_edge(&mut self, edge_id: EdgeId, graph: &str) -> GraphStoreResult<()> {
-        // Snapshot the edge fields so we can populate the partition's
-        // adjacency indexes without re-borrowing `self.edges`.
-        let edge = self.edges.get(&edge_id).cloned().ok_or_else(|| {
-            GraphStoreError::CorruptGraph(format!("cannot attach missing edge {edge_id}"))
-        })?;
-        let partition = self.require_partition(graph)?;
-        self.require_edge_endpoint(partition, edge.source_id, graph)?;
-        self.require_edge_endpoint(partition, edge.target_id, graph)?;
-        let part = self.require_partition_mut(graph)?;
-        part.add_edge(&edge);
-        self.edge_membership
-            .entry(edge_id)
-            .or_default()
-            .insert(graph.to_string());
-        Ok(())
+        self.publish(|state| {
+            let edge = state.edges.get(&edge_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("cannot attach missing edge {edge_id}"))
+            })?;
+            let mut partition = state.partition_candidate(graph)?;
+            state.require_edge_endpoint(&partition, edge.source_id, graph)?;
+            state.require_edge_endpoint(&partition, edge.target_id, graph)?;
+            partition.add_edge(edge)?;
+            super::publication::membership(&mut state.edge_membership, edge_id, graph, true)?;
+            state.put_partition(graph, partition)
+        })
     }
 
     /// All edge ids that participate in `graph`, in stable id order.
     /// Helper for the `SQLite`-backed store's bulk write paths.
     pub fn out_edge_ids_for_graph(&self, graph: &str) -> GraphStoreResult<BTreeSet<EdgeId>> {
-        Ok(self.require_partition(graph)?.edge_ids.clone())
+        Ok(self.require_partition(graph)?.edge_ids.to_set())
     }
 
     fn remove_vertex_preserving_incident_edges(
@@ -269,66 +272,67 @@ impl MemoryGraphStore {
         vertex_id: VertexId,
         graph: &str,
     ) -> GraphStoreResult<()> {
-        let partition = self.require_partition_mut(graph)?;
-        if !partition.vertex_ids.remove(&vertex_id) {
+        let mut partition = self.partition_candidate(graph)?;
+        if !partition.vertex_ids.contains(&vertex_id) {
             return Ok(());
         }
-        for ids in partition.vertex_label_index.values_mut() {
-            ids.remove(&vertex_id);
-        }
-        if let Some(memberships) = self.vertex_membership.get_mut(&vertex_id) {
-            memberships.remove(graph);
-        }
-        self.release_vertex_if_orphan(vertex_id);
-        Ok(())
+        let vertex = self.require_partition_vertex(&partition, vertex_id, graph)?;
+        partition.remove_vertex(vertex)?;
+        self.put_partition(graph, partition)?;
+        super::publication::membership(&mut self.vertex_membership, vertex_id, graph, false)?;
+        self.release_vertex_if_orphan(vertex_id)
     }
 
     /// Snapshot of the AGE label registry for `graph` (empty registry
     /// when the graph has never allocated an id).
     pub fn label_registry(&self, graph: &str) -> GraphLabelRegistry {
+        self.native_registry(graph).to_record()
+    }
+
+    pub(super) fn native_registry(&self, graph: &str) -> super::NativeLabels {
         self.label_registries
             .get(graph)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_else(|| super::NativeLabels::new(self.label_registries.budget()))
     }
 
     /// Install (merge) a persisted label registry for `graph`. Existing
     /// in-memory state wins on conflicts except that the larger
     /// sequence / label-id watermarks are kept.
-    pub fn import_label_registry(&mut self, graph: &str, registry: &GraphLabelRegistry) {
-        self.label_registries
-            .entry(graph.to_string())
-            .or_default()
-            .merge(registry);
+    pub fn import_label_registry(
+        &mut self,
+        graph: &str,
+        registry: &GraphLabelRegistry,
+    ) -> GraphStoreResult<()> {
+        let mut candidate = self.native_registry(graph);
+        candidate.merge(registry)?;
+        self.put_registry(graph, candidate)
     }
 
     /// Re-derive the label registry of `graph` from the ids of the
     /// entities currently attached to it. Self-heals restored graphs
     /// whose registry metadata is missing: `label_id = id >> 48`.
-    pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) {
-        let mut observations: Vec<(String, u64, LabelKind)> = Vec::new();
+    pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) -> GraphStoreResult<()> {
+        let mut registry = self.native_registry(graph);
         if let Some(part) = self.graphs.get(graph) {
-            for vid in &part.vertex_ids {
-                if let Some(vertex) = self.vertices.get(vid) {
-                    observations.push((vertex.label.clone(), vertex.vertex_id, LabelKind::Vertex));
+            for id in &part.vertex_ids {
+                if let Some(vertex) = self.vertices.get(id) {
+                    registry.observe(&vertex.label, *id, LabelKind::Vertex)?;
                 }
             }
-            for eid in &part.edge_ids {
-                if let Some(edge) = self.edges.get(eid) {
-                    observations.push((edge.label.clone(), edge.edge_id, LabelKind::Edge));
+            for id in &part.edge_ids {
+                if let Some(edge) = self.edges.get(id) {
+                    registry.observe(&edge.label, *id, LabelKind::Edge)?;
                 }
             }
         }
-        let registry = self.label_registries.entry(graph.to_string()).or_default();
-        for (label, id, kind) in observations {
-            registry.observe(&label, id, kind);
-        }
+        self.put_registry(graph, registry)
     }
 
     /// Every present `ag_label` entry of `graph`, in label-id order.
     pub fn graph_labels(&self, graph: &str) -> GraphStoreResult<Vec<GraphLabelInfo>> {
         self.require_partition(graph)?;
-        Ok(self.label_registry(graph).labels())
+        Ok(self.native_registry(graph).labels())
     }
 
     /// The kind of `label` in `graph`, or `None` when the label is not
@@ -339,7 +343,7 @@ impl MemoryGraphStore {
         label: &str,
     ) -> GraphStoreResult<Option<LabelKind>> {
         self.require_partition(graph)?;
-        Ok(self.label_registry(graph).label_kind(label))
+        Ok(self.native_registry(graph).label_kind(label))
     }
 
     /// Register an empty user label in `graph` (`create_vlabel` /
@@ -353,10 +357,10 @@ impl MemoryGraphStore {
         kind: LabelKind,
     ) -> GraphStoreResult<Option<u32>> {
         self.require_partition(graph)?;
-        let mut candidate = self.label_registry(graph);
+        let mut candidate = self.native_registry(graph);
         let id = candidate.register_label(label, kind)?;
         if id.is_some() {
-            self.label_registries.insert(graph.to_string(), candidate);
+            self.put_registry(graph, candidate)?;
         }
         Ok(id)
     }
@@ -373,8 +377,16 @@ impl MemoryGraphStore {
         graph: &str,
         label: &str,
     ) -> GraphStoreResult<Option<(u32, LabelKind)>> {
+        self.publish(|state| state.drop_label_candidate(graph, label))
+    }
+
+    fn drop_label_candidate(
+        &mut self,
+        graph: &str,
+        label: &str,
+    ) -> GraphStoreResult<Option<(u32, LabelKind)>> {
         self.require_partition(graph)?;
-        let registry = self.label_registry(graph);
+        let registry = self.native_registry(graph);
         let Some(kind) = registry.label_kind(label) else {
             return Ok(None);
         };
@@ -428,10 +440,9 @@ impl MemoryGraphStore {
                 }
             }
         }
-        self.label_registries
-            .entry(graph.to_string())
-            .or_default()
-            .remove_label(label);
+        let mut registry = self.native_registry(graph);
+        registry.remove_label(label)?;
+        self.put_registry(graph, registry)?;
         Ok(Some((id, kind)))
     }
 
@@ -447,28 +458,23 @@ impl MemoryGraphStore {
                 "graph {to:?} already exists"
             )));
         }
-        let partition = self
-            .graphs
-            .remove(from)
-            .ok_or_else(|| GraphStoreError::UnknownGraph(from.to_string()))?;
-        for vertex_id in &partition.vertex_ids {
-            if let Some(set) = self.vertex_membership.get_mut(vertex_id) {
-                if set.remove(from) {
-                    set.insert(to.to_string());
-                }
+        let partition = self.partition_candidate(from)?;
+        self.publish(|state| {
+            for id in &partition.vertex_ids {
+                super::publication::membership(&mut state.vertex_membership, *id, from, false)?;
+                super::publication::membership(&mut state.vertex_membership, *id, to, true)?;
             }
-        }
-        for edge_id in &partition.edge_ids {
-            if let Some(set) = self.edge_membership.get_mut(edge_id) {
-                if set.remove(from) {
-                    set.insert(to.to_string());
-                }
+            for id in &partition.edge_ids {
+                super::publication::membership(&mut state.edge_membership, *id, from, false)?;
+                super::publication::membership(&mut state.edge_membership, *id, to, true)?;
             }
-        }
-        self.graphs.insert(to.to_string(), partition);
-        if let Some(registry) = self.label_registries.remove(from) {
-            self.label_registries.insert(to.to_string(), registry);
-        }
-        Ok(())
+            state.graphs.remove(from)?;
+            state.put_partition(to, partition)?;
+            if let Some(registry) = state.label_registries.get(from).cloned() {
+                state.put_registry(to, registry)?;
+                state.label_registries.remove(from)?;
+            }
+            Ok(())
+        })
     }
 }
