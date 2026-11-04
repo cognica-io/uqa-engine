@@ -215,7 +215,8 @@ fn temporary_constraint_requests_skip_unselected_expression_nodes() {
             )
             .unwrap();
             table.persistence = uqa_sql::ast::RelationPersistence::Temporary;
-            snapshot.definitions.foreign_tables = Arc::new(BTreeMap::from([(relation, table)]));
+            snapshot.definitions.foreign_tables =
+                crate::catalog::test_support::foreign_tables([(relation, table)]);
         } else {
             let constraints = TableConstraintSet {
                 persistence: uqa_sql::ast::RelationPersistence::Temporary,

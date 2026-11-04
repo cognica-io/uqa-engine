@@ -45,12 +45,14 @@ fn relation_descriptors_preserve_selected_collations_and_attribute_numbers() {
         columns: table.columns.to_vec(),
         dropped_attributes: table.dropped_attributes.to_vec(),
         checks: Vec::new(),
-        options: BTreeMap::new(),
+        options: uqa_core::memory::OwnedMap::new(),
         option_order: Vec::new(),
     };
     let foreign_oid = foreign.relation_oids().row_type.unwrap();
-    Arc::make_mut(&mut snapshot.definitions.foreign_tables)
-        .insert(RelationIdentity::new("public", "f"), foreign);
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
+        RelationIdentity::new("public", "f"),
+        foreign,
+    )]);
     snapshot
         .tables
         .insert(RelationIdentity::new("public", "t"), table);

@@ -101,21 +101,26 @@ fn foreign(
     context: &SchemaDependencyPublicationContext<'_>,
     change: &CompositeConstantChange<'_>,
 ) -> Result<(), SQLError> {
+    let original = context.foreign.foreign_catalog();
     let mut updates = Vec::new();
-    for (name, mut table) in context.foreign.foreign_tables() {
+    for (name, table) in original.tables() {
+        let mut table = table.clone();
         let mut changed = change.columns(&mut table.columns)?;
         changed |= change.checks(&mut table.checks, &table.columns)?;
         if changed {
-            context
-                .foreign
-                .persist_foreign_table(&name, &table)
-                .map_err(storage)?;
-            context.changes.prepared_relation_changed(&name);
-            updates.push((name, table));
+            updates.push((name.clone(), table));
         }
     }
+    let next = original.with_table_updates(&updates)?;
+    for (name, table) in &updates {
+        context
+            .foreign
+            .persist_foreign_table(name, table)
+            .map_err(storage)?;
+        context.changes.prepared_relation_changed(name);
+    }
     if !updates.is_empty() {
-        context.foreign.publish_foreign_tables(updates);
+        context.foreign.publish_foreign_tables(next, updates);
         context.changes.catalog_registry_changed();
     }
     Ok(())

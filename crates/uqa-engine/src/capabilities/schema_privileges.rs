@@ -126,6 +126,14 @@ impl<G: std::ops::Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions>
         self.0.contains_key(relation)
     }
 }
+struct ForeignCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::foreign::ForeignTables>>
+    CreationRelationNames for ForeignCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
 impl CreationRelationGuards for Engine {
     fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
         let user_type = uqa_execution::catalog::projection::named_type_exists(
@@ -140,7 +148,7 @@ impl CreationRelationGuards for Engine {
             return true;
         }
         let views = self.durable.views.snapshot();
-        let foreign = self.durable.foreign_tables.snapshot();
+        let foreign = self.durable.foreign_catalog.snapshot().tables_snapshot();
         // Release the registry lock before reading individual table metadata.
         let tables = self.storage.tables.read().clone();
         let tables = tables
@@ -179,7 +187,9 @@ impl CreationRelationGuards for Engine {
         Box::new(CreationNamesGuard(self.durable.sequences.read()))
     }
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.foreign_tables.read()))
+        Box::new(ForeignCreationNamesGuard(
+            self.durable.foreign_catalog.tables(),
+        ))
     }
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
@@ -201,7 +211,7 @@ impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::Composi
 impl RelationCreationRuntime for Engine {
     fn relation_array_name(&self, relation: &RelationIdentity, array_oid: u32) -> Option<String> {
         let views = self.durable.views.snapshot();
-        let foreign = self.durable.foreign_tables.snapshot();
+        let foreign = self.durable.foreign_catalog.snapshot().tables_snapshot();
         let table = self.storage.tables.read().get(relation).cloned();
         uqa_execution::schema::types::relation_arrays::current_array_name(
             [

@@ -201,16 +201,16 @@ impl RelationLockCatalog for Engine {
         {
             return Ok(Some(system.object_id()));
         }
-        if let Some(table) = self.storage.tables.read().get(&*relation) {
+        if let Some(table) = self.storage.tables.read().get(&relation) {
             return Ok(Some(table.object_id()));
         }
-        if let Some(view) = self.durable.views.read().get(&*relation) {
+        if let Some(view) = self.durable.views.read().get(&relation) {
             return Ok(Some(view.object_id));
         }
-        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&*relation) {
+        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&relation) {
             return Ok(Some(*object_id));
         }
-        if let Some(index) = self.durable.catalog_indexes.read().get(&*relation) {
+        if let Some(index) = self.durable.catalog_indexes.read().get(&relation) {
             return crate::catalog_indexes::index_definition(index)
                 .map(|definition| definition.catalog.map(|catalog| catalog.identity.object_id))
                 .map_err(|error| {
@@ -219,9 +219,9 @@ impl RelationLockCatalog for Engine {
         }
         Ok(self
             .durable
-            .foreign_tables
-            .read()
-            .get(&*relation)
+            .foreign_catalog
+            .tables()
+            .get(&relation)
             .map(|table| table.object_id))
     }
     fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
@@ -235,8 +235,8 @@ impl RelationLockCatalog for Engine {
         }
         Ok(self
             .durable
-            .foreign_tables
-            .read()
+            .foreign_catalog
+            .tables()
             .get(&relation)
             .map(|table| table.relation_oids().relation))
     }
@@ -278,8 +278,8 @@ impl RelationLockCatalog for Engine {
             })
             .or_else(|| {
                 self.durable
-                    .foreign_tables
-                    .read()
+                    .foreign_catalog
+                    .tables()
                     .iter()
                     .find_map(|(name, table)| {
                         (table.object_id == object_id).then(|| name.qualified_name())

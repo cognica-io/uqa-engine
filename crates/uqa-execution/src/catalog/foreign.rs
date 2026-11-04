@@ -15,8 +15,10 @@ const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 3;
 
 pub mod capture;
 pub mod reference;
+pub mod registry;
 pub mod wrappers;
 pub use reference::ForeignServerReference;
+pub use registry::{ForeignCatalog, ForeignTables};
 
 #[derive(Debug, Clone)]
 pub struct StoredForeignTable {
@@ -33,7 +35,7 @@ pub struct StoredForeignTable {
     pub columns: Vec<ColumnDef>,
     pub dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
     pub checks: Vec<TableCheck>,
-    pub options: BTreeMap<String, String>,
+    pub options: uqa_core::memory::OwnedMap<String, String>,
     pub option_order: Vec<String>,
 }
 
@@ -158,7 +160,7 @@ impl StoredForeignTable {
                 columns: schema.columns,
                 dropped_attributes: schema.dropped_attributes,
                 checks: schema.checks,
-                options,
+                options: options.into_iter().collect(),
                 option_order,
             },
             legacy,
@@ -206,7 +208,11 @@ impl StoredForeignTable {
                     ty: sql_column_type_to_fdw(&column.ty),
                 })
                 .collect(),
-            options: self.options.clone(),
+            options: self
+                .options
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
         }
     }
 

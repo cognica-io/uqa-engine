@@ -244,18 +244,18 @@ fn publish(
                 .foreign
                 .security(&holder.relation)
                 .ok_or_else(changed)?;
-            let mut tables = context.foreign_publication.tables_write();
-            let current = tables.get(&holder.relation).ok_or_else(changed)?;
+            let mut next = context.foreign_publication.foreign_catalog();
+            let current = next.tables().get(&holder.relation).ok_or_else(changed)?;
             if current.object_id != holder.object_id {
                 return Err(changed());
             }
             let mut table = current.clone();
             table.row_type_array_name = Some(name);
+            next.insert(holder.relation.clone(), table.clone(), security.clone())?;
             table
                 .persist(context.storage, &holder.relation, &security)
                 .map_err(storage)?;
-            tables.insert(holder.relation.clone(), table);
-            drop(tables);
+            context.foreign_publication.publish_foreign_catalog(next);
             context.changes.catalog_registry_changed();
         }
     }

@@ -6,13 +6,12 @@
 
 //! Foreign catalog lookup through pinned snapshots or refreshed live registries.
 use super::{reads::ForeignRegistryReads, StoredForeignTable};
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_storage::StorageBackendResult;
 pub trait ForeignLookupState {
     fn query_wrappers(&self) -> Option<&uqa_sql::catalog::foreign_wrapper::ForeignWrappers>;
     fn query_servers(&self) -> Option<&uqa_sql::catalog::foreign_server::ForeignServers>;
-    fn query_tables(&self) -> Option<&BTreeMap<RelationIdentity, StoredForeignTable>>;
+    fn query_tables(&self) -> Option<&crate::catalog::foreign::ForeignTables>;
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
     fn relation_lookup_candidates(&self, name: &str)
         -> StorageBackendResult<Vec<RelationIdentity>>;
@@ -106,7 +105,7 @@ impl ForeignLookupContext<'_> {
     fn table_source(
         &self,
         name: &str,
-        tables: &BTreeMap<RelationIdentity, StoredForeignTable>,
+        tables: &crate::catalog::foreign::ForeignTables,
         servers: &uqa_sql::catalog::foreign_server::ForeignServers,
         wrappers: &uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
     ) -> Result<(uqa_fdw::ForeignTable, uqa_fdw::ForeignServer), String> {

@@ -5,9 +5,7 @@
 //
 
 use super::{sql, Engine, StorageReadControl};
-use std::collections::BTreeMap;
-use uqa_core::RelationIdentity;
-use uqa_execution::catalog::foreign::{capture::CapturedForeignTable, StoredForeignTable};
+use uqa_execution::catalog::foreign::{registry::CapturedForeignTables, ForeignTables};
 use uqa_sql::catalog::foreign_server::{CapturedForeignServers, ForeignServers};
 
 fn same_servers(saved: &CapturedForeignServers, source: &ForeignServers) {
@@ -21,10 +19,7 @@ fn same_servers(saved: &CapturedForeignServers, source: &ForeignServers) {
     }
 }
 
-fn same_tables(
-    saved: &[(RelationIdentity, CapturedForeignTable)],
-    source: &BTreeMap<RelationIdentity, StoredForeignTable>,
-) {
+fn same_tables(saved: &CapturedForeignTables, source: &ForeignTables) {
     assert_eq!(saved.len(), source.len());
     for ((name, value), (original_name, original)) in saved.iter().zip(source) {
         assert_eq!(name, original_name);
@@ -37,11 +32,7 @@ fn same_tables(
         assert_eq!(value.server_reference, original.server_reference);
         assert_eq!(value.dropped_attributes, original.dropped_attributes);
         assert_eq!(value.option_order, original.option_order);
-        assert!(value
-            .options
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(original.options.iter()));
+        assert!(value.options.iter().eq(original.options.iter()));
         assert_eq!(
             serde_json::to_value(&value.columns).unwrap(),
             serde_json::to_value(&original.columns).unwrap()
@@ -60,15 +51,12 @@ fn memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unr
         sql(&engine, "CREATE FOREIGN DATA WRAPPER custom HANDLER memory_fdw_handler OPTIONS (z 'first',a 'second'); CREATE SERVER remote TYPE 'kind' VERSION 'v1' FOREIGN DATA WRAPPER custom OPTIONS (z 'first',a 'second'); CREATE FOREIGN TABLE remote_rows(gone integer, payload text DEFAULT 'original', CONSTRAINT valid CHECK(length(payload)>0)) SERVER remote OPTIONS(z 'first',a 'second'); ALTER FOREIGN TABLE remote_rows DROP gone");
         let wrappers = engine.durable.foreign_wrappers.snapshot();
         let servers = engine.durable.foreign_servers.snapshot();
-        let tables = engine.durable.foreign_tables.snapshot();
+        let tables = engine.durable.foreign_catalog.snapshot().tables_snapshot();
         assert_eq!(tables.len(), 1);
-        assert_eq!(
-            tables.first_key_value().unwrap().1.dropped_attributes.len(),
-            1
-        );
+        assert_eq!(tables.iter().next().unwrap().1.dropped_attributes.len(), 1);
         let wrapper_key = engine.durable.foreign_wrappers.key().unwrap();
         let server_key = engine.durable.foreign_servers.key().unwrap();
-        let table_key = engine.durable.foreign_tables.key().unwrap();
+        let table_key = engine.durable.foreign_catalog.key().unwrap();
         let control = StorageReadControl::with_limit(1 << 20);
         let cut = engine
             .storage
@@ -92,7 +80,7 @@ fn memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unr
         let saved_tables = table_key.retained(&cut).unwrap().unwrap();
         assert!(saved_wrappers.get().unwrap().iter().eq(wrappers.iter()));
         same_servers(saved_servers.get().unwrap(), &servers);
-        same_tables(saved_tables.get().unwrap(), &tables);
+        same_tables(&saved_tables.get().unwrap().tables, &tables);
         drop(cut);
         control.cancellation().cancel();
         assert!(saved_wrappers.get().is_err());

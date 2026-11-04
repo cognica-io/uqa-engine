@@ -106,8 +106,8 @@ impl Engine {
                 .any(|relation| relation.schema == schema)
             && !self
                 .durable
-                .foreign_tables
-                .read()
+                .foreign_catalog
+                .tables()
                 .keys()
                 .any(|relation| relation.schema == schema)
             && !self

@@ -50,7 +50,7 @@ impl Engine {
         );
         session.durable.restore(&self.durable.snapshot());
         session.runtime.physical_index_cache = self.runtime.physical_index_cache.clone();
-        uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session);
+        uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session)?;
         session.rebind_graph_stores()?;
         for (relation, source) in self.storage.tables.read().iter() {
             if source.persistence == uqa_sql::ast::RelationPersistence::Temporary {

@@ -43,13 +43,18 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
             Ok(Some(entry))
         })
         .unwrap();
-    for definition in engine.durable.foreign_tables.write().values_mut() {
+    let mut foreign = engine.durable.foreign_catalog.read().clone();
+    let original = foreign.clone();
+    for (relation, definition) in original.tables() {
         if definition.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            let mut definition = definition.clone();
             definition
                 .options
                 .insert("large".into(), "t".repeat(1 << 20));
+            foreign.replace_table(relation.clone(), definition).unwrap();
         }
     }
+    *engine.durable.foreign_catalog.write() = foreign;
     sql(&engine, "BEGIN; UPDATE docs SET id=2; ALTER TABLE docs DISABLE TRIGGER saved; CREATE OR REPLACE RULE changed AS ON UPDATE TO docs DO INSTEAD NOTHING; SAVEPOINT nested; DROP TRIGGER saved ON docs; ROLLBACK TO nested");
     let control = StorageReadControl::with_limit(64 << 10);
     let selected = capture(&engine, &control);
@@ -88,9 +93,17 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
         serde_json::to_value(&rule.definition).unwrap()
     );
     let foreign = selected.foreign.captured(&selected.cut).unwrap();
-    assert_eq!(foreign.get().unwrap().len(), 1);
+    assert_eq!(foreign.get().unwrap().tables.len(), 1);
     assert_eq!(
-        foreign.get().unwrap()[0].relation,
+        foreign
+            .get()
+            .unwrap()
+            .tables
+            .iter()
+            .next()
+            .unwrap()
+            .0
+            .clone(),
         RelationIdentity::new("public", "remote_rows")
     );
     drop((triggers, rules, foreign, selected));

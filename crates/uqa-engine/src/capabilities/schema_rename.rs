@@ -126,7 +126,7 @@ impl SchemaMembers for Engine {
                 });
             }
         }
-        for relation in self.durable.foreign_tables.read().keys() {
+        for relation in self.durable.foreign_catalog.tables().keys() {
             if relation.schema == schema {
                 relations.push(SchemaRelation {
                     identity: relation.clone(),

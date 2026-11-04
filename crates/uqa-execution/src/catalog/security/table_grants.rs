@@ -62,6 +62,10 @@ impl TableGrantContext<'_> {
             || self.writer.prepare_writer(),
             || prepared::prepare(self, statement, &targets, &mut command_roles),
         )?;
+        let mut foreign = self.foreign.foreign_catalog();
+        for (relation, security) in &foreign_updates {
+            foreign.replace_security(relation, security.clone())?;
+        }
         for update in &acl_updates {
             update.persist(self.acls).map_err(|error| {
                 SQLError::Internal(format!("persist relation ACL tuple: {error}"))
@@ -94,10 +98,9 @@ impl TableGrantContext<'_> {
         }
         let foreign_changed = !foreign_updates.is_empty();
         if foreign_changed {
-            let mut securities = self.foreign.security_write();
-            for (relation, security) in foreign_updates {
+            self.foreign.publish_foreign_catalog(foreign);
+            for (relation, _) in foreign_updates {
                 self.changes.prepared_relation_changed(&relation);
-                securities.insert(relation, security);
             }
         }
         let system_changed = system.is_some();

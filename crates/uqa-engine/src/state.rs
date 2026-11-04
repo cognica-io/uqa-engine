@@ -246,19 +246,9 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::foreign_server::ForeignServers,
         uqa_sql::catalog::foreign_server::CapturedForeignServers,
     >,
-    pub(super) foreign_tables: CatalogCell<
-        BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>,
-        Vec<(
-            RelationIdentity,
-            uqa_execution::catalog::foreign::capture::CapturedForeignTable,
-        )>,
-    >,
-    pub(super) foreign_table_security: CatalogCell<
-        BTreeMap<RelationIdentity, BoundTableSecurity>,
-        Vec<(
-            RelationIdentity,
-            uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
-        )>,
+    pub(super) foreign_catalog: CatalogCell<
+        uqa_execution::catalog::foreign::ForeignCatalog,
+        uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
     >,
     pub(super) builtin_routine_security: CatalogCell<
         uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
@@ -311,8 +301,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    pub(super) foreign_catalog: Arc<uqa_execution::catalog::foreign::ForeignCatalog>,
     pub(super) builtin_routine_security:
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
@@ -357,8 +346,9 @@ impl DurableCatalogState {
             foreign_servers: CatalogCell::new(
                 uqa_sql::catalog::foreign_server::ForeignServers::new(),
             ),
-            foreign_tables: CatalogCell::new(BTreeMap::new()),
-            foreign_table_security: CatalogCell::new(BTreeMap::new()),
+            foreign_catalog: CatalogCell::new(
+                uqa_execution::catalog::foreign::ForeignCatalog::default(),
+            ),
             builtin_routine_security: CatalogCell::new(
                 uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
             ),
@@ -402,8 +392,7 @@ impl DurableCatalogState {
             table_field_analyzers: self.table_field_analyzers.snapshot(),
             foreign_wrappers: self.foreign_wrappers.snapshot(),
             foreign_servers: self.foreign_servers.snapshot(),
-            foreign_tables: self.foreign_tables.snapshot(),
-            foreign_table_security: self.foreign_table_security.snapshot(),
+            foreign_catalog: self.foreign_catalog.snapshot(),
             builtin_routine_security: self.builtin_routine_security.snapshot(),
             system_relation_security: self.system_relation_security.snapshot(),
             sql_user_functions: self.sql_user_functions.snapshot(),
@@ -439,9 +428,7 @@ impl DurableCatalogState {
             .restore(&snapshot.table_field_analyzers);
         self.foreign_wrappers.restore(&snapshot.foreign_wrappers);
         self.foreign_servers.restore(&snapshot.foreign_servers);
-        self.foreign_tables.restore(&snapshot.foreign_tables);
-        self.foreign_table_security
-            .restore(&snapshot.foreign_table_security);
+        self.foreign_catalog.restore(&snapshot.foreign_catalog);
         self.builtin_routine_security
             .restore(&snapshot.builtin_routine_security);
         self.system_relation_security

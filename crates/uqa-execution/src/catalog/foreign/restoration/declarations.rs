@@ -16,8 +16,7 @@ use uqa_storage::StorageBackendResult;
 /// The previous registry returns on both success and error; the caller publishes the complete, validated catalog afterward.
 pub(super) struct ForeignDeclarations<'a> {
     publication: &'a dyn ForeignTableAlterPublication,
-    previous: BTreeMap<RelationIdentity, StoredForeignTable>,
-    security: BTreeMap<RelationIdentity, BoundTableSecurity>,
+    previous: Option<super::super::ForeignCatalog>,
 }
 
 impl<'a> ForeignDeclarations<'a> {
@@ -26,27 +25,23 @@ impl<'a> ForeignDeclarations<'a> {
         tables: &BTreeMap<RelationIdentity, StoredForeignTable>,
         security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
     ) -> StorageBackendResult<Self> {
-        let mut tables = tables.clone();
-        let mut security = security.clone();
-        super::merge_session_relations(
-            &context.registry.tables(),
-            &context.registry.security(),
-            &mut tables,
-            &mut security,
-        )?;
-        let previous = std::mem::replace(&mut **context.publication.tables_write(), tables);
-        let security = std::mem::replace(&mut **context.publication.security_write(), security);
+        let previous = context.publication.foreign_catalog();
+        let mut next = super::admit_restored(tables, security, previous.budget())?;
+        super::merge_session_relations(&previous, &mut next)?;
+        context.publication.publish_foreign_catalog(next);
         Ok(Self {
             publication: context.publication,
-            previous,
-            security,
+            previous: Some(previous),
         })
     }
 }
 
 impl Drop for ForeignDeclarations<'_> {
     fn drop(&mut self) {
-        **self.publication.tables_write() = std::mem::take(&mut self.previous);
-        **self.publication.security_write() = std::mem::take(&mut self.security);
+        self.publication.publish_foreign_catalog(
+            self.previous
+                .take()
+                .expect("declarations own their prior generation"),
+        );
     }
 }

@@ -69,8 +69,8 @@ impl SequenceOwnerCatalog for Engine {
     }
     fn owner_foreign_columns(&self, relation: &RelationIdentity) -> Option<SequenceOwnerColumns> {
         self.durable
-            .foreign_tables
-            .read()
+            .foreign_catalog
+            .tables()
             .get(relation)
             .map(|table| (table.object_id, table.columns.clone()))
     }

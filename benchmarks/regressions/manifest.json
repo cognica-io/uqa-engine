@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -24404,12 +24404,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "unchanged_foreign_maps_share_storage_and_invalid_private_security_is_rejected",
+      "test": "unchanged_foreign_generations_share_storage_and_failed_provenance_keeps_both_roots",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/security/relation_authority/tests.rs",
       "capability": "Private foreign catalog publication",
-      "workload": "Unchanged shared maps, absent private security and provenance errors.",
-      "invariant": "Unchanged inputs retain shared map identity; incomplete security or failed provenance never publishes a replacement.",
+      "workload": "Unchanged paired native roots and a failed provenance read.",
+      "invariant": "Unchanged inputs retain both native root identities; failed provenance publishes neither replacement.",
       "case_names": [
         ""
       ]
@@ -39070,12 +39070,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "durable_foreign_capture_joins_original_authority_before_admitting_selected_payloads",
+      "test": "durable_foreign_capture_retains_paired_roots_without_visiting_temporary_payloads",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/foreign/capture/durable/tests.rs",
-      "capability": "Original foreign membership and authority",
-      "workload": "Join permanent/unlogged definitions and ACL revisions beside a huge temporary definition with no authority row.",
-      "invariant": "Original identities and absent/empty ACLs survive; exclusion precedes joining and retained allocation.",
+      "capability": "Paired foreign capture",
+      "workload": "Capture permanent/unlogged definitions and complete authority beside a one-MiB temporary definition.",
+      "invariant": "Capture allocates no heap object and retains original definition/authority identities and complete ACL revisions; temporary membership is excluded from both roots.",
       "case_names": [
         ""
       ]
@@ -39083,12 +39083,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "durable_foreign_capture_rejects_missing_selected_authority_and_releases_partial_output",
+      "test": "durable_foreign_capture_rejects_failed_pair_admission_without_changing_membership",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/foreign/capture/durable/tests.rs",
-      "capability": "Foreign capture join completeness",
-      "workload": "Remove authority for a selected relation after an earlier complete row.",
-      "invariant": "Capture rejects incomplete metadata and releases every partial-output lease.",
+      "capability": "Foreign publication completeness",
+      "workload": "Deny native pair replacement after retaining the existing catalog.",
+      "invariant": "53200 leaves both definition and authority root identities and the original native footprint unchanged.",
       "case_names": [
         ""
       ]
@@ -40808,6 +40808,73 @@
       "capability": "Native comment restoration",
       "workload": "Deny original native admission during full registry restoration in native SQLite, SQLite KV and redb, then restore with funding.",
       "invariant": "53200 leaves the original comment root identity and stored metadata unchanged; subsequent comment publication remains usable and retirement releases all native bytes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_capture_is_constant_allocation_and_retains_complete_old_pairs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/tests.rs",
+      "capability": "Native foreign generation capture",
+      "workload": "Capture 1, 64 and 4096 relations beside a one-MiB temporary definition; use exact and insufficient allowances, replace a pair and retire the source.",
+      "invariant": "Capture allocates no heap object, shares exact native definitions and authority, preserves stored bytes and scalar representations and releases every original and independent lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_changes_share_unrelated_payloads_and_publish_both_roots_on_success",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/tests.rs",
+      "capability": "Paired foreign publication",
+      "workload": "Update selected definitions beside an unrelated four-MiB option, change persistence and deny replacement and deletion.",
+      "invariant": "Selected updates stay below 64 KiB and 256 allocations, share unrelated payloads, exclude temporary membership from both roots and leave both original roots intact on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_foreign_admission_prevents_definition_and_authority_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/foreign_tables/definitions.rs",
+      "capability": "Foreign definition admission",
+      "workload": "Deny native admission while removing a stored default.",
+      "invariant": "53200 preserves the original native definitions, authority membership and stored schema bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_foreign_removal_admission_preserves_rows_and_persisted_definition",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/foreign_tables/runtime.rs",
+      "capability": "Foreign removal admission",
+      "workload": "Deny removal from a populated immutable catalog with loaded foreign rows.",
+      "invariant": "Failed admission changes neither the paired native generation, loaded rows nor the persistent definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_foreign_restore_preserves_the_paired_root_and_stored_rows_on_admission_failure",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/registries/tests.rs",
+      "capability": "Native foreign restoration",
+      "workload": "Deny native admission during foreign catalog restoration in native SQLite, SQLite KV and redb, then restore with funding.",
+      "invariant": "53200 leaves the original paired root and stored definition/authority rows unchanged; funded restoration, rename and deletion remain usable and release all native bytes.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",

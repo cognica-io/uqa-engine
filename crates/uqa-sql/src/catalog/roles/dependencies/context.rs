@@ -32,7 +32,7 @@ pub trait RoleDependencyCatalog:
     fn views(&self) -> RoleDependencyRead<'_, crate::catalog::stored_view::ViewDefinitions>;
     fn foreign_tables(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>>;
+    ) -> RoleDependencyRead<'_, crate::catalog::security::foreign_tables::ForeignTableSecurities>;
     fn sequences(
         &self,
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>>;
@@ -45,14 +45,7 @@ pub trait RoleDependencyCatalog:
     >;
 }
 
-pub trait RoleForeignPersistenceRead {
-    fn iter(
-        &self,
-    ) -> Box<dyn Iterator<Item = (&RelationIdentity, crate::ast::RelationPersistence)> + '_>;
-}
-
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {
-    fn foreign_table_persistence(&self) -> Box<dyn RoleForeignPersistenceRead + '_>;
     fn temporary_namespace_allocated(&self) -> bool;
     fn sequence_persistence(
         &self,

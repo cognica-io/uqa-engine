@@ -161,10 +161,8 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
             "release tables",
             "read views",
             "release views",
-            "read foreign persistence",
             "read foreign",
             "release foreign",
-            "release foreign persistence",
             "read sequences",
             "read sequence persistence",
             "release sequence persistence",
@@ -240,20 +238,22 @@ fn temporary_foreign_dependencies_retain_owner_and_column_acl_roles() {
         vec![entry("column_reader", Some("grantor"))],
     );
     catalog
-        .foreign_persistence
-        .insert(temporary.clone(), RelationPersistence::Temporary);
-    catalog.foreign_tables.insert(
-        temporary.clone(),
-        BoundTableSecurity::bind(&security, &roles()).unwrap(),
-    );
+        .foreign_tables
+        .insert(
+            temporary.clone(),
+            RelationPersistence::Temporary,
+            BoundTableSecurity::bind(&security, &roles()).unwrap(),
+        )
+        .unwrap();
     let permanent = RelationIdentity::new("public", "durable");
     catalog
-        .foreign_persistence
-        .insert(permanent.clone(), RelationPersistence::Permanent);
-    catalog.foreign_tables.insert(
-        permanent,
-        BoundTableSecurity::owner(roles()["reader"].identity()),
-    );
+        .foreign_tables
+        .insert(
+            permanent,
+            RelationPersistence::Permanent,
+            BoundTableSecurity::owner(roles()["reader"].identity()),
+        )
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 3).unwrap(),
         BTreeSet::from([11, 13, 14])
@@ -264,7 +264,17 @@ fn temporary_foreign_dependencies_retain_owner_and_column_acl_roles() {
             .sqlstate(),
         Some("53200")
     );
-    catalog.foreign_tables.remove(&temporary);
+    catalog
+        .foreign_tables
+        .insert(
+            temporary,
+            RelationPersistence::Temporary,
+            BoundTableSecurity::owner(crate::catalog::roles::RoleIdentity {
+                oid: 99_999,
+                object_id: [99; 16],
+            }),
+        )
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 3)
             .unwrap_err()

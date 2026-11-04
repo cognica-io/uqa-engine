@@ -6,9 +6,8 @@
 
 use super::*;
 use crate::{
-    catalog::{
-        foreign::StoredForeignTable,
-        view::{ViewIdentityAllocation, ViewRegistryRead, ViewRegistryState, ViewRegistryWrite},
+    catalog::view::{
+        ViewIdentityAllocation, ViewRegistryRead, ViewRegistryState, ViewRegistryWrite,
     },
     schema::view_creation::context::ViewPlanBinding,
 };
@@ -76,7 +75,7 @@ struct Fixture {
     identities: Cell<u8>,
     writes: Cell<usize>,
     roles: RoleDefinitions,
-    foreign: BTreeMap<RelationIdentity, StoredForeignTable>,
+    foreign: crate::catalog::foreign::ForeignTables,
     graphs: BTreeMap<String, Arc<GraphStoreHandle>>,
 }
 fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
@@ -154,7 +153,9 @@ impl Fixture {
                 },
             )])
             .unwrap(),
-            foreign: BTreeMap::new(),
+            foreign: crate::catalog::foreign::ForeignCatalog::default()
+                .tables()
+                .clone(),
             graphs: BTreeMap::new(),
         }
     }

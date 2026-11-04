@@ -294,7 +294,7 @@ fn foreign_table_server_reference_survives_concurrent_server_deletion() {
                 }
                 let observer = reopened.new_session().unwrap();
                 assert_eq!(
-                    observer.durable.foreign_tables.read()[&relation].server_reference,
+                    observer.durable.foreign_catalog.tables()[&relation].server_reference,
                     Some((&original).into())
                 );
                 let dependency = sql(&observer, "SELECT refobjid::text AS server_oid, deptype::text AS kind FROM pg_depend WHERE classid=1259 AND objid='ds414_orphan.remote'::regclass AND refclassid=1417");
@@ -379,7 +379,7 @@ fn foreign_table_server_reference_upgrade_is_atomic_initial_only_and_durable() {
         let upgraded = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
         let relation = uqa_core::RelationIdentity::new("public", "remote");
         assert_eq!(
-            upgraded.durable.foreign_tables.read()[&relation].server_reference,
+            upgraded.durable.foreign_catalog.tables()[&relation].server_reference,
             Some((&expected).into())
         );
         assert!(raw
@@ -401,7 +401,7 @@ fn foreign_table_server_reference_upgrade_is_atomic_initial_only_and_durable() {
         drop(factory);
         let reopened = open(provider, &path);
         assert_eq!(
-            reopened.durable.foreign_tables.read()[&relation].server_reference,
+            reopened.durable.foreign_catalog.tables()[&relation].server_reference,
             Some((&expected).into())
         );
     }

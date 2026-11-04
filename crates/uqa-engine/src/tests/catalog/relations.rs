@@ -20,13 +20,13 @@ fn creation_metadata_adapters_retain_actual_registry_and_session_guards() {
     assert!(engine.storage.tables.try_write().is_none());
     assert!(engine.durable.views.is_locked());
     assert!(engine.durable.sequences.is_locked());
-    assert!(engine.durable.foreign_tables.is_locked());
+    assert!(engine.durable.foreign_catalog.is_locked());
     assert!(engine.durable.catalog_indexes.is_locked());
     drop(guards);
     assert!(engine.storage.tables.try_write().is_some());
     assert!(!engine.durable.views.is_locked());
     assert!(!engine.durable.sequences.is_locked());
-    assert!(!engine.durable.foreign_tables.is_locked());
+    assert!(!engine.durable.foreign_catalog.is_locked());
     assert!(!engine.durable.catalog_indexes.is_locked());
     let path = context.state.search_path();
     let schemas = context.schemas.schemas();

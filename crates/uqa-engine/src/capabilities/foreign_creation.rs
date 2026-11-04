@@ -43,6 +43,9 @@ impl Engine {
     }
 }
 impl ForeignRegistryReads for Engine {
+    fn relations(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        Box::new(self.durable.foreign_catalog.read())
+    }
     fn wrappers(&self) -> uqa_execution::catalog::foreign::reads::ForeignWrappersRead<'_> {
         Box::new(self.durable.foreign_wrappers.read())
     }
@@ -50,10 +53,10 @@ impl ForeignRegistryReads for Engine {
         Box::new(self.durable.foreign_servers.read())
     }
     fn tables(&self) -> ForeignTablesRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
     fn security(&self) -> ForeignSecurityRead<'_> {
-        Box::new(self.durable.foreign_table_security.read())
+        Box::new(self.durable.foreign_catalog.security())
     }
 }
 impl ForeignCreationRegistry for Engine {

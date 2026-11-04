@@ -21,8 +21,7 @@ use uqa_sql::{
         roles::{
             definition::{RoleNotices, RoleValidationContext},
             dependencies::context::{
-                RoleDependencyCatalog, RoleDependencyRead, RoleForeignPersistenceRead,
-                RoleTableSecurity, RoleTablesRead,
+                RoleDependencyCatalog, RoleDependencyRead, RoleTableSecurity, RoleTablesRead,
             },
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
@@ -198,8 +197,9 @@ impl RoleDependencyCatalog for Engine {
     }
     fn foreign_tables(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
-        Box::new(self.durable.foreign_table_security.read())
+    ) -> RoleDependencyRead<'_, uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>
+    {
+        Box::new(self.durable.foreign_catalog.security())
     }
     fn sequences(
         &self,
@@ -219,29 +219,7 @@ impl RoleDependencyCatalog for Engine {
     }
 }
 
-struct ForeignRolePersistenceRead<'a>(
-    parking_lot::MappedRwLockReadGuard<
-        'a,
-        BTreeMap<RelationIdentity, crate::fdw::StoredForeignTable>,
-    >,
-);
-impl RoleForeignPersistenceRead for ForeignRolePersistenceRead<'_> {
-    fn iter(
-        &self,
-    ) -> Box<dyn Iterator<Item = (&RelationIdentity, uqa_sql::ast::RelationPersistence)> + '_> {
-        Box::new(
-            self.0
-                .iter()
-                .map(|(relation, table)| (relation, table.persistence)),
-        )
-    }
-}
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
-    fn foreign_table_persistence(&self) -> Box<dyn RoleForeignPersistenceRead + '_> {
-        Box::new(ForeignRolePersistenceRead(
-            self.durable.foreign_tables.read(),
-        ))
-    }
     fn temporary_namespace_allocated(&self) -> bool {
         self.session.state.read().temporary_namespace.is_some()
     }

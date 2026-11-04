@@ -55,6 +55,9 @@ struct Publication<'a> {
     changes: Cell<usize>,
 }
 impl ForeignRegistryReads for Publication<'_> {
+    fn relations(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        Box::new(self.engine.durable.foreign_catalog.read())
+    }
     fn wrappers(&self) -> uqa_execution::catalog::foreign::reads::ForeignWrappersRead<'_> {
         Box::new(self.engine.durable.foreign_wrappers.read())
     }
@@ -62,10 +65,10 @@ impl ForeignRegistryReads for Publication<'_> {
         Box::new(self.engine.durable.foreign_servers.read())
     }
     fn tables(&self) -> ForeignTablesRead<'_> {
-        Box::new(self.engine.durable.foreign_tables.read())
+        Box::new(self.engine.durable.foreign_catalog.tables())
     }
     fn security(&self) -> ForeignSecurityRead<'_> {
-        Box::new(self.engine.durable.foreign_table_security.read())
+        Box::new(self.engine.durable.foreign_catalog.security())
     }
 }
 impl ForeignCreationRegistry for Publication<'_> {
@@ -162,16 +165,32 @@ fn missing_foreign_server_rolls_back_implicit_sequence_creation_before_reopen() 
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42704"));
-    assert!(engine.durable.foreign_tables.read().is_empty());
-    assert!(engine.durable.foreign_table_security.read().is_empty());
+    assert!(engine.durable.foreign_catalog.tables().is_empty());
+    assert!(engine.durable.foreign_catalog.security().is_empty());
     assert!(engine.durable.sequences.read().is_empty());
     let catalog = engine.storage.catalog.as_ref().unwrap();
     assert!(catalog.load_foreign_tables().unwrap().is_empty());
     assert_eq!(catalog.load_sequence_rows().unwrap().len(), 0);
     drop(engine);
     let reopened = Engine::open(&path).unwrap();
-    assert!(reopened.durable.foreign_tables.read().is_empty());
+    assert!(reopened.durable.foreign_catalog.tables().is_empty());
     assert!(reopened.durable.sequences.read().is_empty());
 }
 
 use uqa_execution::catalog::foreign::reads::ForeignRegistryReads;
+
+fn bounded_catalog(engine: &Engine) -> uqa_core::memory::MemoryBudget {
+    let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+    let current = engine.durable.foreign_catalog.read().clone();
+    let mut next = uqa_execution::catalog::foreign::ForeignCatalog::with_budget(&memory);
+    for (relation, table) in current.tables() {
+        next.insert(
+            relation.clone(),
+            table.clone(),
+            current.security()[relation].clone(),
+        )
+        .unwrap();
+    }
+    *engine.durable.foreign_catalog.write() = next;
+    memory
+}

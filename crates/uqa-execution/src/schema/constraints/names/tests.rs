@@ -5,13 +5,10 @@
 //
 
 use super::*;
-use crate::catalog::{
-    domain::DomainRegistry, foreign::StoredForeignTable, test_support, CatalogReadSnapshot,
-};
+use crate::catalog::{domain::DomainRegistry, test_support, CatalogReadSnapshot};
 use crate::row_locks::{RowLockManager, ScopedRelationLock};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     sync::Arc,
 };
 use uqa_sql::catalog::events::TriggerCatalog;
@@ -100,7 +97,7 @@ impl ConstraintNameCatalog for Session {
     fn constraint_schema_tables(&self, schema: &str) -> Vec<ConstraintTableMetadata> {
         self.current.borrow().constraint_schema_tables(schema)
     }
-    fn constraint_foreign_tables(&self) -> Arc<BTreeMap<RelationIdentity, StoredForeignTable>> {
+    fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables> {
         self.current.borrow().constraint_foreign_tables()
     }
     fn constraint_domains(&self) -> Arc<DomainRegistry> {

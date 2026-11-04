@@ -8,7 +8,6 @@
 
 use crate::catalog::{
     context::CatalogContext,
-    foreign::StoredForeignTable,
     projection::{
         foreign_table_relation_oid, resolve_regclass_kind_by_oid, snapshot_table_relation_oid,
         view_relation_oid,
@@ -16,7 +15,7 @@ use crate::catalog::{
     sequence::snapshot::{SequenceReadSnapshot, SequenceSnapshotSource},
     view::StoredView,
 };
-use std::{cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{cell::RefCell, ops::Deref, sync::Arc};
 use uqa_core::{RelationIdentity, Value};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
@@ -76,9 +75,10 @@ pub trait TablePrivilegeRead {
 pub type PrivilegeViewsRead<'a> =
     Box<dyn Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 pub type PrivilegeForeignTablesRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
-pub type PrivilegeForeignSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
+    Box<dyn Deref<Target = crate::catalog::foreign::ForeignTables> + 'a>;
+pub type PrivilegeForeignSecurityRead<'a> = Box<
+    dyn Deref<Target = uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities> + 'a,
+>;
 pub trait TablePrivilegeRegistry:
     uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
@@ -95,6 +95,7 @@ pub trait TablePrivilegeRegistry:
     }
     fn tables(&self) -> Box<dyn TablePrivilegeRead + '_>;
     fn views(&self) -> PrivilegeViewsRead<'_>;
+    fn foreign_catalog(&self) -> crate::catalog::foreign::reads::ForeignCatalogRead<'_>;
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_>;
     fn foreign_security(&self) -> PrivilegeForeignSecurityRead<'_>;
 }

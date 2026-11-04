@@ -40,7 +40,7 @@ impl ViewRestoreNamespace for Engine {
         Box::new(TableNamesRead(self.storage.tables.read()))
     }
     fn foreign_tables(&self) -> ViewRestoreForeignRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
     fn graphs(&self) -> ViewRestoreGraphsRead<'_> {
         Box::new(self.durable.graphs.read())

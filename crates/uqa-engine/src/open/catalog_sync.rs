@@ -292,15 +292,12 @@ impl Engine {
             &current.views,
             snapshot.views,
         )?;
-        let foreign = uqa_execution::catalog::security::relation_authority::merge_private_foreign(
-            self.storage.catalog.as_deref(),
-            &current.foreign_tables,
-            &current.foreign_table_security,
-            snapshot.foreign_tables,
-            snapshot.foreign_table_security,
-        )?;
-        snapshot.foreign_tables = foreign.definitions;
-        snapshot.foreign_table_security = foreign.security;
+        snapshot.foreign_catalog =
+            uqa_execution::catalog::security::relation_authority::merge_private_foreign(
+                self.storage.catalog.as_deref(),
+                &current.foreign_catalog,
+                snapshot.foreign_catalog,
+            )?;
         Ok(snapshot)
     }
 
@@ -786,7 +783,7 @@ impl Engine {
         self.durable.named_analyzers.write().clear();
         self.durable.foreign_wrappers.write().clear();
         self.durable.foreign_servers.write().clear();
-        uqa_execution::catalog::foreign::restoration::retain_session_registry(self);
+        uqa_execution::catalog::foreign::restoration::retain_session_registry(self)?;
         self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
         self.durable.models.write().clear();

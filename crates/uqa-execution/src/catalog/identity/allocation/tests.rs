@@ -268,7 +268,7 @@ fn occupied(oid: i64) -> CatalogReadView {
         object_id: [91; 16],
         oid,
     });
-    snapshot.definitions.foreign_tables = std::collections::BTreeMap::from([(
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
         uqa_core::RelationIdentity::new("hidden_schema", "peer"),
         crate::catalog::foreign::StoredForeignTable {
             dropped_attributes: Vec::new(),
@@ -281,11 +281,10 @@ fn occupied(oid: i64) -> CatalogReadView {
             server_reference: None,
             columns,
             checks: Vec::new(),
-            options: std::collections::BTreeMap::default(),
+            options: uqa_core::memory::OwnedMap::new(),
             option_order: Vec::new(),
         },
-    )])
-    .into();
+    )]);
     CatalogReadView::new(snapshot)
 }
 

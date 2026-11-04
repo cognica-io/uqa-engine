@@ -9,7 +9,6 @@ use crate::catalog::{
     foreign::StoredForeignTable,
     test_support::{empty_catalog, table_snapshot},
 };
-use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
@@ -92,10 +91,14 @@ fn foreign_descriptor_selection_borrows_unrelated_options_and_definitions() {
         dropped_attributes: vec![],
         checks: vec![],
         option_order: vec!["payload".into()],
-        options: [("payload".into(), "opaque".repeat(512 * 1024))].into(),
+        options: [("payload".into(), "opaque".repeat(512 * 1024))]
+            .into_iter()
+            .collect(),
     };
-    Arc::make_mut(&mut snapshot.definitions.foreign_tables)
-        .insert(RelationIdentity::new("public", "remote"), table);
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
+        RelationIdentity::new("public", "remote"),
+        table,
+    )]);
     let catalog = CatalogReadView::new(snapshot);
     let namespace = namespace();
     let old = allocation_counter::measure(|| {

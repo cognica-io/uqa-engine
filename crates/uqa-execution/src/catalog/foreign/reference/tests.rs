@@ -86,7 +86,11 @@ fn current_foreign_schema_requires_a_valid_versioned_reference() {
     let (restored, legacy) = StoredForeignTable::from_catalog(
         table.name.clone(),
         table.server_name.clone(),
-        table.options.clone(),
+        table
+            .options
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
         &encoded,
     )
     .unwrap();
@@ -142,14 +146,20 @@ fn reference_format_marker_rejects_unknown_formats() {
 fn foreign_option_order_round_trips_and_legacy_maps_convert_without_inventing_history() {
     let mut table = table();
     table.server_reference = Some(ForeignServerReference::from(&definition()));
-    table.options = BTreeMap::from([("a".into(), "first".into()), ("z".into(), "last".into())]);
+    table.options = [("a".into(), "first".into()), ("z".into(), "last".into())]
+        .into_iter()
+        .collect();
     table.option_order = vec!["z".into(), "a".into()];
     let encoded = table.schema_json().unwrap();
     let read = |encoded: &str| {
         StoredForeignTable::from_catalog(
             table.name.clone(),
             table.server_name.clone(),
-            table.options.clone(),
+            table
+                .options
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             encoded,
         )
     };

@@ -36,11 +36,18 @@ impl Engine {
             }
         }
         let mut foreign_updates = Vec::new();
-        for (relation, mut table) in self.durable.foreign_tables.read().clone() {
+        let foreign = self.durable.foreign_catalog.read().clone();
+        for (relation, table) in foreign.tables() {
+            let mut table = table.clone();
             if rename_column_types(&mut table.columns, oid, identity) {
-                foreign_updates.push((relation, table));
+                foreign_updates.push((relation.clone(), table));
             }
         }
+        let next_foreign = foreign
+            .with_table_updates(&foreign_updates)
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("admit foreign dependency changes", error)
+            })?;
         if self.is_persistent() {
             for (table_name, table, columns) in &table_updates {
                 self.persist_constraint_candidate(
@@ -63,10 +70,7 @@ impl Engine {
         }
         let foreign_tables_changed = !foreign_updates.is_empty();
         if foreign_tables_changed {
-            let mut tables = self.durable.foreign_tables.write();
-            for (relation, table) in foreign_updates {
-                tables.insert(relation, table);
-            }
+            *self.durable.foreign_catalog.write() = next_foreign;
         }
         if tables_changed {
             self.note_table_catalog_changed();
