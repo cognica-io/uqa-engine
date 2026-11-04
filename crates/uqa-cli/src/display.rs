@@ -179,9 +179,11 @@ pub(super) fn expr_display(expr: &Expr) -> String {
     format!("{expr:?}")
 }
 
-pub(super) fn options_display(options: &BTreeMap<String, String>) -> String {
+pub(super) fn options_display<'a>(
+    options: impl IntoIterator<Item = (&'a String, &'a String)>,
+) -> String {
     options
-        .iter()
+        .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(" ")
