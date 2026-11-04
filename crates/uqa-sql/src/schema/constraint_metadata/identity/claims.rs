@@ -172,7 +172,18 @@ pub fn has_constraint_oid(
     foreign_keys: &[ForeignKey],
     oid: i64,
 ) -> bool {
-    let matches = |name: Option<&str>, stored: Option<i64>, object: Option<[u8; 16]>| {
+    constraint_oids(relation, columns, checks, keys, foreign_keys).any(|value| value == oid)
+}
+
+/// Borrow the same recorded and legacy addresses used by catalog membership checks.
+pub fn constraint_oids<'a>(
+    relation: &'a RelationIdentity,
+    columns: &'a [ColumnDef],
+    checks: &'a [TableCheck],
+    keys: &'a [TableKeyConstraint],
+    foreign_keys: &'a [ForeignKey],
+) -> impl Iterator<Item = i64> + 'a {
+    let address = move |name: Option<&str>, stored: Option<i64>, object: Option<[u8; 16]>| {
         stored
             .or_else(|| {
                 object.map(|object| crate::catalog::oids::stable_object_oid("constraint", &object))
@@ -185,53 +196,66 @@ pub fn has_constraint_oid(
                     )
                 })
             })
-            == Some(oid)
     };
-    columns.iter().any(|column| {
-        (column.not_null
-            && matches(
-                column.not_null_name.as_deref(),
-                column.not_null_identity.map(|identity| identity.oid),
-                None,
-            ))
-            || (column.check.is_some()
-                && matches(
-                    column.check_name.as_deref(),
-                    column.check_catalog_oid,
-                    column.check_object_id,
-                ))
-            || column.references.as_ref().is_some_and(|reference| {
-                matches(
-                    reference.name.as_deref(),
-                    reference.catalog_identity.map(|identity| identity.oid),
-                    None,
-                )
-            })
-    }) || checks
+    columns
         .iter()
-        .any(|check| matches(check.name.as_deref(), check.catalog_oid, check.object_id))
-        || keys.iter().any(|key| {
-            matches(
+        .flat_map(move |column| {
+            [
+                column
+                    .not_null
+                    .then(|| {
+                        address(
+                            column.not_null_name.as_deref(),
+                            column.not_null_identity.map(|identity| identity.oid),
+                            None,
+                        )
+                    })
+                    .flatten(),
+                column.check.as_ref().and_then(|_| {
+                    address(
+                        column.check_name.as_deref(),
+                        column.check_catalog_oid,
+                        column.check_object_id,
+                    )
+                }),
+                column.references.as_ref().and_then(|reference| {
+                    address(
+                        reference.name.as_deref(),
+                        reference.catalog_identity.map(|identity| identity.oid),
+                        None,
+                    )
+                }),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .chain(checks.iter().filter_map(move |check| {
+            address(check.name.as_deref(), check.catalog_oid, check.object_id)
+        }))
+        .chain(keys.iter().filter_map(move |key| {
+            address(
                 key.name.as_deref(),
                 key.catalog_identity.map(|identity| identity.oid),
                 None,
             )
-        })
-        || foreign_keys.iter().any(|key| {
-            matches(
+        }))
+        .chain(foreign_keys.iter().filter_map(move |key| {
+            address(
                 key.name.as_deref(),
                 key.catalog_identity.map(|identity| identity.oid),
                 None,
             )
-        })
-        || columns
-            .iter()
-            .filter_map(|column| column.references.as_ref())
-            .flat_map(|reference| &reference.referenced_partitions)
-            .chain(
-                foreign_keys
-                    .iter()
-                    .flat_map(|key| &key.referenced_partitions),
-            )
-            .any(|derived| derived.catalog_identity.oid == oid)
+        }))
+        .chain(
+            columns
+                .iter()
+                .filter_map(|column| column.references.as_ref())
+                .flat_map(|reference| &reference.referenced_partitions)
+                .chain(
+                    foreign_keys
+                        .iter()
+                        .flat_map(|key| &key.referenced_partitions),
+                )
+                .map(|derived| derived.catalog_identity.oid),
+        )
 }

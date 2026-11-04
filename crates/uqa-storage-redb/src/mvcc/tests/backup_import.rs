@@ -32,6 +32,8 @@ use uqa_storage::{
 
 use crate::{RedbBackupImport, RedbBackupImportStep, RedbStorage};
 
+mod incremental;
+
 fn file(path: &Path) -> File {
     OpenOptions::new()
         .read(true)

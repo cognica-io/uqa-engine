@@ -33,6 +33,8 @@ use crate::{
     ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueStorage, SQLiteRecordStore,
 };
 
+mod incremental;
+
 pub(super) fn options(mode: usize) -> SQLiteBackupImportOptions {
     SQLiteBackupImportOptions {
         compression: (mode >= 2).then(SQLiteCompressionOptions::default),

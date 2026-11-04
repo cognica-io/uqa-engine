@@ -28,6 +28,7 @@ mod relation;
 pub mod relation_acl;
 mod relation_security;
 mod schema;
+pub mod scoring_params;
 mod sequence_security;
 mod sequence_values;
 

@@ -13,7 +13,9 @@ mod operation;
 mod restore;
 mod verify;
 
-pub use operation::{BackupCaptureReport, BackupOperation, BackupPack, PackObject, PackRange};
+pub use operation::{
+    BackupCaptureReport, BackupImageStatistics, BackupOperation, BackupPack, PackObject, PackRange,
+};
 pub use restore::{
     BackupRestoreImporter, BackupRestoreOperation, RestoreDirectory, RestoredDatabase,
 };

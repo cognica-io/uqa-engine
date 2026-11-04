@@ -14,9 +14,25 @@ pub fn comments(
     values: &CommentRegistry,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<(CommentAddress, String)>>, SQLError> {
+    selected_comments(values, |_| true, control)
+}
+
+pub(super) fn selected_comments(
+    values: &CommentRegistry,
+    selected: impl Fn(&CommentAddress) -> bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<(CommentAddress, String)>>, SQLError> {
+    let count = values.keys().try_fold(0, |count, address| {
+        control.check()?;
+        Ok::<_, SQLError>(count + usize::from(selected(address)))
+    })?;
     let mut entries = ProductionVec::new(*control);
-    entries.reserve(values.len())?;
+    entries.reserve(count)?;
     for (address, description) in values {
+        control.check()?;
+        if !selected(address) {
+            continue;
+        }
         let (description, memory) = control.copy_text(description)?.into_parts();
         entries.push_produced(control.finish((*address, description), memory)?)?;
     }

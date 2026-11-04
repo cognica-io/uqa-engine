@@ -72,17 +72,27 @@ pub fn trigger_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
-    if let Some(oid) = trigger.catalog_oid {
+    trigger_catalog_oid_for_relation(
+        trigger,
+        &trigger.definition.table,
+        trigger.catalog_oid,
+        || event_relation_oid_from(catalog, resolution, &trigger.definition.table),
+    )
+}
+
+pub(crate) fn trigger_catalog_oid_for_relation(
+    trigger: &StoredTrigger,
+    table: &str,
+    recorded: Option<i64>,
+    relation_oid: impl FnOnce() -> Result<i64, SQLError>,
+) -> Result<i64, SQLError> {
+    if let Some(oid) = recorded {
         return Ok(oid);
     }
     let identity = if let Some(object_id) = trigger.object_id {
-        format!(
-            "{}:{}",
-            hex_object_id(object_id),
-            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
-        )
+        format!("{}:{}", hex_object_id(object_id), relation_oid()?)
     } else {
-        format!("{}.{}", trigger.definition.table, trigger.definition.name)
+        format!("{table}.{}", trigger.definition.name)
     };
     Ok(stable_oid("trigger", &identity))
 }
@@ -92,10 +102,24 @@ pub fn trigger_constraint_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
+    trigger_constraint_catalog_oid_for_relation(
+        trigger,
+        &trigger.definition.table,
+        trigger.constraint_catalog_oid,
+        || event_relation_oid_from(catalog, resolution, &trigger.definition.table),
+    )
+}
+
+pub(crate) fn trigger_constraint_catalog_oid_for_relation(
+    trigger: &StoredTrigger,
+    table: &str,
+    recorded: Option<i64>,
+    relation_oid: impl FnOnce() -> Result<i64, SQLError>,
+) -> Result<i64, SQLError> {
     if !trigger.definition.constraint {
         return Ok(0);
     }
-    if let Some(oid) = trigger.constraint_catalog_oid {
+    if let Some(oid) = recorded {
         return Ok(oid);
     }
     let constraint_name = trigger
@@ -103,13 +127,9 @@ pub fn trigger_constraint_catalog_oid(
         .as_deref()
         .unwrap_or(&trigger.definition.name);
     let identity = if let Some(object_id) = trigger.object_id {
-        format!(
-            "{}:{}",
-            hex_object_id(object_id),
-            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
-        )
+        format!("{}:{}", hex_object_id(object_id), relation_oid()?)
     } else {
-        format!("{}.{}", trigger.definition.table, constraint_name)
+        format!("{table}.{constraint_name}")
     };
     Ok(stable_oid("constraint", &identity))
 }

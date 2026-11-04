@@ -35,3 +35,15 @@ pub struct NontransactionalSequenceValue {
     pub log_count: i64,
     pub autonomous: bool,
 }
+
+/// Value operations survive rollback only for the same object and definition generation.
+pub type NontransactionalSequenceValues =
+    std::collections::BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
+
+#[derive(Clone, Default)]
+pub struct NontransactionalSequenceHistory {
+    pub values_by_definition: std::collections::BTreeMap<[u8; 16], NontransactionalSequenceValue>,
+    pub object_id: [u8; 16],
+    pub session_currval: Option<SessionSequenceValue>,
+    pub defines_lastval: bool,
+}

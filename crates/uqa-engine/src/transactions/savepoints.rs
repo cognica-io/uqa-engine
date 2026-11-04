@@ -134,7 +134,11 @@ impl Engine {
             sqlstate: "25P01".into(),
             message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
         })?;
-        let nontransactional_sequence_values = frame.nontransactional_sequence_values.clone();
+        let nontransactional_sequence_values = frame
+            .nontransactional_sequence_values
+            .read()
+            .values()
+            .clone();
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend

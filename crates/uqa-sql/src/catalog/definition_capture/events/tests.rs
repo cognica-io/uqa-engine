@@ -29,6 +29,54 @@ fn ordinary() -> StoredTrigger {
 }
 
 #[test]
+fn durable_triggers_exclude_temporary_relations_before_admitting_names_and_bodies() {
+    let mut source = TriggerCatalog::from([
+        (
+            RelationIdentity::new("Quoted.Schema", "Table.Name"),
+            BTreeMap::from([("saved".into(), ordinary())]),
+        ),
+        (
+            RelationIdentity::new("public", "pg_temp_local"),
+            BTreeMap::new(),
+        ),
+    ]);
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let original = durable_triggers(&source, &control).unwrap();
+    let retained = memory.used();
+    let mut temporary = ordinary();
+    temporary.definition.arguments.push("x".repeat(1 << 20));
+    source.insert(
+        RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
+        BTreeMap::from([("huge".into(), temporary)]),
+    );
+    source.insert(
+        RelationIdentity::new("pg_toast_temp_1", "toast"),
+        BTreeMap::new(),
+    );
+    let saved = durable_triggers(&source, &control).unwrap();
+    assert_eq!(memory.used(), retained * 2);
+    assert_eq!(
+        serde_json::to_value(&*saved).unwrap(),
+        serde_json::to_value(&*original).unwrap()
+    );
+    assert_eq!(saved.len(), 2);
+    assert!(triggers(&source, &control).is_err());
+    drop((saved, original));
+    assert_eq!(memory.used(), 0);
+    let exact = MemoryBudget::new(retained);
+    let saved = durable_triggers(&source, &ProductionControl::new(&exact, &token, &token)).unwrap();
+    let denied = MemoryBudget::new(retained - 1);
+    assert!(durable_triggers(&source, &ProductionControl::new(&denied, &token, &token)).is_err());
+    assert_eq!(denied.used(), 0);
+    drop(saved);
+    assert_eq!(exact.used(), 0);
+    token.cancel();
+    assert!(durable_triggers(&source, &control).is_err());
+}
+
+#[test]
 fn trigger_capture_preserves_complete_declarations_bound_identities_and_enable_modes() {
     let declarations = [
         ordinary(),

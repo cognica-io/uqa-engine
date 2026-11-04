@@ -57,7 +57,7 @@ jobs:
     if: needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'
     name: FDW ${{ matrix.configuration }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.os == 'macos-15' && 120 || 60 }}
     strategy:
       fail-fast: false
       matrix:

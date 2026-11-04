@@ -8,6 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add complete incremental repository inventories that reuse unchanged immutable unit ranges, preserve changed/new/tombstone units and omit deleted units. Bounded comparison reports actual source reads and hashes separately from reused and newly stored bytes; fingerprint acceleration, retention/GC and public Engine backup jobs remain in progress.
+- Retain the absolute memory catalog OID counter position with the selected transaction data and sequence cut, including reservations consumed by rolled-back definitions. Fresh counter construction preserves uninitialized state, wrapping and exhaustion; memory document counters retain their original transactional semantics. Complete Engine backup remains under implementation.
+- Capture nontransactional memory sequence values from native rollback history, matching the original object and definition generations. Captures preserve reserved cache endpoints and exact `setval` positions through private definition changes, rollback and closure; complete Engine backup remains under implementation.
+- Register immutable transaction table, sequence, type, schema, view, routine, role, authority, foreign-table and event sources separately from private live state, together with their original graph/model/path/analyzer resources, scoring settings, index records, historical field-analyzer bindings and object-addressed comments. Selected captures exclude temporary data and definitions before output admission, retaining original identities, matching authority, syntax, table metadata and text/vector/value indexes through transaction completion and Engine closure under independent memory and cancellation controls. Complete committed Engine backup remains under implementation.
+- Select immutable memory capture source sets under independent admission. Unselected source writes and retirement consume no capture payload allowance; replacement selections preserve earlier cuts. Complete committed Engine backup remains under implementation.
 - Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
 - Exclude temporary views before allocating durable memory catalog images, preserving permanent and unlogged definitions under independent capture limits through rollback, replacement and Engine closure. Complete committed Engine backup remains under implementation.
 - Preserve admitted non-temporary memory table membership through creation, deletion, rename, rollback and Engine closure without retaining mutable table owners or copying the relation corpus at capture. Immutable map deletion preserves earlier roots with logarithmic allocation. Complete committed Engine backup remains under implementation.
@@ -73,6 +78,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share immutable stored-model catalog roots across transaction snapshots and memory captures. Captures admit cached model footprints without visiting layers or copying weights; detached image handles retain only their selected model after catalog closure, under the original memory allowance and cancellation. Complete Engine backup remains under implementation.
+- Share immutable scoring-parameter catalog roots across transaction snapshots and memory captures. Capture admits the complete retained footprint without copying the catalog; later updates preserve unrelated encoded payloads and exact rollback state. Complete Engine backup remains under implementation.
 - Qualify dependent PR stacks once after integration into a candidate targeting main. Intermediate stacked PRs no longer start duplicate platform matrices; existing validation commands and acceptance bounds remain unchanged.
 
 ### Security

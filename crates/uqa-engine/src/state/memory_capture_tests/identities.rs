@@ -86,7 +86,8 @@ fn memory_metadata_capture_preserves_identity_position_and_encoded_values_across
         let saved_oids = same!(oid_key, oids);
         let saved_persistence = same!(persistence_key, persistence);
         let saved_comments = same!(comment_key, comments);
-        let saved_params = same!(params_key, params);
+        let saved_params = params_key.retained(&cut).unwrap().unwrap();
+        assert!(saved_params.get().unwrap().iter().eq(params.iter()));
         let saved_indexes = index_key.retained(&cut).unwrap().unwrap();
         same_indexes(saved_indexes.get().unwrap(), &indexes);
         let saved_graph = graph_key.retained(&cut).unwrap().unwrap();
@@ -136,10 +137,66 @@ fn denied_metadata_capture_does_not_prevent_scoring_parameter_publication() {
     );
     assert!(denied.check().is_err());
     let saved = key.retained(&cut).unwrap().unwrap();
-    assert_eq!(saved.get().unwrap(), &[("signal".into(), original)]);
+    assert_eq!(saved.get().unwrap().len(), 1);
+    assert_eq!(saved.get().unwrap().get("signal"), Some(&original));
     drop((engine, saved, cut, denied));
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
+}
+
+#[test]
+fn committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads() {
+    let engine = Engine::new();
+    let original = format!("{{\"payload\":\"{}\"}}", "x".repeat(4 << 20));
+    engine.save_scoring_params("large", &original).unwrap();
+    engine
+        .save_scoring_params("small", "{ \"x\": 1.00 }")
+        .unwrap();
+    let pointer = engine
+        .durable
+        .scoring_params
+        .read()
+        .get("large")
+        .unwrap()
+        .as_ptr();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut cut = None;
+    let measured = allocation_counter::measure(|| {
+        cut = Some(engine.capture_committed_memory(&control).unwrap());
+    });
+    assert!(measured.bytes_total < 1 << 19, "{measured:?}");
+    let cut = cut.unwrap();
+    let saved = cut.resources.scoring_params.captured(&cut.cut).unwrap();
+    assert_eq!(saved.get().unwrap().get("large").unwrap().as_ptr(), pointer);
+    let retained = control.memory().used();
+    let measured =
+        allocation_counter::measure(|| engine.save_scoring_params("small", "{}").unwrap());
+    assert!(measured.bytes_total < 1 << 19, "{measured:?}");
+    sql(&engine, "BEGIN");
+    engine.save_scoring_params("private", "{\"x\":2}").unwrap();
+    sql(&engine, "SAVEPOINT saved_parameters");
+    assert!(engine.drop_scoring_params("large").unwrap());
+    sql(&engine, "ROLLBACK TO saved_parameters; ROLLBACK");
+    assert_eq!(
+        engine.load_scoring_params("large").unwrap().as_deref(),
+        Some(original.as_str())
+    );
+    assert!(engine.load_scoring_params("private").unwrap().is_none());
+    engine
+        .save_scoring_params("later", &"y".repeat(8 << 20))
+        .unwrap();
+    drop(engine);
+    assert_eq!(control.memory().used(), retained);
+    assert_eq!(saved.get().unwrap().len(), 2);
+    assert_eq!(saved.get().unwrap().get("large"), Some(&original));
+    assert_eq!(
+        saved.get().unwrap().get("small").map(String::as_str),
+        Some("{ \"x\": 1.00 }")
+    );
+    control.cancellation().cancel();
+    assert!(saved.get().is_err());
+    drop((saved, cut));
+    assert_eq!(control.memory().used(), 0);
 }
 
 fn same_indexes(

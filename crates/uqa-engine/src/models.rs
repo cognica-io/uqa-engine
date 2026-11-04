@@ -32,7 +32,7 @@ impl Engine {
                 .save_model(name, &json)
                 .map_err(|e| SQLError::Internal(format!("catalog save_model: {e}")))?;
         }
-        models.insert(name.to_string(), Arc::new(model.clone()));
+        models.insert(name.to_string(), Arc::new(model.clone()))?;
         drop(models);
         self.note_catalog_registry_changed();
         Ok(())
@@ -65,10 +65,10 @@ impl Engine {
         let mut cache = self.durable.models.write();
         match model.as_ref() {
             Some(model) => {
-                cache.insert(name.to_string(), Arc::new(model.clone()));
+                cache.insert(name.to_string(), Arc::new(model.clone()))?;
             }
             None => {
-                cache.remove(name);
+                cache.remove(name)?;
             }
         }
         Ok(model)
@@ -88,7 +88,7 @@ impl Engine {
                 .drop_model(name)
                 .map_err(|err| SQLError::Internal(format!("catalog drop_model: {err}")))?;
         }
-        models.remove(name);
+        models.remove(name)?;
         drop(models);
         self.note_catalog_registry_changed();
         Ok(true)
@@ -160,7 +160,7 @@ impl Engine {
                 .save_scoring_params(name, params_json)
                 .map_err(|e| SQLError::Internal(format!("catalog save_scoring_params: {e}")))?;
         }
-        scoring_params.insert(name.to_string(), params_json.to_string());
+        scoring_params.insert(name.to_string(), params_json.to_string())?;
         drop(scoring_params);
         self.note_catalog_registry_changed();
         Ok(())
@@ -178,10 +178,10 @@ impl Engine {
         let mut cache = self.durable.scoring_params.write();
         match value.as_ref() {
             Some(json) => {
-                cache.insert(name.to_string(), json.clone());
+                cache.insert(name.to_string(), json.clone())?;
             }
             None => {
-                cache.remove(name);
+                cache.remove(name)?;
             }
         }
         Ok(value)
@@ -202,8 +202,7 @@ impl Engine {
                 SQLError::Internal(format!("catalog load_all_scoring_params: {err}"))
             })?;
             let mut cache = self.durable.scoring_params.write();
-            cache.clear();
-            cache.extend(rows.iter().cloned());
+            cache.replace(rows.iter().cloned())?;
             rows
         } else {
             self.durable
@@ -269,7 +268,7 @@ impl Engine {
                 .drop_scoring_params(name)
                 .map_err(|err| SQLError::Internal(format!("catalog drop_scoring_params: {err}")))?;
         }
-        scoring_params.remove(name);
+        scoring_params.remove(name)?;
         drop(scoring_params);
         self.note_catalog_registry_changed();
         Ok(true)

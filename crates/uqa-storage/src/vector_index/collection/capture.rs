@@ -10,7 +10,7 @@ use super::{copy_field, Contents, LiveIndexes, VectorIndexes};
 use crate::{
     memory_capture::{
         MemoryCapture, MemoryCaptureIdentity, MemoryCaptureKey, MemoryCaptureRegistry,
-        MemoryCaptureSource,
+        MemoryCaptureSource, MemoryCaptureSources,
     },
     read_control::StorageReadControl,
     vector_index::{image::VectorImageSnapshot, VectorIndex},
@@ -28,6 +28,21 @@ impl VectorIndexes {
             indexes: LiveIndexes::new(),
             registry: Some(registry.clone()),
         })
+    }
+
+    /// Add the exact child identities while constructing a source generation. Later cut registration retains the completed selection without walking this collection.
+    pub fn capture_sources(
+        &self,
+        sources: &MemoryCaptureSources,
+    ) -> StorageBackendResult<MemoryCaptureSources> {
+        let mut selected = sources.clone();
+        for (_, index) in self {
+            let owner = index.memory_capture().ok_or_else(|| {
+                StorageBackendError::Other("vector owner lacks memory capture admission".into())
+            })?;
+            selected = selected.with_source(&owner.key()?)?;
+        }
+        Ok(selected)
     }
 }
 

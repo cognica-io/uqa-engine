@@ -7,7 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
-fn definition() -> StoredForeignTable {
+pub(super) fn definition() -> StoredForeignTable {
     let uqa_sql::Statement::CreateTable(mut declaration) = uqa_sql::compile(
         "CREATE TABLE fields(id integer, payload text DEFAULT 'original', CONSTRAINT valid CHECK(length(payload)>0))",
     ).unwrap().remove(0) else { panic!("table") };

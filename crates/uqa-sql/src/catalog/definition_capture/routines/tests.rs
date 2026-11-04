@@ -12,6 +12,75 @@ use crate::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+#[test]
+fn durable_routines_borrow_quoted_names_and_exclude_temporary_bodies_before_admission() {
+    let mut source = BTreeMap::from([
+        (
+            "\"public\".\"pg_temp_7.f\"".into(),
+            vec![Arc::new(routine(
+                "CREATE FUNCTION f() RETURNS integer LANGUAGE SQL RETURN 1",
+            ))],
+        ),
+        ("\"pg_temp\".\"f\"".into(), Vec::new()),
+    ]);
+    let memory = MemoryBudget::new(16384);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut saved = None;
+    let baseline =
+        allocation_counter::measure(|| saved = Some(routines(&source, &control).unwrap()));
+    let bytes = memory.used();
+    drop(saved.take());
+    for name in [
+        "pg_temp_7.f",
+        "\"pg_toast_temp_7\".\"f\"",
+        "\"pg_temp_7.dot\".\"f\"\"quote\"",
+    ] {
+        let mut temporary =
+            routine("CREATE FUNCTION f() RETURNS text LANGUAGE SQL AS 'unexamined'");
+        temporary.def.body = FunctionBody::Source("x".repeat(1 << 20));
+        source.insert(name.into(), vec![Arc::new(temporary)]);
+    }
+    let selected =
+        allocation_counter::measure(|| saved = Some(routines(&source, &control).unwrap()));
+    assert_eq!(selected.bytes_total, baseline.bytes_total);
+    assert_eq!(selected.bytes_current, baseline.bytes_current);
+    assert_eq!(memory.used(), bytes);
+    let saved = saved.unwrap();
+    assert_eq!(saved.len(), 2);
+    assert_eq!(saved[0].0, "\"pg_temp\".\"f\"");
+    assert!(saved[0].1.is_empty());
+    assert_eq!(saved[1].0, "\"public\".\"pg_temp_7.f\"");
+    assert!(saved[1].1[0].bound_body.is_some());
+    drop(saved);
+    assert_eq!(memory.used(), 0);
+    token.cancel();
+    assert!(matches!(
+        routines(&source, &control),
+        Err(SQLError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn durable_routines_reject_invalid_catalog_names_with_the_original_allowance() {
+    let source = BTreeMap::from([("\"unterminated".into(), Vec::new())]);
+    for limit in [0, 4096] {
+        let memory = MemoryBudget::new(limit);
+        let token = CancellationToken::new();
+        let error =
+            routines(&source, &ProductionControl::new(&memory, &token, &token)).unwrap_err();
+        if limit == 0 {
+            assert_eq!(error.sqlstate(), Some("53200"));
+        } else {
+            assert!(
+                matches!(error, SQLError::Internal(message) if message.contains("invalid stored routine name"))
+            );
+        }
+        assert_eq!(memory.used(), 0);
+    }
+}
+
 fn routine(sql: &str) -> SQLUserFunction {
     let Statement::CreateFunction(definition) = crate::compile(sql).unwrap().remove(0) else {
         panic!("routine")

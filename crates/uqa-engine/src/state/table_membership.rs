@@ -26,6 +26,10 @@ use crate::TableState;
 
 mod sources;
 use sources::TableSources;
+mod snapshot;
+#[cfg(test)]
+pub(crate) use snapshot::SnapshotTableCut;
+pub(crate) use snapshot::SnapshotTableSources;
 
 #[cfg(test)]
 mod tests;
@@ -55,6 +59,14 @@ impl Membership {
         }
         let relation = relation.clone();
         let source = TableSources::new(table, &relation)?;
+        self.with_source(relation, source)
+    }
+
+    fn with_source(
+        &self,
+        relation: RelationIdentity,
+        source: TableSources,
+    ) -> StorageBackendResult<Self> {
         let previous = self
             .sources
             .get(&relation)
@@ -159,7 +171,27 @@ impl MemoryCaptureSource for State {
         let membership = self.membership.as_ref().ok_or_else(|| {
             StorageBackendError::Other("persistent table membership has no memory capture".into())
         })?;
-        let snapshot = membership.snapshot();
+        membership.freeze_at(control, identity)
+    }
+}
+
+impl MemoryCaptureSource for Membership {
+    type Frozen = CapturedTableMembership;
+
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "table membership capture requires its original cut".into(),
+        ))
+    }
+
+    fn freeze_at(
+        &self,
+        control: &StorageReadControl,
+        identity: &MemoryCaptureIdentity,
+    ) -> StorageBackendResult<Self::Frozen> {
+        control.check()?;
+        let snapshot = self.snapshot();
         let bytes = snapshot
             .sources
             .structural_bytes()?

@@ -814,10 +814,10 @@ impl Engine {
             self.durable
                 .models
                 .write()
-                .insert(name, Arc::new(serde_json::from_str::<DeepModel>(&json)?));
+                .insert(name, Arc::new(serde_json::from_str::<DeepModel>(&json)?))?;
         }
         for (name, json) in catalog.load_all_scoring_params()? {
-            self.durable.scoring_params.write().insert(name, json);
+            self.durable.scoring_params.write().insert(name, json)?;
         }
         // Registry restoration can remove a table-field analyzer or replace a
         // vector/index binding. Recreate every persistent store after the

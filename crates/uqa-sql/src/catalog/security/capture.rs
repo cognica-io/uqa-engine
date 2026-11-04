@@ -110,8 +110,19 @@ pub fn schemas(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<(String, BoundSchemaSecurity)>>, SQLError> {
     let output = SyntaxProduction::new(*control);
-    let mut copied = output.vector(values.len())?;
+    let count = values.keys().try_fold(0, |count, name| {
+        output.check()?;
+        Ok::<_, SQLError>(
+            count
+                + usize::from(!crate::catalog::temporary_namespace::is_temporary_schema_name(name)),
+        )
+    })?;
+    let mut copied = output.vector(count)?;
     for (name, value) in values {
+        output.check()?;
+        if crate::catalog::temporary_namespace::is_temporary_schema_name(name) {
+            continue;
+        }
         let name = output.text(name)?;
         let value = output.take(value.capture_security(control)?);
         copied.push((name, value))?;

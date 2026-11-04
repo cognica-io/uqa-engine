@@ -20,6 +20,7 @@ mod heap;
 mod map;
 mod observation;
 mod production;
+mod retained_map;
 mod small_vec;
 mod string;
 mod vec;
@@ -38,6 +39,7 @@ pub use production::{
     OwnedProductionControl, Produced, ProductionControl, ProductionMap, ProductionSmallVec,
     ProductionString, ProductionVec,
 };
+pub use retained_map::{RetainedMap, RetainedMapSnapshot};
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

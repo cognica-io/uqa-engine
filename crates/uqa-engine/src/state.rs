@@ -16,17 +16,23 @@ use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 mod catalog_capture;
 mod catalog_cell;
+mod generation_sources;
+#[cfg(test)]
+pub(crate) use generation_sources::SnapshotCut;
+pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod table_capture;
 mod table_membership;
-pub(crate) use catalog_cell::CatalogCell;
-pub(crate) use table_membership::{MembershipSnapshot, TableRegistry};
+pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
+#[cfg(test)]
+pub(crate) use table_membership::SnapshotTableCut;
+pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
-    SequenceState, TableFieldAnalyzerRegistry, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache, SequenceState,
+    TableFieldAnalyzerRegistry, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -166,10 +172,13 @@ pub(super) struct DurableCatalogState {
         resource_capture::CapturedResources<uqa_graph::GraphImageSnapshot>,
     >,
     pub(super) models: CatalogCell<
-        BTreeMap<String, Arc<DeepModel>>,
-        resource_capture::CapturedResources<uqa_ml::model_image::ModelImageSnapshot>,
+        uqa_ml::model_catalog::ModelCatalog,
+        uqa_ml::model_catalog::CapturedModelCatalog,
     >,
-    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>, Vec<(String, String)>>,
+    pub(super) scoring_params: CatalogCell<
+        uqa_storage::catalog::scoring_params::ScoringParameters,
+        uqa_storage::catalog::scoring_params::CapturedScoringParameters,
+    >,
     pub(super) views: CatalogCell<
         BTreeMap<RelationIdentity, StoredView>,
         uqa_sql::catalog::definition_capture::views::CapturedViews,
@@ -301,8 +310,8 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
     pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: Arc<BTreeMap<String, Arc<DeepModel>>>,
-    pub(super) scoring_params: Arc<BTreeMap<String, String>>,
+    pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
+    pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: Arc<BoundDatabaseSecurity>,
@@ -347,8 +356,10 @@ impl DurableCatalogState {
             comments: CatalogCell::new(BTreeMap::new()),
             composites: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
-            models: CatalogCell::new(BTreeMap::new()),
-            scoring_params: CatalogCell::new(BTreeMap::new()),
+            models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
+            scoring_params: CatalogCell::new(
+                uqa_storage::catalog::scoring_params::ScoringParameters::default(),
+            ),
             views: CatalogCell::new(BTreeMap::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
             database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
@@ -692,6 +703,13 @@ impl StatementGate {
         } else {
             self.mutex.try_lock()
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn owns_current_operation(&self) -> bool {
+        let identity = std::ptr::from_ref(self) as usize;
+        self.mutex.is_owned_by_current_thread()
+            || DELEGATED_STATEMENT_GATES.with(|gates| gates.borrow().contains(&identity))
     }
 
     pub(super) fn lock_with_cancellation(

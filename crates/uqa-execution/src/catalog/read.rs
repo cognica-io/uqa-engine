@@ -775,43 +775,17 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Vec<uqa_core::RelationIdentity>, SQLError> {
-        let mut current = self
+        let current = self
             .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| self.snapshot.tables.contains_key(relation))
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        let mut sources = Vec::new();
-        let mut visited = BTreeSet::new();
-        loop {
-            if !visited.insert(current.clone()) {
-                return Err(SQLError::Internal(format!(
-                    "trigger partition hierarchy contains a cycle at `{}`",
-                    current.qualified_name()
-                )));
-            }
-            sources.push(current.clone());
-            let hierarchy = &self
-                .snapshot
+        super::hierarchy::partition_trigger_sources(current, |relation| {
+            self.snapshot
                 .tables
-                .get(&current)
-                .ok_or_else(|| SQLError::UnknownTable(current.qualified_name()))?
-                .hierarchy;
-            if hierarchy.partition_bound.is_none() {
-                break;
-            }
-            let Some(parent) = hierarchy.parents.first() else {
-                return Err(SQLError::Internal(format!(
-                    "partition `{}` has no parent",
-                    current.qualified_name()
-                )));
-            };
-            current = uqa_core::RelationIdentity::from_legacy_name(parent).map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode query trigger partition parent `{parent}`: {error}"
-                ))
-            })?;
-        }
-        Ok(sources)
+                .get(relation)
+                .map(|table| &*table.hierarchy)
+        })
     }
 
     pub fn view_resolved(

@@ -115,9 +115,35 @@ pub fn rules(
     values: &RuleCatalog,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CapturedRules>, SQLError> {
+    selected_rules(values, control, |_| true)
+}
+
+/// Preserve original durable relation bindings without retaining temporary rule bodies.
+pub fn durable_rules(
+    values: &RuleCatalog,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<CapturedRules>, SQLError> {
+    selected_rules(values, control, |relation| {
+        !crate::catalog::temporary_namespace::is_temporary_schema_name(&relation.schema)
+    })
+}
+
+fn selected_rules(
+    values: &RuleCatalog,
+    control: &ProductionControl<'_>,
+    include: impl Fn(&RelationIdentity) -> bool,
+) -> Result<Produced<CapturedRules>, SQLError> {
     let output = SyntaxProduction::new(*control);
-    let mut relations = output.vector(values.len())?;
+    let count = values.keys().try_fold(0, |count, relation| {
+        output.check()?;
+        Ok::<_, SQLError>(count + usize::from(include(relation)))
+    })?;
+    let mut relations = output.vector(count)?;
     for (relation, values) in values {
+        output.check()?;
+        if !include(relation) {
+            continue;
+        }
         let mut entries = output.vector(values.len())?;
         for (name, value) in values.iter() {
             entries.push((

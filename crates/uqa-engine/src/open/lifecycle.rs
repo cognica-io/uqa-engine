@@ -537,11 +537,11 @@ impl Engine {
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.
         for (name, json) in restore_catalog.load_models()? {
-            let model = serde_json::from_str::<DeepModel>(&json)?;
-            engine.durable.models.write().insert(name, Arc::new(model));
+            let model = Arc::new(serde_json::from_str::<DeepModel>(&json)?);
+            engine.durable.models.write().insert(name, model)?;
         }
         for (name, json) in restore_catalog.load_all_scoring_params()? {
-            engine.durable.scoring_params.write().insert(name, json);
+            engine.durable.scoring_params.write().insert(name, json)?;
         }
         // Initial catalog migrations and physical-index repairs above may
         // commit. Establish the backend monitor baseline only after every

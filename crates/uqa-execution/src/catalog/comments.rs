@@ -32,6 +32,7 @@ impl From<ObjectAddress> for CommentAddress {
 }
 pub type CommentRegistry = BTreeMap<CommentAddress, String>;
 pub mod capture;
+pub mod snapshot;
 pub trait CommentPublication {
     fn comments(&self) -> Box<dyn Deref<Target = CommentRegistry> + '_>;
     fn comment_catalog(&self) -> Option<&dyn CatalogFacade>;

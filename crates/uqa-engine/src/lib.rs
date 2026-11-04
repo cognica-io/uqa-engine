@@ -223,15 +223,13 @@ type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
-type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
-
-#[derive(Clone, Default)]
-struct NontransactionalSequenceHistory {
-    values_by_definition: BTreeMap<[u8; 16], NontransactionalSequenceValue>,
-    object_id: [u8; 16],
-    session_currval: Option<SessionSequenceValue>,
-    defines_lastval: bool,
-}
+type NontransactionalSequenceValues =
+    uqa_execution::catalog::sequence::session::NontransactionalSequenceValues;
+type NontransactionalSequenceSource = Arc<
+    uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::sequence::capture::SequenceCaptureSource,
+    >,
+>;
 
 /// Unified query engine composed from explicit storage, durable-catalog,
 /// session, extension, epoch, and query-runtime ownership domains.
@@ -371,7 +369,7 @@ struct TransactionFrame {
         parking_lot::Mutex<Option<Box<notifications::CrossNotificationCommit>>>,
     constraint_modes: ConstraintModeState,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
-    nontransactional_sequence_values: NontransactionalSequenceValues,
+    nontransactional_sequence_values: NontransactionalSequenceSource,
 }
 
 enum FixedTransactionSnapshot {
@@ -566,35 +564,47 @@ struct EngineDataSnapshot {
 struct EngineSnapshotData {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
     memory_membership: Option<state::MembershipSnapshot>,
+    sources: Option<state::SnapshotSources>,
     durable: DurableCatalogSnapshot,
 }
 
-#[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
-    security: Arc<state::BoundTableSecurity>,
-    storage_generation: [u8; 16],
-    document_store: Arc<dyn DocumentStore>,
-    inverted_index: Arc<dyn InvertedIndex>,
-    vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
-    value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>,
-    fts_fields: Arc<Vec<FieldName>>,
-    columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
-    columns_declared: bool,
+    object_id: [u8; 16],
+    catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    persistence: uqa_sql::ast::RelationPersistence,
+    on_commit: uqa_sql::ast::OnCommitAction,
+    security: state::CatalogSnapshot<
+        state::BoundTableSecurity,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >,
+    storage_generation: state::CatalogSnapshot<[u8; 16]>,
+    document_store: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    vector_indexes:
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
+    value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    >,
+    fts_fields: state::CatalogSnapshot<Vec<FieldName>>,
+    columns: state::CatalogSnapshot<Vec<uqa_sql::ast::ColumnDef>>,
+    columns_declared: state::CatalogSnapshot<bool>,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
-    next_id: u128,
-    analyzer: Arc<Analyzer>,
-    column_stats: Arc<uqa_planner::ColumnStatistics>,
-    column_stats_loaded: bool,
-    column_stats_dirty: bool,
-    statistics_maintenance: statistics::MaintenanceState,
-    table_checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
-    foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
-    key_constraints: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
-    hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
-    row_type_array_name: Arc<Option<String>>,
-    dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    next_id: state::CatalogSnapshot<u128>,
+    maps_integer_keys: state::CatalogSnapshot<bool>,
+    analyzer: state::CatalogSnapshot<Analyzer, Vec<u8>>,
+    column_stats: state::CatalogSnapshot<uqa_planner::ColumnStatistics>,
+    column_stats_loaded: state::CatalogSnapshot<bool>,
+    column_stats_dirty: state::CatalogSnapshot<bool>,
+    statistics_maintenance: state::CatalogSnapshot<statistics::MaintenanceState>,
+    table_checks: state::CatalogSnapshot<Vec<uqa_sql::ast::TableCheck>>,
+    foreign_keys: state::CatalogSnapshot<Vec<uqa_sql::ast::ForeignKey>>,
+    key_constraints: state::CatalogSnapshot<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    hierarchy: state::CatalogSnapshot<uqa_sql::ast::TableHierarchy>,
+    row_type_array_name: state::CatalogSnapshot<Option<String>>,
+    dropped_attributes:
+        state::CatalogSnapshot<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }

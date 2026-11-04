@@ -8,7 +8,7 @@
 
 use uqa_core::{memory::MemoryError, RelationIdentity};
 use uqa_storage::{
-    memory_capture::{CapturedMemoryValue, MemoryCaptureKey},
+    memory_capture::{CapturedMemoryValue, MemoryCaptureKey, MemoryCaptureSources},
     StorageBackendResult,
 };
 
@@ -26,7 +26,7 @@ macro_rules! table_sources {
         }
 
         #[cfg(test)]
-        pub(super) struct CapturedTable {
+        pub(crate) struct CapturedTable {
             pub(crate) object_id: [u8; 16],
             pub(crate) catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
             pub(crate) persistence: uqa_sql::ast::RelationPersistence,
@@ -36,7 +36,7 @@ macro_rules! table_sources {
 
         #[cfg(test)]
         impl CapturedTable {
-            pub(super) fn assert_original_allowance(&self, memory: &uqa_core::memory::MemoryBudget) {
+            pub(crate) fn assert_original_allowance(&self, memory: &uqa_core::memory::MemoryBudget) {
                 $(assert!(self.$field.budget().shares_allowance(memory), stringify!($field));)*
             }
         }
@@ -57,6 +57,30 @@ macro_rules! table_sources {
 
             pub(super) fn payload_bytes(&self) -> usize {
                 self.payload_bytes
+            }
+
+            pub(super) fn from_snapshot(table: &crate::TableDataSnapshot, relation: &RelationIdentity) -> StorageBackendResult<Self> {
+                let mut source = Self {
+                    object_id: table.object_id,
+                    catalog_oids: table.catalog_oids,
+                    persistence: table.persistence,
+                    on_commit: table.on_commit,
+                    payload_bytes: relation.schema.capacity().checked_add(relation.name.capacity()).ok_or(MemoryError::SizeOverflow)?,
+                    $($field: table.$field.key()?,)*
+                };
+                $(source.payload_bytes = source.payload_bytes.checked_add(source.$field.retained_source_bytes()).ok_or(MemoryError::SizeOverflow)?;)*
+                Ok(source)
+            }
+
+            pub(super) fn select(&self, selection: &MemoryCaptureSources) -> StorageBackendResult<MemoryCaptureSources> {
+                let mut selected = selection.clone();
+                $(selected = selected.with_source(&self.$field)?;)*
+                Ok(selected)
+            }
+
+            #[cfg(test)]
+            pub(super) fn assert_unread(&self, cut: &uqa_storage::memory_capture::MemoryCapture) {
+                $(assert!(self.$field.retained(cut).unwrap().is_none(), stringify!($field));)*
             }
 
             pub(super) fn with_name(&self, relation: &RelationIdentity) -> StorageBackendResult<Self> {
