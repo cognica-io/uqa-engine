@@ -102,7 +102,7 @@ fn memory_analyzer_capture_keeps_named_and_historical_field_revisions_through_ro
         assert_eq!(binding.owner, uqa_storage::AnalyzerBindingOwner::Field);
         assert_eq!(binding.last_phase, uqa_storage::AnalyzerPhase::Search);
         let children = [
-            names.get().unwrap().get("saved").unwrap().clone(),
+            names.get().unwrap().image("saved").unwrap().unwrap(),
             binding.index.image.clone(),
             binding.search.image.clone(),
         ];
@@ -148,7 +148,7 @@ fn denied_analyzer_capture_preserves_replacement_and_independently_funded_images
     drop(engine);
     let saved = key.retained(&cut).unwrap().unwrap();
     assert_eq!(
-        saved_image(saved.get().unwrap().get(&name).unwrap()),
+        saved_image(&saved.get().unwrap().image(&name).unwrap().unwrap()),
         expected
     );
     drop((saved, cut, failed));

@@ -73,6 +73,10 @@ impl Engine {
         )
         .map_err(|error| error.to_string())?;
         let mut analyzers = self.durable.named_analyzers.write();
+        let mut candidate = analyzers.clone();
+        candidate
+            .insert_with_cancellation(name, compiled.clone(), &self.runtime.cancellation)
+            .map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_analyzer_revision(
@@ -82,7 +86,7 @@ impl Engine {
                 )
                 .map_err(|err| format!("persist analyzer `{name}`: {err}"))?;
         }
-        analyzers.insert(name.to_owned(), compiled);
+        *analyzers = candidate;
         drop(analyzers);
         self.note_catalog_registry_changed();
         Ok(())
@@ -131,12 +135,14 @@ impl Engine {
         if !analyzers.contains_key(name) {
             return Ok(false);
         }
+        let mut candidate = analyzers.clone();
+        let removed = candidate.remove(name).map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_analyzer(name)
                 .map_err(|err| format!("drop analyzer `{name}`: {err}"))?;
         }
-        let removed = analyzers.remove(name).is_some();
+        *analyzers = candidate;
         drop(analyzers);
         if removed {
             self.note_catalog_registry_changed();

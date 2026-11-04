@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain named analyzer catalogs and their encoded resources as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors or dictionaries, and does not retain executable pipelines or decoded models. Failed native publication preserves the previous catalog and stored definitions; historical field-binding and complete Engine backup integration remain in progress.
+
 - Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
 
 - Retain native domain, enum, composite, range, shell, schema-authority, role, membership, graph identity, foreign-wrapper, foreign-server, paired foreign-table definition/authority, index metadata, view, user routine, trigger, rewrite-rule, database authority, built-in routine authority and system relation authority catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and preserve exact definitions, namespace and role identities, revisions and grants through native DDL, rollback and closure without copying complete catalogs. Complete Engine backup remains under implementation.

@@ -59,6 +59,7 @@ where
 
 /// An immutable validated model and the exact bytes required to resolve its artifact again.
 pub struct ResolvedDictionary {
+    image: crate::analyzer::image_source::DictionaryImageCache,
     sha256: ResourceHash,
     bytes: DictionaryBytes,
     model: Arc<NoriDictionary>,
@@ -75,6 +76,12 @@ impl std::fmt::Debug for ResolvedDictionary {
 }
 
 impl ResolvedDictionary {
+    pub(crate) fn image_source(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<crate::analyzer::image_source::DictionaryImage, uqa_core::ValueRetentionError> {
+        self.image.prepare(&self.bytes, control)
+    }
     pub fn sha256(&self) -> ResourceHash {
         self.sha256
     }
@@ -188,6 +195,7 @@ impl NoriResources {
                 let model =
                     NoriDictionary::from_bytes(artifact.bytes.as_ref(), self.limits().dictionary)?;
                 Ok(ResolvedDictionary {
+                    image: crate::analyzer::image_source::DictionaryImageCache::default(),
                     sha256: ResourceHash::from_bytes(artifact.sha256),
                     bytes: artifact.bytes,
                     model,

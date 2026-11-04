@@ -215,8 +215,8 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::graph_oids::CapturedGraphOidRegistry,
     >,
     pub(super) named_analyzers: CatalogCell<
-        BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>,
-        resource_capture::CapturedResources<uqa_storage::analyzer_image::AnalyzerImageSnapshot>,
+        uqa_storage::analyzer_catalog::AnalyzerCatalog,
+        uqa_storage::analyzer_catalog::CapturedAnalyzers,
     >,
     pub(super) table_field_analyzers: CatalogCell<
         TableFieldAnalyzerRegistry,
@@ -276,7 +276,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
     pub(super) graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
-    pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
+    pub(super) named_analyzers: Arc<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
@@ -319,7 +319,9 @@ impl DurableCatalogState {
             graph_catalog_oids: CatalogCell::new(
                 uqa_sql::catalog::graph_oids::GraphOidRegistry::new(),
             ),
-            named_analyzers: CatalogCell::new(BTreeMap::new()),
+            named_analyzers: CatalogCell::new(
+                uqa_storage::analyzer_catalog::AnalyzerCatalog::default(),
+            ),
             table_field_analyzers: CatalogCell::new(BTreeMap::new()),
             foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
             foreign_servers: CatalogCell::new(

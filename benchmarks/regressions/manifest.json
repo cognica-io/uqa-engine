@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -41134,6 +41134,126 @@
       "invariant": "SQLSTATE 53200 survives the typed effect-catalog boundary without executing a sequence value operation.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_capture_is_constant_and_retires_the_executable_owner",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer image admission",
+      "workload": "Capture revisions with 1, 64 and 4096 custom words under exact independent allowances.",
+      "invariant": "Capture allocates nothing and preserves exact descriptor bytes after pipeline retirement; every native and capture lease retires with its last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_failure_preserves_source_and_releases_admission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer image failure",
+      "workload": "Deny initial construction, deny an existing native image and cancel repeated selection.",
+      "invariant": "Failure exposes no image or retained lease and leaves ordinary analysis usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_shares_enabled_dictionary_artifacts_without_retaining_models",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer dictionary ownership",
+      "workload": "Prepare distinct revisions against the same enabled Nori and Kuromoji artifacts.",
+      "invariant": "Images share exact encoded resource pointers and hashes while executable revisions can retire independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_catalog_capture_is_constant_and_keeps_exact_revisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer catalog generations",
+      "workload": "Capture 1, 64 and 4096 names, deny insufficient admission, replace the first revision and close every source owner.",
+      "invariant": "Zero-allocation capture retains exact original images, independently admits its complete closure and releases unrelated names before the selected child.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_catalog_denied_publication_preserves_both_roots_and_footprints",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer publication admission",
+      "workload": "Exhaust native memory before replacing and extending a retained named catalog.",
+      "invariant": "Both native roots and the cached footprint remain unchanged; funded removal and final lease retirement still work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_children_share_original_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer child ownership",
+      "workload": "Deny the first image read, repeat funded reads and cancel output after closing the parent.",
+      "invariant": "Denied reads allocate nothing, repeated reads share one original payload lease and escaped children retain original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_publication_observes_cancellation_before_reusing_a_cached_image",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer publication cancellation",
+      "workload": "Cancel a publication while the requested revision already has a live encoded image.",
+      "invariant": "Cancellation precedes native publication allocation and preserves both published roots and their exact existing native reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_images_release_import_allowances_and_preserve_enabled_analysis",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Native imported analyzer resources",
+      "workload": "Import enabled Nori and Kuromoji images, prepare native owners, capture and restore complete token observations.",
+      "invariant": "Capture allocates only one fixed wrapper, source import allowances retire independently and restored image bytes and analysis remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_analyzer_admission_precedes_catalog_writes_and_preserves_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Native analyzer failure recovery",
+      "workload": "Deny named creation, replacement and removal inside active transactions on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Failed admission preserves exact runtime revisions and stored definitions; rollback releases native leases and funded changes survive persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     }
   ]

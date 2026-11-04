@@ -20,9 +20,9 @@ pub enum AnalyzerResourceKind {
 /// A borrowed immutable dictionary artifact, identified independently of names and source paths.
 #[derive(Clone, Copy)]
 pub struct AnalyzerResource<'a> {
-    kind: AnalyzerResourceKind,
-    sha256: [u8; 32],
-    bytes: &'a [u8],
+    pub(super) kind: AnalyzerResourceKind,
+    pub(super) sha256: [u8; 32],
+    pub(super) bytes: &'a [u8],
 }
 
 impl<'a> AnalyzerResource<'a> {

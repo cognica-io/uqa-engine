@@ -19,6 +19,7 @@ use crate::{
 /// A frozen pipeline with compiled expressions, fixed stop sets, and resolved synonym maps.
 #[derive(Debug)]
 pub struct CompiledAnalyzer {
+    pub(super) image_source: super::image_source::AnalyzerImageCache,
     descriptor: Arc<AnalyzerDescriptor>,
     configuration: Analyzer,
     char_filters: Vec<PreparedCharFilter<'static>>,
@@ -114,6 +115,7 @@ impl CompiledAnalyzer {
             kuromoji.normalizer,
         )?;
         Ok(Self {
+            image_source: super::image_source::AnalyzerImageCache::default(),
             descriptor,
             configuration: config,
             char_filters,

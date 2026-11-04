@@ -46,11 +46,7 @@ impl DurableCatalogState {
         state.named_analyzers = CatalogCell::capture_resource(
             state.named_analyzers.snapshot(),
             registry,
-            |values, control| {
-                resources(values, control, |source, control| {
-                    uqa_storage::analyzer_image::AnalyzerImageSnapshot::capture(source, control)
-                })
-            },
+            uqa_storage::analyzer_catalog::AnalyzerCatalog::capture,
         )?;
         state.table_field_analyzers = CatalogCell::capture_resource(
             state.table_field_analyzers.snapshot(),

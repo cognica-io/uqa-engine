@@ -88,7 +88,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let resources = AnalyzerResources::default();
         let names = load_named_revisions(catalog, &resources, mode)?;
-        self.durable.named_analyzers.write().extend(names.current);
+        self.durable.named_analyzers.write().extend(names.current)?;
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
         let mut saved = load_field_bindings(catalog, &resources, &gin_owners)?;
         let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
