@@ -7,7 +7,8 @@
 //! Register the original immutable definitions with their owning durable producers.
 
 use crate::state::{
-    BoundDatabaseSecurity, CatalogCell, DurableCatalogSnapshot, SnapshotTableSources,
+    CapturedDatabaseAuthority, CatalogCell, DatabaseAuthority, DurableCatalogSnapshot,
+    SnapshotTableSources,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
@@ -73,7 +74,7 @@ catalog_sources! {
     sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;
     roles: RoleDefinitions => uqa_sql::catalog::roles::CapturedRoleDefinitions, RoleDefinitions::capture;
     role_memberships: RoleMemberships => uqa_sql::catalog::roles::CapturedRoleMemberships, RoleMemberships::capture;
-    database_security: BoundDatabaseSecurity => BoundDatabaseSecurity, BoundDatabaseSecurity::capture_security;
+    database_security: DatabaseAuthority => CapturedDatabaseAuthority, DatabaseAuthority::capture;
     builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::capture;
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities, uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture;
     foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;

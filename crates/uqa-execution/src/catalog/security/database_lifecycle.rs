@@ -11,7 +11,10 @@ use super::roles::{
     locking::RoleLockContext,
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
-use std::{collections::BTreeSet, ops::DerefMut};
+use std::{
+    collections::BTreeSet,
+    ops::{Deref, DerefMut},
+};
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::GrantDatabaseStmt,
@@ -21,9 +24,8 @@ use uqa_sql::{
             acl_warning::acl_warning,
             database::{
                 apply_database_acl, requested_acl_privileges, resolve_database_grant_targets,
-                validate_database_acl_roles, BoundDatabaseSecurity,
+                validate_database_acl_roles, BoundDatabaseSecurity, DatabaseAuthority,
             },
-            database_inquiry::DatabaseSecurityRead,
             dependencies::added_acl_roles,
         },
         DATABASE_NAME,
@@ -34,10 +36,11 @@ use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
 mod persistence;
-pub type DatabaseSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundDatabaseSecurity> + 'a>;
+pub type DatabaseAuthorityRead<'a> = Box<dyn Deref<Target = DatabaseAuthority> + 'a>;
+pub type DatabaseSecurityWrite<'a> = Box<dyn DerefMut<Target = DatabaseAuthority> + 'a>;
 
 pub trait DatabaseSecurityRegistry {
-    fn security_read(&self) -> DatabaseSecurityRead<'_>;
+    fn security_read(&self) -> DatabaseAuthorityRead<'_>;
     fn security_write(&self) -> DatabaseSecurityWrite<'_>;
 }
 pub trait DatabasePrivilegePublication {
@@ -99,8 +102,8 @@ pub fn grant_database_privileges(
 }
 
 struct DatabasePrivilegeCandidate {
-    current: BoundDatabaseSecurity,
-    next: BoundDatabaseSecurity,
+    current: DatabaseAuthority,
+    next: DatabaseAuthority,
     notice: Option<uqa_sql::SQLNotice>,
 }
 
@@ -154,6 +157,7 @@ fn prepare_privileges<'a>(
         &mut dependencies,
     );
     let next = BoundDatabaseSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+    let next = current.successor(&next)?;
     Ok(RoleDependencyCandidate {
         value: DatabasePrivilegeCandidate {
             current,
@@ -172,7 +176,9 @@ pub fn restore_database_security_from_metadata(
     allow_migration: bool,
 ) -> StorageBackendResult<()> {
     let roles = context.roles.role_definitions();
-    let security = persistence::restore(catalog, &roles, allow_migration)?;
+    let current = context.registry.security_read();
+    let security = persistence::restore(catalog, &roles, allow_migration, &current)?;
+    drop(current);
     drop(roles);
     **context.registry.security_write() = security;
     Ok(())

@@ -17,7 +17,7 @@ use uqa_sql::{
 };
 
 struct DatabaseCatalog {
-    security: RefCell<BoundDatabaseSecurity>,
+    security: RefCell<DatabaseAuthority>,
     roles: RefCell<RoleDefinitions>,
     memberships: RefCell<RoleMemberships>,
     fail_persistence: Cell<bool>,
@@ -72,7 +72,7 @@ impl RoleCatalogGuards for DatabaseCatalog {
 }
 
 impl DatabaseSecurityRegistry for DatabaseCatalog {
-    fn security_read(&self) -> DatabaseSecurityRead<'_> {
+    fn security_read(&self) -> DatabaseAuthorityRead<'_> {
         Box::new(self.security.borrow())
     }
 
@@ -100,7 +100,7 @@ impl DatabasePrivilegePublication for DatabaseCatalog {
         assert_eq!(stored["database_security_format"], 1);
         let bound: uqa_sql::catalog::security::database::binding::BoundDatabaseSecurity =
             serde_json::from_value(stored["security"].clone()).unwrap();
-        assert_ne!(bound, *self.security.borrow());
+        assert_ne!(&bound, self.security.borrow().as_ref());
         self.publications.borrow_mut().push("persist");
         if self.fail_persistence.get() {
             return Err(SQLError::Internal("simulated persistence failure".into()));
@@ -141,7 +141,7 @@ impl SharedObjectLockSession for DatabaseCatalog {
 #[test]
 fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
     let catalog = DatabaseCatalog {
-        security: RefCell::new(BoundDatabaseSecurity::bootstrap()),
+        security: RefCell::new(DatabaseAuthority::bootstrap()),
         roles: RefCell::new(
             RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
         ),
@@ -180,4 +180,50 @@ fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
         ["persist", "publish", "epoch"]
     );
     catalog.assert_guards_are_released();
+}
+
+#[test]
+fn database_acl_admission_failure_precedes_persistence_and_preserves_native_authority() {
+    let memory = uqa_core::memory::MemoryBudget::new(size_of::<
+        uqa_core::memory::Produced<BoundDatabaseSecurity>,
+    >());
+    let security =
+        DatabaseAuthority::with_budget(&BoundDatabaseSecurity::bootstrap(), &memory).unwrap();
+    let catalog = DatabaseCatalog {
+        security: RefCell::new(security),
+        roles: RefCell::new(
+            RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+        ),
+        memberships: RefCell::new(RoleMemberships::new()),
+        fail_persistence: Cell::new(false),
+        epoch: Cell::new(0),
+        publications: RefCell::new(Vec::new()),
+    };
+    let statement = GrantDatabaseStmt {
+        is_grant: true,
+        grant_option: false,
+        grant_option_only: false,
+        privileges: vec![DatabasePrivilege::Create],
+        databases: vec!["uqa".into()],
+        grantees: vec![uqa_sql::ast::AclRoleSpecification::Public],
+        grantor: None,
+        revoke_behavior: DatabaseRevokeBehavior::Restrict,
+    };
+    let initial = catalog.security.borrow().clone();
+    let error = grant_database_privileges(&catalog.context(), &statement).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert!(std::ptr::eq(
+        catalog.security.borrow().as_ref(),
+        initial.as_ref()
+    ));
+    assert!(catalog.publications.borrow().is_empty());
+    assert_eq!(catalog.epoch.get(), 0);
+    catalog.assert_guards_are_released();
+    *catalog.security.borrow_mut() = DatabaseAuthority::bootstrap();
+    grant_database_privileges(&catalog.context(), &statement).unwrap();
+    assert_ne!(*catalog.security.borrow(), initial);
+    assert_eq!(catalog.epoch.get(), 1);
+    catalog.assert_guards_are_released();
+    drop(initial);
+    assert_eq!(memory.used(), 0);
 }

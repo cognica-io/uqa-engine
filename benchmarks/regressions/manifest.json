@@ -40208,6 +40208,85 @@
         "case_1",
         "case_2"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_capture_shares_exact_acl_generations_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Immutable database authority capture",
+      "workload": "Capture absent, empty and 1, 64 or 4096 ordered database grants under independent exact allowances.",
+      "invariant": "Capture allocates nothing, preserves full bound grants and original JSON, and retains the original generation after native replacement and closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_rejects_unfunded_successors_before_replacing_the_original",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Database authority admission",
+      "workload": "Deny one-byte-insufficient native construction and capture, then attempt replacement while the original exhausts its allowance.",
+      "invariant": "Failed construction and replacement release partial admission and preserve original grants; an unchanged successor reuses the fully admitted generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_capture_honors_both_cancellation_owners_without_changing_native_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Database authority cancellation",
+      "workload": "Cancel each capture control independently, reject an uncontrolled capture and then acquire a funded capture.",
+      "invariant": "Each cancellation rejects before database payload admission and leaves native authority usable; final retirement releases native and independent captured admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "database_acl_admission_failure_precedes_persistence_and_preserves_native_authority",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/database_lifecycle/tests.rs",
+      "capability": "Atomic database authority publication",
+      "workload": "Exhaust native authority capacity before GRANT CREATE ON DATABASE and then retry with funded native ownership.",
+      "invariant": "The 53200 error precedes persistence, publication and epoch changes; original authority survives and every retained guard is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "database_authority_admission_precedes_legacy_metadata_migration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/database_lifecycle/persistence/tests.rs",
+      "capability": "Admitted database authority restoration",
+      "workload": "Restore a valid legacy name-bound ACL under an exhausted native allowance and then with sufficient admission.",
+      "invariant": "Failed native construction leaves the original metadata unchanged; funded restoration preserves validation and publishes the existing versioned encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_database_authority_retains_original_grants_with_bounded_capture_work",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/database_authority.rs",
+      "capability": "Committed database authority",
+      "workload": "Capture 1, 32 and 128 role grants during private revocation, savepoint rollback, COMMIT or ROLLBACK, later publication and closure.",
+      "invariant": "Actual committed capture remains below 16 KiB and 64 allocations, retains original bound grants, honors cancellation and releases its complete allowance.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
     }
   ]
 }

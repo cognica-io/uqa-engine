@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::database::{CapturedDatabaseAuthority, DatabaseAuthority};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     events::{RuleCatalog, StoredTrigger},
@@ -52,7 +53,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
+    BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
 };
 
 impl StorageContext {
@@ -192,7 +193,7 @@ pub(super) struct DurableCatalogState {
         BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
         Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
     >,
-    pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
+    pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
     pub(super) schemas: CatalogCell<
         SchemaRegistry,
         uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
@@ -296,7 +297,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: Arc<BoundDatabaseSecurity>,
+    pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
@@ -341,7 +342,7 @@ impl DurableCatalogState {
             ),
             views: CatalogCell::new(BTreeMap::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
-            database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
+            database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),

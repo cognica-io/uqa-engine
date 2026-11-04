@@ -184,7 +184,10 @@ impl uqa_execution::catalog::security::role_lifecycle::context::RoleSharedDepend
 }
 impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
-        Box::new(self.durable.database_security.read())
+        Box::new(parking_lot::MappedRwLockReadGuard::map(
+            self.durable.database_security.read(),
+            AsRef::as_ref,
+        ))
     }
     fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.durable.schemas.read())

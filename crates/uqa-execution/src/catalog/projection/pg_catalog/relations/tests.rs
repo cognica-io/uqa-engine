@@ -55,8 +55,13 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
         ]),
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.database_security =
-        Arc::new(BoundDatabaseSecurity::bind(&security, &roles).unwrap());
+    snapshot.definitions.database_security = Arc::new(
+        snapshot
+            .definitions
+            .database_security
+            .successor(&BoundDatabaseSecurity::bind(&security, &roles).unwrap())
+            .unwrap(),
+    );
     snapshot.definitions.roles = Arc::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
     for name in ["uqa", "reader"] {

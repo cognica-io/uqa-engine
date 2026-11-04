@@ -36,7 +36,10 @@ fn same_authority(selected: &SnapshotCut, original: &DurableCatalogSnapshot) {
         .database_security
         .captured(&selected.cut)
         .unwrap();
-    assert_eq!(database.get().unwrap(), original.database_security.as_ref());
+    assert_eq!(
+        database.get().unwrap().as_ref(),
+        original.database_security.as_ref().as_ref()
+    );
     let system = selected
         .catalogs
         .system_relation_security

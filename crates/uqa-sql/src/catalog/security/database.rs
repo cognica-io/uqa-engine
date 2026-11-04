@@ -19,6 +19,8 @@ use crate::catalog::roles::role_inherits;
 
 pub mod binding;
 pub use binding::BoundDatabaseSecurity;
+mod authority;
+pub use authority::{CapturedDatabaseAuthority, DatabaseAuthority};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatabaseAclPrivilege {

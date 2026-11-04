@@ -26,7 +26,7 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity};
+use security::{BoundSequenceSecurity, BoundTableSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -146,7 +146,7 @@ pub struct CatalogDefinitionSnapshot {
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub database_security: Arc<BoundDatabaseSecurity>,
+    pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
     pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
