@@ -143,7 +143,8 @@ fn add_relations(snapshot: &mut CatalogReadSnapshot, tables: u32) {
             },
         };
         Arc::make_mut(&mut snapshot.definitions.views)
-            .insert(RelationIdentity::new("public", name), view);
+            .insert(RelationIdentity::new("public", name), view)
+            .unwrap();
     }
     let foreign = crate::catalog::foreign::StoredForeignTable {
         dropped_attributes: Vec::new(),
@@ -274,11 +275,22 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
         array_type: Some(relation + 2),
         rule: None,
     };
-    for (index, view) in Arc::make_mut(&mut snapshot.definitions.views)
-        .values_mut()
+    let views = Arc::make_mut(&mut snapshot.definitions.views);
+    for (index, name) in views
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
         .enumerate()
     {
-        view.definition.catalog_oids = Some(oids(80_000 + 10 * u32::try_from(index).unwrap()));
+        views
+            .edit(&name, |view| {
+                view.definition.catalog_oids =
+                    Some(oids(80_000 + 10 * u32::try_from(index).unwrap()));
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
     }
     Arc::make_mut(&mut snapshot.definitions.foreign_tables)
         .values_mut()

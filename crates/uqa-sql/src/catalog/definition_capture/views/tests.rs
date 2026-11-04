@@ -53,7 +53,7 @@ fn view_capture_preserves_relational_syntax_materialized_bits_and_full_authority
     ] {
         let mut original = view(sql);
         original.kind = StoredViewKind::Materialized;
-        original.materialized_rows = vec![BTreeMap::from([("value".into(), Value::Float(f64::from_bits(0x7ff8_0000_0000_0001)))]), BTreeMap::from([("value".into(), Value::Float(-0.0))]), BTreeMap::new()];
+        original.materialized_rows = vec![[("value".into(), Value::Float(f64::from_bits(0x7ff8_0000_0000_0001)))].into_iter().collect(), [("value".into(), Value::Float(-0.0))].into_iter().collect(), uqa_core::memory::OwnedMap::new()];
         original.materialized_column_types = vec![Some(crate::ColumnType::DoublePrecision)];
         original.materialized_column_collations = Some(vec![0]);
         original.security.acl = Some(Vec::new());
@@ -141,41 +141,51 @@ fn view_capture_detaches_constants_and_excludes_execution_only_query_owners() {
             ProductionControl::new(&memory, &token, &token)
         };
         let saved = original.capture_definition(&control).unwrap();
-        assert!(saved.query.analyzed_output.is_none());
-        assert!(saved.query.relation_privilege_subject.is_none());
-        let RelationalPlan::QueryBlock(block) = &saved.query.root else {
-            panic!("block")
-        };
-        let SourcePlan::Table {
-            executable_query, ..
-        } = block.from.as_ref().unwrap()
-        else {
-            panic!("table")
-        };
-        assert!(executable_query.is_none());
-        let ScalarExpr::RetainedLiteral(literal) = &block.projections[0].expr else {
-            panic!("literal")
-        };
-        assert_eq!(literal.collation_oid, Some(950));
+        let key = RelationIdentity::new("public", "stored");
+        let native = crate::catalog::stored_view::ViewDefinitions::try_from_iter([(
+            key.clone(),
+            original.clone(),
+        )])
+        .unwrap();
         drop(original);
         assert_eq!(source_memory.used(), 0);
-        assert!(literal
-            .value
-            .resident_value()
-            .unwrap()
-            .has_same_representation(&Value::Str("original".repeat(8192))));
+        assert_detached_query(&native[&key].query);
+        assert_detached_query(&saved.query);
         drop(saved);
         assert_eq!(memory.used(), 0);
     }
 }
 
+fn assert_detached_query(query: &crate::plan::QueryPlan) {
+    assert!(query.analyzed_output.is_none());
+    assert!(query.relation_privilege_subject.is_none());
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    assert!(matches!(
+        block.from.as_ref().unwrap(),
+        SourcePlan::Table {
+            executable_query: None,
+            ..
+        }
+    ));
+    let ScalarExpr::RetainedLiteral(literal) = &block.projections[0].expr else {
+        panic!("literal")
+    };
+    assert_eq!(literal.collation_oid, Some(950));
+    assert!(literal
+        .value
+        .resident_value()
+        .unwrap()
+        .has_same_representation(&Value::Str("original".repeat(8192))));
+}
+
 #[test]
 fn view_capture_releases_prior_rows_and_catalog_entries_on_denial_or_cancellation() {
     let mut original = view("SELECT 1");
-    original.materialized_rows = vec![BTreeMap::from([(
-        "value".into(),
-        Value::Str("x".repeat(65536)),
-    )])];
+    original.materialized_rows = vec![[("value".into(), Value::Str("x".repeat(65536)))]
+        .into_iter()
+        .collect()];
     let source = BTreeMap::from([
         (RelationIdentity::new("s", "first"), view("SELECT 1")),
         (RelationIdentity::new("s", "last"), original),

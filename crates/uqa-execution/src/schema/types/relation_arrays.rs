@@ -223,16 +223,19 @@ fn publish(
             }
             let mut view = current.clone();
             view.row_type_array_name = Some(name);
+            let mut next = (**views).clone();
+            next.insert(holder.relation.clone(), view)?;
+            let view = &next[&holder.relation];
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 context
                     .views
                     .save_view(
-                        &crate::catalog::view::catalog_view_row(&holder.relation, &view)
+                        &crate::catalog::view::catalog_view_row(&holder.relation, view)
                             .map_err(|error| SQLError::Internal(error.to_string()))?,
                     )
                     .map_err(storage)?;
             }
-            views.insert(holder.relation.clone(), view);
+            **views = next;
             drop(views);
             context.changes.catalog_registry_changed();
         }

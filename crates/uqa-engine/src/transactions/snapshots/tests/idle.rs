@@ -43,8 +43,8 @@ fn idle_memory_capture_retires_sources_without_retaining_undo_or_temporary_paylo
     let views = selected.catalogs.views.captured(&selected.cut).unwrap();
     assert_eq!(views.get().unwrap().len(), 1);
     assert_eq!(
-        views.get().unwrap()[0].0,
-        RelationIdentity::new("public", "saved_view")
+        views.get().unwrap().iter().next().unwrap().0,
+        &RelationIdentity::new("public", "saved_view")
     );
     control.cancellation().cancel();
     assert!(table.document_store.len().is_err());

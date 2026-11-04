@@ -63,7 +63,7 @@ fn restored_view_relation_namespace(
 fn validate_and_persist_restored_views(
     context: &ViewRestoreContext<'_>,
     catalog: &dyn ViewRowsStorage,
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &uqa_sql::catalog::stored_view::ViewDefinitions,
     migrated_views: &BTreeSet<RelationIdentity>,
     revised_rows: &BTreeSet<RelationIdentity>,
 ) -> StorageBackendResult<()> {
@@ -210,6 +210,7 @@ pub fn restore_views_from_catalog(
             "view catalog requires an initial-open metadata migration".into(),
         ));
     }
+    let mut views = admit_restored_views(context, views)?;
     migrate_persisted_views(
         context,
         catalog,
@@ -229,6 +230,19 @@ pub fn restore_views_from_catalog(
     validate_and_persist_restored_views(context, catalog, &views, &migrated_views, &revised_rows)?;
     **context.registry.views_write() = views;
     Ok(())
+}
+
+fn admit_restored_views(
+    context: &ViewRestoreContext<'_>,
+    values: BTreeMap<RelationIdentity, StoredView>,
+) -> StorageBackendResult<uqa_sql::catalog::stored_view::ViewDefinitions> {
+    let mut next = (**context.registry.views_read()).clone();
+    next.clear();
+    for (relation, view) in values {
+        next.insert(relation, view)
+            .map_err(|error| StorageBackendError::backend("restore view generation", error))?;
+    }
+    Ok(next)
 }
 
 #[cfg(test)]

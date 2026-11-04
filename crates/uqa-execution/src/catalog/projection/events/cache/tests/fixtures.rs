@@ -67,10 +67,12 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
                 .or_default(),
         )
         .insert(rule.definition.name.clone(), rule);
-        Arc::make_mut(&mut snapshot.definitions.views).insert(
-            RelationIdentity::new("public", format!("view_{position:03}")),
-            view(position),
-        );
+        Arc::make_mut(&mut snapshot.definitions.views)
+            .insert(
+                RelationIdentity::new("public", format!("view_{position:03}")),
+                view(position),
+            )
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }

@@ -20,3 +20,10 @@ syntax_struct!(crate::catalog::security::system_relations::SystemAcl { revision,
 syntax_struct!(
     crate::catalog::security::system_relations::SystemRelationSecurity { table, columns }
 );
+syntax_struct!(uqa_core::catalog_acl::RelationAclRevisions { relation, columns });
+syntax_struct!(crate::catalog::security::BoundTableSecurity {
+    role_owner,
+    acl,
+    column_acls,
+    acl_revisions
+});

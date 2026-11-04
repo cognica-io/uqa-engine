@@ -49,6 +49,7 @@ impl TableGrantContext<'_> {
                 prepared::PreparedTableGrant {
                     updates,
                     view_updates,
+                    views,
                     foreign_updates,
                     system_updates,
                     system,
@@ -81,15 +82,14 @@ impl TableGrantContext<'_> {
             );
         }
         let view_changed = !view_updates.is_empty();
-        if view_changed {
-            let mut views = self.views.views_write();
-            for (relation, view) in view_updates {
+        if let Some(next) = views {
+            **self.views.views_write() = next;
+            for (_, view) in view_updates {
                 self.changes.prepared_catalog_changed(
                     crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                         view.relation_oids().relation,
                     ),
                 );
-                views.insert(relation, view);
             }
         }
         let foreign_changed = !foreign_updates.is_empty();

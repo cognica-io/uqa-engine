@@ -31,7 +31,6 @@ use uqa_sql::{
             RoleDefinition, RoleMembership, RoleReferenceNames,
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
-        stored_view::StoredView,
     },
     routines::SQLUserFunction,
 };
@@ -52,7 +51,7 @@ pub(super) struct Catalog {
     pub tuple_locks: RefCell<Vec<(u32, u32, crate::row_locks::RelationLockMode)>>,
     database: BoundDatabaseSecurity,
     schemas: SchemaRegistry,
-    views: BTreeMap<RelationIdentity, StoredView>,
+    views: uqa_sql::catalog::stored_view::ViewDefinitions,
     foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
     sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
@@ -81,7 +80,7 @@ impl Catalog {
             tuple_locks: RefCell::new(Vec::new()),
             database: BoundDatabaseSecurity::bootstrap(),
             schemas: SchemaRegistry::new(),
-            views: BTreeMap::new(),
+            views: uqa_sql::catalog::stored_view::ViewDefinitions::new(),
             foreign_tables: BTreeMap::new(),
             system_relations:
                 uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
@@ -351,7 +350,7 @@ impl RoleDependencyCatalog for Catalog {
         self.event("tables");
         Box::new(EmptyTables)
     }
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
+    fn views(&self) -> RoleDependencyRead<'_, uqa_sql::catalog::stored_view::ViewDefinitions> {
         self.event("views");
         Box::new(&self.views)
     }

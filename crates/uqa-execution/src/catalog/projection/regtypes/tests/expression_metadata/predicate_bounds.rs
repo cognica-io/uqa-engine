@@ -258,31 +258,33 @@ fn column_bounds_skip_unrelated_views_and_unrequested_mutation_analysis() {
         panic!("query");
     };
     let mut snapshot = fixture(0).snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views).insert(
-        RelationIdentity::new("public", "visible_view"),
-        crate::catalog::view::StoredView {
-            security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
-            definition: StoredViewDefinition {
-                object_id: [4; 16],
-                query: *query,
-                output_columns: Some(vec!["visible_column".into()]),
-                persistence: uqa_sql::ast::RelationPersistence::Permanent,
-                options: Vec::new(),
-                kind: StoredViewKind::View,
-                materialized_rows: Vec::new(),
-                materialized_column_types: Vec::new(),
-                materialized_column_collations: None,
-                populated: true,
-                catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
-                    relation: 100_000,
-                    row_type: Some(100_001),
-                    array_type: Some(100_002),
-                    rule: Some(100_003),
-                }),
-                row_type_array_name: None,
+    Arc::make_mut(&mut snapshot.definitions.views)
+        .insert(
+            RelationIdentity::new("public", "visible_view"),
+            crate::catalog::view::StoredView {
+                security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+                definition: StoredViewDefinition {
+                    object_id: [4; 16],
+                    query: *query,
+                    output_columns: Some(vec!["visible_column".into()]),
+                    persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                    options: Vec::new(),
+                    kind: StoredViewKind::View,
+                    materialized_rows: Vec::new(),
+                    materialized_column_types: Vec::new(),
+                    materialized_column_collations: None,
+                    populated: true,
+                    catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
+                        relation: 100_000,
+                        row_type: Some(100_001),
+                        array_type: Some(100_002),
+                        rule: Some(100_003),
+                    }),
+                    row_type_array_name: None,
+                },
             },
-        },
-    );
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let selected = request(
         &catalog,

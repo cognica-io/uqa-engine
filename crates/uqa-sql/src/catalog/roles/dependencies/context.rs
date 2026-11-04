@@ -8,9 +8,8 @@
 
 use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::{
-    catalog::{
-        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
-        stored_view::StoredView,
+    catalog::security::{
+        database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity,
     },
     routines::SQLUserFunction,
 };
@@ -33,7 +32,7 @@ pub trait RoleDependencyCatalog:
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
     fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
+    fn views(&self) -> RoleDependencyRead<'_, crate::catalog::stored_view::ViewDefinitions>;
     fn foreign_tables(
         &self,
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>>;

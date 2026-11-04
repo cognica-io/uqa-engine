@@ -28,6 +28,7 @@ mod server_roots;
 mod table_metadata;
 mod type_roots;
 mod undo_sources;
+mod view_roots;
 mod wrapper_roots;
 
 fn sql(engine: &Engine, text: &str) {

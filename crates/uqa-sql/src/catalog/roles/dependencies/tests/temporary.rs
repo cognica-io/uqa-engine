@@ -147,7 +147,8 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     );
     catalog
         .views
-        .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view());
+        .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view())
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 6).unwrap(),
         BTreeSet::from([11, 12, 13, 14, 15, 16])

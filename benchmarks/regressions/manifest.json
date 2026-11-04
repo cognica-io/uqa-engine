@@ -40287,6 +40287,136 @@
         "case_1",
         "case_2"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_roots_capture_exact_syntax_authority_and_evaluated_bits_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Immutable native view capture",
+      "workload": "Capture 1, 64 and 4096 view definitions with full authority and materialized rows under independently exact allowances.",
+      "invariant": "Capture allocates no heap object; complete stored syntax, tuple identities, original row encodings and floating-point bits survive native retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_view_publication_shares_unrelated_large_queries_rows_and_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Selected native view publication",
+      "workload": "Replace one view among 1, 32 and 512 definitions beside unrelated megabyte query constants, evaluated rows and column names.",
+      "invariant": "Selected publication remains below 32 KiB and 256 allocations while every unrelated definition shares its original payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_view_publication_and_capture_retain_original_generations_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Independent view admission",
+      "workload": "Deny native replacement and one-byte-insufficient capture, cancel the capture owner and retire native and captured roots.",
+      "invariant": "The original definition and evaluated bits remain exact; failed operations release partial admission and final retirement releases all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporary_view_roots_do_not_contribute_to_durable_capture_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Durable view membership",
+      "workload": "Add an unrelated temporary megabyte materialized row and capture durable and temporary-only registries.",
+      "invariant": "Temporary payloads do not change durable admission; temporary-only capture needs no payload allowance or heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unchanged_composite_rewrites_borrow_unrelated_large_query_constants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/composites/constants/tests.rs",
+      "capability": "Borrowed composite view selection",
+      "workload": "Inspect an unrelated megabyte query constant during a composite attribute change.",
+      "invariant": "An unchanged query produces no replacement and allocates no heap object.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_rewrite_selection_observes_cte_visibility_before_copying_views",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/removal/tests.rs",
+      "capability": "Scoped view dependency selection",
+      "workload": "Select relation rewrites through forward and self-named non-recursive CTEs and through recursive CTE scopes.",
+      "invariant": "Selection and rewrite agree on actual relation targets without confusing later CTE declarations with earlier visible relations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_view_admission_failure_precedes_storage_and_preserves_the_previous_generation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/view_creation/publication/tests.rs",
+      "capability": "Atomic native view publication",
+      "workload": "Exhaust native view admission before regular and materialized definition replacement.",
+      "invariant": "The 53200 failure precedes storage and epoch publication, preserves the exact original generation and releases actual guards.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "denied_native_view_restore_precedes_provisional_publication_and_migration_writes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests.rs",
+      "capability": "Admitted view restoration",
+      "workload": "Restore legacy stored views under an exhausted native registry allowance.",
+      "invariant": "Native admission failure precedes provisional registry publication and migration writes while retaining previous authority and temporary definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_view_roots_retain_original_definitions_and_rows_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/view_roots.rs",
+      "capability": "Committed native view roots",
+      "workload": "Capture 1, 32 and 128 ordinary views and a large evaluated materialized view through private replacement, refresh, savepoint rollback, COMMIT and closure.",
+      "invariant": "Selected committed capture stays below 32 KiB and 128 allocations, preserves complete original definitions and row bits, retains cancellation and releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_acl_candidates",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_grants.rs",
+      "capability": "View ACL persistence before publication",
+      "workload": "Read unchanged native table, view and foreign authority from the final mixed-GRANT persistence callback, inject its failure and reopen the database.",
+      "invariant": "Persistence observers do not wait on a retained view write guard; prior durable writes roll back and no native ACL candidate is published.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

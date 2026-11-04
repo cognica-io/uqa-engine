@@ -313,19 +313,10 @@ impl Engine {
         let (merged_tables, latest_baseline) =
             self.merged_latest_fixed_snapshot_table_catalog(latest, previous_tables.tables())?;
         let previous_durable = self.durable.snapshot();
-        let temporary_views = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            .map(|(relation, view)| (relation.clone(), view.clone()))
-            .collect::<BTreeMap<_, _>>();
         let latest_durable =
             self.latest_catalog_snapshot_with_private_records(&previous_durable, latest)?;
         self.durable.restore(&latest_durable);
         self.rebind_graph_stores()?;
-        self.durable.views.write().extend(temporary_views);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
             self.storage.tables.restore(&previous_tables);
@@ -782,15 +773,13 @@ impl Engine {
             return Ok(());
         };
 
-        let temporary_views = self
-            .durable
+        self.durable
             .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            .map(|(relation, view)| (relation.clone(), view.clone()))
-            .collect::<BTreeMap<_, _>>();
-        *self.durable.views.write() = temporary_views;
+            .write()
+            .retain(|_, view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            .map_err(|error| {
+                StorageBackendError::backend("retain temporary views for catalog reload", error)
+            })?;
         self.clear_persistent_table_bindings_for_catalog_reload();
         self.durable.schemas.write().clear();
         self.durable.path_indexes.write().clear();

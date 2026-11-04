@@ -382,13 +382,7 @@ impl uqa_execution::schema::sequences::dependencies::ViewCatalogPublication for 
     fn save_view_row(&self, row: &uqa_storage::ViewRow) -> StorageBackendResult<()> {
         uqa_execution::catalog::view::ViewPublication::save_view(self, row)
     }
-    fn publish_views(
-        &self,
-        updates: Vec<(
-            uqa_core::RelationIdentity,
-            uqa_sql::catalog::stored_view::StoredView,
-        )>,
-    ) {
-        self.durable.views.write().extend(updates);
+    fn publish_views(&self, next: uqa_sql::catalog::stored_view::ViewDefinitions) {
+        *self.durable.views.write() = next;
     }
 }

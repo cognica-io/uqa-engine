@@ -35,6 +35,7 @@ use uqa_sql::{
 pub(super) struct PreparedTableGrant<'a> {
     pub updates: Vec<TablePrivilegeUpdate<'a>>,
     pub view_updates: Vec<ViewPrivilegeUpdate>,
+    pub views: Option<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub foreign_updates: Vec<ForeignTablePrivilegeUpdate>,
     pub system_updates: Vec<SystemPrivilegeUpdate>,
     pub system: Option<SystemPrivilegeCandidate<'a>>,
@@ -146,6 +147,15 @@ pub(super) fn prepare<'a>(
         &mut view_updates,
         &mut foreign_updates,
     )?;
+    let views = if view_updates.is_empty() {
+        None
+    } else {
+        let mut next = (**context.views.views_read()).clone();
+        for (relation, view) in &view_updates {
+            next.insert(relation.clone(), view.clone())?;
+        }
+        Some(next)
+    };
     let system = if system_updates.is_empty() {
         None
     } else {
@@ -160,6 +170,7 @@ pub(super) fn prepare<'a>(
         value: PreparedTableGrant {
             updates,
             view_updates,
+            views,
             foreign_updates,
             system_updates,
             system,

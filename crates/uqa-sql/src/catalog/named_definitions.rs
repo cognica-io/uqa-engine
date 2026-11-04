@@ -19,51 +19,61 @@ use uqa_core::{
 mod serialization;
 
 /// Borrowed catalog access shared by native generations and legacy decoded maps during validation.
-pub trait NamedDefinitionView<T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+pub trait NamedDefinitionView<T, K: DefinitionKey = String> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
-        T: 'a;
-    fn get(&self, name: &str) -> Option<&T>;
+        T: 'a,
+        K: 'a;
+    fn get(&self, name: &K::View) -> Option<&T>;
+    fn contains_key(&self, name: &K::View) -> bool {
+        self.get(name).is_some()
+    }
     fn values<'a>(&'a self) -> impl Iterator<Item = &'a T>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter().map(|(_, value)| value)
     }
 }
 
-impl<T> NamedDefinitionView<T> for std::collections::BTreeMap<String, T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for std::collections::BTreeMap<K, T> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.get(name)
     }
 }
 
-impl<T> NamedDefinitionView<T> for NamedDefinitions<T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for DefinitionRegistry<K, T> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.get(name)
     }
 }
 
-impl<T, V: NamedDefinitionView<T>> NamedDefinitionView<T> for std::sync::Arc<V> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K>
+    for std::sync::Arc<V>
+{
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.as_ref().iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.as_ref().get(name)
     }
 }

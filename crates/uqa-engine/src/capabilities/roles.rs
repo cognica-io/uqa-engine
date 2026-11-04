@@ -26,7 +26,6 @@ use uqa_sql::{
             },
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
-        stored_view::StoredView,
     },
     routines::SQLUserFunction,
     SQLError,
@@ -195,7 +194,7 @@ impl RoleDependencyCatalog for Engine {
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
         Box::new(RoleTableRegistryRead(self.storage.tables.read()))
     }
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
+    fn views(&self) -> RoleDependencyRead<'_, uqa_sql::catalog::stored_view::ViewDefinitions> {
         Box::new(self.durable.views.read())
     }
     fn foreign_tables(

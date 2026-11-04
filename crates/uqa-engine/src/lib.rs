@@ -215,7 +215,7 @@ pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = BTreeMap<(String, String), uqa_storage::FieldAnalyzerBinding>;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
-type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
+type SessionPortalViewSnapshots = Arc<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots =
     Arc<BTreeMap<String, Vec<Arc<user_functions::SQLUserFunction>>>>;
 type SessionPortalCatalogSnapshot = Arc<session::RetainedCatalogSnapshot>;

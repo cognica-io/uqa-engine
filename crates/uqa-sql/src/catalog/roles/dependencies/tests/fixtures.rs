@@ -9,7 +9,7 @@ use super::*;
 use crate::catalog::security::database::BoundDatabaseSecurity;
 use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::security::BoundTableSecurity;
-use crate::{catalog::stored_view::StoredView, routines::SQLUserFunction};
+use crate::routines::SQLUserFunction;
 use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
 
 pub(super) type Events = Rc<RefCell<Vec<String>>>;
@@ -61,7 +61,7 @@ pub(super) struct Catalog {
     pub database: BoundDatabaseSecurity,
     pub schemas: SchemaRegistry,
     pub tables: BTreeMap<RelationIdentity, Table>,
-    pub views: BTreeMap<RelationIdentity, StoredView>,
+    pub views: crate::catalog::stored_view::ViewDefinitions,
     pub foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     pub foreign_persistence: BTreeMap<RelationIdentity, crate::ast::RelationPersistence>,
     pub system_relations: crate::catalog::security::system_relations::SystemRelationSecurities,
@@ -78,7 +78,7 @@ impl Catalog {
             database: BoundDatabaseSecurity::bootstrap(),
             schemas: SchemaRegistry::new(),
             tables: BTreeMap::new(),
-            views: BTreeMap::new(),
+            views: crate::catalog::stored_view::ViewDefinitions::new(),
             foreign_tables: BTreeMap::new(),
             foreign_persistence: BTreeMap::new(),
             system_relations:
@@ -149,7 +149,7 @@ impl RoleDependencyCatalog for Catalog {
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
         Box::new(self.read("tables", &self.tables))
     }
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
+    fn views(&self) -> RoleDependencyRead<'_, crate::catalog::stored_view::ViewDefinitions> {
         Box::new(self.read("views", &self.views))
     }
     fn foreign_tables(

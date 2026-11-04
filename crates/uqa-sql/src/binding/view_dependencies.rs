@@ -22,14 +22,43 @@ pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&m
     let ScalarExpr::Func { name, args, .. } = expression else {
         return None;
     };
-    let lower = name.to_ascii_lowercase();
-    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if !matches!(local, "nextval" | "currval" | "setval")
-        || (lower.contains('.') && !lower.starts_with("pg_catalog."))
-    {
+    if !is_sequence_function(name) {
         return None;
     }
     regclass_literal_mut(args.first_mut()?)
+}
+
+fn is_sequence_function(name: &str) -> bool {
+    let local = match name.split_once('.') {
+        Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
+        None => name,
+        Some(_) => return false,
+    };
+    ["nextval", "currval", "setval"]
+        .iter()
+        .any(|name| local.eq_ignore_ascii_case(name))
+}
+
+pub fn sequence_function_reference(expression: &ScalarExpr) -> Option<&str> {
+    let ScalarExpr::Func { name, args, .. } = expression else {
+        return None;
+    };
+    if !is_sequence_function(name) {
+        return None;
+    }
+    fn regclass_literal(expression: &ScalarExpr) -> Option<&str> {
+        match expression {
+            ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
+            ScalarExpr::Cast { expr, ty, .. }
+                if crate::ColumnType::from_sql_name(ty)
+                    .is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass)) =>
+            {
+                regclass_literal(expr)
+            }
+            _ => None,
+        }
+    }
+    regclass_literal(args.first()?)
 }
 
 pub fn regclass_literal_mut(expression: &mut ScalarExpr) -> Option<&mut String> {
@@ -267,13 +296,18 @@ pub fn query_plan_references_relation(
     inherited_ctes: &std::collections::BTreeSet<String>,
 ) -> bool {
     let mut ctes = inherited_ctes.clone();
-    ctes.extend(query.ctes.iter().map(|cte| cte.name.clone()));
-    if query
-        .ctes
-        .iter()
-        .any(|cte| cte_plan_references_relation(&cte.body, target, &ctes))
-    {
-        return true;
+    let recursive = query.ctes.iter().any(|cte| cte.recursive).then(|| {
+        inherited_ctes
+            .iter()
+            .cloned()
+            .chain(query.ctes.iter().map(|cte| cte.name.clone()))
+            .collect()
+    });
+    for cte in &query.ctes {
+        if cte_plan_references_relation(&cte.body, target, recursive.as_ref().unwrap_or(&ctes)) {
+            return true;
+        }
+        ctes.insert(cte.name.clone());
     }
     match &query.root {
         crate::plan::RelationalPlan::QueryBlock(block) => {
@@ -305,12 +339,13 @@ pub fn query_plan_references_relation(
 }
 
 pub fn query_plan_references_sequence(plan: &QueryPlan, target: &RelationIdentity) -> bool {
-    let mut plan = plan.clone();
     let mut referenced = false;
-    plan.rewrite_scalar_expressions(&mut |expression| {
-        if let Some(reference) = sequence_function_reference_mut(expression) {
-            referenced |= relation_reference_matches(reference, target);
-        }
+    plan.visit_scalar_expressions(&mut |root| {
+        root.visit(&mut |expression| {
+            if let Some(reference) = sequence_function_reference(expression) {
+                referenced |= relation_reference_matches(reference, target);
+            }
+        });
     });
     referenced
 }
@@ -491,16 +526,17 @@ fn query_plan_sources_reference_function(plan: &QueryPlan, target: &FunctionBind
 }
 
 pub fn query_plan_references_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
-    let mut scalar_plan = plan.clone();
     let mut referenced = false;
-    scalar_plan.rewrite_scalar_expressions(&mut |expression| {
-        if let ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } = expression
-        {
-            referenced |= function_binding_matches(binding, target);
-        }
+    plan.visit_scalar_expressions(&mut |root| {
+        root.visit(&mut |expression| {
+            if let ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } = expression
+            {
+                referenced |= function_binding_matches(binding, target);
+            }
+        });
     });
     referenced || query_plan_sources_reference_function(plan, target)
 }

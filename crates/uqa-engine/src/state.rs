@@ -186,8 +186,8 @@ pub(super) struct DurableCatalogState {
         uqa_storage::catalog::scoring_params::CapturedScoringParameters,
     >,
     pub(super) views: CatalogCell<
-        BTreeMap<RelationIdentity, StoredView>,
-        uqa_sql::catalog::definition_capture::views::CapturedViews,
+        uqa_sql::catalog::stored_view::ViewDefinitions,
+        uqa_sql::catalog::stored_view::CapturedViewDefinitions,
     >,
     pub(super) catalog_indexes: CatalogCell<
         BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
@@ -295,7 +295,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
-    pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
@@ -340,7 +340,7 @@ impl DurableCatalogState {
             scoring_params: CatalogCell::new(
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),
             ),
-            views: CatalogCell::new(BTreeMap::new()),
+            views: CatalogCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),

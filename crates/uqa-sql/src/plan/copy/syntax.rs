@@ -229,6 +229,7 @@ mod catalog_events;
 mod catalog_foreign;
 mod catalog_graphs;
 mod catalog_types;
+mod catalog_views;
 mod command;
 
 syntax_struct!(crate::ast::ObjectAclEntry {

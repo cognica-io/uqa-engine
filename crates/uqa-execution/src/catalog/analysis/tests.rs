@@ -30,26 +30,28 @@ fn fixture() -> CatalogReadView {
     ) else {
         panic!("query")
     };
-    Arc::make_mut(&mut snapshot.definitions.views).insert(
-        RelationIdentity::new("public", "v"),
-        StoredView {
-            security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
-            definition: StoredViewDefinition {
-                object_id: [3; 16],
-                query: *query,
-                output_columns: Some(vec!["n".into()]),
-                persistence: RelationPersistence::Permanent,
-                options: vec![("opaque".into(), "x".repeat(4 << 20))],
-                kind: crate::catalog::view::StoredViewKind::View,
-                materialized_rows: vec![],
-                materialized_column_types: vec![],
-                materialized_column_collations: None,
-                populated: true,
-                catalog_oids: None,
-                row_type_array_name: None,
+    Arc::make_mut(&mut snapshot.definitions.views)
+        .insert(
+            RelationIdentity::new("public", "v"),
+            StoredView {
+                security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+                definition: StoredViewDefinition {
+                    object_id: [3; 16],
+                    query: *query,
+                    output_columns: Some(vec!["n".into()]),
+                    persistence: RelationPersistence::Permanent,
+                    options: vec![("opaque".into(), "x".repeat(4 << 20))],
+                    kind: crate::catalog::view::StoredViewKind::View,
+                    materialized_rows: vec![],
+                    materialized_column_types: vec![],
+                    materialized_column_collations: None,
+                    populated: true,
+                    catalog_oids: None,
+                    row_type_array_name: None,
+                },
             },
-        },
-    );
+        )
+        .unwrap();
     Arc::make_mut(&mut snapshot.definitions.foreign_tables).insert(
         RelationIdentity::new("public", "remote"),
         StoredForeignTable {
@@ -180,10 +182,12 @@ fn source_view_context(
 ) -> uqa_sql::binding::BindingContext<'static> {
     let mut snapshot = fixture().snapshot().clone();
     Arc::make_mut(&mut snapshot.definitions.views)
-        .get_mut(&RelationIdentity::new("public", "v"))
+        .edit(&RelationIdentity::new("public", "v"), |view| {
+            view.definition.query = query;
+            Ok(())
+        })
         .unwrap()
-        .definition
-        .query = query;
+        .unwrap();
     uqa_sql::binding::BindingContext {
         catalog: Arc::new(CatalogReadView::new(snapshot)),
         resolution: namespace(),

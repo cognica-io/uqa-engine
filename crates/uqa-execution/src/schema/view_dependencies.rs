@@ -32,7 +32,7 @@ pub fn views_depending_on_relation(
     let target =
         RelationIdentity::from_legacy_name(canonical_name).map_err(StorageBackendError::Other)?;
     Ok(analysis::views_depending_on_relation(
-        &context.views.view_definitions(),
+        &**context.views.view_definitions(),
         &target,
     ))
 }
@@ -45,7 +45,7 @@ pub fn views_depending_on_sequence(
     let target =
         RelationIdentity::from_legacy_name(canonical_name).map_err(StorageBackendError::Other)?;
     Ok(analysis::views_depending_on_sequence(
-        &context.views.view_definitions(),
+        &**context.views.view_definitions(),
         &target,
     ))
 }
@@ -56,7 +56,7 @@ pub fn views_depending_on_function(
 ) -> StorageBackendResult<Vec<String>> {
     context.views.synchronize_catalog()?;
     Ok(analysis::views_depending_on_function(
-        &context.views.view_definitions(),
+        &**context.views.view_definitions(),
         target,
     ))
 }
@@ -69,7 +69,8 @@ pub fn rewrite_view_routine_identity(
     let views = context.views.view_definitions();
     let mut next = (**views).clone();
     drop(views);
-    let changed = analysis::rewrite_view_routine_identity(&mut next, target, new_name);
+    let changed = analysis::rewrite_view_routine_identity(&mut next, target, new_name)
+        .map_err(|error| StorageBackendError::backend("rewrite view routine identity", error))?;
     publish_rewritten_views(context, next, &changed, false)
 }
 
@@ -83,7 +84,8 @@ pub fn rewrite_view_type_references(
     let views = context.views.view_definitions();
     let mut next = (**views).clone();
     drop(views);
-    let changed = analysis::rewrite_view_type_references(&mut next, oid, identity);
+    let changed = analysis::rewrite_view_type_references(&mut next, oid, identity)
+        .map_err(|error| StorageBackendError::backend("rewrite view type references", error))?;
     publish_rewritten_views(context, next, &changed, false)
 }
 
@@ -99,39 +101,41 @@ pub fn rewrite_materialized_composite_values(
         uqa_sql::catalog::errors::storage_error("rewrite materialized view rows", &error)
     };
     context.views.synchronize_catalog().map_err(storage)?;
-    let views = context.views.view_definitions();
-    let mut next = (**views).clone();
-    drop(views);
+    let original = (**context.views.view_definitions()).clone();
+    let mut next = original.clone();
     let mut changed = Vec::new();
-    for (relation, view) in &mut next {
-        let query_changed = constants.query(&mut view.query)?;
+    for (relation, view) in &original {
+        let query = constants.rewritten_query(&view.query)?;
         let columns = view
             .output_columns
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .zip(view.materialized_column_types.clone())
-            .filter_map(|(name, ty)| ty.map(|ty| (name, ty)))
-            .collect::<Vec<_>>();
+            .iter()
+            .flatten()
+            .zip(&view.materialized_column_types)
+            .filter_map(|(name, ty)| ty.as_ref().map(|ty| (name, ty)));
         let mut affected = Vec::new();
         for (name, ty) in columns {
-            if uqa_sql::expr::composites::type_contains_composite(&ty, target, types)? {
+            if uqa_sql::expr::composites::type_contains_composite(ty, target, types)? {
                 affected.push((name, ty));
             }
         }
-        if affected.is_empty() && !query_changed {
+        if affected.is_empty() && query.is_none() {
             continue;
+        }
+        let mut view = view.clone();
+        if let Some(query) = query {
+            view.query = query;
         }
         for row in &mut view.materialized_rows {
             for (name, ty) in &affected {
-                if let Some(value) = row.get(name).cloned() {
+                if let Some(value) = row.get(*name).cloned() {
                     let value = uqa_sql::expr::composites::apply_attribute_change(
                         value, ty, target, change, types,
                     )?;
-                    row.insert(name.clone(), value);
+                    row.insert((*name).clone(), value);
                 }
             }
         }
+        next.insert(relation.clone(), view)?;
         changed.push(relation.clone());
     }
     // Retaining the same admitted datum under another descriptor changes its representation, not the view's SQL definition. Existing prepared scalar constants retain their original inputs.
@@ -145,7 +149,7 @@ pub fn rewrite_materialized_composite_values(
 
 fn publish_rewritten_views(
     context: &ViewDependencyContext<'_>,
-    next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,
+    next: uqa_sql::catalog::stored_view::ViewDefinitions,
     changed: &[RelationIdentity],
     same_definition: bool,
 ) -> StorageBackendResult<()> {

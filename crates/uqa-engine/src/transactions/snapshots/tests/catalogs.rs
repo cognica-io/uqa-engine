@@ -126,11 +126,9 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
     drop(schemas);
     let views = selected.catalogs.views.captured(&selected.cut).unwrap();
     assert_eq!(views.get().unwrap().len(), 1);
-    assert_eq!(views.get().unwrap()[0].1.object_id, view_id);
-    assert_eq!(
-        serde_json::to_value(&views.get().unwrap()[0].1.query).unwrap(),
-        view_query
-    );
+    let (_, saved_view) = views.get().unwrap().iter().next().unwrap();
+    assert_eq!(saved_view.object_id, view_id);
+    assert_eq!(serde_json::to_value(&saved_view.query).unwrap(), view_query);
     drop(views);
     let routines = selected
         .catalogs

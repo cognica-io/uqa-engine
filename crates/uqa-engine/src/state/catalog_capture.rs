@@ -21,7 +21,7 @@ impl DurableCatalogState {
         self.views = CatalogCell::capture_source(
             self.views.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::views::durable_views,
+            uqa_sql::catalog::stored_view::ViewDefinitions::capture,
         )?;
         self.triggers = CatalogCell::capture_source(
             self.triggers.snapshot(),

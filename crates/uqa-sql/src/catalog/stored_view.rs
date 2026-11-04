@@ -6,6 +6,13 @@
 
 use super::security::BoundTableSecurity;
 use std::ops::{Deref, DerefMut};
+use uqa_core::{memory::OwnedMap, Value};
+
+/// Evaluated view cells retain exact ordered field storage independently of public result maps.
+pub type MaterializedViewRow = OwnedMap<String, Value>;
+
+mod registry;
+pub use registry::{CapturedViewDefinitions, ViewDefinitions};
 
 /// One bound view query together with the fixed public column names captured when the view was created. `None` exists only while the catalog-opening migration reads formats written before column metadata was persisted.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -33,7 +40,7 @@ pub struct StoredViewDefinition {
     #[serde(default)]
     pub kind: StoredViewKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub materialized_rows: Vec<crate::ResultRow>,
+    pub materialized_rows: Vec<MaterializedViewRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materialized_column_types: Vec<Option<crate::ast::ColumnType>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

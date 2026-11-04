@@ -21,11 +21,11 @@ pub enum RestoredView {
 }
 
 pub fn validate_restored_view_object_ids(
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
 ) -> Result<(), String> {
     let mut object_ids = BTreeSet::new();
     let mut oids = BTreeSet::new();
-    for (relation, view) in views {
+    for (relation, view) in views.iter() {
         if !object_ids.insert(view.object_id) {
             return Err(format!(
                 "view `{}` has a duplicate object identity",
@@ -60,9 +60,9 @@ pub fn validate_restored_view_security(
 }
 pub fn validate_migrated_view_security(
     roles: &dyn RoleCatalogGuards,
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
 ) -> Result<(), String> {
-    for (relation, view) in views {
+    for (relation, view) in views.iter() {
         let output_columns = view.output_columns.as_deref().ok_or_else(|| {
             format!(
                 "view `{}` has no public column metadata after catalog migration",

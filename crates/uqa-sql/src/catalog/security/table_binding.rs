@@ -9,9 +9,9 @@
 use super::{role_bindings, TableAclEntry, TablePrivileges, TableSecurity};
 use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{RoleIdentity, RoleReference};
-use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
+use uqa_core::memory::OwnedMap;
 
 mod production;
 pub use production::{CapturedTablePrivileges, CapturedTableSecurity};
@@ -22,7 +22,7 @@ pub type BoundTableAclEntry = BoundAclEntry<TablePrivileges>;
 pub struct BoundTableSecurity {
     pub role_owner: RoleIdentity,
     pub acl: Option<Vec<BoundTableAclEntry>>,
-    pub column_acls: BTreeMap<String, Vec<BoundTableAclEntry>>,
+    pub column_acls: OwnedMap<String, Vec<BoundTableAclEntry>>,
     pub acl_revisions: uqa_core::catalog_acl::RelationAclRevisions,
 }
 
@@ -45,7 +45,7 @@ impl BoundTableSecurity {
         Self {
             role_owner: row.role_owner,
             acl: row.acl,
-            column_acls: row.column_acls,
+            column_acls: row.column_acls.into_iter().collect(),
             acl_revisions: row.acl_revisions,
         }
     }
@@ -54,7 +54,11 @@ impl BoundTableSecurity {
         uqa_core::catalog_acl::BoundRelationSecurity {
             role_owner: self.role_owner,
             acl: self.acl.clone(),
-            column_acls: self.column_acls.clone(),
+            column_acls: self
+                .column_acls
+                .iter()
+                .map(|(column, acl)| (column.clone(), acl.clone()))
+                .collect(),
             acl_revisions: self.acl_revisions.clone(),
         }
     }
@@ -63,7 +67,7 @@ impl BoundTableSecurity {
         Self {
             role_owner,
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
             acl_revisions: uqa_core::catalog_acl::RelationAclRevisions::default(),
         }
     }
