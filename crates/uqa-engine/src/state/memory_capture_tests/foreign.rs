@@ -99,12 +99,7 @@ fn memory_foreign_capture_keeps_definitions_through_rollback_replacement_and_unr
         let saved_wrappers = wrapper_key.retained(&cut).unwrap().unwrap();
         let saved_servers = server_key.retained(&cut).unwrap().unwrap();
         let saved_tables = table_key.retained(&cut).unwrap().unwrap();
-        assert!(saved_wrappers
-            .get()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(wrappers.iter()));
+        assert!(saved_wrappers.get().unwrap().iter().eq(wrappers.iter()));
         same_servers(saved_servers.get().unwrap(), &servers);
         same_tables(saved_tables.get().unwrap(), &tables);
         drop(cut);
@@ -142,13 +137,7 @@ fn denied_foreign_capture_keeps_ordinary_ddl_and_independent_cuts_usable() {
         .is_empty());
     assert!(denied.check().is_err());
     let saved = key.retained(&cut).unwrap().unwrap();
-    let original = &saved
-        .get()
-        .unwrap()
-        .iter()
-        .find(|(name, _)| name == "large")
-        .unwrap()
-        .1;
+    let original = saved.get().unwrap().get("large").unwrap();
     assert_eq!(original.options[0].1.len(), 32768);
     drop((saved, cut, denied, engine));
     assert_eq!(small.memory().used(), 0);

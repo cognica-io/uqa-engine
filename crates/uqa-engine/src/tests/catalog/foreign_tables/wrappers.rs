@@ -208,7 +208,12 @@ fn native_wrapper_references_survive_sessions_snapshots_and_reopen() {
             expected
         );
         engine.sql("BEGIN; SAVEPOINT before_state", &[]).unwrap();
-        engine.durable.foreign_wrappers.write().remove("memory_fdw");
+        engine
+            .durable
+            .foreign_wrappers
+            .write()
+            .remove("memory_fdw")
+            .unwrap();
         engine.sql("ROLLBACK TO before_state; COMMIT", &[]).unwrap();
         assert_eq!(
             engine.durable.foreign_wrappers.read()["memory_fdw"].identity,
@@ -350,9 +355,14 @@ fn a_wrapper_without_a_handler_cannot_choose_a_native_adapter_by_name() {
     };
     {
         let mut wrappers = engine.durable.foreign_wrappers.write();
-        let wrapper = wrappers.get_mut("memory_fdw").unwrap();
-        wrapper.handler = ForeignWrapperHandler::None;
-        wrapper.identity = reference;
+        wrappers
+            .edit("memory_fdw", |wrapper| {
+                wrapper.handler = ForeignWrapperHandler::None;
+                wrapper.identity = reference;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
     }
     engine
         .durable

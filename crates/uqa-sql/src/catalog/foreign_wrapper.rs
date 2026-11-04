@@ -10,9 +10,10 @@ use super::roles::{identity::RoleSubject, RoleIdentity};
 use crate::catalog::roles::RoleDefinitions;
 use crate::{ast::FunctionBinding, SQLError};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-pub type ForeignWrappers = BTreeMap<String, ForeignWrapperDefinition>;
+mod registry;
+pub use registry::{CapturedForeignWrappers, ForeignWrappers};
 
 /// Implementations already provided by the host. A SQL name alone never selects one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,27 +112,29 @@ impl ForeignWrapperDefinition {
 }
 
 pub fn native_wrappers() -> ForeignWrappers {
-    [
-        NativeForeignWrapper::Memory,
-        NativeForeignWrapper::DuckDB,
-        NativeForeignWrapper::Arrow,
-    ]
-    .into_iter()
-    .map(|native| {
-        let name = native.name().to_owned();
-        (
-            name.clone(),
-            ForeignWrapperDefinition {
-                name,
-                identity: native.reference(),
-                owner: RoleIdentity::BOOTSTRAP,
-                handler: ForeignWrapperHandler::Native(native),
-                validator: None,
-                options: Vec::new(),
-            },
-        )
-    })
-    .collect()
+    ForeignWrappers::try_from_iter(
+        [
+            NativeForeignWrapper::Memory,
+            NativeForeignWrapper::DuckDB,
+            NativeForeignWrapper::Arrow,
+        ]
+        .into_iter()
+        .map(|native| {
+            let name = native.name().to_owned();
+            (
+                name.clone(),
+                ForeignWrapperDefinition {
+                    name,
+                    identity: native.reference(),
+                    owner: RoleIdentity::BOOTSTRAP,
+                    handler: ForeignWrapperHandler::Native(native),
+                    validator: None,
+                    options: Vec::new(),
+                },
+            )
+        }),
+    )
+    .expect("fixed native foreign-wrapper catalog")
 }
 
 /// A missing callback is a valid retained reference; a live callback must agree with its saved OID and incarnation.

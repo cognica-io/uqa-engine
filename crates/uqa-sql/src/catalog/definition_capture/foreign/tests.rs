@@ -60,20 +60,22 @@ fn foreign_wrapper_capture_preserves_every_handler_and_bound_callback_without_re
         ("no_handler", ForeignWrapperHandler::None),
         ("callback", ForeignWrapperHandler::Function(callback())),
     ] {
-        source.insert(
-            name.into(),
-            ForeignWrapperDefinition {
-                name: name.into(),
-                identity: ForeignWrapperReference {
-                    oid: 24002,
-                    object_id: [2; 16],
+        source
+            .insert(
+                name.into(),
+                ForeignWrapperDefinition {
+                    name: name.into(),
+                    identity: ForeignWrapperReference {
+                        oid: 24002,
+                        object_id: [2; 16],
+                    },
+                    owner: RoleIdentity::BOOTSTRAP,
+                    handler,
+                    validator: Some(callback()),
+                    options: vec![("z".into(), "first".into()), ("a".into(), "second".into())],
                 },
-                owner: RoleIdentity::BOOTSTRAP,
-                handler,
-                validator: Some(callback()),
-                options: vec![("z".into(), "first".into()), ("a".into(), "second".into())],
-            },
-        );
+            )
+            .unwrap();
     }
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
@@ -126,10 +128,12 @@ fn foreign_server_capture_keeps_option_order_legacy_absence_and_original_referen
 fn foreign_descriptor_capture_rejects_unfunded_options_and_original_cancellation() {
     let mut wrapper_source = native_wrappers();
     wrapper_source
-        .get_mut("memory_fdw")
+        .edit("memory_fdw", |wrapper| {
+            wrapper.options.push(("large".into(), "x".repeat(32768)));
+            Ok(())
+        })
         .unwrap()
-        .options
-        .push(("large".into(), "x".repeat(32768)));
+        .unwrap();
     let mut value = server();
     value.options.insert("large".into(), "x".repeat(32768));
     let server_source = BTreeMap::from([("source".into(), value)]);

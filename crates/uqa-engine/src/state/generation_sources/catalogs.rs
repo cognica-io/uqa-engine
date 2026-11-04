@@ -76,7 +76,7 @@ catalog_sources! {
     database_security: BoundDatabaseSecurity => BoundDatabaseSecurity, BoundDatabaseSecurity::capture_security;
     builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => Vec<(u32, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity)>, uqa_sql::catalog::security::capture::relations::builtin_routines;
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => Vec<(RelationIdentity, uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity)>, uqa_sql::catalog::security::capture::relations::system_relations;
-    foreign_wrappers: ForeignWrappers => Vec<(String, uqa_sql::catalog::foreign_wrapper::ForeignWrapperDefinition)>, uqa_sql::catalog::definition_capture::foreign::wrappers;
+    foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;
     foreign_servers: BTreeMap<String, ForeignServerDefinition> => Vec<(String, uqa_sql::catalog::definition_capture::foreign::CapturedForeignServer)>, uqa_sql::catalog::definition_capture::foreign::servers;
     triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;
     rules: RuleCatalog => uqa_sql::catalog::definition_capture::rules::CapturedRules, uqa_sql::catalog::definition_capture::rules::durable_rules;

@@ -99,8 +99,8 @@ fn records_preserve_no_handler_and_option_order_without_touching_native_adapters
     persist(&catalog, &definition).unwrap();
     let restored = restore(&catalog, &roles(), &mut servers, false).unwrap();
     assert_eq!(restored.definitions["custom/wrapper"], definition);
-    for (name, native) in native_wrappers() {
-        assert_eq!(restored.definitions[&name], native);
+    for (name, native) in &native_wrappers() {
+        assert_eq!(&restored.definitions[name], native);
     }
 }
 

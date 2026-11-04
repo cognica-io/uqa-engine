@@ -110,7 +110,7 @@ pub(super) fn restore(
         ));
     }
     let mut definitions = if current {
-        BTreeMap::new()
+        ForeignWrappers::new()
     } else {
         native_wrappers()
     };
@@ -121,12 +121,12 @@ pub(super) fn restore(
         {
             return Err(invalid("invalid foreign-wrapper record version or key"));
         }
-        if definitions
-            .insert(record.definition.name.clone(), record.definition)
-            .is_some()
-        {
+        if definitions.contains_key(&record.definition.name) {
             return Err(invalid("duplicate foreign-wrapper catalog record"));
         }
+        definitions
+            .insert(record.definition.name.clone(), record.definition)
+            .map_err(|error| StorageBackendError::backend("foreign wrappers", error))?;
     }
     validate_wrappers(&definitions, roles).map_err(|error| invalid(error.to_string()))?;
     let mut server_migrations = Vec::new();

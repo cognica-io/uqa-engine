@@ -40025,6 +40025,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_roots_capture_without_allocations_and_preserve_original_encodings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Immutable wrapper capture",
+      "workload": "Capture 1, 64 and 4096 wrapper definitions with independent exact allowances and compare complete legacy observations and both encodings.",
+      "invariant": "Capture allocates no heap objects, preserves original handler and validator bindings and ordered options, and releases both independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_wrapper_publication_shares_unrelated_options_and_callback_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Selected wrapper publication",
+      "workload": "Publish one wrapper beside 1, 32 and 512 definitions and unrelated large option and callback-name payloads.",
+      "invariant": "Selected publication stays below 32 KiB and 256 allocations, retains original values and shares every unrelated definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_wrapper_publication_and_capture_preserve_complete_original_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/registry/tests.rs",
+      "capability": "Wrapper admission failure",
+      "workload": "Deny an independently captured root by one byte, exhaust native admission before replacement, cancel and retire source owners.",
+      "invariant": "Failure leaves complete original wrapper identities and callbacks unchanged; denied capture leaks nothing and final owners release every native and captured lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_wrapper_roots_preserve_original_options_and_incarnations_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/wrapper_roots.rs",
+      "capability": "Committed native wrapper roots",
+      "workload": "Capture 1, 32 and 128 SQL wrapper definitions through private same-name replacement, savepoint rollback, COMMIT, another replacement and Engine closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations and preserves the original incarnation, handler and ordered options under independent cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

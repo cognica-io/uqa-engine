@@ -239,10 +239,7 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) foreign_wrappers: CatalogCell<
         uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
-        Vec<(
-            String,
-            uqa_sql::catalog::foreign_wrapper::ForeignWrapperDefinition,
-        )>,
+        uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers,
     >,
     pub(super) foreign_servers: CatalogCell<
         BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
