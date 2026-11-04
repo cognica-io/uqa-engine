@@ -47,7 +47,10 @@ pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
 pub use handle::{GraphImageSnapshot, GraphStoreHandle};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
-pub use index::{CapturedPath, CapturedPathIndex, LabelIndex, PathIndex, VertexPropertyIndex};
+pub use index::{
+    CapturedPath, CapturedPathIndex, CapturedPathIndexes, LabelIndex, PathIndex, PathIndexCatalog,
+    PathIndexImageSnapshot, VertexPropertyIndex,
+};
 pub use memory_store::{
     graphid_label_id, graphid_sequence, make_graphid, GraphLabelInfo, GraphLabelRegistry,
     LabelKind, MemoryGraphStore, EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT,

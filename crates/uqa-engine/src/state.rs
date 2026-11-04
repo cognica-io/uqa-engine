@@ -199,12 +199,8 @@ pub(super) struct DurableCatalogState {
         SchemaRegistry,
         uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
     >,
-    pub(super) path_indexes: CatalogCell<
-        BTreeMap<String, uqa_graph::PathIndex>,
-        resource_capture::CapturedResources<
-            uqa_core::memory::Budgeted<uqa_graph::CapturedPathIndex>,
-        >,
-    >,
+    pub(super) path_indexes:
+        CatalogCell<uqa_graph::PathIndexCatalog, uqa_graph::CapturedPathIndexes>,
     pub(super) sequences: CatalogCell<
         uqa_execution::catalog::sequence::registry::SequenceCatalog,
         uqa_execution::catalog::sequence::registry::CapturedSequenceCatalog,
@@ -273,7 +269,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) catalog_indexes: Arc<uqa_execution::catalog::index::registry::CatalogIndexes>,
     pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
-    pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
+    pub(super) path_indexes: Arc<uqa_graph::PathIndexCatalog>,
     pub(super) sequences: Arc<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
     pub(super) graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub(super) named_analyzers: Arc<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
@@ -312,7 +308,7 @@ impl DurableCatalogState {
             ),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
-            path_indexes: CatalogCell::new(BTreeMap::new()),
+            path_indexes: CatalogCell::new(uqa_graph::PathIndexCatalog::default()),
             sequences: CatalogCell::new(
                 uqa_execution::catalog::sequence::registry::SequenceCatalog::default(),
             ),

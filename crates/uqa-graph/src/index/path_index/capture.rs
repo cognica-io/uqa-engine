@@ -39,8 +39,8 @@ impl PathIndex {
             control.cancellation(),
         );
         let mut output = ProductionVec::new(production);
-        output.reserve(paths.len())?;
-        for (sequence, pairs) in paths.iter() {
+        output.reserve(paths.image.paths.len())?;
+        for CapturedPath { sequence, pairs } in &paths.image.paths {
             let mut labels = ProductionVec::new(production);
             labels.reserve(sequence.len())?;
             for label in sequence {

@@ -203,6 +203,7 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
+        let mut indexes = self.durable.path_indexes.read().clone();
         for (key, seq_json) in catalog.load_path_indexes()? {
             let label_sequences: Vec<Vec<String>> = serde_json::from_str(&seq_json)?;
             let (graph, name) = key.split_once("::").ok_or_else(|| {
@@ -222,8 +223,9 @@ impl Engine {
             let _ = store;
             let idx = self.bind_path_index_definition(&key, graph, &label_sequences)?;
             drop(graphs);
-            self.durable.path_indexes.write().insert(key, idx);
+            indexes.insert(&key, idx)?;
         }
+        *self.durable.path_indexes.write() = indexes;
         Ok(())
     }
 
@@ -235,10 +237,11 @@ impl Engine {
         if changed.is_empty() {
             return Ok(());
         }
-        self.durable.path_indexes.write().retain(|key, _| {
+        let mut indexes = self.durable.path_indexes.read().clone();
+        indexes.remove_where(|key| {
             key.split_once("::")
-                .is_none_or(|(graph, _)| !changed.contains(graph))
-        });
+                .is_some_and(|(graph, _)| changed.contains(graph))
+        })?;
         for (key, json) in catalog.load_path_indexes()? {
             let Some((graph, _)) = key.split_once("::") else {
                 continue;
@@ -255,8 +258,9 @@ impl Engine {
             })?;
             let _ = store;
             let index = self.bind_path_index_definition(&key, graph, &sequences)?;
-            self.durable.path_indexes.write().insert(key, index);
+            indexes.insert(&key, index)?;
         }
+        *self.durable.path_indexes.write() = indexes;
         Ok(())
     }
 }

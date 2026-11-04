@@ -96,7 +96,14 @@ fn same_metadata(selected: &SnapshotCut, original_oids: &GraphOidRegistry) {
         .captured(&selected.cut)
         .unwrap();
     assert_eq!(
-        **paths.get().unwrap().get("g::saved").unwrap(),
+        *paths
+            .get()
+            .unwrap()
+            .image("g::saved")
+            .unwrap()
+            .unwrap()
+            .get()
+            .unwrap(),
         CapturedPathIndex {
             paths: vec![CapturedPath {
                 sequence: vec!["edge".into()],

@@ -46,17 +46,11 @@ impl Engine {
             .durable
             .path_indexes
             .read()
-            .iter()
-            .map(|(key, index)| {
-                let rebound = index
-                    .rebind_persistent(
-                        Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
-                        Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
-                    )
-                    .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
-                Ok((key.clone(), rebound))
-            })
-            .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
+            .rebind_persistent(
+                self.storage.catalog.as_ref().expect("persistent catalog"),
+                self.storage.backend.as_ref().expect("persistent backend"),
+            )
+            .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
         self.durable.path_indexes.restore(&Arc::new(indexes));
         Ok(())
     }

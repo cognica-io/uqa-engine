@@ -68,10 +68,6 @@ impl Engine {
         self.publish_graph_candidate(store)?;
         self.forget_graph_oids(name)?;
         self.durable.graphs.write().remove(name);
-        self.durable
-            .path_indexes
-            .write()
-            .retain(|key, _| !key.starts_with(&format!("{name}::")));
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -393,20 +389,26 @@ impl Engine {
             Some(graph),
         )?;
         let key = format!("{graph}::{name}");
-        let idx = {
+        let indexes = {
             let graphs = self.durable.graphs.read();
             let Some(store) = graphs.get(graph) else {
                 return Ok(false);
             };
+            let mut indexes = self.durable.path_indexes.read().clone();
             match (&self.storage.catalog, &self.storage.backend) {
-                (Some(catalog), Some(backend)) => uqa_graph::PathIndex::build_persistent(
+                (Some(catalog), Some(backend)) => indexes.with_persistent_build(
                     std::sync::Arc::clone(catalog),
                     std::sync::Arc::clone(backend),
                     &key,
                     graph,
                     label_sequences,
                 ),
-                (None, None) => uqa_graph::PathIndex::build(store.as_ref(), graph, label_sequences),
+                (None, None) => {
+                    let index = uqa_graph::PathIndex::build(store.as_ref(), graph, label_sequences)
+                        .map_err(graph_store_error)?;
+                    indexes.insert(&key, index)?;
+                    Ok(indexes)
+                }
                 _ => {
                     return Err(super::StorageBackendError::Other(
                         "path-index catalog and backend must share a storage session".into(),
@@ -415,7 +417,7 @@ impl Engine {
             }
             .map_err(graph_store_error)?
         };
-        self.durable.path_indexes.write().insert(key, idx);
+        *self.durable.path_indexes.write() = indexes;
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -435,10 +437,12 @@ impl Engine {
         if !self.durable.path_indexes.read().contains_key(&key) {
             return Ok(false);
         }
+        let mut indexes = self.durable.path_indexes.read().clone();
+        let removed = indexes.remove(&key)?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_path_index(&key)?;
         }
-        let removed = self.durable.path_indexes.write().remove(&key).is_some();
+        *self.durable.path_indexes.write() = indexes;
         if removed {
             self.note_catalog_registry_changed();
         }
@@ -754,17 +758,17 @@ impl Engine {
     }
 
     fn invalidate_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
+        let prefix = format!("{graph}::");
+        let mut indexes = self.durable.path_indexes.read().clone();
+        indexes.remove_prefix(&prefix)?;
         if let Some(catalog) = &self.storage.catalog {
             for (key, _) in catalog.load_path_indexes()? {
-                if key.starts_with(&format!("{graph}::")) {
+                if key.starts_with(&prefix) {
                     catalog.drop_path_index(&key)?;
                 }
             }
         }
-        self.durable
-            .path_indexes
-            .write()
-            .retain(|key, _| !key.starts_with(&format!("{graph}::")));
+        *self.durable.path_indexes.write() = indexes;
         Ok(())
     }
 }

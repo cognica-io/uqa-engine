@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -41322,6 +41322,74 @@
       "invariant": "Resolution rejects the missing relation before native catalog/image publication; existing identities and membership are unchanged.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_catalog_capture_shares_constant_work_roots_and_original_materializations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path registry capture",
+      "workload": "Capture 1, 64 and 4096 registrations sharing a large materialization, then replace names and retire source roots.",
+      "invariant": "Capture allocates no nodes or payload, exact cached admission is independent per cut, and escaping children retain original evaluated data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_publication_and_removal_preserve_root_and_capability_on_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path publication admission",
+      "workload": "Exhaust a registry allowance before replacement, selected deletion and graph-prefix deletion; then admit and remove a query view.",
+      "invariant": "Denied publication preserves the complete original root, footprint and non-memory count; unsupported memory capture cannot evaluate a graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_children_keep_original_admission_and_cancellation_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path child lifetime",
+      "workload": "Deny child construction, fund it, select the same child again and retire independent parents before cancellation.",
+      "invariant": "Failed child construction leaks no allowance, repeat selection allocates nothing, and original cancellation remains independent after parent retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_image_admits_actual_immutable_capacity_without_copying_or_replaying_paths",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/snapshot/tests.rs",
+      "capability": "Native path materialization footprint",
+      "workload": "Build exact empty, duplicate, separator-bearing and 32 KiB label sequences over a 129-vertex chain; compare actual live allocations and captured pointers.",
+      "invariant": "Cached footprint covers every owning allocation, denied capture allocates nothing and successful capture shares exact evaluated pairs without a graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_path_registry_admission_preserves_physical_materialization_and_transaction_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/path_indexes.rs",
+      "capability": "Path registry transaction recovery",
+      "workload": "Deny creation, replacement, deletion, graph mutation and graph deletion on memory, native SQLite, SQLite KV and redb, then roll back, reuse and reopen.",
+      "invariant": "Typed 53200 admission failures preserve original definitions, evaluated pairs and graph membership; funded operations and persistent reopen retain their exact results.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     }
   ]

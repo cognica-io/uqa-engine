@@ -13,7 +13,14 @@ use std::sync::Arc;
 use uqa_storage::{CatalogFacade, PersistentStorageBackend};
 
 type Pairs = BTreeSet<(u64, u64)>;
-type MemoryPaths = BTreeMap<Vec<String>, Pairs>;
+
+mod memory;
+use memory::MemoryPaths;
+
+mod catalog;
+mod snapshot;
+pub use catalog::{CapturedPathIndexes, PathIndexCatalog};
+pub use snapshot::PathIndexImageSnapshot;
 
 mod capture;
 pub use capture::{CapturedPath, CapturedPathIndex};
@@ -104,7 +111,7 @@ impl PathIndex {
             paths.insert(sequence.clone(), pairs);
         }
         Ok(Self {
-            storage: PathStorage::Memory(Arc::new(paths)),
+            storage: PathStorage::Memory(Arc::new(MemoryPaths::from_entries(paths)?)),
         })
     }
 
@@ -138,31 +145,12 @@ impl PathIndex {
         graph: &str,
         sequences: &[Vec<String>],
     ) -> GraphStoreResult<Self> {
-        let definition = serde_json::to_string(sequences).map_err(|error| json_error(&error))?;
-        let mut store = observed_store(Arc::clone(&catalog), Arc::clone(&backend))?;
-        store.transaction(|store| {
-            catalog.save_path_index(key, &definition)?;
-            catalog.clear_path_index_data(key)?;
-            for sequence in sequences {
-                let sequence_key =
-                    serde_json::to_string(sequence).map_err(|error| json_error(&error))?;
-                let mut page = Vec::with_capacity(256);
-                visit_pairs(store, graph, sequence, |pair| {
-                    page.push(pair);
-                    if page.len() == 256 {
-                        catalog.save_path_index_pairs(key, &sequence_key, &page)?;
-                        page.clear();
-                    }
-                    Ok(())
-                })?;
-                if !page.is_empty() {
-                    catalog.save_path_index_pairs(key, &sequence_key, &page)?;
-                }
-            }
-            catalog.finish_path_index_data(key, graph, &definition)?;
-            Ok(())
-        })?;
-        Self::open_persistent(catalog, backend, key, graph, sequences)
+        let index = Self::open_persistent(catalog, backend, key, graph, sequences)?;
+        let PathStorage::Persistent(durable) = &index.storage else {
+            unreachable!("persistent constructor publishes a durable definition")
+        };
+        durable.materialize()?;
+        Ok(index)
     }
 
     /// Rebind only the physical session, never copy the index's data.
@@ -202,7 +190,9 @@ impl PathIndex {
 
     pub fn lookup(&self, sequence: &[String]) -> GraphStoreResult<Option<Pairs>> {
         match &self.storage {
-            PathStorage::Memory(paths) => Ok(paths.get(sequence).cloned()),
+            PathStorage::Memory(paths) => Ok(paths
+                .get(sequence)
+                .map(|pairs| pairs.iter().copied().collect())),
             PathStorage::ReadView {
                 store,
                 graph,
@@ -233,7 +223,7 @@ impl PathIndex {
 
     pub fn has_path(&self, sequence: &[String]) -> bool {
         match &self.storage {
-            PathStorage::Memory(paths) => paths.contains_key(sequence),
+            PathStorage::Memory(paths) => paths.get(sequence).is_some(),
             PathStorage::ReadView { sequences, .. } => {
                 sequences.iter().any(|candidate| candidate == sequence)
             }
@@ -246,7 +236,12 @@ impl PathIndex {
 
     pub fn indexed_paths(&self) -> Vec<String> {
         let paths: BTreeSet<String> = match &self.storage {
-            PathStorage::Memory(paths) => paths.keys().map(|sequence| sequence.join("/")).collect(),
+            PathStorage::Memory(paths) => paths
+                .image
+                .paths
+                .iter()
+                .map(|path| path.sequence.join("/"))
+                .collect(),
             PathStorage::ReadView { sequences, .. } => sequences
                 .iter()
                 .map(|sequence| sequence.join("/"))
@@ -262,6 +257,35 @@ impl PathIndex {
 }
 
 impl DurablePathIndex {
+    fn materialize(&self) -> GraphStoreResult<()> {
+        let mut store = observed_store(Arc::clone(&self.catalog), Arc::clone(&self.backend))?;
+        store.transaction(|store| {
+            self.catalog.save_path_index(&self.key, &self.definition)?;
+            self.catalog.clear_path_index_data(&self.key)?;
+            for sequence in &self.sequences {
+                let sequence_key =
+                    serde_json::to_string(sequence).map_err(|error| json_error(&error))?;
+                let mut page = Vec::with_capacity(256);
+                visit_pairs(store, &self.graph, sequence, |pair| {
+                    page.push(pair);
+                    if page.len() == 256 {
+                        self.catalog
+                            .save_path_index_pairs(&self.key, &sequence_key, &page)?;
+                        page.clear();
+                    }
+                    Ok(())
+                })?;
+                if !page.is_empty() {
+                    self.catalog
+                        .save_path_index_pairs(&self.key, &sequence_key, &page)?;
+                }
+            }
+            self.catalog
+                .finish_path_index_data(&self.key, &self.graph, &self.definition)?;
+            Ok(())
+        })
+    }
+
     fn lookup(&self, sequence: &[String]) -> GraphStoreResult<Pairs> {
         struct ReadCheckpoint(Option<Arc<dyn PersistentStorageBackend>>);
         impl Drop for ReadCheckpoint {

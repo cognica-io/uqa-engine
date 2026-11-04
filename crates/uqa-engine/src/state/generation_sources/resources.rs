@@ -52,8 +52,8 @@ resource_sources! {
         |values, control| resources(values, control, uqa_graph::GraphStoreHandle::capture_image_with_control);
     models: uqa_ml::model_catalog::ModelCatalog => uqa_ml::model_catalog::CapturedModelCatalog,
         uqa_ml::model_catalog::ModelCatalog::capture;
-    path_indexes: BTreeMap<String, uqa_graph::PathIndex> => CapturedResources<uqa_core::memory::Budgeted<uqa_graph::CapturedPathIndex>>,
-        |values, control| resources(values, control, uqa_graph::PathIndex::capture_memory_with_control);
+    path_indexes: uqa_graph::PathIndexCatalog => uqa_graph::CapturedPathIndexes,
+        uqa_graph::PathIndexCatalog::capture;
     named_analyzers: uqa_storage::analyzer_catalog::AnalyzerCatalog => uqa_storage::analyzer_catalog::CapturedAnalyzers,
         uqa_storage::analyzer_catalog::AnalyzerCatalog::capture;
     scoring_params: uqa_storage::catalog::scoring_params::ScoringParameters => uqa_storage::catalog::scoring_params::CapturedScoringParameters, uqa_storage::catalog::scoring_params::ScoringParameters::capture;
