@@ -58,9 +58,6 @@ impl SnapshotSources {
             catalog: durable.foreign_catalog.clone(),
         })?;
         let metadata = registry.cell(TableMetadataCaptureSource::new(
-            tables
-                .iter()
-                .map(|(name, table)| (name.clone(), table.persistence)),
             durable.catalog_indexes.clone(),
             durable.table_field_analyzers.clone(),
         ))?;

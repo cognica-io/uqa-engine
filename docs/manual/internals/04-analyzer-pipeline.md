@@ -264,3 +264,5 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 - [Analyzer SQL](../sql/05-analyzers.md)
 - [Analyzer pipeline tutorial](../tutorials/03-analyzer-pipelines.md)
 - [Search and ranking internals](05-search-and-ranking.md)
+
+Historical table-field bindings use Storage’s immutable `FieldAnalyzerCatalog`. Native publication records each resolved relation’s actual persistence and prepares both exact index/search image sides before analyzer effects. Temporary runtime membership remains separate from the durable encoded root; matching index/field capture retains those already selected roots without copying table membership. Selected children keep their original image admission and cancellation after parent and Engine retirement.

@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -41254,6 +41254,74 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_capture_excludes_temporary_roots_without_cardinality_work_or_pipeline_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Native historical field capture",
+      "workload": "Capture 1, 64 and 4096 bindings beside a large temporary binding, then retire executable owners and retain one historical child.",
+      "invariant": "Capture allocates nothing, admits the exact cached durable closure and preserves both historical sides without temporary payload or compiled pipelines.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_publication_rename_and_removal_preserve_all_roots_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Native field publication atomicity",
+      "workload": "Deny field insertion, field/table rename and removal, then fund each transition and clear durable membership.",
+      "invariant": "Every rejected successor preserves all three roots and original leases; successful transitions keep exact revisions and temporary partition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_children_preserve_admission_and_original_cancellation_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Historical field child ownership",
+      "workload": "Deny selection, fund it once, reuse the same child and retire the parent before cancelling its original scope.",
+      "invariant": "No payload reservation is lost on denial or charged twice; escaped sides retain original cancellation and release final admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_field_admission_preserves_bindings_postings_and_schema_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Native field failure recovery",
+      "workload": "Deny analyzer assignment, GIN creation/removal, column/table rename and deletion on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Rollback preserves original bindings, stored definitions, table schema and searchable postings; funded changes and persistent reopen remain usable.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "field_publication_rejects_missing_relations_before_catalog_or_image_membership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Resolved field publication membership",
+      "workload": "Assign a named analyzer to a missing relation beside an existing indexed table.",
+      "invariant": "Resolution rejects the missing relation before native catalog/image publication; existing identities and membership are unchanged.",
+      "case_names": [
+        ""
       ]
     }
   ]

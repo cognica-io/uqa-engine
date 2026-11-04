@@ -242,6 +242,15 @@ impl Engine {
             phase,
             AnalyzerBindingOwner::Field,
         );
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .insert(
+                &(table_name.clone(), field.to_owned()),
+                candidate.clone(),
+                t.persistence == uqa_sql::ast::RelationPersistence::Temporary,
+                &self.runtime.cancellation,
+            )
+            .map_err(|error| storage_error("prepare field analyzer publication", &error))?;
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
@@ -273,10 +282,7 @@ impl Engine {
                 storage_error("persist table analyzer", &error),
             ));
         }
-        self.durable
-            .table_field_analyzers
-            .write()
-            .insert((table_name, field.to_owned()), candidate);
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();

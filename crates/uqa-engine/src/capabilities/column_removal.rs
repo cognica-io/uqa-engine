@@ -167,11 +167,11 @@ impl ColumnDropIndexes for Engine {
         }
         Ok(())
     }
-    fn remove_field_analyzer(&self, table: &str, column: &str) {
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(name, field), _| !(name == table && field == column));
+    fn field_analyzers(&self) -> std::sync::Arc<crate::TableFieldAnalyzerRegistry> {
+        self.durable.table_field_analyzers.snapshot()
+    }
+    fn publish_field_analyzers(&self, catalog: crate::TableFieldAnalyzerRegistry) {
+        *self.durable.table_field_analyzers.write() = catalog;
     }
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)

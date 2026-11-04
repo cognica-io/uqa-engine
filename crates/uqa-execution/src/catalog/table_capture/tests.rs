@@ -5,6 +5,9 @@
 //
 
 use super::*;
+use uqa_core::{CancellationToken, RelationIdentity};
+use uqa_sql::ast::RelationPersistence;
+use uqa_storage::FieldAnalyzerBinding;
 use uqa_storage::{
     analyzer_image::{write_analyzer_image, AnalyzerImageSnapshot},
     memory_capture::MemoryCaptureRegistry,
@@ -65,22 +68,24 @@ fn fixture() -> TableMetadataCaptureSource {
     indexes
         .insert(excluded_index, RelationPersistence::Temporary)
         .unwrap();
-    let analyzers = BTreeMap::from([
-        ((selected.qualified_name(), "body".into()), binding()),
-        (
-            (temporary.qualified_name(), "x".repeat(1 << 20)),
+    let mut analyzers = FieldAnalyzerCatalog::default();
+    analyzers
+        .insert(
+            &(selected.qualified_name(), "body".into()),
+            binding(),
+            false,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    analyzers
+        .insert(
+            &(temporary.qualified_name(), "x".repeat(1 << 20)),
             excluded_binding,
-        ),
-    ]);
-    TableMetadataCaptureSource::new(
-        [
-            (selected, RelationPersistence::Permanent),
-            (temporary, RelationPersistence::Temporary),
-            (unlogged, RelationPersistence::Unlogged),
-        ],
-        Arc::new(indexes),
-        Arc::new(analyzers),
-    )
+            true,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    TableMetadataCaptureSource::new(Arc::new(indexes), Arc::new(analyzers))
 }
 
 fn bytes(image: &AnalyzerImageSnapshot) -> Vec<u8> {
@@ -123,13 +128,18 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
             .without_table("public.temporary_membership")
             .unwrap(),
     );
-    Arc::make_mut(&mut selected_only.analyzers)
-        .retain(|(table, _), _| table != "public.temporary_membership");
+    selected_only.analyzers = Arc::new(
+        selected_only
+            .analyzers
+            .without_table("public.temporary_membership")
+            .unwrap(),
+    );
     let other_control = StorageReadControl::with_limit(16 << 10);
     let mut other = None;
     let without_temporary = allocation_counter::measure(|| {
         other = Some(selected_only.capture(&other_control).unwrap());
     });
+    assert_eq!(allocated.count_total, 0);
     assert_eq!(allocated.bytes_current, without_temporary.bytes_current);
     assert_eq!(allocated.bytes_total, without_temporary.bytes_total);
     assert_eq!(allocated.count_total, without_temporary.count_total);
@@ -148,7 +158,9 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
     }
     drop(source);
     assert_eq!(captured.analyzers.len(), 1);
-    let (name, saved) = &captured.analyzers[0];
+    let name = captured.analyzers.keys().next().unwrap();
+    let required = control.memory().used();
+    let saved = captured.analyzers.binding(name).unwrap().unwrap();
     assert_eq!(
         name,
         &("\"Quoted.Schema\".\"Table.\"\"한글\"".into(), "body".into())
@@ -162,8 +174,7 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
         expected
     );
     assert_ne!(expected[0], expected[1]);
-    let required = control.memory().used();
-    drop(captured);
+    drop((saved, captured));
     assert_eq!(control.memory().used(), 0);
     let source = fixture();
     let denied = StorageReadControl::with_limit(required - 1);
@@ -189,11 +200,20 @@ fn table_metadata_rejects_missing_or_invalid_membership_before_index_publication
         assert!(rows
             .iter()
             .all(|(key, row)| std::ptr::eq(row, source.indexes.get(key).unwrap())));
-        let control = StorageReadControl::with_limit(16 << 10);
-        let mut source = fixture();
-        Arc::make_mut(&mut source.analyzers).insert((invalid.into(), "body".into()), binding());
-        assert!(source.capture(&control).is_err());
-        assert_eq!(control.memory().used(), 0);
+        if invalid.starts_with('"') {
+            let mut analyzers = source.analyzers.as_ref().clone();
+            assert!(analyzers
+                .insert(
+                    &(invalid.into(), "body".into()),
+                    binding(),
+                    false,
+                    &CancellationToken::new()
+                )
+                .is_err());
+            assert!(analyzers
+                .iter()
+                .all(|(key, value)| std::ptr::eq(value, source.analyzers.get(key).unwrap())));
+        }
     }
 }
 
@@ -214,12 +234,17 @@ fn table_metadata_generations_retain_independent_controls_after_source_retiremen
     let saved = key.captured(&cut).unwrap();
     assert_eq!(saved.get().unwrap().indexes.len(), 2);
     drop((cut, registry, key));
-    let side = &saved.get().unwrap().analyzers[0].1.index.image;
+    let fields = &saved.get().unwrap().analyzers;
+    let child = fields
+        .binding(fields.keys().next().unwrap())
+        .unwrap()
+        .unwrap();
+    let side = &child.index.image;
     control.cancellation().cancel();
     assert!(side
         .write_image(&mut Vec::new(), &StorageReadControl::with_limit(0))
         .is_err());
     assert!(saved.get().is_err());
-    drop(saved);
+    drop((child, saved));
     assert_eq!(control.memory().used(), 0);
 }

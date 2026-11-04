@@ -213,7 +213,7 @@ pub use uqa_storage::FtsIndexStat;
 
 pub use uqa_scoring::ScoringMode;
 
-type TableFieldAnalyzerRegistry = BTreeMap<(String, String), uqa_storage::FieldAnalyzerBinding>;
+type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
 type SessionPortalViewSnapshots = Arc<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots = Arc<uqa_sql::routines::registry::RoutineRegistry>;

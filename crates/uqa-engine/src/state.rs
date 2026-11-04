@@ -220,7 +220,7 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) table_field_analyzers: CatalogCell<
         TableFieldAnalyzerRegistry,
-        uqa_storage::analyzer_binding::capture::CapturedFieldAnalyzerBindings,
+        uqa_storage::analyzer_binding::registry::CapturedFieldAnalyzers,
     >,
     pub(super) foreign_wrappers: CatalogCell<
         uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
@@ -322,7 +322,7 @@ impl DurableCatalogState {
             named_analyzers: CatalogCell::new(
                 uqa_storage::analyzer_catalog::AnalyzerCatalog::default(),
             ),
-            table_field_analyzers: CatalogCell::new(BTreeMap::new()),
+            table_field_analyzers: CatalogCell::new(TableFieldAnalyzerRegistry::default()),
             foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
             foreign_servers: CatalogCell::new(
                 uqa_sql::catalog::foreign_server::ForeignServers::new(),

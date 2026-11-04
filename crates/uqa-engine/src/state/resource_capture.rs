@@ -51,7 +51,7 @@ impl DurableCatalogState {
         state.table_field_analyzers = CatalogCell::capture_resource(
             state.table_field_analyzers.snapshot(),
             registry,
-            uqa_storage::analyzer_binding::capture::fields,
+            uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog::capture,
         )?;
         Ok(state)
     }

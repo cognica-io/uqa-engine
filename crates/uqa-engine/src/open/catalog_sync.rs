@@ -599,14 +599,7 @@ impl Engine {
     /// back analyzer or vector-index binding cannot be applied to the fresh
     /// stores during the intermediate table reload.
     pub(super) fn clear_persistent_table_bindings_for_catalog_reload(&self) {
-        let temporary_schema = self.temporary_schema_name();
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(table, _), _| {
-                crate::RelationIdentity::from_legacy_name(table)
-                    .is_ok_and(|relation| relation.schema == temporary_schema)
-            });
+        self.durable.table_field_analyzers.write().clear_durable();
         self.durable.catalog_indexes.write().clear_durable();
     }
 

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Retain named analyzer catalogs and their encoded resources as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors or dictionaries, and does not retain executable pipelines or decoded models. Failed native publication preserves the previous catalog and stored definitions; historical field-binding and complete Engine backup integration remain in progress.
+- Retain named and historical field analyzer catalogs as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors, dictionaries or table membership, and does not retain executable pipelines or decoded models. Temporary field bindings remain outside the durable encoded root; failed native publication preserves previous catalogs and stored definitions. Complete Engine backup integration remains in progress.
 
 - Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
 
