@@ -109,13 +109,17 @@ class ForeignHandlerHistoryTests(unittest.TestCase):
             "draft": True, "base": {"sha": self.base}}}
         self.assertFalse(select(self.root, event, "pull_request", revision)["required"])
 
-    def test_event_only_changes_do_not_repeat_unchanged_feature_commands(self):
+    def test_scheduling_changes_do_not_repeat_unchanged_feature_commands(self):
         path = ".github/workflows/fdw-features.yml"
         workflow = "name: Foreign handlers\non:\n  pull_request:\n\npermissions:\n  contents: read\nenv:\n  CARGO_INCREMENTAL: '0'\njobs:\n  features:\n    run: cargo test -p uqa-fdw\n"
         base = self.commit(path, workflow)
         ready = workflow.replace("  pull_request:\n", "  pull_request:\n    types: [ready_for_review]\n")
         revision = self.commit(path, ready)
         self.assertFalse(self.pr(base, revision)["required"])
+        for policy in ("false", "${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}"):
+            scheduled = ready.replace("env:\n", "concurrency:\n  group: fixture\n  cancel-in-progress: " + policy + "\nenv:\n")
+            revision = self.commit(path, scheduled)
+            self.assertFalse(self.pr(base, revision)["required"])
         revision = self.commit("scripts/fdw_ci.py", "selector policy\n")
         self.assertFalse(self.pr(base, revision)["required"])
         revision = self.commit("crates/uqa-fdw/src/lib.rs", "product correction\n")
@@ -217,7 +221,7 @@ class ForeignHandlerWorkflowTests(unittest.TestCase):
     def test_reuse_is_exact_and_evidence_is_saved_only_after_the_complete_matrix(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/fdw-features.yml").read_text()
         self.assertNotIn('      - "crates/**"', workflow)
-        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}", workflow)
         self.assertIn("needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'", workflow)
         self.assertNotIn("restore-keys:", workflow)
         self.assertIn("os: [ubuntu-24.04, macos-15]", workflow)

@@ -51,7 +51,7 @@ def affected(kind: str, path: str) -> bool:
 
 
 def execution_definition(kind: str, contents: bytes) -> bytes:
-    """Ignore selection wiring only; commands, matrices, environments and tools remain inputs."""
+    """Ignore event, concurrency and selection wiring; commands, matrices, environments and tools remain inputs."""
     before, separator, remaining = contents.partition(b"\non:\n")
     if not separator:
         raise ValueError("workflow event declaration is unavailable")
@@ -59,6 +59,7 @@ def execution_definition(kind: str, contents: bytes) -> bytes:
     if following is None:
         raise ValueError("workflow execution definition is unavailable")
     execution = before + b"\n" + remaining[following.start():]
+    execution = re.sub(rb"(?m)^concurrency:\n(?:[ \t]+[^\n]*\n|\n)*", b"", execution)
     prefix, separator, jobs = execution.partition(b"\njobs:\n")
     if not separator:
         raise ValueError("workflow jobs are unavailable")
