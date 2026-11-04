@@ -10,6 +10,8 @@ use crate::RelationIdentity;
 
 mod snapshot;
 pub use snapshot::CatalogIndexSnapshot;
+mod registry;
+pub use registry::{CatalogIndexRegistry, CatalogIndexRegistryIter};
 
 /// One row from the secondary-index registry.
 #[derive(Debug, Clone)]

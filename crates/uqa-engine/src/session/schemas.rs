@@ -31,10 +31,18 @@ impl Engine {
         &self,
     ) -> StorageBackendResult<uqa_core::catalog_index::CatalogIndexSnapshot> {
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.catalog_indexes.clone().into());
+            return Ok(
+                uqa_core::catalog_index::CatalogIndexSnapshot::from_registry(
+                    snapshot.catalog_indexes.clone(),
+                ),
+            );
         }
         self.synchronize_catalog_registries()?;
-        Ok(self.durable.catalog_indexes.snapshot().into())
+        Ok(
+            uqa_core::catalog_index::CatalogIndexSnapshot::from_registry(
+                self.durable.catalog_indexes.snapshot(),
+            ),
+        )
     }
 
     /// Create a durable schema catalog object. Returns `true` when a new

@@ -77,13 +77,13 @@ pub fn rename_sql_routine(
         .dependents
         .rewrite_schema_routine_identity(&target.binding, &target.new_name)
         .map_err(|error| {
-            SQLError::Internal(format!("rewrite schema routine dependencies: {error}"))
+            crate::storage_errors::storage_error("rewrite schema routine dependencies", &error)
         })?;
     context
         .dependents
         .rewrite_view_routine_identity(&target.binding, &target.new_name)
         .map_err(|error| {
-            SQLError::Internal(format!("rewrite view routine dependencies: {error}"))
+            crate::storage_errors::storage_error("rewrite view routine dependencies", &error)
         })?;
     context
         .dependents
@@ -155,13 +155,13 @@ pub fn relocate_sql_routines(
             .dependents
             .rewrite_schema_routine_identity(&target.binding, &target.new_name)
             .map_err(|error| {
-                SQLError::Internal(format!("rewrite schema routine dependencies: {error}"))
+                crate::storage_errors::storage_error("rewrite schema routine dependencies", &error)
             })?;
         context
             .dependents
             .rewrite_view_routine_identity(&target.binding, &target.new_name)
             .map_err(|error| {
-                SQLError::Internal(format!("rewrite view routine dependencies: {error}"))
+                crate::storage_errors::storage_error("rewrite view routine dependencies", &error)
             })?;
         context
             .dependents

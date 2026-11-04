@@ -8,7 +8,7 @@ use super::*;
 use uqa_storage::{
     analyzer_image::{write_analyzer_image, AnalyzerImageSnapshot},
     memory_capture::MemoryCaptureRegistry,
-    AnalyzerBindingOwner, AnalyzerPhase, BoundAnalyzerRevision,
+    AnalyzerBindingOwner, AnalyzerPhase, BoundAnalyzerRevision, CatalogIndexRow,
 };
 
 fn binding() -> FieldAnalyzerBinding {
@@ -55,14 +55,16 @@ fn fixture() -> TableMetadataCaptureSource {
     excluded_index.definition_json = Some("x".repeat(1 << 20));
     let mut excluded_binding = binding();
     excluded_binding.index.name = Some("x".repeat(1 << 20));
-    let indexes = [
-        index(&selected, "saved"),
-        index(&unlogged, "saved"),
-        excluded_index,
-    ]
-    .into_iter()
-    .map(|row| (row.relation.clone(), row))
-    .collect();
+    let mut indexes = crate::catalog::index::registry::CatalogIndexes::default();
+    indexes
+        .insert(index(&selected, "saved"), RelationPersistence::Permanent)
+        .unwrap();
+    indexes
+        .insert(index(&unlogged, "saved"), RelationPersistence::Unlogged)
+        .unwrap();
+    indexes
+        .insert(excluded_index, RelationPersistence::Temporary)
+        .unwrap();
     let analyzers = BTreeMap::from([
         ((selected.qualified_name(), "body".into()), binding()),
         (
@@ -115,8 +117,12 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
         allocation_counter::measure(|| captured = Some(source.capture(&control).unwrap()));
     let captured = captured.unwrap();
     let mut selected_only = fixture();
-    Arc::make_mut(&mut selected_only.indexes)
-        .retain(|_, row| row.table_name != "public.temporary_membership");
+    selected_only.indexes = Arc::new(
+        selected_only
+            .indexes
+            .without_table("public.temporary_membership")
+            .unwrap(),
+    );
     Arc::make_mut(&mut selected_only.analyzers)
         .retain(|(table, _), _| table != "public.temporary_membership");
     let other_control = StorageReadControl::with_limit(16 << 10);
@@ -171,14 +177,19 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
 }
 
 #[test]
-fn table_metadata_capture_rejects_missing_or_invalid_original_relations_without_partial_output() {
+fn table_metadata_rejects_missing_or_invalid_membership_before_index_publication_or_field_capture()
+{
     for invalid in ["missing", "\"unterminated"] {
-        let mut source = fixture();
-        let rows = Arc::make_mut(&mut source.indexes);
-        rows.values_mut().next().unwrap().table_name = invalid.into();
+        let source = fixture();
+        let mut rows = source.indexes.as_ref().clone();
+        let mut row = rows.values().next().unwrap().clone();
+        row.table_name = invalid.into();
+        let catalog = crate::catalog::test_support::empty_catalog();
+        assert!(rows.insert_in(row, catalog.snapshot()).is_err());
+        assert!(rows
+            .iter()
+            .all(|(key, row)| std::ptr::eq(row, source.indexes.get(key).unwrap())));
         let control = StorageReadControl::with_limit(16 << 10);
-        assert!(source.capture(&control).is_err());
-        assert_eq!(control.memory().used(), 0);
         let mut source = fixture();
         Arc::make_mut(&mut source.analyzers).insert((invalid.into(), "body".into()), binding());
         assert!(source.capture(&control).is_err());

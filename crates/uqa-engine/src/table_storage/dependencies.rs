@@ -31,88 +31,11 @@ impl Engine {
         .map_err(StorageBackendError::Other)
     }
 
-    pub(super) fn catalog_index_columns(
-        row: &CatalogIndexRow,
-    ) -> StorageBackendResult<Vec<uqa_sql::ast::IndexKey>> {
-        serde_json::from_str(&row.columns_json).map_err(StorageBackendError::from)
-    }
-
     pub(super) fn catalog_index_references_column(
         row: &CatalogIndexRow,
         column: &str,
     ) -> StorageBackendResult<bool> {
         uqa_execution::catalog::index::index_references_column(row, column)
-    }
-
-    pub(super) fn catalog_index_with_renamed_column(
-        mut row: CatalogIndexRow,
-        from: &str,
-        to: &str,
-    ) -> StorageBackendResult<CatalogIndexRow> {
-        let mut columns = Self::catalog_index_columns(&row)?;
-        let mut definition = crate::catalog_indexes::index_definition(&row)?;
-        if definition.key_names.is_empty() {
-            definition.key_names = columns
-                .iter()
-                .filter_map(uqa_sql::ast::IndexKey::column)
-                .chain(definition.included_columns.iter().map(String::as_str))
-                .map(str::to_owned)
-                .collect();
-        }
-        for column in &mut columns {
-            match column {
-                uqa_sql::ast::IndexKey::Column(name) => {
-                    if name == from {
-                        *name = to.into();
-                    }
-                }
-                uqa_sql::ast::IndexKey::Expression(expression) => {
-                    rename_schema_expr_column(expression, from, to)?;
-                }
-            }
-        }
-        row.columns_json = serde_json::to_string(&columns)?;
-        for column in &mut definition.included_columns {
-            if column == from {
-                *column = to.into();
-            }
-        }
-        if let Some(predicate) = definition.predicate.as_deref_mut() {
-            rename_schema_expr_column(predicate, from, to)?;
-        }
-        row.definition_json = Some(serde_json::to_string(&definition)?);
-        Ok(row)
-    }
-
-    pub(super) fn rename_catalog_index_table_refs(&self, from: &str, to: &str) {
-        for row in self.durable.catalog_indexes.write().values_mut() {
-            if row.table_name == from {
-                row.table_name = to.to_string();
-            }
-        }
-    }
-
-    pub(super) fn rename_catalog_index_column_refs(
-        &self,
-        table: &str,
-        from: &str,
-        to: &str,
-    ) -> StorageBackendResult<()> {
-        let mut rows = self.durable.catalog_indexes.write();
-        let mut updates = Vec::new();
-        for (name, row) in rows.iter() {
-            if row.table_name == table && Self::catalog_index_references_column(row, from)? {
-                let renamed = Self::catalog_index_with_renamed_column(row.clone(), from, to)?;
-                updates.push((name.clone(), renamed));
-            }
-        }
-        for (name, renamed) in updates {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog.save_catalog_index_row(&renamed)?;
-            }
-            rows.insert(name, renamed);
-        }
-        Ok(())
     }
 
     pub(crate) fn table_entries(&self) -> Vec<(String, Arc<TableState>)> {

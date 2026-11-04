@@ -69,12 +69,8 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
         &mut allocate,
     )
     .unwrap();
-    snapshot.definitions.catalog_indexes = change
-        .upserts
-        .into_iter()
-        .map(|row| (row.relation.clone(), row))
-        .collect::<BTreeMap<_, _>>()
-        .into();
+    snapshot.definitions.catalog_indexes =
+        Arc::new(crate::catalog::test_support::index_rows(change.upserts));
     (relation, CatalogReadView::new(snapshot))
 }
 
@@ -86,9 +82,9 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
     let new = RelationIdentity::new("public", "renamed");
     let mut refreshed = before.snapshot().clone();
     let current_rows = Arc::make_mut(&mut refreshed.definitions.catalog_indexes);
-    let mut renamed = current_rows.remove(&old).unwrap();
+    let mut renamed = current_rows.get(&old).unwrap().clone();
     renamed.relation = new.clone();
-    current_rows.insert(new.clone(), renamed);
+    current_rows.rename(&old, renamed).unwrap();
     Arc::make_mut(&mut refreshed.tables.get_mut(&root).unwrap().keys)[0].name =
         Some(new.name.clone());
     validate_snapshots(
@@ -107,12 +103,12 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
                 .columns
                 .push("other".into()),
             _ => {
-                let row = Arc::make_mut(&mut changed.definitions.catalog_indexes)
-                    .get_mut(&new)
-                    .unwrap();
-                let mut definition = super::super::index_definition(row).unwrap();
+                let rows = Arc::make_mut(&mut changed.definitions.catalog_indexes);
+                let mut row = rows.get(&new).unwrap().clone();
+                let mut definition = super::super::index_definition(&row).unwrap();
                 definition.catalog.as_mut().unwrap().identity.object_id = [99; 16];
                 row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+                rows.replace(row).unwrap();
             }
         }
         let error = validate_snapshots(
@@ -129,7 +125,7 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
         );
     }
     let mut removal = rows.as_ref().clone();
-    removal.remove(&old);
+    removal.remove(&old).unwrap();
     let error = validate_snapshots(
         &before,
         &before,
@@ -157,11 +153,10 @@ fn catalog_recheck_validates_metadata_without_planning_physical_builds() {
     );
 
     let mut invalid = before.snapshot().clone();
-    Arc::make_mut(&mut invalid.definitions.catalog_indexes)
-        .values_mut()
-        .next()
-        .unwrap()
-        .definition_json = Some("invalid JSON".into());
+    let invalid_rows = Arc::make_mut(&mut invalid.definitions.catalog_indexes);
+    let mut row = invalid_rows.values().next().unwrap().clone();
+    row.definition_json = Some("invalid JSON".into());
+    invalid_rows.replace(row).unwrap();
     assert!(validate_snapshots(
         &before,
         &before,
@@ -214,7 +209,8 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
             row.definition_json = Some(serde_json::to_string(&definition).unwrap());
             snapshot.tables.insert(relation, table);
             Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
-                .insert(row.relation.clone(), row);
+                .insert(row, uqa_sql::ast::RelationPersistence::Permanent)
+                .unwrap();
         }
         let catalog = CatalogReadView::new(snapshot);
         super::super::validation::PARTITION_TABLE_VISITS.set(0);

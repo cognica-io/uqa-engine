@@ -60,7 +60,7 @@ fn names(
 #[test]
 fn keys_are_found_once_for_the_same_constraints_and_index_rows() {
     let cache = EnforcedKeyCache::default();
-    let indexes = Arc::new(IndexRows::new());
+    let indexes = Arc::new(IndexRows::default());
     let lookups = Cell::new(0);
     let first = [constraint("a")];
     assert_eq!(
@@ -85,7 +85,7 @@ fn keys_are_found_once_for_the_same_constraints_and_index_rows() {
         ["a_key", "b_key"]
     );
     assert_eq!(lookups.get(), 3);
-    let republished = Arc::new(IndexRows::new());
+    let republished = Arc::new(IndexRows::default());
     assert_eq!(
         names(&cache, "public.t", &second, &republished, &lookups),
         ["a_key", "b_key"]
@@ -108,7 +108,7 @@ fn keys_are_found_once_for_the_same_constraints_and_index_rows() {
 #[test]
 fn the_keys_of_a_partition_index_and_failed_lookups_are_not_kept() {
     let cache = EnforcedKeyCache::default();
-    let indexes = Arc::new(IndexRows::new());
+    let indexes = Arc::new(IndexRows::default());
     let lookups = Cell::new(0);
     for _ in 0..2 {
         let keys = cache
@@ -143,7 +143,7 @@ fn the_keys_of_a_partition_index_and_failed_lookups_are_not_kept() {
 #[test]
 fn the_oldest_table_makes_room() {
     let cache = EnforcedKeyCache::default();
-    let indexes = Arc::new(IndexRows::new());
+    let indexes = Arc::new(IndexRows::default());
     let lookups = Cell::new(0);
     for table in 0..=TABLES {
         names(&cache, &format!("public.t{table}"), &[], &indexes, &lookups);

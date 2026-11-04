@@ -26,7 +26,7 @@ mod type_changes;
 pub use context::*;
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
-    uqa_sql::catalog::errors::storage_error(action, &error)
+    crate::storage_errors::storage_error(action, &error)
 }
 /// `ATExecAddColumn` checks the partition and column name before transforming the declaration. An existing ordinary column with `IF NOT EXISTS` skips its type and clauses entirely.
 fn check_added_column_declaration<S: Clone + 'static>(

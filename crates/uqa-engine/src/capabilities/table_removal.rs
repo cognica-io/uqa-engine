@@ -50,7 +50,12 @@ impl TableRemovalPublication for Engine {
     fn prune_constraint_modes(&self) -> Result<(), SQLError> {
         Engine::prune_constraint_modes(self)
     }
-    fn remove_state(&self, name: &str, relation: &RelationIdentity) -> StorageBackendResult<()> {
+    fn remove_state(
+        &self,
+        name: &str,
+        relation: &RelationIdentity,
+        indexes: uqa_execution::catalog::index::registry::CatalogIndexes,
+    ) -> StorageBackendResult<()> {
         let table = self.storage.tables.read().get(relation).cloned();
         let temporary = table
             .as_ref()
@@ -88,10 +93,7 @@ impl TableRemovalPublication for Engine {
             .table_field_analyzers
             .write()
             .retain(|(t, _), _| t != name);
-        self.durable
-            .catalog_indexes
-            .write()
-            .retain(|_, row| row.table_name != name);
+        *self.durable.catalog_indexes.write() = indexes;
         Ok(())
     }
 }

@@ -174,7 +174,7 @@ impl DurableCatalogState {
         self.catalog_indexes = CatalogCell::capture_resource(
             self.catalog_indexes.snapshot(),
             registry,
-            uqa_storage::catalog::capture::indexes,
+            uqa_execution::catalog::index::registry::CatalogIndexes::capture,
         )?;
         self.scoring_params = CatalogCell::capture_resource(
             self.scoring_params.snapshot(),

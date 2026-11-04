@@ -148,11 +148,8 @@ impl Engine {
             &self.index_registry_context(),
             &rows.builds,
         )?;
-        for row in rows.rows {
-            self.durable
-                .catalog_indexes
-                .write()
-                .insert(row.relation.clone(), row.clone());
+        *self.durable.catalog_indexes.write() = rows.catalog().clone();
+        for row in rows.iter() {
             let keys: Vec<uqa_sql::ast::IndexKey> = serde_json::from_str(&row.columns_json)?;
             let columns = keys
                 .iter()
@@ -182,7 +179,7 @@ impl Engine {
                             row.table_name
                         )));
                     };
-                    let spec = uqa_execution::catalog::index::vectors::stored_spec(&row, dim)?;
+                    let spec = uqa_execution::catalog::index::vectors::stored_spec(row, dim)?;
                     if !self.restore_vector_field_index(&row.table_name, col, dim, spec)? {
                         return Err(StorageBackendError::Other(format!(
                             "failed to restore vector index `{}` for table `{}`",

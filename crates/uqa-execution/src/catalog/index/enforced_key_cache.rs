@@ -6,14 +6,13 @@
 
 //! The enforced keys of the tables a session writes, kept while the definitions they were read from are the same objects.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
-use uqa_core::RelationIdentity;
 use uqa_sql::{ast::TableKeyConstraint, catalog::index::EnforcedKey};
-use uqa_storage::{CatalogIndexRow, StorageBackendResult};
+use uqa_storage::StorageBackendResult;
 
-type IndexRows = BTreeMap<RelationIdentity, CatalogIndexRow>;
+type IndexRows = crate::catalog::index::registry::CatalogIndexes;
 
 /// Tables whose keys are kept. A statement writes its target and the tables its referential actions reach.
 const TABLES: usize = 8;

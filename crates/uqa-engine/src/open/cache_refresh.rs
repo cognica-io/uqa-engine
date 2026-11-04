@@ -241,13 +241,11 @@ impl Engine {
             || previous
                 .as_ref()
                 .is_none_or(|previous| previous.registries != current.registries);
-        if catalog_changed {
-            self.clear_persistent_table_bindings_for_catalog_reload();
-            self.reload_table_catalog(catalog_epoch)?;
-            self.synchronize_partition_identity_watermarks()?;
-        }
         if registries_changed {
-            self.reload_catalog_registries(registry_epoch)?;
+            self.reload_catalog_snapshot(
+                catalog_changed.then_some(catalog_epoch),
+                Some(registry_epoch),
+            )?;
         } else if let Some(graphs) = current.graphs.as_ref() {
             let changed = self.refresh_graph_handles(
                 catalog.as_ref(),

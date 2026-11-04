@@ -103,13 +103,8 @@ fn selection_preserves_declared_identity_and_standalone_expression_predicate_and
         .unwrap(),
     );
     let ordinary = index("ordinary", "target", false);
-    snapshot.definitions.catalog_indexes = Arc::new(
-        [
-            (unique.relation.clone(), unique),
-            (ordinary.relation.clone(), ordinary),
-        ]
-        .into(),
-    );
+    snapshot.definitions.catalog_indexes =
+        Arc::new(crate::catalog::test_support::index_rows([unique, ordinary]));
     let keys = enforced_keys(
         &CatalogReadView::new(snapshot),
         &resolution(),
@@ -174,17 +169,12 @@ fn persisted_partition_indexes_bind_local_incarnations_and_leave_ordinary_inheri
         row.definition_json = Some(serde_json::to_string(&definition).unwrap());
         row
     };
-    snapshot.definitions.catalog_indexes = Arc::new(
-        [
-            persisted("root_key", "root", 2, None),
-            persisted("child_key", "child", 3, Some(2)),
-            persisted("leaf_key", "leaf", 4, Some(3)),
-            persisted("ordinary_key", "ordinary", 5, None),
-        ]
-        .into_iter()
-        .map(|index| (index.relation.clone(), index))
-        .collect(),
-    );
+    snapshot.definitions.catalog_indexes = Arc::new(crate::catalog::test_support::index_rows([
+        persisted("root_key", "root", 2, None),
+        persisted("child_key", "child", 3, Some(2)),
+        persisted("leaf_key", "leaf", 4, Some(3)),
+        persisted("ordinary_key", "ordinary", 5, None),
+    ]));
     let catalog = CatalogReadView::new(snapshot);
     for (target, name, id, ancestry) in [
         ("public.root", "root_key", 2, vec![]),

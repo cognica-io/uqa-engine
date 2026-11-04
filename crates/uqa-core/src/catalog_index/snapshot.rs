@@ -6,7 +6,7 @@
 
 //! Immutable observations of already-owned index catalog rows.
 
-use super::CatalogIndexRow;
+use super::{CatalogIndexRegistry, CatalogIndexRegistryIter, CatalogIndexRow};
 use crate::RelationIdentity;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -17,6 +17,7 @@ pub struct CatalogIndexSnapshot(Option<Storage>);
 #[derive(Clone, Debug)]
 enum Storage {
     Registry(Arc<BTreeMap<RelationIdentity, CatalogIndexRow>>),
+    Native(Arc<dyn CatalogIndexRegistry>),
     Rows(Arc<Vec<CatalogIndexRow>>),
 }
 
@@ -37,11 +38,18 @@ impl From<Vec<CatalogIndexRow>> for CatalogIndexSnapshot {
 }
 
 impl CatalogIndexSnapshot {
+    pub fn from_registry(registry: Arc<dyn CatalogIndexRegistry>) -> Self {
+        Self(Some(Storage::Native(registry)))
+    }
+
     pub fn iter(
         &self,
     ) -> impl ExactSizeIterator<Item = &CatalogIndexRow> + DoubleEndedIterator + Clone {
         match &self.0 {
             Some(Storage::Registry(rows)) => Rows::Registry(rows.values()),
+            Some(Storage::Native(rows)) => {
+                Rows::Native(CatalogIndexRegistryIter::new(rows.as_ref()))
+            }
             Some(Storage::Rows(rows)) => Rows::Sequence(rows.iter()),
             None => Rows::Sequence([].iter()),
         }
@@ -59,6 +67,7 @@ impl CatalogIndexSnapshot {
 #[derive(Clone)]
 enum Rows<'a> {
     Registry(std::collections::btree_map::Values<'a, RelationIdentity, CatalogIndexRow>),
+    Native(CatalogIndexRegistryIter<'a>),
     Sequence(std::slice::Iter<'a, CatalogIndexRow>),
 }
 
@@ -68,6 +77,7 @@ impl<'a> Iterator for Rows<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Registry(rows) => rows.next(),
+            Self::Native(rows) => rows.next().map(|(_, row)| row),
             Self::Sequence(rows) => rows.next(),
         }
     }
@@ -75,6 +85,7 @@ impl<'a> Iterator for Rows<'a> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         match self {
             Self::Registry(rows) => rows.size_hint(),
+            Self::Native(rows) => rows.size_hint(),
             Self::Sequence(rows) => rows.size_hint(),
         }
     }
@@ -84,6 +95,7 @@ impl DoubleEndedIterator for Rows<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self {
             Self::Registry(rows) => rows.next_back(),
+            Self::Native(rows) => rows.next_back().map(|(_, row)| row),
             Self::Sequence(rows) => rows.next_back(),
         }
     }

@@ -134,6 +134,14 @@ impl<G: std::ops::Deref<Target = uqa_execution::catalog::foreign::ForeignTables>
         self.0.contains_key(relation)
     }
 }
+struct IndexCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::index::registry::CatalogIndexes>>
+    CreationRelationNames for IndexCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
 impl CreationRelationGuards for Engine {
     fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
         let user_type = uqa_execution::catalog::projection::named_type_exists(
@@ -192,7 +200,7 @@ impl CreationRelationGuards for Engine {
         ))
     }
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
+        Box::new(IndexCreationNamesGuard(self.durable.catalog_indexes.read()))
     }
     fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CompositeNamesGuard(self.durable.composites.read()))

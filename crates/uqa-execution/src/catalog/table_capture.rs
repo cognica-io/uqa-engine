@@ -14,20 +14,19 @@ use uqa_core::{
 use uqa_sql::ast::RelationPersistence;
 use uqa_storage::{
     analyzer_binding::capture::{selected_fields, CapturedFieldAnalyzerBindings},
-    catalog::capture::selected_indexes,
     memory_capture::{CapturedMemoryValue, MemoryCaptureSource},
     read_control::StorageReadControl,
-    CatalogIndexRow, FieldAnalyzerBinding, StorageBackendError, StorageBackendResult,
+    FieldAnalyzerBinding, StorageBackendError, StorageBackendResult,
 };
 
 pub struct CapturedTableMetadata {
-    pub indexes: Budgeted<Vec<(RelationIdentity, CatalogIndexRow)>>,
+    pub indexes: Budgeted<crate::catalog::index::registry::CapturedCatalogIndexes>,
     pub analyzers: Budgeted<CapturedFieldAnalyzerBindings>,
 }
 
 pub struct TableMetadataCaptureSource {
     tables: OwnedMap<RelationIdentity, RelationPersistence>,
-    indexes: Arc<BTreeMap<RelationIdentity, CatalogIndexRow>>,
+    indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
     analyzers: Arc<BTreeMap<(String, String), FieldAnalyzerBinding>>,
 }
 
@@ -35,7 +34,7 @@ impl TableMetadataCaptureSource {
     /// Construct from the same retained generation as the table data and both metadata roots.
     pub fn new(
         tables: impl IntoIterator<Item = (RelationIdentity, RelationPersistence)>,
-        indexes: Arc<BTreeMap<RelationIdentity, CatalogIndexRow>>,
+        indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
         analyzers: Arc<BTreeMap<(String, String), FieldAnalyzerBinding>>,
     ) -> Self {
         let mut membership = OwnedMap::new();
@@ -76,7 +75,7 @@ impl TableMetadataCaptureSource {
         control: &StorageReadControl,
     ) -> StorageBackendResult<CapturedTableMetadata> {
         control.check()?;
-        let indexes = selected_indexes(&self.indexes, |name| self.selected(name), control)?;
+        let indexes = self.indexes.capture(control)?;
         let analyzers = selected_fields(&self.analyzers, |name| self.selected(name), control)?;
         Ok(CapturedTableMetadata { indexes, analyzers })
     }

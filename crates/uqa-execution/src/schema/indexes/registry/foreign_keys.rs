@@ -7,12 +7,11 @@
 //! Resolve foreign-key dependencies to immutable unique-index incarnations.
 
 use super::{
-    index_definition, invalid, BTreeMap, CatalogIndexRow, ColumnDef, IndexKey, RelationIdentity,
-    StorageBackendResult, TableConstraintSet,
+    index_definition, invalid, ColumnDef, IndexKey, StorageBackendResult, TableConstraintSet,
 };
 
 pub(crate) fn bind(
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     columns: &mut [ColumnDef],
     constraints: &mut TableConstraintSet,
     allow_new: bool,
@@ -55,7 +54,7 @@ pub(crate) fn bind(
 }
 
 fn bind_one(
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     table: &str,
     columns: &[String],
     identity: &mut Option<[u8; 16]>,

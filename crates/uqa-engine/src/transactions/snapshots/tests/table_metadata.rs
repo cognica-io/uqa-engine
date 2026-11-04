@@ -72,14 +72,19 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
         .unwrap()
         .table_name
         .clone();
-    for row in engine.durable.catalog_indexes.write().values_mut() {
+    let original_indexes = engine.durable.catalog_indexes.snapshot();
+    let mut next_indexes = original_indexes.as_ref().clone();
+    for mut row in original_indexes.values().cloned() {
         if row.table_name == temporary {
             row.definition_json
                 .as_mut()
                 .unwrap()
                 .push_str(&" ".repeat(1 << 20));
+            next_indexes.replace(row).unwrap();
         }
     }
+    *engine.durable.catalog_indexes.write() = next_indexes;
+    drop(original_indexes);
     engine
         .durable
         .table_field_analyzers
@@ -116,7 +121,7 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
         let (name, row) = metadata
             .indexes
             .iter()
-            .find(|(name, _)| *name == expected.relation)
+            .find(|(name, _)| **name == expected.relation)
             .unwrap();
         assert_eq!(*name, row.relation);
         assert_eq!(row.relation, expected.relation);

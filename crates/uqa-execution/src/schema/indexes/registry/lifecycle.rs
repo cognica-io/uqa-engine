@@ -29,7 +29,7 @@ pub fn register(
     let mut rows = previous.as_ref().clone();
     if let Some(old) = previous.get(&row.relation) {
         if !same_row(old, &row) {
-            let old_tree = descendants(previous, &row.relation)?;
+            let old_tree = descendants(previous.as_ref(), &row.relation)?;
             require_no_references(&catalog, &old_tree)?;
             for child in old_tree.iter().skip(1) {
                 if index_definition(child)?
@@ -41,12 +41,12 @@ pub fn register(
                         "an owned partition index prevents direct replacement",
                     ));
                 }
-                rows.remove(&child.relation);
+                rows.remove(&child.relation)?;
             }
         }
     }
     let table = RelationIdentity::from_legacy_name(&row.table_name).map_err(invalid)?;
-    rows.insert(row.relation.clone(), row);
+    rows.insert_in(row, catalog.snapshot())?;
     let mut allocator = context
         .identities
         .allocator(crate::catalog::identity::allocate_catalog_object_id);
@@ -67,7 +67,7 @@ pub fn planned_partition_indexes(
 
 /// The key attributes of each unique index of `table` that no key constraint owns.
 pub fn standalone_unique_index_keys(
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     table: &str,
 ) -> StorageBackendResult<Vec<Vec<uqa_sql::ast::IndexKey>>> {
     let mut keys = Vec::new();
@@ -81,7 +81,7 @@ pub fn standalone_unique_index_keys(
 }
 
 pub fn descendants(
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &dyn uqa_core::catalog_index::CatalogIndexRegistry,
     root: &RelationIdentity,
 ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
     let Some(root) = rows.get(root) else {
@@ -99,7 +99,7 @@ pub fn descendants(
         if !visited.insert(id) {
             return Err(invalid("cyclic index ancestry"));
         }
-        for child in rows.values() {
+        for (_, child) in uqa_core::catalog_index::CatalogIndexRegistryIter::new(rows) {
             if index_definition(child)?.relationships.parent_index == Some(id) {
                 pending.push_back(child.clone());
             }
@@ -120,7 +120,7 @@ pub fn remove(
         return Ok(None);
     };
     ensure_independent(root)?;
-    let removed = descendants(previous, relation)?;
+    let removed = descendants(previous.as_ref(), relation)?;
     require_no_references(&catalog, &removed)?;
     if !cascade {
         for child in removed.iter().skip(1) {

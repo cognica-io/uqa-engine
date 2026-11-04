@@ -144,7 +144,7 @@ pub struct CatalogDefinitionSnapshot {
     pub composites: Arc<composite_type::CompositeRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub catalog_indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
     pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
     pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,

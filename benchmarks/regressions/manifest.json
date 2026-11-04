@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -39164,12 +39164,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "table_metadata_capture_rejects_missing_or_invalid_original_relations_without_partial_output",
+      "test": "table_metadata_rejects_missing_or_invalid_membership_before_index_publication_or_field_capture",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/table_capture/tests.rs",
       "capability": "Atomic original metadata joins",
-      "workload": "Capture index and field metadata with missing or malformed relation references, including failure after index output has been admitted.",
-      "invariant": "Unresolved original ownership returns no partial metadata and releases every prior payload lease.",
+      "workload": "Reject malformed or missing table membership before native index publication, then capture field metadata with invalid ownership after index admission.",
+      "invariant": "Failed index admission preserves the original row generation; failed field capture returns no partial metadata and releases every prior capture lease.",
       "case_names": [
         ""
       ]
@@ -40875,6 +40875,141 @@
       "capability": "Native foreign restoration",
       "workload": "Deny native admission during foreign catalog restoration in native SQLite, SQLite KV and redb, then restore with funding.",
       "invariant": "53200 leaves the original paired root and stored definition/authority rows unchanged; funded restoration, rename and deletion remain usable and release all native bytes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_observations_keep_structural_order_cloned_positions_and_exact_length",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "Native index observations",
+      "workload": "Interleave forward and reverse reads and cloned cursors over keys whose order differs from encoded row identities.",
+      "invariant": "The observer allocates nothing, preserves structural order and payload identity, keeps exact remaining lengths and releases its owner at final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bounded_entry_seeks_without_linear_work_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests.rs",
+      "capability": "Bounded structural-key seeks",
+      "workload": "Seek included and excluded lower and upper bounds in 4096 immutable entries.",
+      "invariant": "Every selected endpoint requires fewer than 32 comparisons and no heap allocation, including empty results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "renamed_stored_index_preserves_identity_display_names_and_sql_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/tests.rs",
+      "capability": "Stored index column references",
+      "workload": "Rename plain and expression keys, predicates and included columns while retaining original display names.",
+      "invariant": "Rewritten keys and predicates match independently parsed renamed SQL; physical/object identities and display names stay unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_capture_has_constant_allocation_and_retains_exact_old_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/tests.rs",
+      "capability": "Native index capture",
+      "workload": "Capture 1, 64 and 4096 rows beside large temporary metadata, then replace a row and retire the source.",
+      "invariant": "Capture allocates nothing, admits only the cached durable footprint, shares exact encoded rows and releases original and independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_mutations_share_unrelated_payloads_and_preserve_failed_generations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/tests.rs",
+      "capability": "Native index publication",
+      "workload": "Mutate selected rows beside an unrelated four-MiB payload and deny insertion, deletion, rename and table removal.",
+      "invariant": "Selected edits stay below 64 KiB and 256 allocations; unrelated payloads remain shared and failed successors preserve exact rows and eligibility.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_restoration_keeps_actual_temporary_membership_and_ordered_observers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/tests.rs",
+      "capability": "Native index eligibility",
+      "workload": "Join restored durable rows with actual temporary membership whose names do not identify persistence; exercise conflicts, cursors and cancellation.",
+      "invariant": "Temporary rows share their original root and remain excluded, unlogged rows remain included, and conflicts or mixed native allowances publish no replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_generation_charges_owned_keys_and_complete_encoded_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/tests.rs",
+      "capability": "Complete native index admission",
+      "workload": "Measure actual retained allocations for structural keys and encoded rows, then retain an independent capture after source retirement.",
+      "invariant": "Native and captured payload footprints agree; growth in every owned key and encoded row field matches actual retained allocation growth, and all leases release with their final owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_late_native_index_relocation_admission_precedes_every_persistent_write",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/relocation/tests.rs",
+      "capability": "Atomic index relocation admission",
+      "workload": "Admit the first namespace relocation but deny a larger final row before publishing a batch.",
+      "invariant": "53200 precedes every erase, persistent write and native publication and preserves original row addresses and allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_native_index_admission_preserves_catalog_rows_and_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/index_registry/native.rs",
+      "capability": "Native index operation recovery",
+      "workload": "Deny native admission during index creation, deletion and rename, table/column rename, column removal and table removal over all four providers.",
+      "invariant": "Every failed operation reports 53200, preserves original index rows, table handles, native leases and stored metadata through rollback reload failure, and leaves unchanged query results and subsequent funded DDL usable.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_index_restore_preserves_original_generation_and_stored_rows_on_admission_failure",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/registries/tests.rs",
+      "capability": "Native index restoration",
+      "workload": "Deny native admission during index restoration over native SQLite, SQLite KV and redb, then restore with funding.",
+      "invariant": "Failed restoration preserves root identity and stored rows; funded restoration retains actual temporary handles and supports later rename and deletion without leaking admission.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",

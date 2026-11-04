@@ -14,17 +14,16 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::Value;
 use uqa_sql::{
     ast::{ColumnDef, IndexKey, TableKeyConstraint},
     SQLError,
 };
 use uqa_storage::{
-    document_store::Document, CatalogIndexRow, StorageBackendError, StorageBackendResult,
-    ValueIndexKey,
+    document_store::Document, StorageBackendError, StorageBackendResult, ValueIndexKey,
 };
 
-type IndexRows = BTreeMap<RelationIdentity, CatalogIndexRow>;
+type IndexRows = crate::catalog::index::registry::CatalogIndexes;
 
 pub fn column_value<'a>(document: &'a Document, column: &str) -> &'a Value {
     document.get(column).unwrap_or(&Value::Null)

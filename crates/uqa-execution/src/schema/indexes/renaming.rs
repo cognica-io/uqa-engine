@@ -9,11 +9,9 @@
 use super::registry::{IndexRegistryChange, IndexRegistryContext};
 use crate::schema::constraints::{renaming::rename_constraint, ConstraintAlterContext};
 use crate::schema::table_alteration::binding::TableAlterBindingContext;
+use crate::storage_errors::storage_error;
 use uqa_core::RelationIdentity;
-use uqa_sql::{
-    catalog::errors::storage_error, schema::relation_alteration::relation_rename_target, SQLError,
-    SQLResult,
-};
+use uqa_sql::{schema::relation_alteration::relation_rename_target, SQLError, SQLResult};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 /// Publish the two names through their shared durable index row without rewriting the table's key structure.

@@ -153,3 +153,14 @@ pub(crate) fn foreign_tables(
     }
     catalog.tables_snapshot()
 }
+pub(crate) fn index_rows(
+    rows: impl IntoIterator<Item = uqa_storage::CatalogIndexRow>,
+) -> crate::catalog::index::registry::CatalogIndexes {
+    let mut indexes = crate::catalog::index::registry::CatalogIndexes::default();
+    for row in rows {
+        indexes
+            .insert(row, uqa_sql::ast::RelationPersistence::Permanent)
+            .unwrap();
+    }
+    indexes
+}

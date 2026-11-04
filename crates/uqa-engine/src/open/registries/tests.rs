@@ -129,3 +129,72 @@ fn native_foreign_restore_preserves_the_paired_root_and_stored_rows_on_admission
     drop((engine, original));
     assert_eq!(memory.used(), 0);
 }
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn native_index_restore_preserves_original_generation_and_stored_rows_on_admission_failure(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("indexes.db"));
+    engine.sql("CREATE TABLE saved(id integer); CREATE INDEX saved_index ON saved(id); CREATE TEMP TABLE local_items(id integer); CREATE INDEX local_index ON local_items(id)", &[]).unwrap();
+    let memory = MemoryBudget::new(1 << 20);
+    let mut next = uqa_execution::catalog::index::registry::CatalogIndexes::with_budget(&memory);
+    for row in engine.durable.catalog_indexes.read().values() {
+        let relation = uqa_core::RelationIdentity::from_legacy_name(&row.table_name).unwrap();
+        next.insert(
+            row.clone(),
+            engine.storage.tables.read()[&relation].persistence,
+        )
+        .unwrap();
+    }
+    *engine.durable.catalog_indexes.write() = next;
+    let original = engine.durable.catalog_indexes.snapshot();
+    let catalog = engine.storage.catalog.as_ref().unwrap();
+    let stored = format!("{:?}", catalog.load_catalog_indexes().unwrap());
+    let baseline = memory.used();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    let error = engine
+        .restore_catalog_indexes_from_catalog(catalog.as_ref(), CatalogRestoreMode::LoadOnly)
+        .unwrap_err();
+    assert_eq!(
+        uqa_execution::storage_errors::storage_error("index restore", &error).sqlstate(),
+        Some("53200"),
+        "{provider:?}: {error}"
+    );
+    assert!(Arc::ptr_eq(
+        &original,
+        &engine.durable.catalog_indexes.snapshot()
+    ));
+    assert_eq!(
+        format!("{:?}", catalog.load_catalog_indexes().unwrap()),
+        stored
+    );
+    drop(occupied);
+    assert_eq!(memory.used(), baseline);
+    engine
+        .restore_catalog_indexes_from_catalog(catalog.as_ref(), CatalogRestoreMode::LoadOnly)
+        .unwrap();
+    let restored = engine.durable.catalog_indexes.snapshot();
+    assert_eq!(restored.len(), original.len());
+    for (key, row) in original.iter() {
+        assert_eq!(
+            format!("{:?}", restored.get(key).unwrap()),
+            format!("{row:?}")
+        );
+        assert_eq!(restored.is_durable(key), original.is_durable(key));
+        if !original.is_durable(key) {
+            assert!(std::ptr::eq(row, restored.get(key).unwrap()));
+        }
+    }
+    engine
+        .sql(
+            "ALTER INDEX saved_index RENAME TO usable; DROP INDEX local_index",
+            &[],
+        )
+        .unwrap();
+    drop((engine, restored, original));
+    assert_eq!(memory.used(), 0);
+}

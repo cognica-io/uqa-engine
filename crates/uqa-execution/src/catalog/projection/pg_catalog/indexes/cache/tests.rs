@@ -49,17 +49,19 @@ fn fixture(unrelated: usize) -> CatalogReadView {
             }),
             ..super::super::IndexDefinition::default()
         };
-        Arc::make_mut(&mut snapshot.definitions.catalog_indexes).insert(
-            index_name(position),
-            uqa_storage::CatalogIndexRow {
-                relation: index_name(position),
-                table_name: "public.items".into(),
-                index_type: "btree".into(),
-                columns_json: r#"["id"]"#.into(),
-                parameters_json: "{}".into(),
-                definition_json: Some(serde_json::to_string(&definition).unwrap()),
-            },
-        );
+        Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
+            .insert(
+                uqa_storage::CatalogIndexRow {
+                    relation: index_name(position),
+                    table_name: "public.items".into(),
+                    index_type: "btree".into(),
+                    columns_json: r#"["id"]"#.into(),
+                    parameters_json: "{}".into(),
+                    definition_json: Some(serde_json::to_string(&definition).unwrap()),
+                },
+                uqa_sql::ast::RelationPersistence::Permanent,
+            )
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }
@@ -139,9 +141,9 @@ fn retained_index_collections_survive_rename_and_removal() {
     let renamed = RelationIdentity::new("public", "renamed");
     let mut snapshot = catalog.snapshot().clone();
     let rows = Arc::make_mut(&mut snapshot.definitions.catalog_indexes);
-    let mut row = rows.remove(&index_name(0)).unwrap();
+    let mut row = rows.get(&index_name(0)).unwrap().clone();
     row.relation = renamed.clone();
-    rows.insert(renamed.clone(), row);
+    rows.rename(&index_name(0), row).unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     let selected = catalog_index_by_oid(&current, 70_000).unwrap().unwrap();
     assert_eq!(selected.relation, renamed);
@@ -149,7 +151,9 @@ fn retained_index_collections_survive_rename_and_removal() {
     assert!(catalog_index_by_name(&current, &index_name(0))
         .unwrap()
         .is_none());
-    Arc::make_mut(&mut snapshot.definitions.catalog_indexes).remove(&renamed);
+    Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
+        .remove(&renamed)
+        .unwrap();
     let removed = CatalogReadView::new(snapshot);
     assert!(catalog_index_by_oid(&removed, 70_000).unwrap().is_none());
     assert_eq!(original.relation, index_name(0));
@@ -164,12 +168,12 @@ fn change_definition(
     position: usize,
     change: impl FnOnce(&mut super::super::IndexDefinition),
 ) {
-    let row = Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
-        .get_mut(&index_name(position))
-        .unwrap();
-    let mut definition = super::super::index_definition(row).unwrap();
+    let rows = Arc::make_mut(&mut snapshot.definitions.catalog_indexes);
+    let mut row = rows.get(&index_name(position)).unwrap().clone();
+    let mut definition = super::super::index_definition(&row).unwrap();
     change(&mut definition);
     row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    rows.replace(row).unwrap();
 }
 
 #[test]

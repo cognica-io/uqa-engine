@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
 
-- Retain native domain, enum, composite, range, shell, schema-authority, role, membership, graph identity, foreign-wrapper, foreign-server, paired foreign-table definition/authority, view, user routine, trigger, rewrite-rule, database authority, built-in routine authority and system relation authority catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and preserve exact definitions, namespace and role identities, revisions and grants through native DDL, rollback and closure without copying complete catalogs. Complete Engine backup remains under implementation.
+- Retain native domain, enum, composite, range, shell, schema-authority, role, membership, graph identity, foreign-wrapper, foreign-server, paired foreign-table definition/authority, index metadata, view, user routine, trigger, rewrite-rule, database authority, built-in routine authority and system relation authority catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and preserve exact definitions, namespace and role identities, revisions and grants through native DDL, rollback and closure without copying complete catalogs. Complete Engine backup remains under implementation.
 - Retain catalog comments in immutable native generations. Changing one description shares unrelated text, capture admits its complete cached footprint, and failed native admission leaves existing descriptions and stored metadata unchanged. Object-address ordering, temporary exclusion and transactional rollback preserve their existing behavior.
 
 - Add complete incremental repository inventories that reuse unchanged immutable unit ranges, preserve changed/new/tombstone units and omit deleted units. Bounded comparison reports actual source reads and hashes separately from reused and newly stored bytes; fingerprint acceleration, retention/GC and public Engine backup jobs remain in progress.
@@ -75,6 +75,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve original catalog roots and table membership when persistent catalog reload runs out of memory, and retain SQLSTATE `53200` through index, table and routine publication errors.
 - Avoid premature stack-depth errors for valid recursive PL/pgSQL calls in unoptimized builds, including `fact(11)`. Interpreter activations retain their own heap storage while native stack and configured nesting limits remain enforced.
 - Stream temporary value-index payloads through the exact evaluated-value codec instead of JSON and a complete intermediate buffer. Tag-shaped maps keep their type, and owned reads retain decoded payload admission through their final consumer.
 - Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.

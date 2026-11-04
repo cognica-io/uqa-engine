@@ -32,6 +32,7 @@ mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 #[cfg(test)]
 pub(crate) use table_membership::SnapshotTableCut;
+pub(crate) use table_membership::TableRegistrySnapshot;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
@@ -190,8 +191,8 @@ pub(super) struct DurableCatalogState {
         uqa_sql::catalog::stored_view::CapturedViewDefinitions,
     >,
     pub(super) catalog_indexes: CatalogCell<
-        BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
-        Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
+        uqa_execution::catalog::index::registry::CatalogIndexes,
+        uqa_execution::catalog::index::registry::CapturedCatalogIndexes,
     >,
     pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
     pub(super) schemas: CatalogCell<
@@ -286,7 +287,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
     pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub(super) catalog_indexes: Arc<uqa_execution::catalog::index::registry::CatalogIndexes>,
     pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
@@ -328,7 +329,9 @@ impl DurableCatalogState {
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),
             ),
             views: CatalogCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
-            catalog_indexes: CatalogCell::new(BTreeMap::new()),
+            catalog_indexes: CatalogCell::new(
+                uqa_execution::catalog::index::registry::CatalogIndexes::default(),
+            ),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(BTreeMap::new()),

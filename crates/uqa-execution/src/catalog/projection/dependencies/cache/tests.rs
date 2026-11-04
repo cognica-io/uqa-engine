@@ -191,17 +191,19 @@ fn failed_dependency_derivation_does_not_publish_partial_metadata() {
     let catalog = fixture(0);
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "malformed");
-    Arc::make_mut(&mut snapshot.definitions.catalog_indexes).insert(
-        relation.clone(),
-        uqa_storage::CatalogIndexRow {
-            relation,
-            table_name: "public.item_0".into(),
-            index_type: "btree".into(),
-            columns_json: "[]".into(),
-            parameters_json: "{}".into(),
-            definition_json: None,
-        },
-    );
+    Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
+        .insert(
+            uqa_storage::CatalogIndexRow {
+                relation,
+                table_name: "public.item_0".into(),
+                index_type: "btree".into(),
+                columns_json: "[]".into(),
+                parameters_json: "{}".into(),
+                definition_json: None,
+            },
+            uqa_sql::ast::RelationPersistence::Permanent,
+        )
+        .unwrap();
     let invalid = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let output = RegtypeOutputCache::default();

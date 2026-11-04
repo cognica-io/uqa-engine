@@ -85,6 +85,24 @@ impl<K, V> RetainedMap<K, V> {
 }
 
 impl<K: Ord, V> RetainedMap<K, V> {
+    pub fn first_from<Q: Ord + ?Sized>(&self, start: std::ops::Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        self.values
+            .first_from(start)
+            .map(|(key, entry)| (key, &entry.value))
+    }
+
+    pub fn last_before<Q: Ord + ?Sized>(&self, end: std::ops::Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        self.values
+            .last_before(end)
+            .map(|(key, entry)| (key, &entry.value))
+    }
+
     /// Seek a lower bound without visiting earlier entries or allocating a cursor.
     pub fn range_from<Q: Ord + ?Sized>(
         &self,

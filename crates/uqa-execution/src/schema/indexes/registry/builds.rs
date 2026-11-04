@@ -7,8 +7,8 @@
 //! Select newly allocated physical indexes and preserve their catalog/build ordering.
 
 use super::{
-    index_definition, BTreeMap, BTreeSet, CatalogIndexRow, IndexRegistryContext, RelationIdentity,
-    StorageBackendError, StorageBackendResult,
+    index_definition, BTreeSet, CatalogIndexRow, IndexRegistryContext, StorageBackendError,
+    StorageBackendResult,
 };
 
 #[cfg(test)]
@@ -17,8 +17,8 @@ std::thread_local! {
 }
 
 pub(in crate::schema::indexes) fn new_physical_indexes(
-    previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    previous: &crate::catalog::index::registry::CatalogIndexes,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
     #[cfg(test)]
     PHYSICAL_BUILD_SELECTIONS.set(PHYSICAL_BUILD_SELECTIONS.get() + 1);

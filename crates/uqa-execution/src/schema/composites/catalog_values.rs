@@ -219,6 +219,15 @@ fn indexes(
         }
     }
     drop(rows);
+    if updates.is_empty() {
+        return Ok(tables);
+    }
+    let mut candidate = context.index_publication.index_catalog().as_ref().clone();
+    for row in &updates {
+        candidate.replace(row.clone()).map_err(|error| {
+            crate::storage_errors::storage_error("rewrite stored composite constants", &error)
+        })?;
+    }
     for row in updates {
         context
             .index_publication
@@ -230,9 +239,11 @@ fn indexes(
                     crate::schema::indexes::registry::IndexPublicationKind::Definition
                 },
             )
-            .map_err(storage)?;
+            .map_err(|error| {
+                crate::storage_errors::storage_error("rewrite stored composite constants", &error)
+            })?;
         tables.insert(row.table_name.clone());
-        context.index_publication.publish_index(row);
     }
+    context.index_publication.publish_indexes(candidate);
     Ok(tables)
 }
