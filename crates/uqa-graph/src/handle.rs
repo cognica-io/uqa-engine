@@ -196,19 +196,13 @@ impl GraphStoreHandle {
         registry: &GraphLabelRegistry,
     ) -> GraphStoreResult<()> {
         match self {
-            Self::Memory(store) => {
-                store.import_label_registry(graph, registry);
-                Ok(())
-            }
+            Self::Memory(store) => store.import_label_registry(graph, registry),
             Self::Persistent(store) => store.import_label_registry(graph, registry),
         }
     }
     pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) -> GraphStoreResult<()> {
         match self {
-            Self::Memory(store) => {
-                store.rebuild_label_registry_from_ids(graph);
-                Ok(())
-            }
+            Self::Memory(store) => store.rebuild_label_registry_from_ids(graph),
             Self::Persistent(store) => store.rebuild_label_registry_from_ids(graph),
         }
     }

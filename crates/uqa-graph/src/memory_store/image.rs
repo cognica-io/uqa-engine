@@ -6,8 +6,10 @@
 
 //! Primary memory graph images preserve evaluated properties and allocation state.
 
-use super::{GraphLabelRegistry, LabelKind, MemoryGraphStore, Partition};
-use uqa_core::{memory::Budgeted, Edge, Vertex};
+#[cfg(test)]
+use super::GraphLabelRegistry;
+use super::{LabelKind, MemoryGraphStore, NativeLabels, Partition};
+use uqa_core::{Edge, Vertex};
 use uqa_storage::{
     image_io::{ImageInput, ImageOutput},
     read_control::StorageReadControl,
@@ -39,11 +41,11 @@ impl MemoryGraphStore {
         output::write(self, output, control)
     }
 
-    /// Reconstruct a fresh unpublished memory store. Complete decoding and relationship validation precede return; errors release the candidate and its admitted payload. The returned owner retains its import allowance until explicitly transferred into an activated database. No SQL, analyzer, expression or user callback is invoked.
+    /// Reconstruct a fresh unpublished memory store. Complete decoding and relationship validation precede return; errors release the candidate and its admitted payload. The returned native roots retain their import allowance through cloning, mutation and source retirement. No SQL, analyzer, expression or user callback is invoked.
     pub fn read_image(
         input: &mut dyn std::io::Read,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Budgeted<Self>> {
+    ) -> StorageBackendResult<Self> {
         input::read(input, control)
     }
 }

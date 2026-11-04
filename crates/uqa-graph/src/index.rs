@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn vertex_property_index_tracks_selected_values_and_missing_fields() {
         let mut store = MemoryGraphStore::new();
-        store.create_graph("g");
+        store.create_graph("g").unwrap();
         let mut first = Vertex::new(1, "node");
         first.properties.insert("val".into(), Value::Int(7));
         first.properties.insert("nullable".into(), Value::Null);

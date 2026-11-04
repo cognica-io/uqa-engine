@@ -12,7 +12,7 @@ use uqa_core::{Edge, Vertex};
 #[test]
 fn path_capture_keeps_exact_sequences_and_evaluated_pairs_after_source_loss() {
     let mut graph = MemoryGraphStore::new();
-    graph.create_graph("g");
+    graph.create_graph("g").unwrap();
     for id in 1..=3 {
         graph.add_vertex(Vertex::new(id, "node"), "g").unwrap();
     }

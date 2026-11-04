@@ -21,7 +21,7 @@ const N: i64 = 100;
 
 fn build_store() -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let mut writer = CypherWriter::new(&mut store, "g");
     for i in 0..N {
         let create = format!(

@@ -277,3 +277,9 @@ impl From<uqa_storage::StorageBackendError> for GraphStoreError {
         Self::Backend(error.into())
     }
 }
+
+impl From<uqa_core::memory::MemoryError> for GraphStoreError {
+    fn from(error: uqa_core::memory::MemoryError) -> Self {
+        uqa_storage::StorageBackendError::Memory(error).into()
+    }
+}

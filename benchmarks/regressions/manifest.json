@@ -1607,8 +1607,8 @@
       "cases": 1,
       "source": "crates/uqa-graph/src/memory_store/image/tests.rs",
       "capability": "Graph image memory admission",
-      "workload": "Sweep every insufficient allowance, admit the exact successful payload and reject overflowing advertised cardinality.",
-      "invariant": "All limits preserve typed memory failures, peak remains within allowance, and every candidate releases its complete charge.",
+      "workload": "Sweep every insufficient construction allowance, admit the exact successful peak, retain imported data through a surviving native clone and reject overflowing advertised cardinality.",
+      "invariant": "All limits preserve typed memory failures and bounded peak; immutable native owners retain the original allowance through cloning and release it only after final retirement.",
       "case_names": [
         ""
       ]
@@ -41014,6 +41014,59 @@
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
         "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_roots_capture_and_clone_without_visiting_primary_entities",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph ownership",
+      "workload": "Capture and clone 1, 64 and 4,096 entities and labels; replace one entity and allocate from an existing label before retiring the source.",
+      "invariant": "Cloning allocates nothing, capture allocates one wrapper, selected mutation allocates less than 128 KiB, and independent exact leases retain unchanged evaluated images until final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_publication_denial_preserves_all_roots_and_identity_counters",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph publication admission",
+      "workload": "Exhaust the native allowance at seven levels during twenty graph, entity, membership, label and identity operations.",
+      "invariant": "Every rejected operation preserves the complete encoded state and counters, propagates typed memory failure and supports subsequent successful reuse without leaking reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_nested_transactions_restore_complete_roots_after_errors_and_panics",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/native_tests.rs",
+      "capability": "Native graph transaction roots",
+      "workload": "Change shared graph generations through nested transaction failure, outer failure, panic and a later successful transaction.",
+      "invariant": "Every failed boundary restores its entering image and identities; the later commit succeeds and retirement releases all native admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "target": "integration",
+      "test": "native_graph_admission_failure_preserves_engine_rollback_and_reuse",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/graph_delta_and_path_index.rs",
+      "capability": "Native graph transaction admission",
+      "workload": "Exhaust graph memory during implicit and explicit Engine mutations, roll back while the allowance remains exhausted, then reuse the session and retire its source.",
+      "invariant": "Typed 53200 failure preserves graph entities and path-index results; rollback needs no graph allocation, subsequent mutation succeeds, and the independent captured image retains its original data and releases its leases after retirement.",
+      "case_names": [
+        ""
       ]
     }
   ]
