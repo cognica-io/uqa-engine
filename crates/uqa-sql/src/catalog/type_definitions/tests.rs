@@ -6,7 +6,9 @@
 
 use super::super::shell_type::StoredShellType;
 use super::*;
-use uqa_core::catalog_role::RoleIdentity;
+use uqa_core::{
+    catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken, RelationIdentity,
+};
 
 fn shell(schema: &str, name: &str) -> StoredShellType {
     StoredShellType {

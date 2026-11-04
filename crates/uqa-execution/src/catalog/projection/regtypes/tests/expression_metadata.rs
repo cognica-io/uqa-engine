@@ -42,10 +42,12 @@ fn fixture(unrelated: usize) -> CatalogReadView {
         ("reader".into(), reader),
     ]));
     let mut schemas = BoundSchemaSecurity::initial_catalog();
-    schemas.insert(
-        "hidden".into(),
-        BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP),
-    );
+    schemas
+        .insert(
+            "hidden".into(),
+            BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
     snapshot.definitions.schemas = Arc::new(schemas);
     let Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN hidden.positive AS integer DEFAULT abs(-7)")

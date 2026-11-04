@@ -25,14 +25,14 @@ pub(super) fn catalog() -> CatalogReadView {
         .into(),
     );
     snapshot.definitions.schemas = Arc::new(
-        [
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([
             (
                 "public".into(),
                 BoundSchemaSecurity::with_public_privileges(true),
             ),
             ("private".into(), BoundSchemaSecurity::bootstrap("private")),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     snapshot.definitions.graphs =
         Arc::new([("g".into(), Arc::new(uqa_graph::GraphStoreHandle::default()))].into());

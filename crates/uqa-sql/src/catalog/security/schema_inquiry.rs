@@ -15,6 +15,7 @@ use super::{
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleReference;
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::temporary_namespace::{TemporaryNamespace, TemporaryNamespaceOids};
 use crate::{
     catalog::roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
@@ -23,8 +24,7 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::Value;
 
-pub type SchemaRegistryRead<'a> =
-    Box<dyn std::ops::Deref<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
+pub type SchemaRegistryRead<'a> = Box<dyn std::ops::Deref<Target = SchemaRegistry> + 'a>;
 
 /// Metadata-only graph names held under the caller's original registry read guard.
 pub trait GraphNamespaceRead {

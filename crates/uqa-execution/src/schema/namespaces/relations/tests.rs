@@ -11,6 +11,7 @@ use std::{
     sync::Arc,
 };
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     resolution::{candidates::SearchPathRead, creation::CreationRelationNames},
     roles::{
@@ -30,7 +31,7 @@ use uqa_storage::StorageBackendError;
 struct Fixture {
     user: String,
     path: Vec<String>,
-    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
+    schemas: RefCell<SchemaRegistry>,
     roles: BTreeMap<String, RoleDefinition>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
     database: BoundDatabaseSecurity,
@@ -41,14 +42,14 @@ struct Fixture {
     fail: Option<&'static str>,
     locks: Arc<crate::row_locks::RowLockManager>,
     cancellation: uqa_core::CancellationToken,
-    refreshes: RefCell<VecDeque<BTreeMap<String, BoundSchemaSecurity>>>,
+    refreshes: RefCell<VecDeque<SchemaRegistry>>,
 }
 impl Fixture {
     fn new() -> Self {
         Self {
             user: "uqa".into(),
             path: vec!["tenant".into()],
-            schemas: RefCell::new(BTreeMap::new()),
+            schemas: RefCell::new(SchemaRegistry::new()),
             roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
             memberships: BTreeMap::new(),
             database: BoundDatabaseSecurity::bootstrap(),
@@ -248,7 +249,8 @@ impl RelationCreationRuntime for Fixture {
         if self.publish_on_fence {
             self.schemas
                 .borrow_mut()
-                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"));
+                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"))
+                .unwrap();
         }
         Ok(())
     }

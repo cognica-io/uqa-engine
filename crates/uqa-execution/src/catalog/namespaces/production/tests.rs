@@ -18,7 +18,9 @@ fn controlled_namespace_selection_preserves_implicit_order_and_privilege_errors(
         oid: 500,
         object_id: [50; 16],
     };
-    Arc::make_mut(&mut snapshot.definitions.schemas).insert("invalid".into(), invalid);
+    Arc::make_mut(&mut snapshot.definitions.schemas)
+        .insert("invalid".into(), invalid)
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
@@ -115,10 +117,12 @@ fn controlled_namespace_selection_preserves_implicit_order_and_privilege_errors(
 fn controlled_namespace_rejection_and_cancellation_release_partial_results() {
     let name = "long_namespace_".repeat(64 * 1024);
     let mut snapshot = catalog().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.schemas).insert(
-        name.clone(),
-        BoundSchemaSecurity::with_public_privileges(true),
-    );
+    Arc::make_mut(&mut snapshot.definitions.schemas)
+        .insert(
+            name.clone(),
+            BoundSchemaSecurity::with_public_privileges(true),
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let path = resolution(&["public", &name]);
     let budget = MemoryBudget::new(512);

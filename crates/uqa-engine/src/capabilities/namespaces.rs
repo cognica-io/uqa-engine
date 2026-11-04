@@ -162,11 +162,11 @@ impl SchemaSecurityPersistence for Engine {
     }
 }
 impl SchemaSecurityPublication for Engine {
-    fn publish_security(&self, name: &str, security: BoundSchemaSecurity) {
+    fn publish_security(&self, name: &str, security: BoundSchemaSecurity) -> Result<(), SQLError> {
         self.durable
             .schemas
             .write()
-            .insert(name.to_string(), security);
+            .insert(name.to_string(), security)
     }
 }
 impl SchemaPrivilegeRegistry for Engine {

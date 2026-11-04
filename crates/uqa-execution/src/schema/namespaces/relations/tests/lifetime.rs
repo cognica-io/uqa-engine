@@ -35,7 +35,8 @@ fn relation_creation_keeps_the_selected_namespace_but_nonrelation_resolution_doe
         fixture
             .schemas
             .borrow_mut()
-            .insert("tenant".into(), security);
+            .insert("tenant".into(), security)
+            .unwrap();
         let context = fixture.context();
         let name = if relation {
             context.persistent_relation_name("docs")
@@ -55,14 +56,13 @@ fn creation_rebinds_search_path_and_releases_the_deleted_namespace() {
     let new = BoundSchemaSecurity::bootstrap("fallback");
     let old_oid = old.tuple.unwrap().oid;
     let new_oid = new.tuple.unwrap().oid;
-    fixture
-        .schemas
-        .borrow_mut()
-        .extend([("tenant".into(), old), ("fallback".into(), new.clone())]);
+    *fixture.schemas.borrow_mut() =
+        SchemaRegistry::try_from_iter([("tenant".into(), old), ("fallback".into(), new.clone())])
+            .unwrap();
     fixture
         .refreshes
         .borrow_mut()
-        .push_back(BTreeMap::from([("fallback".into(), new)]));
+        .push_back(SchemaRegistry::try_from_iter([("fallback".into(), new)]).unwrap());
     assert_eq!(
         fixture.context().persistent_relation_name("docs").unwrap(),
         "fallback.docs"
@@ -84,11 +84,12 @@ fn creation_rebinds_recreated_identity_even_when_its_oid_is_reused() {
     fixture
         .schemas
         .borrow_mut()
-        .insert("tenant".into(), before.clone());
+        .insert("tenant".into(), before.clone())
+        .unwrap();
     fixture
         .refreshes
         .borrow_mut()
-        .push_back(BTreeMap::from([("tenant".into(), after)]));
+        .push_back(SchemaRegistry::try_from_iter([("tenant".into(), after)]).unwrap());
     assert_eq!(
         fixture.context().persistent_relation_name("docs").unwrap(),
         "tenant.docs"
@@ -119,18 +120,22 @@ fn creation_checks_authority_before_waiting_and_again_after_replacement() {
         let denied = BoundSchemaSecurity::bootstrap("tenant");
         let mut allowed = BoundSchemaSecurity::with_public_privileges(true);
         allowed.tuple = denied.tuple;
-        fixture.schemas.borrow_mut().insert(
-            "tenant".into(),
-            if revoked_after_wait {
-                allowed
-            } else {
-                denied.clone()
-            },
-        );
+        fixture
+            .schemas
+            .borrow_mut()
+            .insert(
+                "tenant".into(),
+                if revoked_after_wait {
+                    allowed
+                } else {
+                    denied.clone()
+                },
+            )
+            .unwrap();
         fixture
             .refreshes
             .borrow_mut()
-            .push_back(BTreeMap::from([("tenant".into(), denied.clone())]));
+            .push_back(SchemaRegistry::try_from_iter([("tenant".into(), denied.clone())]).unwrap());
         let error = fixture
             .context()
             .persistent_relation_name("tenant.docs")
@@ -152,7 +157,8 @@ fn direct_api_creation_retains_the_same_namespace_lifetime() {
     fixture
         .schemas
         .borrow_mut()
-        .insert("tenant".into(), security);
+        .insert("tenant".into(), security)
+        .unwrap();
     assert_eq!(fixture.context().api_name("docs").unwrap(), "tenant.docs");
     assert!(!peer_acquires(&fixture, oid));
 }
@@ -166,7 +172,8 @@ fn direct_api_creation_preserves_typed_namespace_lock_errors() {
     fixture
         .schemas
         .borrow_mut()
-        .insert("tenant".into(), security);
+        .insert("tenant".into(), security)
+        .unwrap();
     let error = fixture.context().api_name("docs").unwrap_err();
     let error = uqa_sql::catalog::errors::storage_error("CREATE TABLE", &error);
     assert_eq!(error.sqlstate(), Some("55P03"));

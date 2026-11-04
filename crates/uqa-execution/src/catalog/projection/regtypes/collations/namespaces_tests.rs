@@ -60,7 +60,10 @@ fn catalog(revoked: bool) -> CatalogReadView {
             BoundSchemaSecurity::owner(uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP),
         );
     }
-    snapshot.definitions.schemas = Arc::new(schemas);
+    snapshot.definitions.schemas = Arc::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter(schemas)
+            .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 

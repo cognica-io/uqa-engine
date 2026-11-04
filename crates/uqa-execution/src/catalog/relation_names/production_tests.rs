@@ -40,7 +40,7 @@ fn admitted_relation_resolution_preserves_namespace_usage_and_bound_identity_ord
         .into(),
     );
     snapshot.definitions.schemas = Arc::new(
-        [
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([
             (
                 "public".into(),
                 BoundSchemaSecurity::with_public_privileges(true),
@@ -50,8 +50,8 @@ fn admitted_relation_resolution_preserves_namespace_usage_and_bound_identity_ord
                 "odd.schema".into(),
                 BoundSchemaSecurity::with_public_privileges(true),
             ),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     let tables = [
         RelationIdentity::new("private", "items"),

@@ -39803,6 +39803,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_roots_capture_without_enumeration_or_temporary_authority_retention",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Native schema root capture",
+      "workload": "Capture 1, 64 and 4096 namespaces before and after adding large temporary authority, then retire the source.",
+      "invariant": "Capture allocates zero heap objects, excludes temporary authority from exact independent admission and releases every selected allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_root_publication_preserves_unrelated_grants_and_matches_legacy_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Native schema publication",
+      "workload": "Insert one namespace beside 1, 32 and 512 existing namespaces and a large unrelated ACL; compare captured authority with the legacy producer.",
+      "invariant": "Insertion stays below 32 KiB and 256 allocations, retains unrelated payloads and preserves every ordered legacy authority value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_schema_publication_and_capture_preserve_original_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Schema admission failure",
+      "workload": "Deny native replacement and removal, capture with exact and insufficient independent allowances, cancel and retire all owners.",
+      "invariant": "Failed publication preserves the original root, failed capture releases partial admission, and all native and independent reservations retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_schema_roots_preserve_original_authority_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/schema_roots.rs",
+      "capability": "Committed native schema roots",
+      "workload": "Create 1, 32 and 128 schemas through SQL; capture original authority during private grants, then revoke, roll back a savepoint, commit, rename and replace.",
+      "invariant": "Selected authority capture stays below 16 KiB and 64 allocations, preserves original grant identities after closure and retains original cancellation and final release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

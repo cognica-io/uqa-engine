@@ -6,6 +6,7 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -24,9 +25,7 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
-};
+use security::{BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -153,7 +152,7 @@ pub struct CatalogDefinitionSnapshot {
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub database_security: Arc<BoundDatabaseSecurity>,
-    pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
+    pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     /// The `pg_class` OIDs sequences recorded when they were created, by object identity.

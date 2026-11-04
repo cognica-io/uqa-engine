@@ -7,6 +7,7 @@
 //! Schema ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::catalog_acl::AclGrantee;
 
@@ -451,7 +452,7 @@ pub fn validate_schema_acl_roles(
 }
 
 pub fn resolve_schema_grant_targets(
-    registry: &BTreeMap<String, super::BoundSchemaSecurity>,
+    registry: &SchemaRegistry,
     schemas: &[String],
 ) -> Result<Vec<String>, SQLError> {
     let mut targets = Vec::with_capacity(schemas.len());

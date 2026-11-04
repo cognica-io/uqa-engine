@@ -27,10 +27,12 @@ fn oid_initialization_excludes_bootstrap_namespaces_but_observes_user_claims() {
         largest_catalog_oid(&CatalogReadView::new(snapshot.clone()), &resolution).unwrap(),
         None
     );
-    Arc::make_mut(&mut snapshot.definitions.schemas).insert(
-        "retained".into(),
-        BoundSchemaSecurity::bootstrap_with_oid("retained", 70_000),
-    );
+    Arc::make_mut(&mut snapshot.definitions.schemas)
+        .insert(
+            "retained".into(),
+            BoundSchemaSecurity::bootstrap_with_oid("retained", 70_000),
+        )
+        .unwrap();
     assert_eq!(
         largest_catalog_oid(&CatalogReadView::new(snapshot), &resolution).unwrap(),
         Some(70_000)

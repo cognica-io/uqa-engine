@@ -192,9 +192,12 @@ fn catalog(definition: StoredRange) -> crate::catalog::CatalogReadView {
         RangeRegistry::try_from_iter([(definition.identity.qualified_name(), definition)]).unwrap(),
     );
     snapshot.definitions.roles = Arc::new(roles());
-    snapshot.definitions.schemas = Arc::new(BTreeMap::from([(
-        "public".into(),
-        crate::catalog::security::BoundSchemaSecurity::bootstrap("public"),
-    )]));
+    snapshot.definitions.schemas = Arc::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
+            "public".into(),
+            crate::catalog::security::BoundSchemaSecurity::bootstrap("public"),
+        )])
+        .unwrap(),
+    );
     crate::catalog::CatalogReadView::new(snapshot)
 }

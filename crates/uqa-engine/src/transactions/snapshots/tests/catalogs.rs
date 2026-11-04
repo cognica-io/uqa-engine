@@ -120,7 +120,9 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
     exact!(domains, enums, composites, ranges, shells);
     let schemas = selected.catalogs.schemas.captured(&selected.cut).unwrap();
     assert!(schemas.budget().shares_allowance(control.memory()));
-    assert_eq!(schemas.get().unwrap(), &original_schemas);
+    assert!(schemas.get().unwrap().iter().eq(original_schemas
+        .iter()
+        .map(|(name, security)| (name, security))));
     drop(schemas);
     let views = selected.catalogs.views.captured(&selected.cut).unwrap();
     assert_eq!(views.get().unwrap().len(), 1);

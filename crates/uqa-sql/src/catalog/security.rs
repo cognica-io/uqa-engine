@@ -13,6 +13,7 @@ pub mod dependencies;
 mod role_bindings;
 pub mod schema;
 pub mod schema_binding;
+pub mod schema_registry;
 pub use schema_binding::BoundSchemaSecurity;
 pub mod table;
 pub mod table_binding;

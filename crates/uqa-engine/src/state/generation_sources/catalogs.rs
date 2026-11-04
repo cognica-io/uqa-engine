@@ -11,6 +11,7 @@ use crate::state::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     composite_type::StoredComposite,
     definition_capture::{routines::CapturedRoutines, views::CapturedViews},
@@ -22,7 +23,6 @@ use uqa_sql::catalog::{
     graph_oids::GraphCatalogOids,
     range_type::StoredRange,
     roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
-    security::BoundSchemaSecurity,
     shell_type::StoredShellType,
     stored_view::StoredView,
 };
@@ -68,7 +68,7 @@ catalog_sources! {
     composites: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredComposite> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredComposite>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
     ranges: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredRange> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredRange>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
     shells: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredShellType> => uqa_sql::catalog::type_definitions::CapturedTypeDefinitions<StoredShellType>, uqa_sql::catalog::type_definitions::TypeDefinitions::capture;
-    schemas: BTreeMap<String, BoundSchemaSecurity> => Vec<(String, BoundSchemaSecurity)>, uqa_sql::catalog::security::capture::schemas;
+    schemas: SchemaRegistry => uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry, SchemaRegistry::capture;
     views: BTreeMap<RelationIdentity, StoredView> => CapturedViews, uqa_sql::catalog::definition_capture::views::durable_views;
     sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;
     roles: BTreeMap<String, RoleDefinition> => Vec<(String, uqa_sql::catalog::roles::capture::CapturedRoleDefinition)>, uqa_sql::catalog::roles::capture::roles;

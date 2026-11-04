@@ -177,7 +177,7 @@ pub fn rename_schema(
     context
         .registry
         .schemas_write()
-        .insert(new_name.to_string(), staged.clone());
+        .insert(new_name.to_string(), staged.clone())?;
     context.persistence.save_schema_row(new_name, &staged)?;
     for relation in &relations {
         context.relocation.relocate_relation(relation, new_name)?;
@@ -192,8 +192,10 @@ pub fn rename_schema(
     }
     {
         let mut schemas = context.registry.schemas_write();
-        schemas.remove(name);
-        schemas.insert(new_name.to_string(), current.clone());
+        let mut renamed = schemas.clone();
+        renamed.remove(name)?;
+        renamed.insert(new_name.to_string(), current.clone())?;
+        **schemas = renamed;
     }
     context.persistence.drop_schema_row(name)?;
     context.persistence.save_schema_row(new_name, &current)?;

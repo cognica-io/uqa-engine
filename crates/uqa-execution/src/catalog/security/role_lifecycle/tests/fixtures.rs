@@ -17,6 +17,7 @@ use std::{
 };
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     ast::RoleAttribute,
     catalog::{
@@ -28,10 +29,7 @@ use uqa_sql::{
             guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
             RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
         },
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
+        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -53,7 +51,7 @@ pub(super) struct Catalog {
     pub catalog_locks: RefCell<Vec<(u32, Option<u32>, crate::row_locks::RelationLockMode)>>,
     pub tuple_locks: RefCell<Vec<(u32, u32, crate::row_locks::RelationLockMode)>>,
     database: BoundDatabaseSecurity,
-    schemas: BTreeMap<String, BoundSchemaSecurity>,
+    schemas: SchemaRegistry,
     views: BTreeMap<RelationIdentity, StoredView>,
     foreign_tables: BTreeMap<RelationIdentity, BoundTableSecurity>,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
@@ -82,7 +80,7 @@ impl Catalog {
             catalog_locks: RefCell::new(Vec::new()),
             tuple_locks: RefCell::new(Vec::new()),
             database: BoundDatabaseSecurity::bootstrap(),
-            schemas: BTreeMap::new(),
+            schemas: SchemaRegistry::new(),
             views: BTreeMap::new(),
             foreign_tables: BTreeMap::new(),
             system_relations: BTreeMap::new(),
@@ -344,7 +342,7 @@ impl RoleDependencyCatalog for Catalog {
         self.event("database");
         Box::new(&self.database)
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         self.event("schemas");
         Box::new(&self.schemas)
     }

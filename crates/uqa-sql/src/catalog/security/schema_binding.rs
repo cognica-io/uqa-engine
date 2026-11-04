@@ -29,13 +29,13 @@ impl BoundSchemaSecurity {
     pub const BUILTIN_NAMES: [&'static str; 3] = ["pg_catalog", "information_schema", "ag_catalog"];
 
     /// The initial namespace authority shared by memory and durable catalogs.
-    pub fn initial_catalog() -> BTreeMap<String, Self> {
-        std::iter::once(("public".into(), Self::bootstrap("public")))
-            .chain(
-                Self::BUILTIN_NAMES
-                    .map(|name| (name.into(), Self::builtin(name).expect("built-in schema"))),
-            )
-            .collect()
+    pub fn initial_catalog() -> super::schema_registry::SchemaRegistry {
+        let entries = std::iter::once(("public".into(), Self::bootstrap("public"))).chain(
+            Self::BUILTIN_NAMES
+                .map(|name| (name.into(), Self::builtin(name).expect("built-in schema"))),
+        );
+        super::schema_registry::SchemaRegistry::try_from_iter(entries)
+            .expect("fixed bootstrap schema definitions fit native admission")
     }
 
     pub fn builtin(name: &str) -> Option<Self> {

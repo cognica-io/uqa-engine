@@ -5,7 +5,7 @@
 //
 
 use super::context::RoleDependencyCatalog;
-use crate::catalog::security::{BoundSchemaSecurity, BoundSequenceSecurity};
+use crate::catalog::security::BoundSequenceSecurity;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 mod fixtures;

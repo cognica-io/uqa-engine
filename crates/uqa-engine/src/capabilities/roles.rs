@@ -14,6 +14,7 @@ use uqa_execution::catalog::security::role_lifecycle::context::{
 };
 use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     catalog::{
         roles::{
@@ -24,10 +25,7 @@ use uqa_sql::{
             },
             RoleDefinition, RoleMembership, RoleMembershipKey,
         },
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
+        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
         stored_view::StoredView,
     },
     routines::SQLUserFunction,
@@ -188,7 +186,7 @@ impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.durable.database_security.read())
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.durable.schemas.read())
     }
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {

@@ -19,14 +19,26 @@ fn namespace_oid_projection_reads_the_captured_incarnation_after_name_reuse() {
         object_id: [1; 16],
         revision: [2; 16],
     });
-    snapshot.definitions.schemas = Arc::new(BTreeMap::from([("s".into(), first.clone())]));
+    snapshot.definitions.schemas = Arc::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
+            "s".into(),
+            first.clone(),
+        )])
+        .unwrap(),
+    );
     let original = CatalogReadView::new(snapshot.clone());
     first.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity {
         oid: 40_002,
         object_id: [3; 16],
         revision: [4; 16],
     });
-    snapshot.definitions.schemas = Arc::new(BTreeMap::from([("s".into(), first)]));
+    snapshot.definitions.schemas = Arc::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
+            "s".into(),
+            first,
+        )])
+        .unwrap(),
+    );
     let replacement = CatalogReadView::new(snapshot);
     assert_eq!(super::super::schema_object_oid(&original, "s"), 40_001);
     assert_eq!(super::super::schema_object_oid(&replacement, "s"), 40_002);
@@ -41,10 +53,13 @@ fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_na
     let owner = RoleDefinition::bootstrap();
     let mut roles = BTreeMap::from([(owner.name.clone(), owner)]);
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas = Arc::new(BTreeMap::from([(
-        "public".into(),
-        BoundSchemaSecurity::bootstrap("public"),
-    )]));
+    snapshot.definitions.schemas = Arc::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
+            "public".into(),
+            BoundSchemaSecurity::bootstrap("public"),
+        )])
+        .unwrap(),
+    );
     snapshot.definitions.roles = Arc::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
     let mut owner = roles.remove("uqa").unwrap();

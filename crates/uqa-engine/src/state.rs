@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     events::{RuleCatalog, StoredTrigger},
     type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
@@ -191,8 +192,10 @@ pub(super) struct DurableCatalogState {
         Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
     >,
     pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
-    pub(super) schemas:
-        CatalogCell<BTreeMap<String, BoundSchemaSecurity>, Vec<(String, BoundSchemaSecurity)>>,
+    pub(super) schemas: CatalogCell<
+        SchemaRegistry,
+        uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
+    >,
     pub(super) path_indexes: CatalogCell<
         BTreeMap<String, uqa_graph::PathIndex>,
         resource_capture::CapturedResources<
@@ -318,7 +321,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
     pub(super) database_security: Arc<BoundDatabaseSecurity>,
-    pub(super) schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
+    pub(super) schemas: Arc<SchemaRegistry>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,

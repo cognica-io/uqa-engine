@@ -106,7 +106,7 @@ impl DurableCatalogState {
         self.schemas = CatalogCell::capture_source(
             self.schemas.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::schemas,
+            uqa_sql::catalog::security::schema_registry::SchemaRegistry::capture,
         )?;
         self.sequence_security = CatalogCell::capture_source(
             self.sequence_security.snapshot(),
