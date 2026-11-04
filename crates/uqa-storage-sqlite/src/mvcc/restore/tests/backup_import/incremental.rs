@@ -8,6 +8,15 @@ use super::*;
 
 #[test]
 fn sqlite_kv_incremental_backup_restores_membership_and_artifacts_in_every_file_mode() {
+    verify_incremental_restore(false);
+}
+
+#[test]
+fn sqlite_kv_standalone_copy_restores_incremental_images_in_every_file_mode() {
+    verify_incremental_restore(true);
+}
+
+fn verify_incremental_restore(standalone: bool) {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();
         let source_path = directory.path().join("source");
@@ -51,6 +60,11 @@ fn sqlite_kv_incremental_backup_restores_membership_and_artifacts_in_every_file_
         drop((operation, records, store, owner, connection));
         std::fs::remove_dir_all(source_path).unwrap();
 
+        let (repository, child) = if standalone {
+            copy_repository(repository, child, directory.path(), &control)
+        } else {
+            (repository, child)
+        };
         let lease = repository.open_backup(child.backup(), &control).unwrap();
         let request = DatabaseRestore::new(child.cut().source).unwrap();
         let target = directory.path().join("target");
@@ -76,4 +90,39 @@ fn sqlite_kv_incremental_backup_restores_membership_and_artifacts_in_every_file_
         owner.store().put(b"after-restore", b"writable").unwrap();
         assert_eq!(control.memory().used(), 0);
     }
+}
+
+fn copy_repository(
+    repository: uqa_storage::backup::LocalRepository,
+    child: uqa_storage::backup::BackupRoot,
+    directory: &std::path::Path,
+    control: &StorageReadControl,
+) -> (
+    uqa_storage::backup::LocalRepository,
+    uqa_storage::backup::BackupRoot,
+) {
+    let source = repository.open_backup(child.backup(), control).unwrap();
+    let copied_repository = uqa_storage::backup::LocalRepository::create(
+        directory.join("copy"),
+        uqa_storage::backup::Protection::Encrypted {
+            domain: uqa_storage::backup::ProtectionId::from_bytes([93; 16]).unwrap(),
+            key: uqa_storage::backup::BackupKey::new([94; 32]),
+        },
+        uqa_storage::backup::BackupLimits::new(4096, 4096).unwrap(),
+        control,
+    )
+    .unwrap();
+    let mut copy = copied_repository
+        .begin_backup(child.cut(), None, 16 << 20, control)
+        .unwrap();
+    let report = copy.prepare_copy(&source, 2 << 20, control).unwrap();
+    assert_eq!(report.inventory, child.summary());
+    assert_eq!(report.copied_payload_bytes, child.summary().decoded_bytes);
+    let copied = copy.publish(control).unwrap();
+    assert_eq!(copied.cut(), child.cut());
+    assert_eq!(copied.parent(), None);
+    drop((copy, source));
+    drop(repository);
+    std::fs::remove_dir_all(directory.join("backup")).unwrap();
+    (copied_repository, copied)
 }

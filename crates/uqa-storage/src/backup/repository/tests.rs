@@ -14,7 +14,9 @@ use super::*;
 
 mod admission;
 mod capture;
+mod copy;
 mod failures;
+mod image_fixture;
 mod incremental;
 mod integrity;
 mod resources;

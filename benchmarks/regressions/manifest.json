@@ -41015,6 +41015,136 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_reprotects_complete_incremental_images_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy.rs",
+      "capability": "Independent backup protection",
+      "workload": "Copy inherited, new, deleted and tombstone units across all nine plaintext/two-key combinations, delete the original repository, and reopen the destination.",
+      "invariant": "Exact logical summaries and unit bytes survive source/key loss; every object belongs to the new repository, wrong keys fail, and ciphertext contains no fixture plaintext.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_prepared_and_uncertain_publications_need_only_the_destination_key",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy.rs",
+      "capability": "Recoverable key-rotation copies",
+      "workload": "Prepare a re-encrypted root, delete the original repository and reopen the target after a lost prepared handle or uncertain final synchronization.",
+      "invariant": "The same prepared identity publishes without the old key; resolving completed publication wins over late cancellation and preserves exact output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_bounds_large_units_and_shared_verification_workspace",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy.rs",
+      "capability": "Bounded standalone backup copies",
+      "workload": "Copy 1,030 units including a payload larger than two MiB under 128 KiB of memory, then repeat with less than the measured shared physical workspace.",
+      "invariant": "The complete image remains exact within admitted memory and workspace; a lower quota fails without publication and retires all charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_preserves_an_empty_complete_image",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy.rs",
+      "capability": "Empty standalone backup images",
+      "workload": "Copy a complete empty image from plaintext to an encrypted repository and verify the result.",
+      "invariant": "The destination has the identical empty logical summary, zero payload copies and a valid independent complete inventory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_rejects_corruption_even_in_unselected_inherited_pack_frames",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy/failures.rs",
+      "capability": "Complete copy integrity",
+      "workload": "Corrupt an unselected inherited pack frame, selected payload or inventory, or remove a required object.",
+      "invariant": "No failed copy can publish or resume preparation, including when the selected unit alone still authenticates; transient memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_invalid_intents_and_limits_cannot_publish_or_continue",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy/failures.rs",
+      "capability": "Copy operation admission",
+      "workload": "Attempt same-repository, mismatched-cut and parent-bearing copies; exhaust staging, workspace and memory, and inject an object synchronization failure.",
+      "invariant": "The owning operation fails terminally without changing existing source or destination roots, and releases all partial allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "standalone_copy_retains_the_source_lease_and_cancels_while_destination_admission_waits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/copy/failures.rs",
+      "capability": "Copy retention and cancellation",
+      "workload": "Hold destination admission while the copy waits, try exclusive source recovery, then cancel the copy before releasing the competing admission.",
+      "invariant": "The source remains leased, cancellation terminates the waiting copy, no root publishes, and source verification still succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_standalone_copy_restores_incremental_images_without_the_old_repository",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import/incremental.rs",
+      "capability": "Independent provider-image key rotation",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_kv_standalone_copy_restores_incremental_images_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import/incremental.rs",
+      "capability": "Independent provider-image key rotation",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_standalone_copy_restores_incremental_images_in_every_file_mode",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests/incremental.rs",
+      "capability": "Independent provider-image key rotation",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

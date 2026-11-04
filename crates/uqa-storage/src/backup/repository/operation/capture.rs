@@ -142,17 +142,23 @@ impl BackupOperation<'_> {
         if !matches!(self.state, State::Capturing) {
             return Err(BackupError::Finished);
         }
-        let result = self.capture_image(source, maximum_workspace_bytes, control);
+        let result = self.capture_image(
+            source,
+            &FileBudget::new(maximum_workspace_bytes),
+            None,
+            control,
+        );
         if result.is_err() {
             self.state = State::Failed;
         }
         result.map_err(workspace_error)
     }
 
-    fn capture_image(
+    pub(super) fn capture_image(
         &mut self,
         mut source: impl BackupImageSource,
-        maximum_workspace_bytes: u64,
+        files: &FileBudget,
+        expected: Option<InventorySummary>,
         control: &StorageReadControl,
     ) -> BackupResult<BackupCaptureReport> {
         control.cancellation().check()?;
@@ -168,14 +174,12 @@ impl BackupOperation<'_> {
             .as_ref()
             .map(|lease| ParentInventory::new(repository, lease.root(), control))
             .transpose()?;
-        let files = FileBudget::new(maximum_workspace_bytes);
-        let spool = TemporaryFile::with_file_budget(&files)?;
+        let spool = TemporaryFile::with_file_budget(files)?;
         let mut inventory = InventoryWriter::new(spool, self.cut().format, limits, control)?;
         let mut statistics = BackupImageStatistics::default();
         let mut selected = select(&mut source, control)?;
         while selected {
-            let mut unit =
-                SelectedUnit::new(&mut source, parent.as_mut(), &files, limits, control)?;
+            let mut unit = SelectedUnit::new(&mut source, parent.as_mut(), files, limits, control)?;
             if let SelectedImage::Reused { digest, span } = &unit.image {
                 inventory.append(&unit.metadata.entry(*digest, *span, limits, control)?)?;
                 statistics.payload(unit.metadata.bytes, true)?;
@@ -211,7 +215,7 @@ impl BackupOperation<'_> {
                 if charge > retention_limit.saturating_sub(retained) {
                     break;
                 }
-                unit = SelectedUnit::new(&mut source, parent.as_mut(), &files, limits, control)?;
+                unit = SelectedUnit::new(&mut source, parent.as_mut(), files, limits, control)?;
             }
             let object = pack.finish(control)?;
             add(&mut statistics.written_object_bytes, object.encoded_bytes())?;
@@ -223,11 +227,14 @@ impl BackupOperation<'_> {
         drop(source);
         statistics.parent_units = parent.map_or(Ok(0), ParentInventory::finish)?;
         let (mut spool, summary) = inventory.finish()?;
+        if expected.is_some_and(|expected| expected != summary) {
+            return Err(BackupError::Integrity);
+        }
         spool.seek(SeekFrom::Start(0))?;
         let span = self.write_object(FrameKind::Inventory, &mut spool, control)?;
         add(&mut statistics.written_object_bytes, span.object_bytes())?;
         drop(spool);
-        self.prepare(span, summary, control)?;
+        self.prepare_with_files(span, summary, Some(files), control)?;
         Ok(BackupCaptureReport {
             inventory: summary,
             source: source_statistics,
@@ -247,7 +254,7 @@ fn select(source: &mut impl BackupImageSource, control: &StorageReadControl) -> 
     }
 }
 
-fn workspace_error(error: BackupError) -> BackupError {
+pub(super) fn workspace_error(error: BackupError) -> BackupError {
     if let BackupError::Io(io) = &error {
         if let Some(limit) = io
             .get_ref()

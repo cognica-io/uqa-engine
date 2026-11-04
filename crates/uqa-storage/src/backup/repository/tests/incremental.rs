@@ -4,11 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::image_fixture::{capture, objects, read, Image, Unit};
 use super::*;
-use fixtures::{capture, objects, read, Image, Unit};
 use std::sync::atomic::Ordering;
-
-mod fixtures;
 
 #[test]
 fn incremental_capture_reuses_exact_images_and_preserves_complete_current_membership() {
