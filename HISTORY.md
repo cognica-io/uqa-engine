@@ -74,6 +74,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Avoid premature stack-depth errors for valid recursive PL/pgSQL calls in unoptimized builds, including `fact(11)`. Interpreter activations retain their own heap storage while native stack and configured nesting limits remain enforced.
 - Stream temporary value-index payloads through the exact evaluated-value codec instead of JSON and a complete intermediate buffer. Tag-shaped maps keep their type, and owned reads retain decoded payload admission through their final consumer.
 - Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.
 - Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.

@@ -13,12 +13,13 @@ use super::{
 };
 
 impl<'a> Interpreter<'a> {
+    /// Retain the activation record outside the native stack of nested routine calls.
     pub fn new(
         services: RoutineContext<'a>,
         def: &'a CreateFunction,
         parsed: &'a PLpgSQLFunction,
         bound: Vec<Value>,
-    ) -> Result<Self, SQLError> {
+    ) -> Result<Box<Self>, SQLError> {
         services.statements.load_language_library("plpgsql");
         let datums = &parsed.datums;
         if datums.len() < def.params.len() {
@@ -67,7 +68,7 @@ impl<'a> Interpreter<'a> {
             services
                 .statements
                 .plpgsql_preparations(def, parsed, &planning.control())?;
-        let mut interpreter = Self {
+        let mut interpreter = Box::new(Self {
             planning,
             descriptions: None,
             preparations,
@@ -89,7 +90,7 @@ impl<'a> Interpreter<'a> {
             last_row_count: 0,
             is_set: def.returns_set(),
             variable_conflict: parsed.variable_conflict,
-        };
+        });
         interpreter.bind_arguments(bound)?;
         // Each block initializes its own declared variables when reached.
         if let Some(found) = interpreter.found {
@@ -133,7 +134,7 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    pub fn into_outcome(self) -> RoutineOutcome {
+    pub fn into_outcome(self: Box<Self>) -> RoutineOutcome {
         let out_values = self
             .out_datums
             .iter()

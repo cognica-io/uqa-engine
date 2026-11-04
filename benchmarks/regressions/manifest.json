@@ -18375,7 +18375,7 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/sql_plpgsql/dynamic_recursion.rs",
       "capability": "Routine recursion stack and state",
-      "workload": "A PL/pgSQL function recursively evaluates factorial(10) through located RETURN statements.",
+      "workload": "A PL/pgSQL function recursively evaluates factorial(10) and factorial(11) through located RETURN statements.",
       "invariant": "Finite routine recursion preserves the exact integer output within the unchanged native stack budget.",
       "case_names": [
         ""
