@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 use uqa_sql::catalog::roles::{memberships::role_is_superuser, session::SessionAuthorization};
 use uqa_sql::semantics::parameters::{ParameterScope, ParameterScopes};
@@ -91,8 +92,6 @@ impl Drop for RoutineSessionStateGuard<'_> {
     }
 }
 
-pub(crate) use uqa_sql::catalog::roles::{RoleDefinition, RoleMembership, RoleMembershipKey};
-
 impl Engine {
     pub(crate) fn current_role(&self) -> RoleReference {
         self.session_execution_view().current_role()
@@ -119,16 +118,16 @@ impl Engine {
 
     pub(crate) fn persist_roles_snapshot(
         &self,
-        before: &BTreeMap<String, RoleDefinition>,
-        roles: &BTreeMap<String, RoleDefinition>,
+        before: &RoleDefinitions,
+        roles: &RoleDefinitions,
     ) -> Result<(), SQLError> {
         role_catalog::persist_roles(self.storage.catalog.as_deref(), before, roles)
     }
 
     pub(crate) fn persist_role_memberships_snapshot(
         &self,
-        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        before: &RoleMemberships,
+        memberships: &RoleMemberships,
     ) -> Result<(), SQLError> {
         role_catalog::persist_memberships(self.storage.catalog.as_deref(), before, memberships)
     }

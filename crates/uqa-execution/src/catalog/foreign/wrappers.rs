@@ -8,12 +8,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     foreign_server::ForeignServerDefinition,
     foreign_wrapper::{
         native_wrappers, validate_wrappers, ForeignWrapperDefinition, ForeignWrappers,
     },
-    roles::RoleDefinition,
 };
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
@@ -86,7 +86,7 @@ fn persist_record(
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     servers: &mut BTreeMap<String, ForeignServerDefinition>,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredWrappers> {

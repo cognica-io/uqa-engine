@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{ast::ColumnType, catalog::roles::RoleIdentity, Statement};
 
 fn definition(sql: &str, defaults: &[Option<ColumnType>]) -> CreateFunction {
@@ -42,8 +44,8 @@ fn replace(
         existing,
         replacement,
         "uqa",
-        &BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
-        &BTreeMap::new(),
+        &RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+        &RoleMemberships::new(),
         signature,
     )
 }

@@ -7,8 +7,9 @@
 //! Schema ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::schema_registry::SchemaRegistry;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use crate::ast::{GrantSchemaStmt, RoleAttribute, SchemaPrivilege, SchemaRevokeBehavior};
@@ -16,7 +17,7 @@ use crate::SQLError;
 use uqa_core::catalog_schema::{SchemaAclEntry, SchemaPrivileges};
 
 use super::SchemaSecurity;
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 mod production;
 pub use production::{role_has_schema_privilege_with_control, SchemaPrivilegeView};
@@ -136,8 +137,8 @@ pub fn select_acl_grantor(
     security: &SchemaSecurity,
     privilege: SchemaAclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -160,8 +161,8 @@ pub fn role_has_schema_privilege(
     security: &SchemaSecurity,
     subject: &(impl RoleSubject + ?Sized),
     privilege: SchemaAclPrivilege,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     role_has_schema_privilege_check(
         security,
@@ -179,8 +180,8 @@ pub fn role_has_schema_privilege_check(
     security: &SchemaSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: SchemaPrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)
@@ -366,8 +367,8 @@ pub fn apply_schema_acl(
     grantees: &[AclGrantee],
     privileges: &[SchemaAclPrivilege],
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &SchemaSecurity,
 ) -> Result<(SchemaSecurity, usize), SQLError> {
     let grantors = privileges
@@ -415,7 +416,7 @@ pub fn validate_schema_acl_roles(
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     for role in grantees {
         if role

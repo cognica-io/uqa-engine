@@ -7,11 +7,8 @@
 //! Versioned database security stores bound role references and converts legacy names once.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::database::{binding::BoundDatabaseSecurity, DatabaseSecurity},
-};
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::security::database::{binding::BoundDatabaseSecurity, DatabaseSecurity};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::DATABASE_SECURITY_METADATA_KEY;
@@ -25,7 +22,7 @@ struct StoredDatabaseSecurity<T> {
 
 pub(super) fn encode(
     security: &BoundDatabaseSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<String> {
     security
         .validate(roles)
@@ -38,7 +35,7 @@ pub(super) fn encode(
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<BoundDatabaseSecurity> {
     let json = catalog.get_metadata(DATABASE_SECURITY_METADATA_KEY)?;

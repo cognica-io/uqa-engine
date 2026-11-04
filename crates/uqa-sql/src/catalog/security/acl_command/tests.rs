@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use std::sync::Arc;
 
 struct Names(RoleReference);
@@ -20,18 +22,20 @@ impl RoleReferenceNames for Names {
     }
 }
 
-fn catalog() -> (BTreeMap<String, RoleDefinition>, Names) {
-    let roles: BTreeMap<_, _> = ["grantor", "reader", "PUBLIC"]
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
-            let mut role = RoleDefinition::bootstrap();
-            role.name = name.into();
-            role.oid = 20_000 + i64::try_from(index).unwrap();
-            role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-            (name.into(), role)
-        })
-        .collect();
+fn catalog() -> (RoleDefinitions, Names) {
+    let roles = RoleDefinitions::try_from_iter(
+        ["grantor", "reader", "PUBLIC"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_000 + i64::try_from(index).unwrap();
+                role.object_id = [u8::try_from(index + 1).unwrap(); 16];
+                (name.into(), role)
+            }),
+    )
+    .unwrap();
     let names = Names(RoleReference::Bound(Arc::new(
         RoleBinding::from_definition(&roles["grantor"]).unwrap(),
     )));
@@ -53,14 +57,15 @@ fn captured_acl_recipients_and_grantor_follow_renames_without_authorizing_reused
         .resolve_validated(&names, &roles, &arguments, Some(&grantor), |_| Ok(()))
         .unwrap();
     for old in ["grantor", "reader", "PUBLIC"] {
-        let mut original = roles.remove(old).unwrap();
+        let mut original = roles.get(old).unwrap().clone();
+        roles.remove(old).unwrap();
         let mut replacement = original.clone();
         replacement.oid += 10;
         replacement.object_id[0] += 10;
         original.name = format!("renamed {old}");
         original.advance_revision().unwrap();
-        roles.insert(original.name.clone(), original);
-        roles.insert(old.into(), replacement);
+        roles.insert(original.name.clone(), original).unwrap();
+        roles.insert(old.into(), replacement).unwrap();
     }
     let resolved = command
         .resolve_validated(&names, &roles, &arguments, Some(&grantor), |_| Ok(()))
@@ -92,15 +97,16 @@ fn a_named_actor_is_captured_before_a_wait_can_replace_its_name() {
     command
         .resolve_validated(&names, &roles, &[], None, |_| Ok(()))
         .unwrap();
-    let mut original = roles.remove("grantor").unwrap();
+    let mut original = roles.get("grantor").unwrap().clone();
+    roles.remove("grantor").unwrap();
     let identity = original.identity();
     let mut replacement = original.clone();
     replacement.oid += 10;
     replacement.object_id[0] += 10;
     original.name = "renamed".into();
     original.advance_revision().unwrap();
-    roles.insert(original.name.clone(), original);
-    roles.insert(replacement.name.clone(), replacement);
+    roles.insert(original.name.clone(), original).unwrap();
+    roles.insert(replacement.name.clone(), replacement).unwrap();
     let resolved = command
         .resolve_validated(&names, &roles, &[], None, |_| Ok(()))
         .unwrap();
@@ -118,7 +124,13 @@ fn captured_acl_recipients_reject_replacement_incarnations_before_reauthorizatio
     command
         .resolve_validated(&names, &roles, &arguments, None, |_| Ok(()))
         .unwrap();
-    roles.get_mut("reader").unwrap().object_id = [9; 16];
+    roles
+        .edit("reader", |value| {
+            value.object_id = [9; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     let result = command.resolve_validated(&names, &roles, &arguments, None, |_| {
         panic!("a replacement must not be authorized")
     });

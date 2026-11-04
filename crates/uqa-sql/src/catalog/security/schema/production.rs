@@ -7,17 +7,14 @@
 //! Read persisted schema ACLs without materializing names or unowned traversal scratch.
 
 use super::{RoleAttribute, SchemaAclPrivilege};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     catalog::{
-        roles::{
-            identity::RoleSubject, memberships::role_inherits_with_control, RoleDefinition,
-            RoleIdentity, RoleMembership, RoleMembershipKey,
-        },
+        roles::{identity::RoleSubject, memberships::role_inherits_with_control, RoleIdentity},
         security::BoundSchemaSecurity,
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::{
     catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges, memory::ProductionControl,
 };
@@ -41,8 +38,8 @@ pub fn role_has_schema_privilege_with_control(
     security: SchemaPrivilegeView<'_>,
     subject: &(impl RoleSubject + ?Sized),
     privilege: SchemaAclPrivilege,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     // Ordinary namespace lookup resolves the complete ACL before considering even PUBLIC or superuser access. Invalid persisted references therefore keep the namespace unusable.
@@ -85,7 +82,7 @@ pub fn role_has_schema_privilege_with_control(
 
 fn require_role(
     role: RoleIdentity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     control.check()?;

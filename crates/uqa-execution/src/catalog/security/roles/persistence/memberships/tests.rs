@@ -6,10 +6,12 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::{identity::RoleBinding, role_inherits};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions) {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let initial = super::super::restore_and_migrate(&catalog).unwrap();
     let mut roles = initial.roles.clone();
@@ -22,18 +24,13 @@ fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
         role.oid = 20_001 + offset as i64;
         role.object_id = [offset as u8 + 1; 16];
         role.attributes.clear();
-        roles.insert(name.into(), role);
+        roles.insert(name.into(), role).unwrap();
     }
     super::super::persist_roles(Some(&catalog), &initial.roles, &roles).unwrap();
     (catalog, roles)
 }
 
-fn membership(
-    roles: &BTreeMap<String, RoleDefinition>,
-    target: &str,
-    member: &str,
-    oid: i64,
-) -> RoleMembership {
+fn membership(roles: &RoleDefinitions, target: &str, member: &str, oid: i64) -> RoleMembership {
     RoleMembership {
         oid,
         role: RoleBinding::from_definition(&roles[target]).unwrap(),
@@ -49,23 +46,32 @@ fn membership(
 fn independent_membership_changes_preserve_unrelated_committed_records() {
     let (catalog, roles) = fixture();
     let first = membership(&roles, "target", "member", 30_001);
-    let baseline = BTreeMap::from([(first.key(), first.clone())]);
-    persist(&catalog, &BTreeMap::new(), &baseline).unwrap();
+    let baseline = RoleMemberships::try_from_iter([(first.key(), first.clone())]).unwrap();
+    persist(&catalog, &RoleMemberships::new(), &baseline).unwrap();
     let second = membership(&roles, "other_target", "other_member", 30_002);
     let mut peer = baseline.clone();
-    peer.insert(second.key(), second.clone());
+    peer.insert(second.key(), second.clone()).unwrap();
     persist(&catalog, &baseline, &peer).unwrap();
 
     let mut private = baseline.clone();
-    private.get_mut(&first.key()).unwrap().admin_option = true;
+    private
+        .edit(&first.key(), |value| {
+            value.admin_option = true;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     persist(&catalog, &baseline, &private).unwrap();
     let latest = super::super::restore(&catalog).unwrap();
     assert_eq!(latest.memberships.len(), 2);
     assert!(latest.memberships[&first.key()].admin_option);
     assert_eq!(latest.memberships[&second.key()], second);
-    persist(&catalog, &private, &BTreeMap::new()).unwrap();
+    persist(&catalog, &private, &RoleMemberships::new()).unwrap();
     let latest = super::super::restore(&catalog).unwrap();
-    assert_eq!(latest.memberships, BTreeMap::from([(second.key(), second)]));
+    assert_eq!(
+        latest.memberships,
+        RoleMemberships::try_from_iter([(second.key(), second)]).unwrap()
+    );
     assert!(catalog.get_metadata(&oid_key(first.oid)).unwrap().is_none());
     assert_eq!(
         catalog
@@ -81,15 +87,15 @@ fn membership_oid_collisions_and_invalid_candidates_fail_before_any_write() {
     let (catalog, roles) = fixture();
     let first = membership(&roles, "target", "member", 30_001);
     let second = membership(&roles, "other_target", "other_member", 30_001);
-    let baseline = BTreeMap::from([(first.key(), first.clone())]);
-    persist(&catalog, &BTreeMap::new(), &baseline).unwrap();
+    let baseline = RoleMemberships::try_from_iter([(first.key(), first.clone())]).unwrap();
+    persist(&catalog, &RoleMemberships::new(), &baseline).unwrap();
     let stored = catalog.metadata_with_prefix("").unwrap();
-    for before in [BTreeMap::new(), baseline.clone()] {
+    for before in [RoleMemberships::new(), baseline.clone()] {
         assert_eq!(
             persist(
                 &catalog,
                 &before,
-                &BTreeMap::from([(second.key(), second.clone())])
+                &RoleMemberships::try_from_iter([(second.key(), second.clone())]).unwrap()
             )
             .unwrap_err()
             .sqlstate(),
@@ -98,14 +104,14 @@ fn membership_oid_collisions_and_invalid_candidates_fail_before_any_write() {
         assert_eq!(catalog.metadata_with_prefix("").unwrap(), stored);
     }
     let mut duplicate = baseline.clone();
-    duplicate.insert(second.key(), second.clone());
+    duplicate.insert(second.key(), second.clone()).unwrap();
     assert_eq!(
         persist(&catalog, &baseline, &duplicate)
             .unwrap_err()
             .sqlstate(),
         Some("23505")
     );
-    let invalid = BTreeMap::from([(first.key(), second)]);
+    let invalid = RoleMemberships::try_from_iter([(first.key(), second)]).unwrap();
     assert!(persist(&catalog, &baseline, &invalid).is_err());
     assert_eq!(catalog.metadata_with_prefix("").unwrap(), stored);
 }
@@ -117,8 +123,8 @@ fn membership_records_reject_malformed_markers_keys_values_and_oid_claims() {
         let value = membership(&roles, "target", "member", 30_001);
         persist(
             &catalog,
-            &BTreeMap::new(),
-            &BTreeMap::from([(value.key(), value.clone())]),
+            &RoleMemberships::new(),
+            &RoleMemberships::try_from_iter([(value.key(), value.clone())]).unwrap(),
         )
         .unwrap();
         match corruption {
@@ -172,7 +178,7 @@ fn legacy_memberships_require_initial_open_and_keep_their_public_oid() {
     expected.inherit_option = false;
     assert_eq!(
         restored.memberships,
-        BTreeMap::from([(expected.key(), expected)])
+        RoleMemberships::try_from_iter([(expected.key(), expected)]).unwrap()
     );
     assert_eq!(
         restored.memberships,
@@ -185,10 +191,10 @@ fn membership_reopen_retains_dropped_endpoints_without_authorizing_their_replace
     for endpoint in ["target", "member"] {
         let (catalog, roles) = fixture();
         let value = membership(&roles, "target", "member", 30_001);
-        let baseline = BTreeMap::from([(value.key(), value)]);
-        persist(&catalog, &BTreeMap::new(), &baseline).unwrap();
+        let baseline = RoleMemberships::try_from_iter([(value.key(), value)]).unwrap();
+        persist(&catalog, &RoleMemberships::new(), &baseline).unwrap();
         let mut dropped = roles.clone();
-        dropped.remove(endpoint);
+        dropped.remove(endpoint).unwrap();
         super::super::persist_roles(Some(&catalog), &roles, &dropped).unwrap();
         assert_eq!(
             super::super::restore(&catalog).unwrap().memberships,
@@ -197,7 +203,7 @@ fn membership_reopen_retains_dropped_endpoints_without_authorizing_their_replace
         let mut replaced = dropped.clone();
         let mut replacement = roles[endpoint].clone();
         replacement.object_id = [5; 16];
-        replaced.insert(endpoint.into(), replacement);
+        replaced.insert(endpoint.into(), replacement).unwrap();
         super::super::persist_roles(Some(&catalog), &dropped, &replaced).unwrap();
         let restored = super::super::restore(&catalog).unwrap();
         assert_eq!(restored.memberships, baseline);

@@ -18,10 +18,8 @@ use crate::{
     },
     row_locks::shared_objects::SharedObjectLockSession,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Deref,
-};
+use std::{collections::BTreeSet, ops::Deref};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
@@ -186,7 +184,7 @@ fn resolve_roles(
     context: &SchemaPrivilegeContext<'_>,
     statement: &GrantSchemaStmt,
     command_roles: &mut AclCommandRoles,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<ResolvedAclRoles, SQLError> {
     command_roles.resolve_validated(
         context.session,

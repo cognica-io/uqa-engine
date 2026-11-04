@@ -15,12 +15,13 @@ use crate::{
 };
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     ast::{ColumnDef, ColumnType},
     catalog::{
         roles::{
             guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
-            RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference, RoleReferenceNames,
+            RoleDefinition, RoleReference, RoleReferenceNames,
         },
         security::{ownership::RelationOwnerSchemas, BoundSchemaSecurity},
     },
@@ -36,8 +37,8 @@ pub(super) struct Fixture {
     pub notices: RefCell<Vec<uqa_sql::SQLNotice>>,
     pub current: RefCell<String>,
     pub denied_schema: Cell<bool>,
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
     locks: RowLockManager,
     cancel: uqa_core::CancellationToken,
 }
@@ -59,11 +60,14 @@ impl Fixture {
             notices: RefCell::new(Vec::new()),
             current: RefCell::new("uqa".into()),
             denied_schema: Cell::new(false),
-            roles: RefCell::new(BTreeMap::from([
-                ("uqa".into(), RoleDefinition::bootstrap()),
-                ("reader".into(), reader),
-            ])),
-            memberships: RefCell::new(BTreeMap::new()),
+            roles: RefCell::new(
+                RoleDefinitions::try_from_iter([
+                    ("uqa".into(), RoleDefinition::bootstrap()),
+                    ("reader".into(), reader),
+                ])
+                .unwrap(),
+            ),
+            memberships: RefCell::new(RoleMemberships::new()),
             locks: RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
         }

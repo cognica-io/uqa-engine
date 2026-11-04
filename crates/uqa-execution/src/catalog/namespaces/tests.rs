@@ -7,6 +7,7 @@
 use super::*;
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 pub(super) fn catalog() -> CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
@@ -18,11 +19,11 @@ pub(super) fn catalog() -> CatalogReadView {
     reader.object_id = [42; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     snapshot.definitions.schemas = Arc::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([

@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{RoleAttribute, Statement},
     catalog::{roles::RoleReference, security::BoundSchemaSecurity},
@@ -171,21 +173,23 @@ fn no_execute_is_an_error_while_execute_without_grant_option_only_warns() {
     reader.oid = 20_000;
     reader.object_id = [2; 16];
     reader.attributes.remove(&RoleAttribute::Superuser);
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader),
-    ]);
+    ])
+    .unwrap();
     let mut def = routine("app.f", 20_001, false).def.clone();
     assert_eq!(
-        select_routine_acl_grantor(&def, "reader", &roles, &BTreeMap::new()).unwrap(),
+        select_routine_acl_grantor(&def, "reader", &roles, &RoleMemberships::new()).unwrap(),
         None
     );
     def.execute_acl = Some(Vec::new());
-    let error = select_routine_acl_grantor(&def, "reader", &roles, &BTreeMap::new()).unwrap_err();
+    let error =
+        select_routine_acl_grantor(&def, "reader", &roles, &RoleMemberships::new()).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     assert_eq!(error.to_string(), "permission denied for function f");
     assert!(
-        select_routine_acl_grantor(&def, "uqa", &roles, &BTreeMap::new())
+        select_routine_acl_grantor(&def, "uqa", &roles, &RoleMemberships::new())
             .unwrap()
             .is_some()
     );

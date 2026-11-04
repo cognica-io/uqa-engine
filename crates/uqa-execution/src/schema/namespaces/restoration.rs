@@ -6,19 +6,16 @@
 
 //! Initial schema role conversion joins the caller's complete restoration transaction.
 
-use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::{BoundSchemaSecurity, SchemaSecurity},
-};
+use uqa_sql::catalog::security::{BoundSchemaSecurity, SchemaSecurity};
 use uqa_storage::{CatalogFacade, SchemaRow, StorageBackendError, StorageBackendResult};
 
 const BUILTIN_INITIALIZED: &str = "sql_builtin_schema_catalog_initialized";
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<SchemaRegistry> {
     let mut restored = SchemaRegistry::new();

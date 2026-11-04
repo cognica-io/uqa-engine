@@ -8,9 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     foreign_server::{validate_foreign_servers, ForeignServerDefinition, ForeignServerMetadata},
-    roles::{RoleDefinition, RoleIdentity},
+    roles::RoleIdentity,
 };
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
@@ -87,7 +88,7 @@ impl RestoredServers {
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredServers> {
     let format = catalog_format(catalog)?;

@@ -7,11 +7,12 @@
 //! Membership records retain role incarnations and publish independent OID claims.
 
 use super::{
-    restoration, BTreeMap, CatalogFacade, RoleDefinition, RoleMembership, RoleMembershipKey,
-    SQLError, StorageBackendError, StorageBackendResult, ROLE_MEMBERSHIPS_METADATA_KEY,
+    restoration, BTreeMap, CatalogFacade, RoleMembership, RoleMembershipKey, SQLError,
+    StorageBackendError, StorageBackendResult, ROLE_MEMBERSHIPS_METADATA_KEY,
 };
 use serde::Deserialize;
 use std::{collections::BTreeSet, fmt::Write};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 pub(super) const PREFIX: &str = "uqa.sql.role_membership.v1:";
 const OID_PREFIX: &str = "uqa.sql.role_membership_oid.v1:";
@@ -54,11 +55,8 @@ fn oid_key(oid: i64) -> String {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<(
-    BTreeMap<RoleMembershipKey, RoleMembership>,
-    MembershipFormat,
-)> {
+    roles: &RoleDefinitions,
+) -> StorageBackendResult<(RoleMemberships, MembershipFormat)> {
     let stored = catalog
         .get_metadata(ROLE_MEMBERSHIPS_METADATA_KEY)?
         .map(|json| serde_json::from_str::<StoredMemberships>(&json))
@@ -122,7 +120,7 @@ pub(super) fn read(
 /// Initial restoration owns the transaction and validates both catalogs before publishing either conversion.
 pub(super) fn migrate(
     catalog: &dyn CatalogFacade,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
 ) -> StorageBackendResult<()> {
     for (identity, membership) in memberships {
         let key = key(identity);
@@ -134,8 +132,8 @@ pub(super) fn migrate(
 
 pub(super) fn persist(
     catalog: &dyn CatalogFacade,
-    before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    after: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    before: &RoleMemberships,
+    after: &RoleMemberships,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     for (identity, membership) in after {

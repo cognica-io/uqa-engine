@@ -5,23 +5,21 @@
 //
 
 use super::*;
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-};
+use std::cell::{Cell, RefCell};
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     ast::{DatabasePrivilege, DatabaseRevokeBehavior},
     catalog::roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleDefinition, RoleMembership, RoleMembershipKey,
+        RoleDefinition,
     },
 };
 
 struct DatabaseCatalog {
     security: RefCell<BoundDatabaseSecurity>,
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
     fail_persistence: Cell<bool>,
     epoch: Cell<usize>,
     publications: RefCell<Vec<&'static str>>,
@@ -144,11 +142,10 @@ impl SharedObjectLockSession for DatabaseCatalog {
 fn database_acl_persistence_failure_leaves_security_and_epoch_unchanged() {
     let catalog = DatabaseCatalog {
         security: RefCell::new(BoundDatabaseSecurity::bootstrap()),
-        roles: RefCell::new(BTreeMap::from([(
-            "uqa".into(),
-            RoleDefinition::bootstrap(),
-        )])),
-        memberships: RefCell::new(BTreeMap::new()),
+        roles: RefCell::new(
+            RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+        ),
+        memberships: RefCell::new(RoleMemberships::new()),
         fail_persistence: Cell::new(true),
         epoch: Cell::new(0),
         publications: RefCell::new(Vec::new()),

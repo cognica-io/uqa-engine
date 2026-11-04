@@ -17,11 +17,10 @@ use crate::catalog::security::roles::{
 use crate::catalog::{domain, enum_type};
 use std::collections::BTreeSet;
 use uqa_core::catalog_role::RoleIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{GrantTypeStmt, ObjectAclEntry, TypeRevokeBehavior},
-    catalog::roles::{
-        identity::RoleSubject, memberships::role_is_superuser, role_inherits, RoleDefinition,
-    },
+    catalog::roles::{identity::RoleSubject, memberships::role_is_superuser, role_inherits},
     catalog::security::{
         acl_command::{AclCommandRoles, ResolvedAclRoles},
         object_acl,
@@ -178,7 +177,7 @@ fn prepare<'a>(
 fn validate_requested_grantor(
     grantor: &str,
     current_user: &uqa_sql::catalog::roles::RoleReference,
-    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     if !roles.contains_key(grantor) {
         return Err(SQLError::Routine {
@@ -195,10 +194,7 @@ fn validate_requested_grantor(
     Ok(())
 }
 
-fn validate_grantees(
-    resolved: &ResolvedAclRoles,
-    roles: &std::collections::BTreeMap<String, RoleDefinition>,
-) -> Result<(), SQLError> {
+fn validate_grantees(resolved: &ResolvedAclRoles, roles: &RoleDefinitions) -> Result<(), SQLError> {
     for grantee in &resolved.grantees {
         if let Some(name) = grantee
             .role_name()

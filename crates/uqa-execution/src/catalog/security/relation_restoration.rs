@@ -6,11 +6,8 @@
 
 //! Bind legacy relation security only inside complete initial catalog restoration.
 
-use std::collections::BTreeMap;
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::{BoundTableSecurity, TableSecurity},
-};
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::security::{BoundTableSecurity, TableSecurity};
 use uqa_storage::{
     CatalogFacade, RelationSecurityRow, StorageBackendError, StorageBackendResult, TableSchema,
 };
@@ -18,7 +15,7 @@ use uqa_storage::{
 pub fn restore_security(
     row: &RelationSecurityRow,
     columns: Option<&[String]>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<BoundTableSecurity> {
     let security = match row {
@@ -41,7 +38,7 @@ pub fn restore_security(
 
 pub fn restore_tables(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<Vec<(TableSchema, BoundTableSecurity)>> {
     let mut restored = Vec::new();

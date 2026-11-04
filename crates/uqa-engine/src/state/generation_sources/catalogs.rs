@@ -11,6 +11,7 @@ use crate::state::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     composite_type::StoredComposite,
@@ -22,7 +23,6 @@ use uqa_sql::catalog::{
     foreign_wrapper::ForeignWrappers,
     graph_oids::GraphCatalogOids,
     range_type::StoredRange,
-    roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
     shell_type::StoredShellType,
     stored_view::StoredView,
 };
@@ -71,8 +71,8 @@ catalog_sources! {
     schemas: SchemaRegistry => uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry, SchemaRegistry::capture;
     views: BTreeMap<RelationIdentity, StoredView> => CapturedViews, uqa_sql::catalog::definition_capture::views::durable_views;
     sql_user_functions: BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>> => CapturedRoutines, uqa_sql::catalog::definition_capture::routines::routines;
-    roles: BTreeMap<String, RoleDefinition> => Vec<(String, uqa_sql::catalog::roles::capture::CapturedRoleDefinition)>, uqa_sql::catalog::roles::capture::roles;
-    role_memberships: BTreeMap<RoleMembershipKey, RoleMembership> => Vec<(RoleMembershipKey, RoleMembership)>, uqa_sql::catalog::roles::capture::memberships;
+    roles: RoleDefinitions => uqa_sql::catalog::roles::CapturedRoleDefinitions, RoleDefinitions::capture;
+    role_memberships: RoleMemberships => uqa_sql::catalog::roles::CapturedRoleMemberships, RoleMemberships::capture;
     database_security: BoundDatabaseSecurity => BoundDatabaseSecurity, BoundDatabaseSecurity::capture_security;
     builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => Vec<(u32, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity)>, uqa_sql::catalog::security::capture::relations::builtin_routines;
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => Vec<(RelationIdentity, uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity)>, uqa_sql::catalog::security::capture::relations::system_relations;

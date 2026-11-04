@@ -6,10 +6,11 @@
 
 //! Versioned domain authority, complete restoration and durable registry publication.
 
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     domain::{validate_domain_registry, StoredDomain},
-    roles::{guards::RoleCatalogGuards, RoleDefinition},
+    roles::guards::RoleCatalogGuards,
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -35,7 +36,7 @@ pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &Arc<DomainRegistry>,
     committed: Arc<DomainRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<Arc<DomainRegistry>> {
     let committed = merge_private_records(current, committed, |name| {
         catalog.map_or(Ok(false), |catalog| {

@@ -5,11 +5,10 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::{
-    roles::{
-        guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleMembership, RoleMembershipKey,
-    },
+    roles::guards::{RoleDefinitionRead, RoleMembershipRead},
     security::{
         columns::grant_column_acl,
         sequence::AclPrivilege,
@@ -22,11 +21,12 @@ use crate::catalog::{
     },
 };
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RoleMemberships,
     table_security: TableSecurity,
     sequences: RefCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     replace_subject_on_lookup: Cell<bool>,
@@ -41,11 +41,14 @@ impl Catalog {
         reader.object_id = [1; 16];
         reader.attributes.clear();
         Self {
-            roles: RefCell::new(BTreeMap::from([
-                (owner.name.clone(), owner),
-                (reader.name.clone(), reader.clone()),
-            ])),
-            memberships: BTreeMap::new(),
+            roles: RefCell::new(
+                RoleDefinitions::try_from_iter([
+                    (owner.name.clone(), owner),
+                    (reader.name.clone(), reader.clone()),
+                ])
+                .unwrap(),
+            ),
+            memberships: RoleMemberships::new(),
             table_security: TableSecurity {
                 acl: Some(vec![TableAclEntry {
                     role: "reader".into(),
@@ -73,7 +76,14 @@ impl Catalog {
 
     fn lookup(&self) {
         if self.replace_subject_on_lookup.replace(false) {
-            self.roles.borrow_mut().get_mut("reader").unwrap().object_id = [2; 16];
+            self.roles
+                .borrow_mut()
+                .edit("reader", |value| {
+                    value.object_id = [2; 16];
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap();
             self.sequences
                 .borrow_mut()
                 .values_mut()
@@ -174,14 +184,14 @@ impl TablePrivilegeCatalog for Catalog {
     fn table_privilege_security(
         &self,
         _target: &ResolvedTablePrivilegeTarget,
-        _roles: &BTreeMap<String, RoleDefinition>,
+        _roles: &RoleDefinitions,
     ) -> Result<TableSecurity, SQLError> {
         Ok(self.table_security.clone())
     }
     fn column_privilege_relation(
         &self,
         _target: &ResolvedTablePrivilegeTarget,
-        _roles: &BTreeMap<String, RoleDefinition>,
+        _roles: &RoleDefinitions,
     ) -> Result<ColumnPrivilegeRelation, SQLError> {
         Ok(ColumnPrivilegeRelation {
             relation: RelationIdentity::new("public", "items"),

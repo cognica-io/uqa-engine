@@ -7,6 +7,7 @@
 use super::{support::Values, *};
 use crate::catalog::{range_type::input::*, CatalogReadView};
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use uqa_core::{
     memory::{MemoryBudget, Produced, ProductionControl},
     CancellationToken, Value,

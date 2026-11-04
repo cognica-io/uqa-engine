@@ -7,6 +7,7 @@
 //! Private definitions are selected as complete immutable records.
 
 use super::*;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{ast::SequenceDataType, catalog::roles::RoleDefinition};
 
 fn registry(entries: &[(&str, u8, i64)]) -> SequenceReadSnapshot {
@@ -17,11 +18,11 @@ fn registry(entries: &[(&str, u8, i64)]) -> SequenceReadSnapshot {
         persistence: Arc::new(BTreeMap::new()),
         security: Arc::new(BTreeMap::new()),
         roles: RoleCatalogSnapshot {
-            roles: Arc::new(BTreeMap::from([(
-                "uqa".into(),
-                RoleDefinition::bootstrap(),
-            )])),
-            memberships: Arc::new(BTreeMap::new()),
+            roles: Arc::new(
+                RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
+                    .unwrap(),
+            ),
+            memberships: Arc::new(RoleMemberships::new()),
         },
     };
     for &(name, identity, start) in entries {

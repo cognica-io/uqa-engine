@@ -7,12 +7,10 @@
 //! Prepare role-dependent mutations without retaining registry guards across waits.
 
 use super::locking::{RoleBinding, RoleDependencyLocks, RoleLockContext};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
-    catalog::roles::{
-        guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleDefinition, RoleMembership, RoleMembershipKey,
-    },
+    catalog::roles::guards::{RoleDefinitionRead, RoleMembershipRead},
     SQLError,
 };
 
@@ -54,11 +52,7 @@ pub fn prepare_role_owner<'a, T>(
     context: RoleLockContext<'a>,
     owner: &RoleBinding,
     prepare_writer: impl FnMut() -> Result<(), SQLError>,
-    mut prepare: impl FnMut(
-        &BTreeMap<String, RoleDefinition>,
-        &BTreeMap<RoleMembershipKey, RoleMembership>,
-        &str,
-    ) -> Result<Option<T>, SQLError>,
+    mut prepare: impl FnMut(&RoleDefinitions, &RoleMemberships, &str) -> Result<Option<T>, SQLError>,
 ) -> Result<RoleDependencyCandidate<'a, Option<T>>, SQLError> {
     prepare_dependencies(
         &context,

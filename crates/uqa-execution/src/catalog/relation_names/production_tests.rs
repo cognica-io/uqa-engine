@@ -10,6 +10,7 @@ use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{roles::RoleDefinition, security::BoundSchemaSecurity};
 
 fn resolution() -> RelationNameResolution {
@@ -33,11 +34,11 @@ fn admitted_relation_resolution_preserves_namespace_usage_and_bound_identity_ord
     reader.object_id = [42; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     snapshot.definitions.schemas = Arc::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([

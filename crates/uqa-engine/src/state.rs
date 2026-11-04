@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     events::{RuleCatalog, StoredTrigger},
@@ -285,20 +286,10 @@ pub(super) struct DurableCatalogState {
         BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>,
         uqa_sql::catalog::definition_capture::routines::CapturedRoutines,
     >,
-    pub(super) roles: CatalogCell<
-        BTreeMap<String, super::roles::RoleDefinition>,
-        Vec<(
-            String,
-            uqa_sql::catalog::roles::capture::CapturedRoleDefinition,
-        )>,
-    >,
-    pub(super) role_memberships: CatalogCell<
-        BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>,
-        Vec<(
-            super::roles::RoleMembershipKey,
-            super::roles::RoleMembership,
-        )>,
-    >,
+    pub(super) roles:
+        CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
+    pub(super) role_memberships:
+        CatalogCell<RoleMemberships, uqa_sql::catalog::roles::CapturedRoleMemberships>,
     pub(super) triggers: CatalogCell<
         BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>,
         uqa_sql::catalog::definition_capture::events::CapturedTriggers,
@@ -344,9 +335,8 @@ pub(super) struct DurableCatalogSnapshot {
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub(super) sql_user_functions:
         Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
-    pub(super) roles: Arc<BTreeMap<String, super::roles::RoleDefinition>>,
-    pub(super) role_memberships:
-        Arc<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
+    pub(super) roles: Arc<RoleDefinitions>,
+    pub(super) role_memberships: Arc<RoleMemberships>,
     pub(super) triggers:
         Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
     pub(super) rules: Arc<RuleCatalog>,
@@ -386,11 +376,8 @@ impl DurableCatalogState {
             builtin_routine_security: CatalogCell::new(BTreeMap::new()),
             system_relation_security: CatalogCell::new(BTreeMap::new()),
             sql_user_functions: CatalogCell::new(BTreeMap::new()),
-            roles: CatalogCell::new(BTreeMap::from([(
-                "uqa".to_string(),
-                super::roles::RoleDefinition::bootstrap(),
-            )])),
-            role_memberships: CatalogCell::new(BTreeMap::new()),
+            roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
+            role_memberships: CatalogCell::new(RoleMemberships::new()),
             triggers: CatalogCell::new(BTreeMap::new()),
             rules: CatalogCell::new(BTreeMap::new()),
         }

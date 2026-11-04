@@ -8,9 +8,9 @@
 
 use super::super::role_bindings;
 use super::{DatabaseAclEntry, DatabasePrivileges, DatabaseSecurity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{RoleDefinition, RoleIdentity};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 
 pub type BoundDatabaseAclEntry = uqa_core::catalog_role::BoundAclEntry<DatabasePrivileges>;
@@ -21,10 +21,7 @@ pub struct BoundDatabaseSecurity {
     pub acl: Option<Vec<BoundDatabaseAclEntry>>,
 }
 
-fn role_name(
-    roles: &BTreeMap<String, RoleDefinition>,
-    identity: RoleIdentity,
-) -> Result<&str, String> {
+fn role_name(roles: &RoleDefinitions, identity: RoleIdentity) -> Result<&str, String> {
     role_bindings::role_name(roles, identity, "database")
 }
 
@@ -45,7 +42,7 @@ impl BoundDatabaseSecurity {
             })
     }
 
-    pub fn validate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+    pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
         role_name(roles, self.role_owner)?;
         for entry in self.acl.iter().flatten() {
             if let Some(grantee) = entry.role {
@@ -56,10 +53,7 @@ impl BoundDatabaseSecurity {
         Ok(())
     }
 
-    pub fn bind(
-        security: &DatabaseSecurity,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<Self, String> {
+    pub fn bind(security: &DatabaseSecurity, roles: &RoleDefinitions) -> Result<Self, String> {
         super::validate_stored_database_security(security, roles)?;
         let bind = |name: &str| role_bindings::bind_role(roles, name, "database");
         Ok(Self {
@@ -87,10 +81,7 @@ impl BoundDatabaseSecurity {
     }
 
     /// Project current names without rewriting or rebinding the stored references.
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<DatabaseSecurity, String> {
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<DatabaseSecurity, String> {
         let name = |identity| role_name(roles, identity).map(str::to_owned);
         Ok(DatabaseSecurity {
             role_owner: name(self.role_owner)?,

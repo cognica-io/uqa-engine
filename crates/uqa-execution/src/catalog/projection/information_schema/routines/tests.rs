@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::test_support::{empty_catalog, CatalogServices};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{roles::RoleDefinition, security::builtin_routines::BuiltinRoutineSecurity};
 
 /// The bootstrap catalog with an ordinary `reader` role, where the bootstrap owner revoked `EXECUTE` on `revoked` from PUBLIC.
@@ -19,11 +20,11 @@ fn catalog(revoked: &[u32]) -> CatalogReadView {
     reader.object_id = [1; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     snapshot.definitions.builtin_routine_security = Arc::new(
         revoked

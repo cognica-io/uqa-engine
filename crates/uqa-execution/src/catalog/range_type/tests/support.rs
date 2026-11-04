@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::range_type::support::{
     bound_equality_key, compare_bounds, RangeComparisonStates,
 };
+use std::collections::BTreeMap;
 use uqa_core::{
     memory::{MemoryBudget, Produced, ProductionControl},
     CancellationToken, DatumValue, Value,

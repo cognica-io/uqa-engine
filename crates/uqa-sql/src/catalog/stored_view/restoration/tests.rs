@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::RelationPersistence,
     catalog::{
@@ -19,23 +20,26 @@ use crate::{
 use std::cell::{Cell, RefCell};
 
 struct Roles {
-    definitions: RefCell<BTreeMap<String, RoleDefinition>>,
+    definitions: RefCell<RoleDefinitions>,
     reads: Cell<usize>,
 }
 impl Roles {
     fn new() -> Self {
         Self {
-            definitions: RefCell::new(BTreeMap::from([(
-                "owner".into(),
-                RoleDefinition {
-                    oid: 42,
-                    object_id: [42; 16],
-                    revision: 1,
-                    name: "owner".into(),
-                    attributes: BTreeSet::new(),
-                    connection_limit: -1,
-                },
-            )])),
+            definitions: RefCell::new(
+                RoleDefinitions::try_from_iter([(
+                    "owner".into(),
+                    RoleDefinition {
+                        oid: 42,
+                        object_id: [42; 16],
+                        revision: 1,
+                        name: "owner".into(),
+                        attributes: uqa_core::memory::OwnedSet::new(),
+                        connection_limit: -1,
+                    },
+                )])
+                .unwrap(),
+            ),
             reads: Cell::new(0),
         }
     }

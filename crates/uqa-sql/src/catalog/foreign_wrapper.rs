@@ -6,7 +6,8 @@
 
 //! Foreign-wrapper catalog identity, separate from server names and source adapters.
 
-use super::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity};
+use super::roles::{identity::RoleSubject, RoleIdentity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::{ast::FunctionBinding, SQLError};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -190,7 +191,7 @@ pub fn bound_wrapper<'a>(
 /// Validate the complete candidate before publishing any restored wrapper.
 pub fn validate_wrappers(
     wrappers: &ForeignWrappers,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     let mut identities = BTreeSet::new();

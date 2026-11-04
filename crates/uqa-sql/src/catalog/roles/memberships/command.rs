@@ -10,17 +10,17 @@ use super::{
     grants, RoleAttribute, RoleBinding, RoleDefinition, RoleMembership, RoleMembershipKey,
     RoleSubject, SQLError,
 };
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{AlterRoleStmt, GrantRoleStmt, RoleMembershipAction, RoleMembershipOptions},
     catalog::roles::{resolve_role_specification, RoleReference, RoleReferenceNames},
 };
-use std::collections::BTreeMap;
 
 mod revoke;
 pub use revoke::MembershipRevocation;
 
 pub fn creator_membership(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     created: &RoleDefinition,
 ) -> Result<MembershipInsertion, SQLError> {
@@ -51,7 +51,7 @@ impl MembershipRecipients {
     /// Resolve the explicit grantor before all recipients; target lookup and authority follow separately in statement order.
     pub fn bind(
         names: &dyn RoleReferenceNames,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         statement: &GrantRoleStmt,
     ) -> Result<Self, SQLError> {
         let grantor = statement
@@ -82,8 +82,8 @@ impl MembershipTarget {
     /// ALTER GROUP checks the target and its administration before resolving recipients.
     pub fn authorize_group(
         names: &dyn RoleReferenceNames,
-        roles: &BTreeMap<String, RoleDefinition>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        roles: &RoleDefinitions,
+        memberships: &RoleMemberships,
         current: &(impl RoleSubject + ?Sized),
         statement: &AlterRoleStmt,
     ) -> Result<Self, SQLError> {
@@ -104,8 +104,8 @@ impl MembershipTarget {
 
     /// Capture authority before execution waits on the target; subsequent graph checks do not repeat this authorization.
     pub fn authorize(
-        roles: &BTreeMap<String, RoleDefinition>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        roles: &RoleDefinitions,
+        memberships: &RoleMemberships,
         current: &(impl RoleSubject + ?Sized),
         target: &RoleReference,
         recipients: &MembershipRecipients,
@@ -130,10 +130,7 @@ impl MembershipTarget {
         })
     }
 
-    pub fn validate_graph(
-        &self,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    ) -> Result<(), SQLError> {
+    pub fn validate_graph(&self, memberships: &RoleMemberships) -> Result<(), SQLError> {
         if self.is_grant {
             grants::validate_grant(
                 memberships,
@@ -148,8 +145,8 @@ impl MembershipTarget {
 
     pub fn change_for_member(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        roles: &RoleDefinitions,
+        memberships: &RoleMemberships,
         member: &RoleBinding,
     ) -> Result<MembershipChange, SQLError> {
         let key = RoleMembershipKey {
@@ -207,7 +204,7 @@ impl MembershipTarget {
 
     fn membership_notice(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         member: &RoleBinding,
         action: &str,
     ) -> Result<String, SQLError> {
@@ -232,10 +229,7 @@ pub struct MembershipUpdate {
 }
 
 impl MembershipUpdate {
-    pub fn apply(
-        &self,
-        memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    ) -> Result<(), SQLError> {
+    pub fn apply(&self, memberships: &mut RoleMemberships) -> Result<(), SQLError> {
         let key = self.before.key();
         match memberships.get(&key) {
             Some(current) if current == &self.before => {}
@@ -243,9 +237,9 @@ impl MembershipUpdate {
             None => return Err(SQLError::Internal("tuple concurrently deleted".into())),
         }
         if let Some(after) = &self.after {
-            memberships.insert(key, after.clone());
+            memberships.insert(key, after.clone())?;
         } else {
-            memberships.remove(&key);
+            memberships.remove(&key)?;
         }
         Ok(())
     }

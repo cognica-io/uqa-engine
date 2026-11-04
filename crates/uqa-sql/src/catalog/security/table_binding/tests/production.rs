@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
@@ -15,7 +17,7 @@ fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
     let mut role = RoleDefinition::bootstrap();
     role.name = "n".repeat(4 << 20);
     let identity = role.identity();
-    let mut roles = BTreeMap::from([(role.name.clone(), role)]);
+    let mut roles = RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap();
     let budget = MemoryBudget::new(8 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -32,10 +34,11 @@ fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
     let owner = owner_reference_with_control(identity, &roles, &control).unwrap();
     let shared = owner.clone();
     assert!(budget.used() >= before + (4 << 20));
-    let name = roles.first_key_value().unwrap().0.clone();
-    let mut renamed = roles.remove(&name).unwrap();
+    let name = roles.iter().next().unwrap().0.clone();
+    let mut renamed = roles.get(&name).unwrap().clone();
+    roles.remove(&name).unwrap();
     renamed.name = "renamed".into();
-    roles.insert("renamed".into(), renamed);
+    roles.insert("renamed".into(), renamed).unwrap();
     assert_eq!(owner.require_name(&roles).unwrap(), "renamed");
     drop(owner);
     assert!(budget.used() >= before + (4 << 20));
@@ -49,7 +52,7 @@ fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
 fn captured_view_owner_diagnostics_and_both_cancellation_scopes_are_preserved() {
     let role = RoleDefinition::bootstrap();
     let identity = role.identity();
-    let roles = BTreeMap::from([(role.name.clone(), role)]);
+    let roles = RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap();
     let budget = MemoryBudget::new(1 << 20);
     for original_cancelled in [true, false] {
         let original = CancellationToken::new();

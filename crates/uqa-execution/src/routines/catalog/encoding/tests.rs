@@ -5,10 +5,13 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 #[test]
 fn unknown_or_malformed_routine_formats_are_not_treated_as_legacy() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for json in [
         r#"{"routine_catalog_format":0,"definitions":{}}"#,
         r#"{"routine_catalog_format":4,"definitions":{}}"#,
@@ -26,7 +29,7 @@ fn unknown_or_malformed_routine_formats_are_not_treated_as_legacy() {
     );
 }
 
-fn fixture() -> (Definitions, BTreeMap<String, RoleDefinition>) {
+fn fixture() -> (Definitions, RoleDefinitions) {
     let mut owner = RoleDefinition::bootstrap();
     owner.name = "owner".into();
     owner.oid = 20_001;
@@ -43,7 +46,7 @@ fn fixture() -> (Definitions, BTreeMap<String, RoleDefinition>) {
     definition.execute_acl = Some(Vec::new());
     (
         BTreeMap::from([("public.f".into(), vec![*definition])]),
-        BTreeMap::from([("owner".into(), owner)]),
+        RoleDefinitions::try_from_iter([("owner".into(), owner)]).unwrap(),
     )
 }
 
@@ -92,19 +95,26 @@ fn current_routine_authority_follows_renames_and_rejects_replacement_incarnation
     let (definitions, mut roles) = fixture();
     let identity = roles["owner"].identity();
     let json = encode(definitions).unwrap();
-    let mut original = roles.remove("owner").unwrap();
+    let mut original = roles.get("owner").unwrap().clone();
+    roles.remove("owner").unwrap();
     let mut replacement = original.clone();
     replacement.oid += 1;
     replacement.object_id = [8; 16];
     original.name = "renamed".into();
-    roles.insert("renamed".into(), original);
-    roles.insert("owner".into(), replacement);
+    roles.insert("renamed".into(), original).unwrap();
+    roles.insert("owner".into(), replacement).unwrap();
     assert_eq!(
         decode(Some(&json), &roles, false).unwrap().0["public.f"][0].owner,
         Some(identity)
     );
-    roles.remove("renamed");
-    roles.get_mut("owner").unwrap().oid = identity.oid;
+    roles.remove("renamed").unwrap();
+    roles
+        .edit("owner", |value| {
+            value.oid = identity.oid;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     for migrate in [false, true] {
         assert!(decode(Some(&json), &roles, migrate).is_err());
     }

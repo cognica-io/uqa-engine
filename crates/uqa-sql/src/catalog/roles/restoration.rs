@@ -7,14 +7,13 @@
 //! Validation of persisted role keys and membership identities.
 use super::{
     identity::{RoleBinding, RoleSubject},
-    RoleDefinition, RoleMembership, RoleMembershipKey,
+    RoleDefinition, RoleMembership,
 };
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn restore_role_definitions(
-    roles: &mut BTreeMap<String, RoleDefinition>,
-) -> Result<(), String> {
+pub fn restore_role_definitions(roles: &mut RoleDefinitions) -> Result<(), String> {
     if !roles
         .iter()
         .any(|(name, role)| role.oid == 10 && role.name == *name)
@@ -22,9 +21,11 @@ pub fn restore_role_definitions(
         if roles.get("uqa").is_some_and(|role| role.oid != 10) {
             return Err("persisted bootstrap role must have OID 10".into());
         }
-        roles
-            .entry("uqa".into())
-            .or_insert_with(RoleDefinition::bootstrap);
+        if !roles.contains_key("uqa") {
+            roles
+                .insert("uqa".into(), RoleDefinition::bootstrap())
+                .map_err(|error| error.to_string())?;
+        }
     }
     let mut oids = BTreeSet::new();
     for (name, role) in roles.iter() {
@@ -60,7 +61,7 @@ pub struct NamedRoleMembership {
 }
 
 impl NamedRoleMembership {
-    fn bind(self, roles: &BTreeMap<String, RoleDefinition>) -> Result<RoleMembership, String> {
+    fn bind(self, roles: &RoleDefinitions) -> Result<RoleMembership, String> {
         let missing = || {
             format!(
                 "persisted role membership `{}` -> `{}` has a missing role or grantor",
@@ -84,9 +85,9 @@ impl NamedRoleMembership {
 }
 
 pub fn restore_named_role_memberships(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     memberships: Vec<NamedRoleMembership>,
-) -> Result<BTreeMap<RoleMembershipKey, RoleMembership>, String> {
+) -> Result<RoleMemberships, String> {
     restore_memberships(
         roles,
         memberships
@@ -96,17 +97,17 @@ pub fn restore_named_role_memberships(
 }
 
 pub fn restore_role_memberships(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     memberships: Vec<RoleMembership>,
-) -> Result<BTreeMap<RoleMembershipKey, RoleMembership>, String> {
+) -> Result<RoleMemberships, String> {
     restore_memberships(roles, memberships.into_iter().map(Ok))
 }
 
 fn restore_memberships(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     memberships: impl Iterator<Item = Result<RoleMembership, String>>,
-) -> Result<BTreeMap<RoleMembershipKey, RoleMembership>, String> {
-    let mut membership_map = BTreeMap::new();
+) -> Result<RoleMemberships, String> {
+    let mut membership_map = super::RoleMemberships::new();
     let mut membership_oids = BTreeSet::new();
     let mut identities = roles
         .values()
@@ -145,14 +146,17 @@ fn restore_memberships(
             ));
         }
         let key = membership.key();
-        if membership_map.insert(key, membership).is_some() {
+        if membership_map.contains_key(&key) {
             return Err("persisted role membership identity is duplicated".into());
         }
+        membership_map
+            .insert(key, membership)
+            .map_err(|error| error.to_string())?;
     }
     Ok(membership_map)
 }
 
-pub fn validate_role_identities(roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+pub fn validate_role_identities(roles: &RoleDefinitions) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     for (name, role) in roles {
         if role.object_id == [0; 16] {

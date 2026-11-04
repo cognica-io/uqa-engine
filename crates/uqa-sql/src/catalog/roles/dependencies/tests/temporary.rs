@@ -5,6 +5,7 @@
 //
 
 use super::{BoundSequenceSecurity, Catalog, RelationIdentity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::RelationPersistence,
     catalog::{
@@ -19,28 +20,30 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    [
-        "uqa",
-        "owner",
-        "reader",
-        "grantor",
-        "column_reader",
-        "sequence_reader",
-        "view_owner",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(index, name)| {
-        let mut role = RoleDefinition::bootstrap();
-        role.name = name.into();
-        role.oid += index as i64;
-        if name != "uqa" {
-            role.object_id = [index as u8 + 1; 16];
-        }
-        (name.into(), role)
-    })
-    .collect()
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(
+        [
+            "uqa",
+            "owner",
+            "reader",
+            "grantor",
+            "column_reader",
+            "sequence_reader",
+            "view_owner",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let mut role = RoleDefinition::bootstrap();
+            role.name = name.into();
+            role.oid += index as i64;
+            if name != "uqa" {
+                role.object_id = [index as u8 + 1; 16];
+            }
+            (name.into(), role)
+        }),
+    )
+    .unwrap()
 }
 
 fn entry(role: impl Into<AclGrantee>, grantor: Option<&str>) -> TableAclEntry {
@@ -205,7 +208,7 @@ fn named_public_temporary_owners_grantees_and_grantors_retain_dependencies() {
     named.name = "PUBLIC".into();
     named.oid = 17;
     named.object_id = [17; 16];
-    roles.insert(named.name.clone(), named);
+    roles.insert(named.name.clone(), named).unwrap();
     for (owner, acl, expected) in [
         ("PUBLIC", None, BTreeSet::from([17])),
         ("uqa", Some(entry("PUBLIC", None)), BTreeSet::from([17])),

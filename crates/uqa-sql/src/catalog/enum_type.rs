@@ -10,12 +10,13 @@
 //! `pg_enum.enumsortorder` that reproduces `PostgreSQL`'s float4 midpoint and renumbering
 //! algorithm. Renumbering changes only the catalog column; stored values keep their keys.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, EnumLabelKey, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition};
+use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, EnumNeighbor, EnumTypeReference};
 use crate::SQLError;
 
@@ -281,7 +282,7 @@ impl<Owner> StoredEnum<Owner> {
 /// Validate a complete enum registry before restoration exposes it or publication persists it.
 pub fn validate_enum_registry(
     registry: &impl super::type_definitions::TypeDefinitionView<StoredEnum>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();

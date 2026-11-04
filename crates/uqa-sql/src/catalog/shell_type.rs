@@ -6,12 +6,13 @@
 
 //! An undefined type owns its name and OID before any value layout or array type exists. Completing it preserves that identity.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::RoleDefinitions;
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition};
+use super::roles::identity::RoleSubject;
 use crate::ast::ObjectAclEntry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,7 +29,7 @@ pub struct StoredShellType {
 /// Reject inconsistent names, duplicate identities and stale owner incarnations before publishing any restored shell.
 pub fn validate_shell_registry(
     registry: &impl super::type_definitions::TypeDefinitionView<StoredShellType>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
@@ -60,11 +61,15 @@ pub fn validate_shell_registry(
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::roles::RoleDefinition;
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
     fn retained_shells_reject_aliasing_corrupt_names_and_retired_owners() {
-        let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+        let roles =
+            RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
         let shell = StoredShellType {
             object_id: [1; 16],
             oid: 20_000,

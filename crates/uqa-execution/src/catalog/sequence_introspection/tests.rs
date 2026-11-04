@@ -16,6 +16,7 @@ use std::{
     sync::Arc,
 };
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 struct TestCatalog {
     snapshot: RefCell<SequenceReadSnapshot>,
@@ -34,7 +35,8 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     let relation = RelationIdentity::from_legacy_name("public.counter").unwrap();
     let object_id = [7; 16];
     let state = SequenceState::initial(1, 1, SequenceDataType::BigInt);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let security = SequenceSecurity {
         role_owner: "uqa".into(),
         acl: None,
@@ -54,7 +56,7 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
             )])),
             roles: RoleCatalogSnapshot {
                 roles: Arc::new(roles),
-                memberships: Arc::new(BTreeMap::new()),
+                memberships: Arc::new(RoleMemberships::new()),
             },
         }),
         reads: Cell::new(0),

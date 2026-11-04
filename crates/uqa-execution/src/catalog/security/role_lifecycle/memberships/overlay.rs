@@ -7,6 +7,7 @@
 //! A statement's staged membership deltas retain their original catalog versions through waits.
 
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_sql::catalog::roles::RoleMemberships;
 use uqa_sql::{
     catalog::roles::{memberships::command::MembershipUpdate, RoleMembership, RoleMembershipKey},
     SQLError,
@@ -18,10 +19,7 @@ pub(super) struct MembershipOverlay {
 }
 
 impl MembershipOverlay {
-    pub(super) fn apply(
-        &self,
-        current: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    ) -> Result<BTreeMap<RoleMembershipKey, RoleMembership>, SQLError> {
+    pub(super) fn apply(&self, current: &RoleMemberships) -> Result<RoleMemberships, SQLError> {
         let mut next = current.clone();
         for (key, (before, after)) in &self.changes {
             if current.get(key) != before.as_ref() {
@@ -35,9 +33,9 @@ impl MembershipOverlay {
                 ));
             }
             if let Some(after) = after {
-                next.insert(*key, after.clone());
+                next.insert(*key, after.clone())?;
             } else {
-                next.remove(key);
+                next.remove(key)?;
             }
         }
         Ok(next)

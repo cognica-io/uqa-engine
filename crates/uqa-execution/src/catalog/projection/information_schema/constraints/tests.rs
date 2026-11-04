@@ -11,6 +11,7 @@ use crate::catalog::{
 };
 use std::sync::Arc;
 use uqa_core::{catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::TableConstraintSet,
     catalog::{domain::StoredDomain, roles::RoleDefinition},
@@ -27,11 +28,11 @@ fn fixture() -> CatalogReadView {
     reader.object_id = [1; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     let Statement::CreateTable(mut table) = uqa_sql::compile("CREATE TABLE items(\"Has Space\" integer CONSTRAINT required NOT NULL, CONSTRAINT positive CHECK (\"Has Space\" > 0))").unwrap().remove(0) else { panic!("table"); };
     table.columns[0].not_null_identity = Some(CatalogObjectIdentity {

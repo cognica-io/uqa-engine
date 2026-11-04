@@ -37,9 +37,11 @@ fn rename_rejects_an_intervening_tuple_change_before_reserving_the_destination()
     catalog.role("target", &[]);
     let mut committed = catalog.roles.borrow().clone();
     committed
-        .get_mut("target")
+        .edit("target", |value| {
+            value.advance_revision().unwrap();
+            Ok(())
+        })
         .unwrap()
-        .advance_revision()
         .unwrap();
     catalog
         .refreshed_roles

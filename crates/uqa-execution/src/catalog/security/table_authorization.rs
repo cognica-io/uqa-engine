@@ -11,6 +11,7 @@ use super::table_inquiry::{TablePrivilegeRegistry, TablePrivilegeState};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     catalog::{
         roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
@@ -113,7 +114,7 @@ impl TableAuthorizationContext<'_> {
     fn visible_row_columns_with(
         &self,
         resolve: impl FnOnce(
-            &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+            &RoleDefinitions,
         ) -> Result<uqa_sql::catalog::security::TableSecurity, String>,
         subject: &dyn RoleSubject,
         columns: Vec<String>,

@@ -13,14 +13,14 @@ use crate::catalog::{
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 fn fixture() -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas = Arc::new(BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+    );
     let uqa_sql::Statement::CreateFunction(mut definition) = uqa_sql::compile(
         "CREATE FUNCTION unrelated(text) RETURNS integer LANGUAGE SQL AS 'SELECT 1'",
     )

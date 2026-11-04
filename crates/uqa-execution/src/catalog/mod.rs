@@ -6,6 +6,7 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 pub mod comments;
 pub mod composite_type;
@@ -133,12 +134,7 @@ pub struct CatalogDefinitionSnapshot {
     pub foreign_servers:
         Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
     pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
-    pub role_memberships: Arc<
-        BTreeMap<
-            uqa_sql::catalog::roles::RoleMembershipKey,
-            uqa_sql::catalog::roles::RoleMembership,
-        >,
-    >,
+    pub role_memberships: Arc<RoleMemberships>,
 
     pub domains: Arc<
         uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
@@ -163,7 +159,7 @@ pub struct CatalogDefinitionSnapshot {
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,
+    pub roles: Arc<RoleDefinitions>,
     pub triggers: Arc<
         BTreeMap<
             uqa_storage::RelationIdentity,

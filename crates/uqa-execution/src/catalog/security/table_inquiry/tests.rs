@@ -38,9 +38,12 @@ fn relation_ownership_keeps_role_incarnations_and_uses_no_value_snapshot() {
         .ensure_relation_owner(&relation, "sequence")
         .unwrap();
     Arc::make_mut(&mut fixture.retained.roles.roles)
-        .get_mut("reader")
+        .edit("reader", |role| {
+            role.object_id = [9; 16];
+            Ok(())
+        })
         .unwrap()
-        .object_id = [9; 16];
+        .unwrap();
     let error = fixture
         .context()
         .ensure_relation_owner(&relation, "sequence")
@@ -97,9 +100,12 @@ fn sequence_name_inquiry_reads_roles_and_acl_after_resolution_without_rebinding_
     let fixture = Fixture::new();
     let mut replaced = fixture.retained.clone();
     Arc::make_mut(&mut replaced.roles.roles)
-        .get_mut("reader")
+        .edit("reader", |role| {
+            role.object_id = [2; 16];
+            Ok(())
+        })
         .unwrap()
-        .object_id = [2; 16];
+        .unwrap();
     Arc::make_mut(&mut replaced.security)
         .values_mut()
         .next()

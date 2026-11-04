@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{ColumnDef, FunctionBinding, TableHierarchy},
@@ -331,7 +332,7 @@ impl MutationPrivilegeCatalog for Catalog {
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         assert!(matches!(privilege, TableAclPrivilege::Trigger));
-        let subject = subject.catalog_name(&std::collections::BTreeMap::new())?;
+        let subject = subject.catalog_name(&RoleDefinitions::new())?;
         self.record(format!("trigger-privilege:{table}:{subject}"));
         if self.allow_trigger {
             Ok(())

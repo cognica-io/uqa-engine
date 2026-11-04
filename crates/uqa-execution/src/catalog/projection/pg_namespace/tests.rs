@@ -6,8 +6,9 @@
 
 use super::*;
 use crate::catalog::{test_support::empty_catalog, RelationLookupMode, RelationNameResolution};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::{ArrayValue, Value};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{roles::RoleDefinition, security::BoundSchemaSecurity};
 
 #[test]
@@ -51,7 +52,7 @@ fn namespace_oid_projection_reads_the_captured_incarnation_after_name_reuse() {
 #[test]
 fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_names() {
     let owner = RoleDefinition::bootstrap();
-    let mut roles = BTreeMap::from([(owner.name.clone(), owner)]);
+    let mut roles = RoleDefinitions::try_from_iter([(owner.name.clone(), owner)]).unwrap();
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas = Arc::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
@@ -62,13 +63,14 @@ fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_na
     );
     snapshot.definitions.roles = Arc::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
-    let mut owner = roles.remove("uqa").unwrap();
+    let mut owner = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     let mut replacement = owner.clone();
     owner.name = "renamed owner".into();
     replacement.oid = 20_000;
     replacement.object_id = [9; 16];
-    roles.insert(owner.name.clone(), owner);
-    roles.insert(replacement.name.clone(), replacement);
+    roles.insert(owner.name.clone(), owner).unwrap();
+    roles.insert(replacement.name.clone(), replacement).unwrap();
     snapshot.definitions.roles = Arc::new(roles);
     let renamed = CatalogReadView::new(snapshot);
     let resolution = RelationNameResolution {

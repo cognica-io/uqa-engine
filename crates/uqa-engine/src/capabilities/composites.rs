@@ -7,7 +7,6 @@
 //! Bind composite type DDL to namespace, identity and publication state, and expose composite attributes to value conversion.
 
 use crate::Engine;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_execution::catalog::composite_type::{
     CompositeRegistry, CompositeRegistryPublication, CompositeRegistryRead,
@@ -15,7 +14,7 @@ use uqa_execution::catalog::composite_type::{
 use uqa_execution::schema::composites::attributes::CompositeAttributeContext;
 use uqa_execution::schema::composites::values::{CompositeValueContext, CompositeValueTables};
 use uqa_execution::schema::composites::CompositeTypeContext;
-use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::expr::composites::{CompositeTypeCatalog, CompositeTypeDescriptor};
 use uqa_sql::SQLError;
 
@@ -152,7 +151,7 @@ impl CompositeRegistryPublication for Engine {
     fn composite_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn composite_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn composite_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
     fn publish_composite_definitions(&self, registry: CompositeRegistry) {

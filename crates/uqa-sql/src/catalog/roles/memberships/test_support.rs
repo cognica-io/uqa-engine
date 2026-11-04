@@ -7,6 +7,7 @@
 //! Catalog fixtures execute the SQL mutation descriptions with deterministic test identities.
 
 use super::{command::*, *};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{GrantRoleStmt, RoleMembershipOptions},
     catalog::roles::{RoleReference, RoleReferenceNames},
@@ -25,7 +26,7 @@ impl RoleReferenceNames for Names<'_> {
     }
 }
 
-fn oid(memberships: &BTreeMap<RoleMembershipKey, RoleMembership>) -> i64 {
+fn oid(memberships: &RoleMemberships) -> i64 {
     memberships
         .values()
         .map(|value| value.oid)
@@ -35,13 +36,13 @@ fn oid(memberships: &BTreeMap<RoleMembershipKey, RoleMembership>) -> i64 {
 }
 
 pub(crate) fn apply_change(
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &mut RoleMemberships,
     change: MembershipChange,
 ) -> Result<(), SQLError> {
     match change {
         MembershipChange::Insert(insert) => {
             let row = insert.with_oid(oid(memberships))?;
-            memberships.insert(row.key(), row);
+            memberships.insert(row.key(), row).unwrap();
         }
         MembershipChange::Update(updates) => {
             for update in updates {
@@ -54,8 +55,8 @@ pub(crate) fn apply_change(
 }
 
 pub(crate) fn apply_grant_role_statement(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &mut RoleMemberships,
     current: &str,
     statement: &GrantRoleStmt,
 ) -> Result<(), SQLError> {
@@ -89,12 +90,12 @@ pub(crate) fn apply_grant_role_statement(
 }
 
 pub(crate) fn insert_membership(
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &mut RoleMemberships,
     role: &str,
     member: &str,
     grantor: &str,
     options: RoleMembershipOptions,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let target = MembershipTarget {
         role: RoleBinding::from_definition(&roles[role])?,

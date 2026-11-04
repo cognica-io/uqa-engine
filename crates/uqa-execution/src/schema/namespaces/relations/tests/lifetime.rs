@@ -115,7 +115,7 @@ fn creation_checks_authority_before_waiting_and_again_after_replacement() {
         role.oid = 42_001;
         role.object_id = [4; 16];
         role.attributes.clear();
-        fixture.roles.insert(role.name.clone(), role);
+        fixture.roles.insert(role.name.clone(), role).unwrap();
         fixture.user = "reader".into();
         let denied = BoundSchemaSecurity::bootstrap("tenant");
         let mut allowed = BoundSchemaSecurity::with_public_privileges(true);

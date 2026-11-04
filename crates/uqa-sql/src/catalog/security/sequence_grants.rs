@@ -12,15 +12,12 @@ use super::{
     SequenceSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{GrantSequenceStmt, SequenceRevokeBehavior},
-    catalog::{
-        resolution::RelationResolution,
-        roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
-    },
+    catalog::resolution::RelationResolution,
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::RelationIdentity;
 
@@ -90,8 +87,8 @@ pub fn apply_sequence_acl(
     grantees: &[AclGrantee],
     privileges: &[AclPrivilege],
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &SequenceSecurity,
 ) -> Result<(SequenceSecurity, usize), SQLError> {
     let grantors = privileges
@@ -139,7 +136,7 @@ pub fn validate_sequence_acl_roles(
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     for role in grantees {
         if role

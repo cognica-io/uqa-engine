@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::test_support::{empty_catalog, table_snapshot, CatalogServices};
 use std::sync::Arc;
 use uqa_core::catalog_identity::CatalogObjectIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::TableConstraintSet, catalog::roles::RoleDefinition, Statement};
 
 fn fixture() -> CatalogReadView {
@@ -20,11 +21,11 @@ fn fixture() -> CatalogReadView {
     reader.object_id = [1; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     let Statement::CreateTable(mut table) = uqa_sql::compile(
         "CREATE TABLE subject(n integer CONSTRAINT required NOT NULL, \

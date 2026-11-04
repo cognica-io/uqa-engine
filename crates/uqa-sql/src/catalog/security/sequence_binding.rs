@@ -7,8 +7,8 @@
 //! Sequence owners, grantees and grantors retain their original role incarnations.
 
 use super::{role_bindings, SequenceSecurity};
-use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference};
-use std::collections::BTreeMap;
+use crate::catalog::roles::RoleDefinitions;
+use crate::catalog::roles::{identity::RoleBinding, RoleIdentity, RoleReference};
 use uqa_core::{
     catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
@@ -50,7 +50,7 @@ impl BoundSequenceSecurity {
 
     pub fn owner_reference(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<RoleReference, crate::SQLError> {
         let name = role_bindings::role_name(roles, self.role_owner, "sequence")
             .map_err(crate::SQLError::Internal)?;
@@ -59,10 +59,7 @@ impl BoundSequenceSecurity {
         )))
     }
 
-    pub fn bind(
-        security: &SequenceSecurity,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<Self, String> {
+    pub fn bind(security: &SequenceSecurity, roles: &RoleDefinitions) -> Result<Self, String> {
         let bind = |name: &str| role_bindings::bind_role(roles, name, "sequence");
         let entries = |entries: &[SequenceAclEntry]| {
             entries
@@ -84,10 +81,7 @@ impl BoundSequenceSecurity {
     }
 
     /// Resolve display names only through the role view accompanying this authority snapshot.
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<SequenceSecurity, String> {
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<SequenceSecurity, String> {
         let name =
             |identity| role_bindings::role_name(roles, identity, "sequence").map(str::to_owned);
         let entries = |entries: &[BoundSequenceAclEntry]| {
@@ -113,7 +107,7 @@ impl BoundSequenceSecurity {
         })
     }
 
-    pub fn validate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+    pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
         super::sequence::validate_sequence_security_invariants(&self.resolve(roles)?, roles)
     }
 

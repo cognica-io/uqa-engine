@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt},
     catalog::{
@@ -15,7 +16,7 @@ use crate::{
         },
     },
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 
 fn role(name: &str, oid: i64, incarnation: u8) -> RoleDefinition {
     RoleDefinition {
@@ -23,20 +24,22 @@ fn role(name: &str, oid: i64, incarnation: u8) -> RoleDefinition {
         oid,
         object_id: [incarnation; 16],
         revision: 1,
-        attributes: BTreeSet::new(),
+        attributes: uqa_core::memory::OwnedSet::new(),
         connection_limit: -1,
     }
 }
 
-fn fixture() -> (BTreeMap<String, RoleDefinition>, DatabaseSecurity) {
-    let roles = [
-        role("owner", 20_000, 1),
-        role("delegate", 20_001, 2),
-        role("reader", 20_002, 3),
-    ]
-    .into_iter()
-    .map(|role| (role.name.clone(), role))
-    .collect();
+fn fixture() -> (RoleDefinitions, DatabaseSecurity) {
+    let roles = RoleDefinitions::try_from_iter(
+        [
+            role("owner", 20_000, 1),
+            role("delegate", 20_001, 2),
+            role("reader", 20_002, 3),
+        ]
+        .into_iter()
+        .map(|role| (role.name.clone(), role)),
+    )
+    .unwrap();
     let create = DatabasePrivileges {
         create: true,
         ..DatabasePrivileges::default()
@@ -78,13 +81,16 @@ fn database_references_follow_renames_without_rebinding_reused_names_or_oids() {
         RoleBinding::from_definition(&roles["reader"]).unwrap(),
     ));
     for name in ["owner", "delegate", "reader"] {
-        let mut renamed = roles.remove(name).unwrap();
+        let mut renamed = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         let oid = renamed.oid;
         let incarnation = renamed.object_id[0] + 10;
         renamed.name = format!("renamed_{name}");
-        roles.insert(renamed.name.clone(), renamed);
+        roles.insert(renamed.name.clone(), renamed).unwrap();
         // Reuse the name with a fresh public OID while the old identity remains live.
-        roles.insert(name.into(), role(name, oid + 100, incarnation));
+        roles
+            .insert(name.into(), role(name, oid + 100, incarnation))
+            .unwrap();
     }
     let restored = bound.resolve(&roles).unwrap();
     assert_eq!(restored.role_owner, "renamed_owner");
@@ -117,21 +123,24 @@ fn database_references_follow_renames_without_rebinding_reused_names_or_oids() {
         &original_reader,
         check,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!role_has_privilege(
         &restored,
         "reader",
         check,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
 
-    let original = roles.remove("renamed_reader").unwrap();
-    roles.insert(
-        "renamed_reader".into(),
-        role("renamed_reader", original.oid, 10),
-    );
+    let original = roles.get("renamed_reader").unwrap().clone();
+    roles.remove("renamed_reader").unwrap();
+    roles
+        .insert(
+            "renamed_reader".into(),
+            role("renamed_reader", original.oid, 10),
+        )
+        .unwrap();
     assert!(bound
         .resolve(&roles)
         .unwrap_err()
@@ -142,10 +151,13 @@ fn database_references_follow_renames_without_rebinding_reused_names_or_oids() {
 fn resolved_grantor_chains_keep_cascade_and_public_privileges_after_rename() {
     let (mut roles, security) = fixture();
     let bound = BoundDatabaseSecurity::bind(&security, &roles).unwrap();
-    let mut grantor = roles.remove("delegate").unwrap();
+    let mut grantor = roles.get("delegate").unwrap().clone();
+    roles.remove("delegate").unwrap();
     grantor.name = "renamed_delegate".into();
-    roles.insert(grantor.name.clone(), grantor);
-    roles.insert("delegate".into(), role("delegate", 30_000, 5));
+    roles.insert(grantor.name.clone(), grantor).unwrap();
+    roles
+        .insert("delegate".into(), role("delegate", 30_000, 5))
+        .unwrap();
     let restored = bound.resolve(&roles).unwrap();
     let statement = GrantDatabaseStmt {
         is_grant: false,
@@ -163,7 +175,7 @@ fn resolved_grantor_chains_keep_cascade_and_public_privileges_after_rename() {
         &[DatabaseAclPrivilege::Create],
         "owner",
         &roles,
-        &BTreeMap::new(),
+        &RoleMemberships::new(),
         &restored,
     )
     .unwrap();
@@ -181,7 +193,7 @@ fn resolved_grantor_chains_keep_cascade_and_public_privileges_after_rename() {
             grant_option: false,
         },
         &roles,
-        &BTreeMap::new(),
+        &RoleMemberships::new(),
     ));
 }
 
@@ -192,9 +204,12 @@ fn missing_or_replaced_owner_grantee_and_grantor_are_not_resolved_by_name() {
     for name in ["owner", "delegate", "reader"] {
         for replacement in [false, true] {
             let mut changed = roles.clone();
-            let old = changed.remove(name).unwrap();
+            let old = changed.get(name).unwrap().clone();
+            changed.remove(name).unwrap();
             if replacement {
-                changed.insert(name.into(), role(name, old.oid, 12));
+                changed
+                    .insert(name.into(), role(name, old.oid, 12))
+                    .unwrap();
             }
             assert!(bound
                 .resolve(&changed)
@@ -215,7 +230,13 @@ fn binding_preserves_default_acl_and_rejects_invalid_role_identities() {
     assert!(bound.acl.is_none());
     assert_eq!(bound.resolve(&roles).unwrap(), security);
     for oid in [-1, 0, i64::from(u32::MAX) + 1] {
-        roles.get_mut("owner").unwrap().oid = oid;
+        roles
+            .edit("owner", |value| {
+                value.oid = oid;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         assert!(BoundDatabaseSecurity::bind(&security, &roles).is_err());
         let mut corrupt = bound.clone();
         corrupt.role_owner.oid = oid;
@@ -224,8 +245,20 @@ fn binding_preserves_default_acl_and_rejects_invalid_role_identities() {
             .unwrap_err()
             .contains("invalid persisted database role identity"));
     }
-    roles.get_mut("owner").unwrap().oid = bound.role_owner.oid;
-    roles.get_mut("owner").unwrap().object_id = [0; 16];
+    roles
+        .edit("owner", |value| {
+            value.oid = bound.role_owner.oid;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    roles
+        .edit("owner", |value| {
+            value.object_id = [0; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(BoundDatabaseSecurity::bind(&security, &roles).is_err());
     let mut corrupt = bound;
     corrupt.role_owner.object_id = [0; 16];

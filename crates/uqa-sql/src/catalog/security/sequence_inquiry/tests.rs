@@ -7,14 +7,15 @@
 use super::*;
 use crate::catalog::roles::{
     guards::{RoleDefinitionRead, RoleMembershipRead},
-    RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference,
+    RoleDefinition, RoleReference,
 };
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use std::cell::Cell;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
-    roles: BTreeMap<String, RoleDefinition>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: RoleDefinitions,
+    memberships: RoleMemberships,
     security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
     lookups: Cell<usize>,
 }
@@ -28,11 +29,12 @@ impl Catalog {
         reader.object_id = [1; 16];
         reader.attributes.clear();
         Self {
-            roles: BTreeMap::from([
+            roles: RoleDefinitions::try_from_iter([
                 (owner.name.clone(), owner),
                 (reader.name.clone(), reader.clone()),
-            ]),
-            memberships: BTreeMap::new(),
+            ])
+            .unwrap(),
+            memberships: RoleMemberships::new(),
             security: BTreeMap::from([(
                 RelationIdentity::new("public", "ids"),
                 BoundSequenceSecurity {
@@ -195,7 +197,14 @@ fn a_selected_inquiry_role_never_follows_a_reused_name_or_oid() {
             .unwrap()
             .bind(&catalog, &catalog)
             .unwrap();
-        catalog.roles.get_mut("reader").unwrap().object_id = [2; 16];
+        catalog
+            .roles
+            .edit("reader", |value| {
+                value.object_id = [2; 16];
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         let relation = RelationIdentity::new("public", "ids");
         catalog
             .security

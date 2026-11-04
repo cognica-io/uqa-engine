@@ -9,7 +9,8 @@
 use super::{DomainRegistry, DOMAINS_METADATA_KEY};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use uqa_sql::catalog::{domain::StoredDomain, roles::RoleDefinition};
+use uqa_sql::catalog::domain::StoredDomain;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub(super) const PREFIX: &str = "uqa.sql.domain.v1:";
@@ -39,7 +40,7 @@ struct RecordFormat {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<(DomainRegistry, bool)> {
     let value = catalog

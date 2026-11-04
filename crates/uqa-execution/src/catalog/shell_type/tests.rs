@@ -8,11 +8,14 @@
 
 use super::*;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 #[test]
 fn shell_records_require_one_exact_oid_claim_and_a_known_format() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let shell = StoredShellType {
         object_id: [1; 16],
         oid: 20_000,

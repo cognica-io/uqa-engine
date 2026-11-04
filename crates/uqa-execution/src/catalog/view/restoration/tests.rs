@@ -18,6 +18,7 @@ use std::{
     sync::Arc,
 };
 use uqa_graph::GraphStoreHandle;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnType, RelationPersistence},
     catalog::roles::{
@@ -46,7 +47,7 @@ struct Fixture {
     schemas: Cell<usize>,
     identities: Cell<u8>,
     writes: Cell<usize>,
-    roles: BTreeMap<String, RoleDefinition>,
+    roles: RoleDefinitions,
     foreign: BTreeMap<RelationIdentity, StoredForeignTable>,
     graphs: BTreeMap<String, Arc<GraphStoreHandle>>,
 }
@@ -110,17 +111,18 @@ impl Fixture {
             schemas: Cell::new(0),
             identities: Cell::new(0),
             writes: Cell::new(0),
-            roles: BTreeMap::from([(
+            roles: RoleDefinitions::try_from_iter([(
                 "owner".into(),
                 RoleDefinition {
                     oid: 42,
                     object_id: [42; 16],
                     revision: 1,
                     name: "owner".into(),
-                    attributes: BTreeSet::new(),
+                    attributes: uqa_core::memory::OwnedSet::new(),
                     connection_limit: -1,
                 },
-            )]),
+            )])
+            .unwrap(),
             foreign: BTreeMap::new(),
             graphs: BTreeMap::new(),
         }

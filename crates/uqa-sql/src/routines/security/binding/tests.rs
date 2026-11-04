@@ -5,24 +5,28 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    ["owner", "delegate", "recipient"]
-        .into_iter()
-        .zip(1_u8..)
-        .map(|(name, id)| {
-            let mut role = RoleDefinition::bootstrap();
-            role.name = name.into();
-            role.oid = 20_000 + i64::from(id);
-            role.object_id = [id; 16];
-            role.attributes
-                .remove(&crate::ast::RoleAttribute::Superuser);
-            (name.into(), role)
-        })
-        .collect()
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(
+        ["owner", "delegate", "recipient"]
+            .into_iter()
+            .zip(1_u8..)
+            .map(|(name, id)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_000 + i64::from(id);
+                role.object_id = [id; 16];
+                role.attributes
+                    .remove(&crate::ast::RoleAttribute::Superuser);
+                (name.into(), role)
+            }),
+    )
+    .unwrap()
 }
 
-fn definition(roles: &BTreeMap<String, RoleDefinition>) -> CreateFunction {
+fn definition(roles: &RoleDefinitions) -> CreateFunction {
     let crate::Statement::CreateFunction(mut definition) =
         crate::compile("CREATE FUNCTION f() RETURNS int RETURN 7")
             .unwrap()
@@ -51,13 +55,14 @@ fn routine_owner_and_acl_authority_survives_renames_without_authorizing_replacem
     let mut roles = roles();
     let definition = definition(&roles);
     for name in ["owner", "delegate", "recipient"] {
-        let mut original = roles.remove(name).unwrap();
+        let mut original = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         let mut replacement = original.clone();
         replacement.oid += 100;
         replacement.object_id = [original.object_id[0] + 90; 16];
         original.name = format!("renamed_{name}");
-        roles.insert(original.name.clone(), original);
-        roles.insert(name.into(), replacement);
+        roles.insert(original.name.clone(), original).unwrap();
+        roles.insert(name.into(), replacement).unwrap();
     }
     validate_routine_authority(&definition, &roles).unwrap();
     assert_eq!(
@@ -81,7 +86,7 @@ fn routine_owner_and_acl_authority_survives_renames_without_authorizing_replacem
             expected
         );
     }
-    roles.remove("renamed_recipient");
+    roles.remove("renamed_recipient").unwrap();
     assert!(validate_routine_authority(&definition, &roles).is_err());
 }
 

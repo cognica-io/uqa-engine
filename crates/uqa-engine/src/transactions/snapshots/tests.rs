@@ -17,6 +17,7 @@ mod events;
 mod identifiers;
 mod idle;
 mod resources;
+mod role_roots;
 mod schema_roots;
 mod sequence_values;
 mod sequences;

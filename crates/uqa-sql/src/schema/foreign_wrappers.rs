@@ -6,12 +6,12 @@
 
 //! `PostgreSQL` wrapper declaration checks over exact catalog routine identities.
 
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::{ForeignWrapperFunctionOption, FunctionBinding},
-    catalog::roles::{memberships::role_is_superuser, RoleDefinition, RoleReference},
+    catalog::roles::{memberships::role_is_superuser, RoleReference},
     SQLError,
 };
-use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub struct ForeignWrapperRoutine {
@@ -29,7 +29,7 @@ pub struct ForeignWrapperFunctions {
 pub fn ensure_create_authority(
     name: &str,
     role: &RoleReference,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     if role_is_superuser(roles, role) {
         return Ok(());

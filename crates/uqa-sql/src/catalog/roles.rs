@@ -8,9 +8,13 @@
 
 use crate::ast::{CreateRoleStmt, RoleAttribute};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use uqa_core::memory::OwnedSet;
 
 pub mod capture;
+pub mod registry;
+pub use registry::{
+    CapturedRoleDefinitions, CapturedRoleMemberships, RoleDefinitions, RoleMemberships,
+};
 pub mod identity;
 pub mod rename;
 pub mod session;
@@ -30,7 +34,7 @@ pub struct RoleDefinition {
     #[serde(default)]
     pub revision: u64,
     pub name: String,
-    pub attributes: BTreeSet<RoleAttribute>,
+    pub attributes: OwnedSet<RoleAttribute>,
     pub connection_limit: i32,
 }
 
@@ -76,7 +80,7 @@ impl RoleDefinition {
             object_id: RoleIdentity::BOOTSTRAP.object_id,
             revision: 1,
             name: "uqa".into(),
-            attributes: BTreeSet::from([
+            attributes: OwnedSet::from([
                 RoleAttribute::Superuser,
                 RoleAttribute::Inherit,
                 RoleAttribute::CreateRole,
@@ -139,7 +143,7 @@ pub fn resolve_role_specification(
 pub fn resolve_acl_role_specification(
     names: &dyn RoleReferenceNames,
     specification: &crate::ast::AclRoleSpecification,
-    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<uqa_core::catalog_acl::AclGrantee, crate::SQLError> {
     use crate::ast::AclRoleSpecification;
     use uqa_core::catalog_acl::AclGrantee;
@@ -151,10 +155,7 @@ pub fn resolve_acl_role_specification(
     }
 }
 
-pub fn require_role_exists(
-    roles: &std::collections::BTreeMap<String, RoleDefinition>,
-    name: &str,
-) -> Result<(), crate::SQLError> {
+pub fn require_role_exists(roles: &RoleDefinitions, name: &str) -> Result<(), crate::SQLError> {
     if roles.contains_key(name) {
         return Ok(());
     }
@@ -164,8 +165,8 @@ pub fn require_role_exists(
     })
 }
 pub fn require_set_role(
-    roles: &std::collections::BTreeMap<String, RoleDefinition>,
-    memberships: &std::collections::BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &(impl identity::RoleSubject + ?Sized),
     target: &str,
 ) -> Result<(), crate::SQLError> {

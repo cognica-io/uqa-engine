@@ -6,6 +6,8 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     foreign_server::ForeignServerMetadata,
     foreign_wrapper::{ForeignWrapperHandler, ForeignWrapperReference},
@@ -13,8 +15,8 @@ use uqa_sql::catalog::{
 };
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn catalog() -> KeyValueCatalog {
@@ -153,7 +155,7 @@ fn partial_or_unknown_wrapper_formats_are_rejected_before_publication() {
         assert!(restore(&catalog, &roles(), &mut servers, true).is_err());
     }
     catalog.set_metadata(&key, &original).unwrap();
-    assert!(restore(&catalog, &BTreeMap::new(), &mut servers, true).is_err());
+    assert!(restore(&catalog, &RoleDefinitions::new(), &mut servers, true).is_err());
 }
 
 #[test]

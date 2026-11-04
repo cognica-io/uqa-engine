@@ -7,16 +7,17 @@
 use super::*;
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, VecDeque},
+    collections::VecDeque,
     sync::Arc,
 };
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     resolution::{candidates::SearchPathRead, creation::CreationRelationNames},
     roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleDefinition, RoleMembership, RoleMembershipKey,
+        RoleDefinition,
     },
     security::{
         database::BoundDatabaseSecurity,
@@ -32,8 +33,8 @@ struct Fixture {
     user: String,
     path: Vec<String>,
     schemas: RefCell<SchemaRegistry>,
-    roles: BTreeMap<String, RoleDefinition>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: RoleDefinitions,
+    memberships: RoleMemberships,
     database: BoundDatabaseSecurity,
     events: RefCell<Vec<&'static str>>,
     allocated: Cell<bool>,
@@ -50,8 +51,9 @@ impl Fixture {
             user: "uqa".into(),
             path: vec!["tenant".into()],
             schemas: RefCell::new(SchemaRegistry::new()),
-            roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
-            memberships: BTreeMap::new(),
+            roles: RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
+                .unwrap(),
+            memberships: RoleMemberships::new(),
             database: BoundDatabaseSecurity::bootstrap(),
             events: RefCell::new(Vec::new()),
             allocated: Cell::new(false),

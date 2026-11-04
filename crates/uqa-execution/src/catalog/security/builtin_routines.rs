@@ -6,13 +6,11 @@
 
 //! Independently persisted ACL tuples for immutable builtin routine identities.
 
-use std::{collections::BTreeMap, ops::DerefMut};
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::builtin_routines::{
-        metadata_key, validate, BuiltinRoutineSecurities, BuiltinRoutineSecurity,
-        BuiltinRoutineSecurityCatalog, METADATA_PREFIX,
-    },
+use std::ops::DerefMut;
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::security::builtin_routines::{
+    metadata_key, validate, BuiltinRoutineSecurities, BuiltinRoutineSecurity,
+    BuiltinRoutineSecurityCatalog, METADATA_PREFIX,
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -36,10 +34,7 @@ fn encode(entry: &BuiltinRoutineSecurity) -> StorageBackendResult<String> {
     })?)
 }
 
-fn decode(
-    json: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<BuiltinRoutineSecurity> {
+fn decode(json: &str, roles: &RoleDefinitions) -> StorageBackendResult<BuiltinRoutineSecurity> {
     let stored: StoredSecurity = serde_json::from_str(json)?;
     if stored.builtin_routine_acl_format != 1 {
         return Err(StorageBackendError::Other(format!(
@@ -54,7 +49,7 @@ fn decode(
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<BuiltinRoutineSecurities> {
     let mut result = BuiltinRoutineSecurities::new();
     for (key, json) in catalog.metadata_with_prefix(METADATA_PREFIX)? {
@@ -114,7 +109,7 @@ pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &BuiltinRoutineSecurities,
     mut latest: BuiltinRoutineSecurities,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<BuiltinRoutineSecurities> {
     if let Some(catalog) = catalog {
         for (oid, entry) in current {

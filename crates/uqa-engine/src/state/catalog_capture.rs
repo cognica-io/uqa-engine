@@ -7,6 +7,7 @@
 //! Memory catalog generations register owning producers before Engine publication.
 
 use super::{BoundDatabaseSecurity, CatalogCell, DurableCatalogState};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_storage::{memory_capture::MemoryCaptureRegistry, StorageBackendResult};
 
 impl DurableCatalogState {
@@ -116,12 +117,12 @@ impl DurableCatalogState {
         self.roles = CatalogCell::capture_source(
             self.roles.snapshot(),
             Some(registry),
-            uqa_sql::catalog::roles::capture::roles,
+            RoleDefinitions::capture,
         )?;
         self.role_memberships = CatalogCell::capture_source(
             self.role_memberships.snapshot(),
             Some(registry),
-            uqa_sql::catalog::roles::capture::memberships,
+            RoleMemberships::capture,
         )?;
         self.foreign_table_security = CatalogCell::capture_source(
             self.foreign_table_security.snapshot(),

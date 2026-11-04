@@ -6,7 +6,8 @@
 
 //! Foreign-server catalog identity and ownership, independent of a transport implementation.
 
-use super::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity};
+use super::roles::{identity::RoleSubject, RoleIdentity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,7 +54,7 @@ impl ForeignServerDefinition {
 /// Validate identities before publishing any restored definition. A name, OID or incarnation cannot alias another server, and an owner must still be the role incarnation that created it.
 pub fn validate_foreign_servers(
     servers: &BTreeMap<String, ForeignServerDefinition>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     let mut identities = BTreeSet::new();

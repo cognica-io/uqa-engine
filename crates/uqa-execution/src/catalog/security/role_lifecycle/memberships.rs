@@ -11,7 +11,7 @@ use crate::{
     catalog::security::roles::{locking::ROLE_CATALOG_CLASS_ID, persistence::RoleCatalogValues},
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
-use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{AlterRoleStmt, CreateRoleStmt, GrantRoleStmt, RoleMembershipOptions, RoleSpecification},
     catalog::roles::{
@@ -37,15 +37,12 @@ struct MembershipWork<'a, 'context> {
 }
 
 impl MembershipWork<'_, '_> {
-    fn roles(&self) -> Result<BTreeMap<String, RoleDefinition>, SQLError> {
+    fn roles(&self) -> Result<RoleDefinitions, SQLError> {
         let roles = self.context.analysis.roles.role_definitions();
         self.with_created(&roles)
     }
 
-    fn with_created(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<BTreeMap<String, RoleDefinition>, SQLError> {
+    fn with_created(&self, roles: &RoleDefinitions) -> Result<RoleDefinitions, SQLError> {
         if let Some(created) = &self.created {
             definition::create_role_candidate(roles, &self.current, created.clone())
                 .map(|(roles, _)| roles)

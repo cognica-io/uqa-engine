@@ -7,6 +7,8 @@
 use super::*;
 use std::cell::RefCell;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{catalog::range_type::StoredMultirange, ColumnType};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
@@ -15,8 +17,8 @@ mod projections;
 mod snapshots;
 mod support;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn definition() -> StoredRange {
@@ -79,7 +81,7 @@ impl RangeRegistryPublication for Publication {
     fn range_catalog_snapshot(&self) -> crate::catalog::CatalogReadView {
         crate::catalog::test_support::empty_catalog()
     }
-    fn range_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn range_role_definitions(&self) -> RoleDefinitions {
         roles()
     }
     fn publish_range_definitions(&self, registry: RangeRegistry) {

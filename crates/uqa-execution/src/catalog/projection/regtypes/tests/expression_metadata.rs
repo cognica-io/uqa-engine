@@ -10,6 +10,7 @@ use crate::catalog::{
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnDef, Expr, TableConstraintSet},
     catalog::{domain::StoredDomain, roles::RoleDefinition, security::BoundSchemaSecurity},
@@ -37,10 +38,13 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     reader.oid = 20_000;
     reader.object_id = [9; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([
-        ("uqa".into(), RoleDefinition::bootstrap()),
-        ("reader".into(), reader),
-    ]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([
+            ("uqa".into(), RoleDefinition::bootstrap()),
+            ("reader".into(), reader),
+        ])
+        .unwrap(),
+    );
     let mut schemas = BoundSchemaSecurity::initial_catalog();
     schemas
         .insert(

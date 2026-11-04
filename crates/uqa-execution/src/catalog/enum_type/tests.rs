@@ -8,10 +8,12 @@ use super::*;
 use std::cell::RefCell;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::catalog::enum_type::initial_enum_labels;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 fn definition(name: &str, base_oid: u32, labels: &[&str]) -> StoredEnum {
@@ -106,7 +108,7 @@ impl EnumRegistryPublication for Publication<'_> {
     fn enum_catalog(&self) -> Option<&dyn CatalogFacade> {
         Some(self.catalog)
     }
-    fn enum_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn enum_role_definitions(&self) -> RoleDefinitions {
         roles()
     }
     fn publish_enum_definitions(&self, registry: EnumRegistry) {

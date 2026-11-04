@@ -6,14 +6,12 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::database::{DatabaseAclEntry, DatabasePrivileges};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn fixture() -> (
-    KeyValueCatalog,
-    BTreeMap<String, RoleDefinition>,
-    DatabaseSecurity,
-) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions, DatabaseSecurity) {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let bootstrap = RoleDefinition::bootstrap();
     let mut reader = bootstrap.clone();
@@ -21,10 +19,11 @@ fn fixture() -> (
     reader.oid = 20_001;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         (bootstrap.name.clone(), bootstrap),
         (reader.name.clone(), reader),
-    ]);
+    ])
+    .unwrap();
     let security = DatabaseSecurity {
         role_owner: "uqa".into(),
         acl: Some(vec![DatabaseAclEntry {
@@ -94,14 +93,15 @@ fn restoring_renamed_database_roles_does_not_rewrite_metadata_or_rebind_names() 
     catalog
         .set_metadata(DATABASE_SECURITY_METADATA_KEY, &stored)
         .unwrap();
-    let mut renamed = roles.remove("reader").unwrap();
+    let mut renamed = roles.get("reader").unwrap().clone();
+    roles.remove("reader").unwrap();
     renamed.name = "renamed".into();
     let mut replacement = renamed.clone();
     replacement.name = "reader".into();
     replacement.oid += 1;
     replacement.object_id = [2; 16];
-    roles.insert("reader".into(), replacement);
-    roles.insert("renamed".into(), renamed);
+    roles.insert("reader".into(), replacement).unwrap();
+    roles.insert("renamed".into(), renamed).unwrap();
     assert_eq!(
         restore(&catalog, &roles, false)
             .unwrap()
@@ -119,7 +119,13 @@ fn restoring_renamed_database_roles_does_not_rewrite_metadata_or_rebind_names() 
             .unwrap(),
         stored
     );
-    roles.get_mut("renamed").unwrap().object_id = [3; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [3; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(restore(&catalog, &roles, true)
         .unwrap_err()
         .to_string()
@@ -241,7 +247,13 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
     catalog
         .set_metadata(DATABASE_SECURITY_METADATA_KEY, &legacy)
         .unwrap();
-    roles.get_mut("uqa").unwrap().object_id = [0; 16];
+    roles
+        .edit("uqa", |value| {
+            value.object_id = [0; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(restore(&catalog, &roles, true).is_err());
     assert_eq!(
         catalog
@@ -255,13 +267,14 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
 #[test]
 fn missing_database_metadata_uses_the_bootstrap_identity_independently_of_its_name() {
     let (catalog, mut roles, _) = fixture();
-    let mut bootstrap = roles.remove("uqa").unwrap();
+    let mut bootstrap = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     bootstrap.name = "renamed_bootstrap".into();
-    roles.insert(bootstrap.name.clone(), bootstrap);
+    roles.insert(bootstrap.name.clone(), bootstrap).unwrap();
     let mut replacement = roles["reader"].clone();
     replacement.name = "uqa".into();
-    roles.remove("reader");
-    roles.insert("uqa".into(), replacement);
+    roles.remove("reader").unwrap();
+    roles.insert("uqa".into(), replacement).unwrap();
     let bound = restore(&catalog, &roles, true).unwrap();
     assert_eq!(bound, BoundDatabaseSecurity::bootstrap());
     assert_eq!(

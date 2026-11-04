@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::collections::BTreeMap;
 
 #[test]
 fn range_descriptors_share_both_oids_and_retain_their_generation_without_repeat_allocations() {

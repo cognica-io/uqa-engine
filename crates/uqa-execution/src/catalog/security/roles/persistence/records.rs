@@ -7,10 +7,11 @@
 //! Independent role definitions and their OID uniqueness records.
 
 use super::{
-    BTreeMap, CatalogFacade, RoleDefinition, SQLError, StorageBackendError, StorageBackendResult,
+    CatalogFacade, RoleDefinition, SQLError, StorageBackendError, StorageBackendResult,
     ROLES_METADATA_KEY,
 };
 use serde::Deserialize;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 pub(super) const ROLE_PREFIX: &str = "uqa.sql.role.v1:";
 const OID_PREFIX: &str = "uqa.sql.role_oid.v1:";
@@ -34,7 +35,7 @@ struct RecordFormat {
 #[serde(untagged)]
 enum StoredRoles {
     Records(RecordFormat),
-    Legacy(BTreeMap<String, RoleDefinition>),
+    Legacy(RoleDefinitions),
 }
 
 pub(super) fn role_key(name: &str) -> String {
@@ -47,7 +48,7 @@ fn oid_key(oid: i64) -> String {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-) -> StorageBackendResult<(BTreeMap<String, RoleDefinition>, RoleRecordFormat)> {
+) -> StorageBackendResult<(RoleDefinitions, RoleRecordFormat)> {
     let stored = catalog
         .get_metadata(ROLES_METADATA_KEY)?
         .map(|json| serde_json::from_str::<StoredRoles>(&json))
@@ -64,10 +65,12 @@ pub(super) fn read(
                     )))
                 }
             };
-            let mut roles = BTreeMap::new();
+            let mut roles = RoleDefinitions::new();
             catalog.visit_metadata_with_prefix(ROLE_PREFIX, &mut |key, json| {
                 let name = key.strip_prefix(ROLE_PREFIX).expect("metadata prefix");
-                roles.insert(name.to_owned(), serde_json::from_str(json)?);
+                roles
+                    .insert(name.to_owned(), serde_json::from_str(json)?)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 Ok(())
             })?;
             if !roles.values().any(|role: &RoleDefinition| role.oid == 10) {
@@ -88,7 +91,7 @@ pub(super) fn read(
             Ok((
                 match legacy {
                     Some(StoredRoles::Legacy(roles)) => roles,
-                    None => BTreeMap::new(),
+                    None => RoleDefinitions::new(),
                     _ => unreachable!(),
                 },
                 RoleRecordFormat::Aggregate,
@@ -99,7 +102,7 @@ pub(super) fn read(
 
 pub(super) fn validate_oids(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<()> {
     let invalid =
         || StorageBackendError::Other("role OID records do not match role definitions".into());
@@ -120,7 +123,7 @@ pub(super) fn validate_oids(
 /// Called only inside initial catalog restoration's owning transaction, after validating roles and memberships. The marker replaces the legacy map, so old readers fail to decode the new representation instead of silently using a stale aggregate.
 pub(super) fn migrate(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<()> {
     for (name, role) in roles {
         catalog.set_metadata(&role_key(name), &serde_json::to_string(role)?)?;
@@ -131,8 +134,8 @@ pub(super) fn migrate(
 
 pub(super) fn persist(
     catalog: &dyn CatalogFacade,
-    before: &BTreeMap<String, RoleDefinition>,
-    after: &BTreeMap<String, RoleDefinition>,
+    before: &RoleDefinitions,
+    after: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     // OID records share the role publication transaction. Even creators that chose the same OID in different snapshots cannot both commit distinct owners of that OID.
     let mut assigned = std::collections::BTreeSet::new();

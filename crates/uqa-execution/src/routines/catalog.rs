@@ -10,6 +10,7 @@ pub(crate) mod encoding;
 pub(super) mod publication;
 pub(super) mod revision;
 mod values;
+use uqa_sql::catalog::roles::RoleDefinitions;
 pub use values::rewrite_composite_constants;
 
 use std::ops::DerefMut;
@@ -44,7 +45,7 @@ pub fn merge_private(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
     current: &Arc<RoutineRegistry>,
     committed: Arc<RoutineRegistry>,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
     temporary_schema: &str,
 ) -> uqa_storage::StorageBackendResult<Arc<RoutineRegistry>> {
     let mut registry = if catalog.map_or(Ok(false), |catalog| {

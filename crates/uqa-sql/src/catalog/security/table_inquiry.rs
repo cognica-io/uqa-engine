@@ -15,15 +15,15 @@ use super::{
     },
     TableSecurity,
 };
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{identity::RoleSubject, RoleReference};
 use crate::{
     catalog::{
         resolution::RelationResolution,
-        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::{catalog_acl::AclGrantee, RelationIdentity, Value};
 
 pub trait TablePrivilegeCatalog {
@@ -35,12 +35,12 @@ pub trait TablePrivilegeCatalog {
     fn table_privilege_security(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<TableSecurity, SQLError>;
     fn column_privilege_relation(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<ColumnPrivilegeRelation, SQLError>;
 }
 

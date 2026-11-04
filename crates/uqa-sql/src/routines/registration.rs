@@ -11,13 +11,13 @@ use super::{
     routine_local_name,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{AlterRoutineStmt, CreateFunction},
-    catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
+    catalog::roles::role_inherits,
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
-use std::collections::BTreeMap;
 
 pub trait RoutineSupportAuthority {
     fn current_user_is_superuser(&self) -> bool;
@@ -68,8 +68,8 @@ pub fn prepare_routine_replacement(
     existing: &CreateFunction,
     def: &mut CreateFunction,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     signature: &str,
 ) -> Result<(), SQLError> {
     if !def.or_replace {

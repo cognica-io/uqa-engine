@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::security::BoundSchemaSecurity;
 
@@ -28,7 +30,8 @@ fn private_schema_authority_preserves_deletions_and_uses_fresh_unmodified_record
         .unwrap()
         .unwrap();
     let committed = Arc::new(schemas(&["changed", "removed", "peer"]));
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let merged = merge_private_records(&current, committed.clone(), &roles, |name| {
         Ok(matches!(name, "private" | "changed" | "removed"))
     })
@@ -44,7 +47,8 @@ fn private_schema_authority_preserves_deletions_and_uses_fresh_unmodified_record
 
 #[test]
 fn private_schema_authority_validates_role_incarnations_and_provenance_errors() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let mut current = schemas(&["private"]);
     current
         .edit("private", |value| {

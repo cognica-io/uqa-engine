@@ -7,9 +7,10 @@
 //! Role incarnations and authorization subjects over an explicit role catalog.
 
 use super::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 pub use uqa_core::catalog_role::RoleIdentity;
 use uqa_core::memory::ProductionControl;
 
@@ -58,7 +59,7 @@ impl From<&str> for RoleReference {
 impl RoleReference {
     pub fn from_identity_with_control(
         identity: RoleIdentity,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let role = identity
@@ -105,7 +106,7 @@ impl RoleReference {
 
     pub fn from_identity(
         identity: RoleIdentity,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<Self, SQLError> {
         let name = identity.role_name(roles).ok_or_else(|| {
             SQLError::Internal("role identity references a missing or replaced incarnation".into())
@@ -115,10 +116,7 @@ impl RoleReference {
         )?)))
     }
 
-    pub fn require_name<'a>(
-        &'a self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Result<&'a str, SQLError> {
+    pub fn require_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Result<&'a str, SQLError> {
         match self {
             Self::Named(name) => {
                 super::require_role_exists(roles, name)?;
@@ -128,34 +126,28 @@ impl RoleReference {
         }
     }
 
-    pub fn catalog_name(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<String, SQLError> {
+    pub fn catalog_name(&self, roles: &RoleDefinitions) -> Result<String, SQLError> {
         match self {
             Self::Named(name) => Ok(name.clone()),
             Self::Bound(role) => role.require_name(roles).map(str::to_owned),
         }
     }
 
-    pub fn bind(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<RoleBinding, SQLError> {
+    pub fn bind(&self, roles: &RoleDefinitions) -> Result<RoleBinding, SQLError> {
         let name = self.require_name(roles)?;
         RoleBinding::from_definition(&roles[name])
     }
 }
 
 impl RoleSubject for RoleReference {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         match self {
             Self::Named(name) => name.role_name(roles),
             Self::Bound(role) => role.role_name(roles),
         }
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         match self {
             Self::Named(name) => name.role_definition(roles),
             Self::Bound(role) => role.role_definition(roles),
@@ -164,7 +156,7 @@ impl RoleSubject for RoleReference {
 
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         match self {
@@ -229,7 +221,7 @@ impl RoleBinding {
     }
 
     /// Retain the original incarnation through name changes before publishing a stored role reference.
-    pub fn revalidate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError> {
+    pub fn revalidate(&self, roles: &RoleDefinitions) -> Result<(), SQLError> {
         if self.role_definition(roles).is_some() {
             Ok(())
         } else {
@@ -244,10 +236,7 @@ impl RoleBinding {
         role.oid == i64::from(self.oid) && role.object_id == self.object_id
     }
 
-    pub fn require_name<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Result<&'a str, SQLError> {
+    pub fn require_name<'a>(&self, roles: &'a RoleDefinitions) -> Result<&'a str, SQLError> {
         self.role_definition(roles)
             .map(|role| role.name.as_str())
             .ok_or_else(|| SQLError::Routine {
@@ -259,17 +248,14 @@ impl RoleBinding {
 
 /// A named SQL argument and an already selected session role have different lookup semantics. An absent bound role contributes no inherited privileges; PUBLIC ACLs remain applicable.
 pub trait RoleSubject {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str>;
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str>;
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition>;
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition>;
 
     /// Native captured identities poll while searching a renamed incarnation. External subjects retain their existing lookup semantics.
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         control.check()?;
@@ -280,19 +266,16 @@ pub trait RoleSubject {
 }
 
 impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         self.as_ref().role_name(roles)
     }
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         self.as_ref().role_definition(roles)
     }
 
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         self.as_ref().role_definition_with_control(roles, control)
@@ -300,20 +283,17 @@ impl<T: RoleSubject + ?Sized> RoleSubject for Arc<T> {
 }
 
 impl<T: RoleSubject + ?Sized> RoleSubject for &T {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         (*self).role_name(roles)
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         (*self).role_definition(roles)
     }
 
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         (*self).role_definition_with_control(roles, control)
@@ -321,53 +301,41 @@ impl<T: RoleSubject + ?Sized> RoleSubject for &T {
 }
 
 impl RoleSubject for str {
-    fn role_name<'a>(&'a self, _roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, _roles: &'a RoleDefinitions) -> Option<&'a str> {
         Some(self)
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         roles.get(self)
     }
 }
 
 impl RoleSubject for String {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         self.as_str().role_name(roles)
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         self.as_str().role_definition(roles)
     }
 }
 
 impl RoleSubject for uqa_core::catalog_acl::AclGrantee {
-    fn role_name<'a>(&'a self, _roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, _roles: &'a RoleDefinitions) -> Option<&'a str> {
         self.role_name()
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         self.role_name().and_then(|name| roles.get(name))
     }
 }
 
 impl RoleSubject for RoleBinding {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         self.role_definition(roles).map(|role| role.name.as_str())
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         roles
             .get(&self.name)
             .filter(|role| self.matches_definition(role))
@@ -376,7 +344,7 @@ impl RoleSubject for RoleBinding {
 
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         control.check()?;
@@ -397,14 +365,11 @@ impl RoleSubject for RoleBinding {
 }
 
 impl RoleSubject for RoleIdentity {
-    fn role_name<'a>(&'a self, roles: &'a BTreeMap<String, RoleDefinition>) -> Option<&'a str> {
+    fn role_name<'a>(&'a self, roles: &'a RoleDefinitions) -> Option<&'a str> {
         self.role_definition(roles).map(|role| role.name.as_str())
     }
 
-    fn role_definition<'a>(
-        &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
-    ) -> Option<&'a RoleDefinition> {
+    fn role_definition<'a>(&self, roles: &'a RoleDefinitions) -> Option<&'a RoleDefinition> {
         if !self.is_valid() {
             return None;
         }
@@ -413,7 +378,7 @@ impl RoleSubject for RoleIdentity {
 
     fn role_definition_with_control<'a>(
         &self,
-        roles: &'a BTreeMap<String, RoleDefinition>,
+        roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
         control.check()?;

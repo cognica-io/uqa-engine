@@ -13,6 +13,7 @@ use crate::catalog::{
 };
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 #[derive(serde::Deserialize)]
 struct Diagnostic {
@@ -41,11 +42,11 @@ fn catalog(revoked: bool) -> CatalogReadView {
     reader.object_id = [42; 16];
     reader.attributes.clear();
     snapshot.definitions.roles = Arc::new(
-        [
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     let mut schemas = std::collections::BTreeMap::from([
         (

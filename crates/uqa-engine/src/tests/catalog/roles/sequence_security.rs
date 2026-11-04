@@ -57,9 +57,10 @@ fn sequence_owner_and_delegated_grants_keep_identity_after_every_name_is_reused(
     {
         let mut roles = engine.durable.roles.write();
         for name in ["object_owner", "delegate", "reader"] {
-            let mut role = roles.remove(name).unwrap();
+            let mut role = roles.get(name).unwrap().clone();
+            roles.remove(name).unwrap();
             role.name = format!("renamed_{name}");
-            roles.insert(role.name.clone(), role);
+            roles.insert(role.name.clone(), role).unwrap();
         }
     }
     engine.note_catalog_registry_changed();

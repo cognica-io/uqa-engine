@@ -6,9 +6,9 @@
 
 //! Retained read-only authorization keeps ACL contents independently of catalog mutation revisions.
 
-use super::{BoundTableAclEntry, BoundTableSecurity, RoleDefinition, RoleIdentity, TableSecurity};
+use super::{BoundTableAclEntry, BoundTableSecurity, RoleIdentity, TableSecurity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::{plan::copy::SyntaxProduction, SQLError};
-use std::collections::BTreeMap;
 use uqa_core::memory::{Produced, ProductionControl};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -80,10 +80,7 @@ impl CapturedTablePrivileges {
         &self.column_acls
     }
 
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<TableSecurity, String> {
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<TableSecurity, String> {
         super::resolve_privileges(
             self.role_owner,
             self.acl.as_deref(),

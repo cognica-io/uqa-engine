@@ -6,16 +6,16 @@
 
 //! Ordered namespace expansion and declaration checks for routine privileges.
 
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::{AlterRoutineKind, GrantRoutineStmt, RoutinePrivilege},
-    catalog::roles::{identity::RoleSubject, RoleDefinition},
+    catalog::roles::identity::RoleSubject,
     routines::{
         lifecycle::{names::RoutineNameCatalog, RoutineRegistry},
         SQLUserFunction,
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::{catalog_acl::AclGrantee, RelationIdentity};
 
 /// `objectsInSchemaToOids` includes aggregate and window functions in FUNCTIONS, but excludes procedures.
@@ -77,7 +77,7 @@ pub fn routines_in_schemas(
 pub fn validate_grantor(
     requested: Option<&str>,
     current: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let Some(requested) = requested else {
         return Ok(());

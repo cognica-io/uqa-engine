@@ -10,12 +10,10 @@ use super::{records, DomainRegistry};
 use crate::catalog::{projection, CatalogReadView, RelationNameResolution};
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::ConstraintCatalogIdentity,
-    catalog::{
-        domain::{validate_domain_definitions, validate_domain_registry},
-        roles::RoleDefinition,
-    },
+    catalog::domain::{validate_domain_definitions, validate_domain_registry},
     schema::{
         constraint_metadata::{
             CatalogObjectAllocator, CatalogOidClass, ConstraintMetadataError,
@@ -39,7 +37,7 @@ pub struct RestoredDomains {
 /// This read never writes conversion metadata; later relation restoration still needs these domain definitions for type binding.
 pub fn restore(
     storage: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredDomains> {
     let (registry, current) = records::read(storage, roles, allow_migration)?;

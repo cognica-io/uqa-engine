@@ -6,8 +6,8 @@
 
 //! Fresh namespace authority retains only schemas changed by the current transaction.
 
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_sql::catalog::roles::RoleDefinition;
+use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -15,7 +15,7 @@ pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &SchemaRegistry,
     committed: Arc<SchemaRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<Arc<SchemaRegistry>> {
     merge_private_records(current, committed, roles, |name| {
         catalog.map_or(Ok(false), |catalog| {
@@ -27,7 +27,7 @@ pub fn merge_private(
 fn merge_private_records(
     current: &SchemaRegistry,
     mut committed: Arc<SchemaRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     mut is_private: impl FnMut(&str) -> StorageBackendResult<bool>,
 ) -> StorageBackendResult<Arc<SchemaRegistry>> {
     {

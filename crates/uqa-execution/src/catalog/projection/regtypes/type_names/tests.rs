@@ -16,6 +16,7 @@ use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken, RelationIdentity,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{CreateDomain, UserTypeIdentity, UserTypeKind},
     catalog::{
@@ -27,10 +28,9 @@ use uqa_sql::{
 pub(super) fn fixture() -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.schemas = Arc::new(BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.roles = Arc::new(
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+    );
     let domain = StoredDomain {
         object_id: [1; 16],
         oid: 20001,

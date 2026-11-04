@@ -8,6 +8,7 @@
 
 use super::{registration::RoutineSupportAuthority, routine_kind, routine_local_name};
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::roles::{RoleIdentity, RoleReference};
 
 pub mod binding;
@@ -17,7 +18,6 @@ use crate::{
     ast::{
         AlterRoutineOwnerStmt, AlterRoutineStmt, CreateFunction, GrantRoutineStmt, RoutineAclEntry,
     },
-    catalog::roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
     catalog::security::object_acl,
     SQLError,
 };
@@ -25,7 +25,6 @@ pub use production::{
     ensure_routine_execute_privilege_named_with_control,
     ensure_routine_execute_privilege_with_control,
 };
-use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 
 pub trait RoutineExecutionAuthority: RoutineSupportAuthority {
@@ -119,7 +118,7 @@ pub fn validate_routine_acl_roles(
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     for role in grantees {
         if role
@@ -138,8 +137,8 @@ pub fn validate_routine_acl_roles(
 pub fn select_routine_acl_grantor(
     definition: &CreateFunction,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Result<Option<RoleIdentity>, SQLError> {
     let owner = bound_routine_owner(definition)?;
     let grantor = object_acl::select_grantor(

@@ -9,24 +9,26 @@ use super::*;
 use crate::ast::{
     CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleMembershipOptions, RoleSpecification,
 };
+use crate::catalog::roles::RoleMembership;
 use crate::catalog::roles::{
     memberships::command::{creator_membership, MembershipRecipients},
     RoleReference,
 };
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
 
 struct Inputs {
-    roles: BTreeMap<String, RoleDefinition>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: RoleDefinitions,
+    memberships: RoleMemberships,
     notices: RefCell<Vec<crate::SQLNotice>>,
     current_reads: Cell<usize>,
 }
 impl Inputs {
     fn new() -> Self {
         Self {
-            roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
-            memberships: BTreeMap::new(),
+            roles: RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
+                .unwrap(),
+            memberships: RoleMemberships::new(),
             notices: RefCell::new(Vec::new()),
             current_reads: Cell::new(0),
         }
@@ -71,7 +73,7 @@ fn resolve_drop_role_names(
     statement: &DropRoleStmt,
     current: &str,
     session: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<String>, SQLError> {
     let authority = RoleDropAuthority::new(current.into(), session.into(), roles)?;
     let mut names = Vec::new();
@@ -94,8 +96,8 @@ fn role_definition_administration_uses_membership_paths_independent_of_inherit_a
             role.name = name.into();
             role.oid = 20_000 + i64::try_from(index).unwrap();
             role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-            role.attributes = BTreeSet::from([RoleAttribute::CreateRole]);
-            inputs.roles.insert(name.into(), role);
+            role.attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::CreateRole]);
+            inputs.roles.insert(name.into(), role).unwrap();
         }
         for (index, (role, member)) in [("middle", "actor"), ("target", "middle")]
             .into_iter()
@@ -110,7 +112,10 @@ fn role_definition_administration_uses_membership_paths_independent_of_inherit_a
                 inherit_option: inherit && role == "middle",
                 set_option: false,
             };
-            inputs.memberships.insert(membership.key(), membership);
+            inputs
+                .memberships
+                .insert(membership.key(), membership)
+                .unwrap();
         }
         let result = require_role_administration_for(
             &inputs,
@@ -122,7 +127,14 @@ fn role_definition_administration_uses_membership_paths_independent_of_inherit_a
         result.unwrap();
         let authority =
             RoleDropAuthority::new("actor".into(), "uqa".into(), &inputs.roles).unwrap();
-        inputs.roles.get_mut("actor").unwrap().attributes.clear();
+        inputs
+            .roles
+            .edit("actor", |value| {
+                value.attributes.clear();
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(
             authority
                 .resolve_target(&inputs.context(), &"target".into(), false, &inputs.roles)
@@ -161,15 +173,16 @@ fn role_creation_grants_creator_administration_without_inherit_or_set() {
     creator.name = "creator".into();
     creator.oid = 20_002;
     creator.object_id = [2; 16];
-    creator.attributes = BTreeSet::from([RoleAttribute::CreateRole]);
-    inputs.roles.insert("creator".into(), creator);
+    creator.attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::CreateRole]);
+    inputs.roles.insert("creator".into(), creator).unwrap();
     let mut other_superuser = RoleDefinition::bootstrap();
     other_superuser.name = "another_superuser".into();
     other_superuser.oid = 20_003;
     other_superuser.object_id = [3; 16];
     inputs
         .roles
-        .insert(other_superuser.name.clone(), other_superuser);
+        .insert(other_superuser.name.clone(), other_superuser)
+        .unwrap();
     let (roles, superuser) = create_role_candidate(
         &inputs.roles,
         "creator",
@@ -223,7 +236,7 @@ fn grant_binds_explicit_grantor_before_recipients_without_aliasing_target_names(
         role.name = format!("current_{index}");
         role.oid = 20_001 + index;
         role.object_id = [index as u8 + 1; 16];
-        inputs.roles.insert(role.name.clone(), role);
+        inputs.roles.insert(role.name.clone(), role).unwrap();
     }
     let statement = GrantRoleStmt {
         granted_roles: vec!["CURRENT_USER".into()],
@@ -248,11 +261,11 @@ fn drop_special_role_targets_check_createrole_before_rejecting_specifications() 
         role.oid = 20_000 + i64::try_from(index).unwrap();
         role.object_id = [u8::try_from(index + 1).unwrap(); 16];
         role.attributes = if name == "creator" {
-            BTreeSet::from([RoleAttribute::CreateRole])
+            uqa_core::memory::OwnedSet::from([RoleAttribute::CreateRole])
         } else {
-            BTreeSet::new()
+            uqa_core::memory::OwnedSet::new()
         };
-        inputs.roles.insert(name.into(), role);
+        inputs.roles.insert(name.into(), role).unwrap();
     }
     for current in ["plain", "creator", "uqa"] {
         for requested in [
@@ -326,7 +339,7 @@ fn drop_special_role_targets_leave_quoted_uppercase_names_literal() {
         role.name = name.into();
         role.oid = 20_000 + i64::try_from(index).unwrap();
         role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-        inputs.roles.insert(name.into(), role);
+        inputs.roles.insert(name.into(), role).unwrap();
     }
     let statement = DropRoleStmt {
         names: names.map(RoleSpecification::from).to_vec(),
@@ -363,7 +376,7 @@ fn role_deletion_protects_effective_outer_and_session_incarnations() {
         role.name = name.into();
         role.oid = 20_000 + i64::try_from(index).unwrap();
         role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-        inputs.roles.insert(name.into(), role);
+        inputs.roles.insert(name.into(), role).unwrap();
     }
     let reference = |name: &str| {
         RoleReference::from_identity(inputs.roles[name].identity(), &inputs.roles).unwrap()
@@ -396,14 +409,21 @@ fn role_deletion_protects_effective_outer_and_session_incarnations() {
             "{target}"
         );
     }
-    let mut original = inputs.roles.remove("outer").unwrap();
+    let mut original = inputs.roles.get("outer").unwrap().clone();
+    inputs.roles.remove("outer").unwrap();
     let mut replacement = original.clone();
     replacement.oid += 10;
     replacement.object_id[0] += 10;
     original.name = "renamed_outer".into();
     original.advance_revision().unwrap();
-    inputs.roles.insert(original.name.clone(), original);
-    inputs.roles.insert(replacement.name.clone(), replacement);
+    inputs
+        .roles
+        .insert(original.name.clone(), original)
+        .unwrap();
+    inputs
+        .roles
+        .insert(replacement.name.clone(), replacement)
+        .unwrap();
     assert_eq!(
         check(&inputs, "renamed_outer").unwrap_err().sqlstate(),
         Some("55006")

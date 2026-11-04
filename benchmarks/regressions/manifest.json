@@ -39869,6 +39869,58 @@
         "case_1",
         "case_2"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_and_membership_roots_capture_without_enumeration_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Native role and membership capture",
+      "workload": "Capture 1, 64 and 4096 role definitions and membership tuples twice under separate allowances, then retire the sources.",
+      "invariant": "Capture allocates no heap objects, independently admits the complete selected roots and preserves ordered original values through source closure and full release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_role_publication_shares_unrelated_payloads_and_preserves_legacy_values",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Native role publication",
+      "workload": "Publish one role and membership beside 1, 32 and 512 existing entries plus large unrelated endpoint names; compare legacy values and native encodings.",
+      "invariant": "Publication stays below 32 KiB and 256 allocations, shares unrelated immutable values, preserves serialized roles and captured memberships and leaves earlier authority unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_role_publication_and_independent_capture_preserve_original_roots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/registry/tests.rs",
+      "capability": "Role admission failure",
+      "workload": "Deny native role and membership replacements, independently underfund each capture by one byte, cancel and retire every owner.",
+      "invariant": "Failed publication preserves both original roots, incomplete capture leaks no admission and the final native and capture owners release their full allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_role_roots_preserve_original_memberships_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/role_roots.rs",
+      "capability": "Committed native role roots",
+      "workload": "Create 1, 32 and 128 SQL roles and memberships; capture original authority during private ALTER and REVOKE, then roll back a savepoint, commit, rename and replace.",
+      "invariant": "Selected role and membership capture stays below 32 KiB and 128 allocations, preserves original identities after source closure and retains cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
