@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::catalog::view::{StoredView, StoredViewKind, ViewRegistryRead, ViewRegistryWrite};
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
 use uqa_sql::{ast::RelationPersistence, plan::UnifiedPlan};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -18,7 +18,7 @@ enum Persistence {
     Failure,
 }
 struct Fixture {
-    views: RefCell<BTreeMap<RelationIdentity, StoredView>>,
+    views: RefCell<uqa_sql::catalog::stored_view::ViewDefinitions>,
     events: RefCell<Vec<&'static str>>,
     persistence: Persistence,
 }
@@ -30,35 +30,38 @@ impl Fixture {
             panic!("query fixture");
         };
         Self {
-            views: RefCell::new(BTreeMap::from([(
-                RelationIdentity::new("public", "v"),
-                StoredView {
-                    security: uqa_sql::catalog::security::BoundTableSecurity::owner(
-                        uqa_sql::catalog::roles::RoleIdentity {
-                            oid: 42,
-                            object_id: [42; 16],
+            views: RefCell::new(
+                uqa_sql::catalog::stored_view::ViewDefinitions::try_from_iter([(
+                    RelationIdentity::new("public", "v"),
+                    StoredView {
+                        security: uqa_sql::catalog::security::BoundTableSecurity::owner(
+                            uqa_sql::catalog::roles::RoleIdentity {
+                                oid: 42,
+                                object_id: [42; 16],
+                            },
+                        ),
+                        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+                            object_id: [7; 16],
+                            catalog_oids: None,
+                            row_type_array_name: None,
+                            query: *query,
+                            output_columns: Some(vec!["value".into()]),
+                            persistence: if temporary {
+                                RelationPersistence::Temporary
+                            } else {
+                                RelationPersistence::Permanent
+                            },
+                            options: Vec::new(),
+                            kind: StoredViewKind::View,
+                            materialized_rows: Vec::new(),
+                            materialized_column_types: Vec::new(),
+                            materialized_column_collations: None,
+                            populated: true,
                         },
-                    ),
-                    definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
-                        object_id: [7; 16],
-                        catalog_oids: None,
-                        row_type_array_name: None,
-                        query: *query,
-                        output_columns: Some(vec!["value".into()]),
-                        persistence: if temporary {
-                            RelationPersistence::Temporary
-                        } else {
-                            RelationPersistence::Permanent
-                        },
-                        options: Vec::new(),
-                        kind: StoredViewKind::View,
-                        materialized_rows: Vec::new(),
-                        materialized_column_types: Vec::new(),
-                        materialized_column_collations: None,
-                        populated: true,
                     },
-                },
-            )])),
+                )])
+                .unwrap(),
+            ),
             events: RefCell::new(Vec::new()),
             persistence,
         }

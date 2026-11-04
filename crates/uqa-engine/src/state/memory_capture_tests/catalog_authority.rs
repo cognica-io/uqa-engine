@@ -38,7 +38,10 @@ fn memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure() 
         let saved_schemas = schemas_key.retained(&cut).unwrap().unwrap();
         let saved_sequences = sequences_key.retained(&cut).unwrap().unwrap();
         drop(cut);
-        assert_eq!(saved_database.get().unwrap(), database.as_ref());
+        assert_eq!(
+            saved_database.get().unwrap().as_ref(),
+            database.as_ref().as_ref()
+        );
         assert!(saved_schemas.get().unwrap().iter().eq(schemas.iter()));
         assert!(saved_sequences
             .get()

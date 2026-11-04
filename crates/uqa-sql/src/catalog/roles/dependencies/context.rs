@@ -7,14 +7,10 @@
 //! Retained catalog inputs for ordered role dependency checks.
 
 use crate::catalog::security::schema_registry::SchemaRegistry;
-use crate::{
-    catalog::{
-        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
-        stored_view::StoredView,
-    },
-    routines::SQLUserFunction,
+use crate::catalog::security::{
+    database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity,
 };
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{collections::BTreeMap, ops::Deref};
 use uqa_core::RelationIdentity;
 
 pub type RoleDependencyRead<'a, T> = Box<dyn Deref<Target = T> + 'a>;
@@ -33,14 +29,14 @@ pub trait RoleDependencyCatalog:
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
     fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
+    fn views(&self) -> RoleDependencyRead<'_, crate::catalog::stored_view::ViewDefinitions>;
     fn foreign_tables(
         &self,
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>>;
     fn sequences(
         &self,
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>>;
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
+    fn routines(&self) -> RoleDependencyRead<'_, crate::routines::registry::RoutineRegistry>;
     fn domains(
         &self,
     ) -> RoleDependencyRead<

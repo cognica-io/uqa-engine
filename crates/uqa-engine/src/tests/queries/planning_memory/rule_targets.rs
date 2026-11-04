@@ -24,18 +24,28 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
     table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
     {
         let mut views = engine.durable.views.write();
-        let view = views
-            .get_mut(&RelationIdentity::new("public", "selected"))
+        views
+            .edit(&RelationIdentity::new("public", "selected"), |view| {
+                let RelationalPlan::QueryBlock(block) = &mut view.query.root else {
+                    panic!("query")
+                };
+                block.projections[0].expr =
+                    ScalarExpr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+                Ok(())
+            })
+            .unwrap()
             .unwrap();
-        let RelationalPlan::QueryBlock(block) = &mut view.query.root else {
-            panic!("query")
-        };
-        block.projections[0].expr = ScalarExpr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
-        let materialized = views
-            .get_mut(&RelationIdentity::new("public", "materialized"))
+        views
+            .edit(
+                &RelationIdentity::new("public", "materialized"),
+                |materialized| {
+                    materialized.materialized_rows[0]
+                        .insert("n".into(), Value::Str("x".repeat(4 * 1024 * 1024)));
+                    Ok(())
+                },
+            )
+            .unwrap()
             .unwrap();
-        materialized.materialized_rows[0]
-            .insert("n".into(), Value::Str("x".repeat(4 * 1024 * 1024)));
     }
     for target in ["items", "selected", "materialized"] {
         let copied = allocation_counter::measure(|| {
@@ -201,10 +211,16 @@ fn native_rule_target_columns_preserve_live_lookup_and_schema_diagnostics(
     }
     {
         let mut views = engine.durable.views.write();
-        let materialized = views
-            .get_mut(&RelationIdentity::new("public", "materialized"))
+        views
+            .edit(
+                &RelationIdentity::new("public", "materialized"),
+                |materialized| {
+                    materialized.materialized_column_types.clear();
+                    Ok(())
+                },
+            )
+            .unwrap()
             .unwrap();
-        materialized.materialized_column_types.clear();
     }
     let ordinary =
         RuleSourceCatalog::rule_relation_definitions(&engine, "public.materialized").unwrap_err();

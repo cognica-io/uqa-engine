@@ -18375,7 +18375,7 @@
       "cases": 1,
       "source": "crates/uqa-engine/tests/sql_plpgsql/dynamic_recursion.rs",
       "capability": "Routine recursion stack and state",
-      "workload": "A PL/pgSQL function recursively evaluates factorial(10) through located RETURN statements.",
+      "workload": "A PL/pgSQL function recursively evaluates factorial(10) and factorial(11) through located RETURN statements.",
       "invariant": "Finite routine recursion preserves the exact integer output within the unchanged native stack budget.",
       "case_names": [
         ""
@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -40126,6 +40126,398 @@
       "capability": "Committed native server roots",
       "workload": "Capture 1, 32 and 128 SQL server definitions through private replacement, savepoint rollback, COMMIT, another incarnation and Engine closure.",
       "invariant": "Capture stays below 32 KiB and 128 allocations and preserves original identities, optional type/version and written option order under independent cancellation and complete allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_roots_capture_original_acl_tuples_without_allocations_or_encoding_changes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Immutable authority capture",
+      "workload": "Capture both native ACL root families with 1, 64 and 4096 entries under independent exact allowances; compare complete legacy tuples and stored encodings.",
+      "invariant": "Root capture allocates no heap objects; original revisions, role endpoints, optional defaults and empty column tuples survive source closure and release all allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_authority_publication_shares_unrelated_large_acl_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Selected authority publication",
+      "workload": "Update selected built-in and system ACL tuples beside 1, 32 and 512 entries and unrelated large ACL and column-name payloads.",
+      "invariant": "Both publications together stay below 32 KiB and 256 allocations, share every unrelated definition and preserve the original selected tuples.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_copy_and_failed_admission_preserve_complete_revisions_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/native_authority_tests.rs",
+      "capability": "Authority admission and retirement",
+      "workload": "Admit exact system ACL copies, reject one-byte-insufficient captures and exhausted native updates, cancel captures and retire owners.",
+      "invariant": "Admitted bytes match copied storage; rejected updates preserve original revisions and every native or captured lease is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "builtin_admission_failure_precedes_mixed_routine_persistence_and_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/privileges/tests.rs",
+      "capability": "Atomic mixed routine authority",
+      "workload": "Exhaust the native built-in ACL allowance before a mixed user/built-in GRANT, then release the competing reservation and retry.",
+      "invariant": "Admission failure occurs before persistence or either registry publication, releases guards, preserves original ACLs and permits ordinary retry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "denied_system_acl_successor_preserves_independent_tuples_and_releases_reservations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/tests.rs",
+      "capability": "Independent system authority tuples",
+      "workload": "Deny an attribute ACL successor beside independent table and attribute records, then release the reservation and apply the original update.",
+      "invariant": "Failure preserves every original tuple; success changes only the selected attribute and releases all native reservations after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_authority_roots_preserve_original_acl_revisions_with_bounded_capture_work",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/authority_roots.rs",
+      "capability": "Committed native authority roots",
+      "workload": "Capture built-in and system ACL roots with 1, 32 and 128 role endpoints through private revocation, savepoint rollback, COMMIT or ROLLBACK, later publication and closure.",
+      "invariant": "Capture stays below 32 KiB and 128 allocations; original complete ACLs and revisions survive closure, retain cancellation and release all admission.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_capture_shares_exact_acl_generations_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Immutable database authority capture",
+      "workload": "Capture absent, empty and 1, 64 or 4096 ordered database grants under independent exact allowances.",
+      "invariant": "Capture allocates nothing, preserves full bound grants and original JSON, and retains the original generation after native replacement and closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_rejects_unfunded_successors_before_replacing_the_original",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Database authority admission",
+      "workload": "Deny one-byte-insufficient native construction and capture, then attempt replacement while the original exhausts its allowance.",
+      "invariant": "Failed construction and replacement release partial admission and preserve original grants; an unchanged successor reuses the fully admitted generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_capture_honors_both_cancellation_owners_without_changing_native_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/authority/tests.rs",
+      "capability": "Database authority cancellation",
+      "workload": "Cancel each capture control independently, reject an uncontrolled capture and then acquire a funded capture.",
+      "invariant": "Each cancellation rejects before database payload admission and leaves native authority usable; final retirement releases native and independent captured admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "database_acl_admission_failure_precedes_persistence_and_preserves_native_authority",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/database_lifecycle/tests.rs",
+      "capability": "Atomic database authority publication",
+      "workload": "Exhaust native authority capacity before GRANT CREATE ON DATABASE and then retry with funded native ownership.",
+      "invariant": "The 53200 error precedes persistence, publication and epoch changes; original authority survives and every retained guard is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "database_authority_admission_precedes_legacy_metadata_migration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/database_lifecycle/persistence/tests.rs",
+      "capability": "Admitted database authority restoration",
+      "workload": "Restore a valid legacy name-bound ACL under an exhausted native allowance and then with sufficient admission.",
+      "invariant": "Failed native construction leaves the original metadata unchanged; funded restoration preserves validation and publishes the existing versioned encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_database_authority_retains_original_grants_with_bounded_capture_work",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/database_authority.rs",
+      "capability": "Committed database authority",
+      "workload": "Capture 1, 32 and 128 role grants during private revocation, savepoint rollback, COMMIT or ROLLBACK, later publication and closure.",
+      "invariant": "Actual committed capture remains below 16 KiB and 64 allocations, retains original bound grants, honors cancellation and releases its complete allowance.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "view_roots_capture_exact_syntax_authority_and_evaluated_bits_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Immutable native view capture",
+      "workload": "Capture 1, 64 and 4096 view definitions with full authority and materialized rows under independently exact allowances.",
+      "invariant": "Capture allocates no heap object; complete stored syntax, tuple identities, original row encodings and floating-point bits survive native retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_view_publication_shares_unrelated_large_queries_rows_and_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Selected native view publication",
+      "workload": "Replace one view among 1, 32 and 512 definitions beside unrelated megabyte query constants, evaluated rows and column names.",
+      "invariant": "Selected publication remains below 32 KiB and 256 allocations while every unrelated definition shares its original payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_view_publication_and_capture_retain_original_generations_and_release_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Independent view admission",
+      "workload": "Deny native replacement and one-byte-insufficient capture, cancel the capture owner and retire native and captured roots.",
+      "invariant": "The original definition and evaluated bits remain exact; failed operations release partial admission and final retirement releases all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "temporary_view_roots_do_not_contribute_to_durable_capture_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/registry/tests.rs",
+      "capability": "Durable view membership",
+      "workload": "Add an unrelated temporary megabyte materialized row and capture durable and temporary-only registries.",
+      "invariant": "Temporary payloads do not change durable admission; temporary-only capture needs no payload allowance or heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "unchanged_composite_rewrites_borrow_unrelated_large_query_constants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/composites/constants/tests.rs",
+      "capability": "Borrowed composite view selection",
+      "workload": "Inspect an unrelated megabyte query constant during a composite attribute change.",
+      "invariant": "An unchanged query produces no replacement and allocates no heap object.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "relation_rewrite_selection_observes_cte_visibility_before_copying_views",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_view/removal/tests.rs",
+      "capability": "Scoped view dependency selection",
+      "workload": "Select relation rewrites through forward and self-named non-recursive CTEs and through recursive CTE scopes.",
+      "invariant": "Selection and rewrite agree on actual relation targets without confusing later CTE declarations with earlier visible relations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_view_admission_failure_precedes_storage_and_preserves_the_previous_generation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/view_creation/publication/tests.rs",
+      "capability": "Atomic native view publication",
+      "workload": "Exhaust native view admission before regular and materialized definition replacement.",
+      "invariant": "The 53200 failure precedes storage and epoch publication, preserves the exact original generation and releases actual guards.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "denied_native_view_restore_precedes_provisional_publication_and_migration_writes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/view/restoration/tests.rs",
+      "capability": "Admitted view restoration",
+      "workload": "Restore legacy stored views under an exhausted native registry allowance.",
+      "invariant": "Native admission failure precedes provisional registry publication and migration writes while retaining previous authority and temporary definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_view_roots_retain_original_definitions_and_rows_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/view_roots.rs",
+      "capability": "Committed native view roots",
+      "workload": "Capture 1, 32 and 128 ordinary views and a large evaluated materialized view through private replacement, refresh, savepoint rollback, COMMIT and closure.",
+      "invariant": "Selected committed capture stays below 32 KiB and 128 allocations, preserves complete original definitions and row bits, retains cancellation and releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_acl_candidates",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/table_grants.rs",
+      "capability": "View ACL persistence before publication",
+      "workload": "Read unchanged native table, view and foreign authority from the final mixed-GRANT persistence callback, inject its failure and reopen the database.",
+      "invariant": "Persistence observers do not wait on a retained view write guard; prior durable writes roll back and no native ACL candidate is published.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routines_preserve_exact_overloads_and_the_original_capture_encoding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Exact immutable routine capture",
+      "workload": "Capture overloaded SQL source, bound SQL and PL/pgSQL source definitions, empty overload sets and excluded temporary routines.",
+      "invariant": "The native image equals the independent legacy ordered definition/body encoding and preserves identities, revisions and definition hashes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_capture_has_constant_work_and_independent_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Bounded native routine capture",
+      "workload": "Capture 1, 64 and 4096 durable routine names beside a temporary definition under independent exact and one-byte-insufficient allowances.",
+      "invariant": "Capture allocates no heap object; denied admission retains no lease, successful cuts survive native retirement and all allowances release at final close.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_routine_publication_shares_unrelated_overloads_and_preserves_failed_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Selected routine publication",
+      "workload": "Replace one overload beside an unrelated megabyte source body and reject a later replacement that exceeds the native allowance.",
+      "invariant": "Selected replacement stays below 32 KiB and 256 allocations, shares unrelated overloads and preserves original roots and allowance usage on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "escaped_routine_and_bound_body_handles_keep_their_native_allowances_until_final_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Escaped routine ownership",
+      "workload": "Retain a routine and its bound SQL body, retire the native registry, then release the routine and body independently.",
+      "invariant": "Each escaped immutable handle keeps its complete native syntax allowance until that handle is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_capture_checks_both_cancellation_owners_without_changing_native_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Independent routine cancellation",
+      "workload": "Cancel the original or invoking capture owner before native routine capture.",
+      "invariant": "Both cancellations report 57014, publish no capture, retain no allowance and leave the native definitions unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_admission_failure_precedes_persistence_and_preserves_authority",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/privileges/tests.rs",
+      "capability": "Atomic routine authority publication",
+      "workload": "Exhaust native admission before routine REVOKE, then release the allowance and repeat the command.",
+      "invariant": "Denied publication reports 53200 before persistence, preserves original routine handles and authority, and funded publication succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_routine_restore_admission_keeps_original_definitions_and_metadata_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/routines/acl_persistence.rs",
+      "capability": "Admitted routine restoration",
+      "workload": "Deny placeholder and final-root admission while restoring persisted routines, then complete a funded restore on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Both failures restore the original registry and leave stored metadata unchanged; funded restoration preserves access semantics and releases all retained allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_routine_roots_preserve_original_bodies_and_authority_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/routine_roots.rs",
+      "capability": "Committed native routine roots",
+      "workload": "Capture 1, 32 and 128 routine names through private replacement, ACL changes, savepoint rollback, COMMIT, further replacement and engine closure.",
+      "invariant": "Committed capture stays below 32 KiB and 128 allocations, retains original ordered overloads and bound bodies, honors cancellation and releases its allowance.",
       "case_names": [
         ""
       ]

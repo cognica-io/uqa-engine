@@ -11,7 +11,31 @@ use crate::{
     catalog::{stored_view::references::rewritten_relation_references, view::StoredViewKind},
     plan::UnifiedPlan,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[test]
+fn relation_rewrite_selection_observes_cte_visibility_before_copying_views() {
+    for (sql, selected) in [
+        ("WITH first AS (SELECT * FROM later), later AS (SELECT 1 AS value) SELECT * FROM first", true),
+        ("WITH RECURSIVE first AS (SELECT * FROM later), later AS (SELECT 1 AS value) SELECT * FROM first", false),
+        ("WITH later AS (SELECT * FROM later) SELECT * FROM later", true),
+        ("WITH RECURSIVE later AS (SELECT 1 AS value UNION ALL SELECT value + 1 FROM later WHERE value < 3) SELECT * FROM later", false),
+    ] {
+        let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0)) else { panic!("query fixture") };
+        let mut stored = view("SELECT 1", RelationPersistence::Permanent);
+        stored.query = *query;
+        let source = RelationIdentity::new("public", "later");
+        let target = RelationIdentity::new("public", "renamed");
+        assert_eq!(query_plan_references_relation(&stored.query, &source, &BTreeSet::new()), selected, "{sql}");
+        let views = BTreeMap::from([(RelationIdentity::new("public", "saved"), stored)]);
+        let updates = rewritten_relation_references(&views, &BTreeMap::from([(source.clone(), target.clone())])).unwrap();
+        assert_eq!(updates.len(), usize::from(selected), "{sql}");
+        if let Some((_, replacement)) = updates.first() {
+            assert!(query_plan_references_relation(&replacement.query, &target, &BTreeSet::new()));
+            assert!(!query_plan_references_relation(&replacement.query, &source, &BTreeSet::new()));
+        }
+    }
+}
 
 fn view(sql: &str, persistence: RelationPersistence) -> StoredView {
     let UnifiedPlan::Query(mut query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))

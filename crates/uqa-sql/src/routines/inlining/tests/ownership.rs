@@ -15,10 +15,9 @@ use uqa_core::{
 fn materialized_defaults_keep_exact_owners_and_match_ordinary_invocations() {
     let mut catalog = Catalog::new("CREATE FUNCTION defaults(a integer,b text DEFAULT 'tail') RETURNS text LANGUAGE sql AS $$SELECT b$$");
     let payload = "retained_default".repeat(2048);
-    std::sync::Arc::make_mut(&mut catalog.functions[0])
-        .def
-        .params[1]
-        .default = Some(crate::ast::Expr::Literal(Value::Str(payload.clone())));
+    catalog.edit_definition(0, |definition| {
+        definition.params[1].default = Some(crate::ast::Expr::Literal(Value::Str(payload.clone())));
+    });
     let binding = catalog.binding("defaults", &[Some(ColumnType::Integer)]);
     let input = call(binding.clone(), vec![integer(7)]);
     let expected = catalog
@@ -98,10 +97,10 @@ fn variadic_materialization_preserves_marker_and_argument_order() {
 #[test]
 fn default_rejection_precedes_payload_allocation_and_retires_consumed_call() {
     let mut catalog = Catalog::new("CREATE FUNCTION large_default(a text DEFAULT 'tail') RETURNS text LANGUAGE sql AS $$SELECT a$$");
-    std::sync::Arc::make_mut(&mut catalog.functions[0])
-        .def
-        .params[0]
-        .default = Some(crate::ast::Expr::Literal(Value::Str("large".repeat(32768))));
+    catalog.edit_definition(0, |definition| {
+        definition.params[0].default =
+            Some(crate::ast::Expr::Literal(Value::Str("large".repeat(32768))));
+    });
     let input = call(catalog.binding("large_default", &[]), vec![]);
     let budget = MemoryBudget::new(16384);
     let token = CancellationToken::new();

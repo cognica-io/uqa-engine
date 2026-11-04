@@ -80,13 +80,13 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     definition.params[0].default = Some(constant(60_000, "regtype"));
     definition.catalog_oid = Some(70_000);
     definition.owner = Some(RoleIdentity::BOOTSTRAP);
-    snapshot.definitions.sql_user_functions = Arc::new(BTreeMap::from([(
-        "hidden.echo".into(),
-        vec![Arc::new(SQLUserFunction::new(
-            *definition,
-            RoutineBody::Source,
-        ))],
-    )]));
+    snapshot.definitions.sql_user_functions = Arc::new(
+        uqa_sql::routines::registry::RoutineRegistry::try_from_iter([(
+            "hidden.echo".into(),
+            vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
+        )])
+        .unwrap(),
+    );
     for position in 0..=unrelated {
         let mut type_ref = ColumnDef::nullable("type_ref", ColumnType::Regtype);
         type_ref.default = Some(constant(60_000, "regtype"));

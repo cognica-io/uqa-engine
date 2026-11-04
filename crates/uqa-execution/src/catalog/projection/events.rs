@@ -26,7 +26,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
 use uqa_sql::canonical_routine_type_name;
 use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
-use uqa_sql::routines::{routine_signature_types, SQLUserFunction};
+use uqa_sql::routines::routine_signature_types;
 
 use super::helpers::oids::{namespace_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
@@ -482,7 +482,7 @@ fn resolve_trigger_function(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     name: &str,
-) -> Result<std::sync::Arc<SQLUserFunction>, SQLError> {
+) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
     let candidates = catalog
         .sql_functions(resolution, name)?
         .unwrap_or_default()

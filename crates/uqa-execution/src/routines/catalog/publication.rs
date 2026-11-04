@@ -41,7 +41,7 @@ pub(in crate::routines) fn record_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::RefCell, sync::Arc};
+    use std::cell::RefCell;
     use uqa_sql::routines::{RoutineBody, SQLUserFunction};
 
     struct Changes(RefCell<Vec<PreparedCatalogChange>>);
@@ -67,21 +67,27 @@ mod tests {
         let first =
             super::super::revision::replacement(*definition.clone(), RoutineBody::Source).unwrap();
         definition.object_id = Some([2; 16]);
-        let unchanged = Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source));
-        let before = BTreeMap::from([("public.f".into(), vec![first.clone(), unchanged.clone()])]);
+        let unchanged = SQLUserFunction::new(*definition, RoutineBody::Source).shared();
+        let before = RoutineRegistry::try_from_iter([(
+            "public.f".into(),
+            vec![first.clone(), unchanged.clone()],
+        )])
+        .unwrap();
         let changes = Changes(RefCell::new(vec![]));
         record_changes(&changes, &before, &before);
         assert!(changes.0.borrow().is_empty());
         let replaced =
             super::super::revision::replacement(first.def.clone(), RoutineBody::Source).unwrap();
-        let after = BTreeMap::from([("public.f".into(), vec![replaced, unchanged])]);
+        let after =
+            RoutineRegistry::try_from_iter([("public.f".into(), vec![replaced, unchanged])])
+                .unwrap();
         record_changes(&changes, &before, &after);
         assert_eq!(
             *changes.0.borrow(),
             [PreparedCatalogChange::Routine([1; 16])]
         );
         changes.0.borrow_mut().clear();
-        record_changes(&changes, &BTreeMap::new(), &after);
+        record_changes(&changes, &RoutineRegistry::new(), &after);
         assert_eq!(
             *changes.0.borrow(),
             [
@@ -90,7 +96,7 @@ mod tests {
             ]
         );
         changes.0.borrow_mut().clear();
-        record_changes(&changes, &after, &BTreeMap::new());
+        record_changes(&changes, &after, &RoutineRegistry::new());
         assert_eq!(
             *changes.0.borrow(),
             [

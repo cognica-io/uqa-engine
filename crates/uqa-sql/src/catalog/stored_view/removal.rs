@@ -10,13 +10,12 @@ use crate::{
     catalog::security::view_ownership::{self, ViewOwnershipContext},
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 
 pub fn ensure_view_drop_authorities(
     ownership: ViewOwnershipContext<'_>,
     names: &[String],
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
 ) -> Result<(), SQLError> {
     for name in names {
         let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {

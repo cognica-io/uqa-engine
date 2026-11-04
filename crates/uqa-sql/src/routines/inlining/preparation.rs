@@ -163,7 +163,7 @@ impl RoutineInliningContext<'_> {
     ) -> Result<Option<MutableExecutablePlan>, SQLError> {
         control.check()?;
         match &function.body {
-            RoutineBody::Bound(body) => match body.as_ref() {
+            RoutineBody::Bound(body) => match &***body {
                 CompiledFunctionBody::SQL(plans) if plans.len() == 1 => {
                     plans[0].copy_for_rewrite(control).map(Some)
                 }

@@ -36,7 +36,7 @@ pub struct RoutineMutationContext<'a> {
 }
 
 use std::{collections::BTreeMap, sync::Arc};
-use uqa_sql::{ast::CreateFunction, routines::SQLUserFunction};
+use uqa_sql::ast::CreateFunction;
 
 pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 
@@ -58,7 +58,14 @@ pub fn merge_private(
     for (name, overloads) in current.iter().filter(|(name, _)| {
         uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, temporary_schema)
     }) {
-        Arc::make_mut(&mut registry).insert(name.clone(), overloads.clone());
+        Arc::make_mut(&mut registry)
+            .insert(name.clone(), overloads.clone())
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend(
+                    "retain temporary routine definitions",
+                    error,
+                )
+            })?;
     }
     for function in registry.values().flatten() {
         uqa_sql::routines::security::binding::validate_routine_authority(&function.def, roles)
@@ -69,7 +76,7 @@ pub fn merge_private(
 
 pub fn persist_sql_functions_snapshot(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &uqa_sql::routines::registry::RoutineRegistry,
 ) -> Result<(), SQLError> {
     for function in registry.values().flatten() {
         uqa_sql::routines::security::binding::validate_routine_authority_identities(&function.def)?;
@@ -104,9 +111,5 @@ fn temporary_routine_name(name: &str) -> bool {
 }
 
 pub(super) fn temporary_snapshot(registry: &RoutineRegistry) -> RoutineRegistry {
-    registry
-        .iter()
-        .filter(|(name, _)| temporary_routine_name(name))
-        .map(|(name, overloads)| (name.clone(), overloads.clone()))
-        .collect()
+    registry.temporary_only()
 }

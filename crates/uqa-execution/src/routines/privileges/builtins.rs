@@ -77,6 +77,6 @@ pub(super) fn prepare(
     )?;
     let update = BuiltinRoutinePrivilegeUpdate::new(target.oid, next)
         .map_err(|error| SQLError::Internal(error.to_string()))?;
-    registry.insert(target.oid, update.entry.clone());
+    registry.insert(target.oid, update.entry.clone())?;
     Ok(update)
 }

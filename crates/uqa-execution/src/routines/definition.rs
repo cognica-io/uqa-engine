@@ -7,7 +7,6 @@
 //! Capture routine namespaces, bind catalog dependencies, and recompile changed definitions.
 
 use super::compilation::{self, StoredRoutineCompilationContext};
-use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
@@ -100,7 +99,7 @@ pub fn compile_catalog_bound_routine(
         ))
     })?;
     Ok(BoundRoutine {
-        body: RoutineBody::Bound(Arc::new(compiled)),
+        body: RoutineBody::Bound(compiled.shared()),
         validated: None,
         changed,
     })

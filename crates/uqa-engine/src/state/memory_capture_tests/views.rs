@@ -5,16 +5,18 @@
 //
 
 use super::{sql, Engine, StorageReadControl};
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
-use uqa_sql::catalog::{definition_capture::views::CapturedViews, stored_view::StoredView};
+use uqa_sql::catalog::stored_view::CapturedViewDefinitions;
 use uqa_storage::StorageBackendError;
 
 fn fixture(engine: &Engine) {
     sql(engine,"CREATE TABLE docs(id integer); INSERT INTO docs VALUES (1), (2); CREATE VIEW saved AS SELECT id FROM docs; CREATE MATERIALIZED VIEW evaluated AS SELECT id, random() AS sampled FROM docs");
 }
 
-fn same(saved: &CapturedViews, original: &BTreeMap<RelationIdentity, StoredView>) {
+fn same(
+    saved: &CapturedViewDefinitions,
+    original: &uqa_sql::catalog::stored_view::ViewDefinitions,
+) {
     assert_eq!(saved.len(), original.len());
     for ((name, view), (old_name, old)) in saved.iter().zip(original) {
         assert_eq!(name, old_name);
@@ -33,9 +35,9 @@ fn same(saved: &CapturedViews, original: &BTreeMap<RelationIdentity, StoredView>
             serde_json::to_value(&view.query).unwrap(),
             serde_json::to_value(&old.query).unwrap()
         );
-        assert_eq!(view.security.privileges.role_owner, old.security.role_owner);
+        assert_eq!(view.security.role_owner, old.security.role_owner);
         assert_eq!(
-            view.security.relation_revision,
+            view.security.acl_revisions.relation,
             old.security.acl_revisions.relation
         );
         assert_eq!(view.materialized_rows.len(), old.materialized_rows.len());
@@ -124,11 +126,10 @@ fn denied_view_capture_preserves_ddl_and_independently_funded_materialized_rows(
         .get()
         .unwrap()
         .iter()
-        .find(|(name, _)| name == &RelationIdentity::new("public", "large"))
+        .find(|(name, _)| *name == &RelationIdentity::new("public", "large"))
         .unwrap()
         .1;
-    assert!(view.materialized_rows[0][0]
-        .1
+    assert!(view.materialized_rows[0]["payload"]
         .has_same_representation(&uqa_core::Value::Str("x".repeat(65536))));
     drop((saved, cut, failed));
     assert_eq!(small.memory().used(), 0);

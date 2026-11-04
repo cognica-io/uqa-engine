@@ -79,6 +79,7 @@ copy_inline!(
     crate::catalog::collations::CollationSelection,
     uqa_core::catalog_identity::CatalogObjectIdentity,
     uqa_core::catalog_role::RoleIdentity,
+    uqa_core::catalog_acl::TablePrivileges,
     std::num::NonZeroU32
 );
 
@@ -223,10 +224,12 @@ syntax_enum!(crate::SQLParam {
 });
 
 mod ast;
+mod catalog_authority;
 mod catalog_events;
 mod catalog_foreign;
 mod catalog_graphs;
 mod catalog_types;
+mod catalog_views;
 mod command;
 
 syntax_struct!(crate::ast::ObjectAclEntry {

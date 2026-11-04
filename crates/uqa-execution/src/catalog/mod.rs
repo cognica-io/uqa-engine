@@ -26,14 +26,13 @@ pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity};
+use security::{BoundSequenceSecurity, BoundTableSecurity};
 use sequence::SequenceState;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::RelationIdentity;
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
-use view::StoredView;
 mod analysis;
 pub mod definition_revision;
 pub mod graph;
@@ -132,7 +131,7 @@ pub struct CatalogDefinitionSnapshot {
     pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
     pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
+    pub sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub role_memberships: Arc<RoleMemberships>,
 
     pub domains: Arc<
@@ -144,9 +143,9 @@ pub struct CatalogDefinitionSnapshot {
     pub comments: Arc<comments::CommentRegistry>,
     pub composites: Arc<composite_type::CompositeRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    pub views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub database_security: Arc<BoundDatabaseSecurity>,
+    pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
     pub schemas: Arc<SchemaRegistry>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,

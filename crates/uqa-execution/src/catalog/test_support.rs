@@ -64,7 +64,8 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             graphs: Arc::default(),
             views: Arc::default(),
             catalog_indexes: Arc::default(),
-            database_security: crate::catalog::security::BoundDatabaseSecurity::bootstrap().into(),
+            database_security: uqa_sql::catalog::security::database::DatabaseAuthority::bootstrap()
+                .into(),
             schemas: Arc::default(),
             sequences: Arc::default(),
             sequence_object_ids: Arc::default(),

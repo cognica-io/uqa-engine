@@ -11,7 +11,7 @@ use crate::SQLError;
 
 /// Visit only the target definitions and their view dependencies, collecting each query once; intermediate ordinary views can connect two materialized views requiring migration.
 pub fn view_metadata_dependency_order(
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
     targets: &BTreeSet<RelationIdentity>,
 ) -> Result<Vec<RelationIdentity>, SQLError> {
     let mut remaining = BTreeMap::new();

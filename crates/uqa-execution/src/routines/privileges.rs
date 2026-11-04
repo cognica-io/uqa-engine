@@ -62,6 +62,7 @@ pub fn grant_sql_routine(
                 mut registry,
                 next,
                 mut builtin_security,
+                builtin_next,
                 builtin_updates,
                 notices,
             },
@@ -91,9 +92,7 @@ pub fn grant_sql_routine(
             SQLError::Internal(format!("persist builtin routine privilege: {error}"))
         })?;
     }
-    for update in builtin_updates {
-        builtin_security.insert(update.oid, update.entry);
-    }
+    **builtin_security = builtin_next;
     super::catalog::publication::record_changes(context.catalog.changes, &registry, &next);
     **registry = next;
     drop(builtin_security);
@@ -124,6 +123,7 @@ struct RoutinePrivilegeCandidate<'a> {
                 Target = uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
             > + 'a,
     >,
+    builtin_next: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
     builtin_updates: Vec<crate::catalog::security::builtin_routines::BuiltinRoutinePrivilegeUpdate>,
     registry: RoutineRegistryWrite<'a>,
     next: RoutineRegistry,
@@ -193,6 +193,7 @@ fn prepare_privileges<'a>(
     Ok(RoleDependencyCandidate {
         value: RoutinePrivilegeCandidate {
             builtin_security,
+            builtin_next,
             builtin_updates,
             registry,
             next,

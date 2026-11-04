@@ -455,7 +455,7 @@ fn sql_routine_may_mutate_engine(
                 // effects of statements whose syntax is deferred until reach.
                 return Ok(function.def.language == "plpgsql");
             };
-            match &*body {
+            match &**body {
                 crate::routines::CompiledFunctionBody::SQL(plans) => (|| {
                     let mut mutates = false;
                     for plan in plans {

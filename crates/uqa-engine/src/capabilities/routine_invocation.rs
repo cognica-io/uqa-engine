@@ -34,7 +34,7 @@ impl RoutineInvocationSession for Engine {
         function: &SQLUserFunction,
         definition: &uqa_sql::ast::CreateFunction,
         relation: Option<i64>,
-    ) -> Result<std::sync::Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
         let owner = uqa_sql::plan::ExecutablePlanOptimizer::planning_control(self)?;
         self.session.routine_bodies.plpgsql_body(
             function,

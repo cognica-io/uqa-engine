@@ -51,7 +51,8 @@ impl Fixture {
             manager: crate::row_locks::RowLockManager::new(),
             cancel: uqa_core::CancellationToken::new(),
             user: "uqa".into(),
-            system_security: BTreeMap::new(),
+            system_security:
+                uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
         }
     }
     fn execute(&self, sql: &str) -> Result<SQLResult, SQLError> {

@@ -137,13 +137,15 @@ fn defaults_fixture(unrelated: usize) -> CatalogReadView {
         })
         .unwrap()
         .unwrap();
-    let function = Arc::make_mut(
-        &mut Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .get_mut("hidden.echo")
-            .unwrap()[0],
-    );
-    function.def.params[0].default = Some(constant(60_000, "regtype"));
-    let function = function.clone();
+    let function = Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .edit("hidden.echo", |overloads| {
+            let mut function = (**overloads[0]).clone();
+            function.def.params[0].default = Some(constant(60_000, "regtype"));
+            overloads[0] = function.clone().shared();
+            Ok(function)
+        })
+        .unwrap()
+        .unwrap();
     for i in 0..unrelated {
         let mut domain = domain.clone();
         domain.identity.name = format!("unrelated_{i}");
@@ -158,7 +160,8 @@ fn defaults_fixture(unrelated: usize) -> CatalogReadView {
         function.def.name = format!("hidden.unrelated_{i}");
         function.def.catalog_oid = Some(90_000 + u32::try_from(i).unwrap());
         Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .insert(function.def.name.clone(), vec![Arc::new(function)]);
+            .insert(function.def.name.clone(), vec![function.shared()])
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }
@@ -258,31 +261,33 @@ fn column_bounds_skip_unrelated_views_and_unrequested_mutation_analysis() {
         panic!("query");
     };
     let mut snapshot = fixture(0).snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views).insert(
-        RelationIdentity::new("public", "visible_view"),
-        crate::catalog::view::StoredView {
-            security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
-            definition: StoredViewDefinition {
-                object_id: [4; 16],
-                query: *query,
-                output_columns: Some(vec!["visible_column".into()]),
-                persistence: uqa_sql::ast::RelationPersistence::Permanent,
-                options: Vec::new(),
-                kind: StoredViewKind::View,
-                materialized_rows: Vec::new(),
-                materialized_column_types: Vec::new(),
-                materialized_column_collations: None,
-                populated: true,
-                catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
-                    relation: 100_000,
-                    row_type: Some(100_001),
-                    array_type: Some(100_002),
-                    rule: Some(100_003),
-                }),
-                row_type_array_name: None,
+    Arc::make_mut(&mut snapshot.definitions.views)
+        .insert(
+            RelationIdentity::new("public", "visible_view"),
+            crate::catalog::view::StoredView {
+                security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+                definition: StoredViewDefinition {
+                    object_id: [4; 16],
+                    query: *query,
+                    output_columns: Some(vec!["visible_column".into()]),
+                    persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                    options: Vec::new(),
+                    kind: StoredViewKind::View,
+                    materialized_rows: Vec::new(),
+                    materialized_column_types: Vec::new(),
+                    materialized_column_collations: None,
+                    populated: true,
+                    catalog_oids: Some(uqa_sql::catalog::relation_oids::RelationCatalogOids {
+                        relation: 100_000,
+                        row_type: Some(100_001),
+                        array_type: Some(100_002),
+                        rule: Some(100_003),
+                    }),
+                    row_type_array_name: None,
+                },
             },
-        },
-    );
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let selected = request(
         &catalog,

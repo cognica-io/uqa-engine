@@ -9,7 +9,6 @@
 use super::resolution::RelationNameResolution;
 use crate::ast::ColumnDef;
 use crate::plan::QueryPlan;
-use crate::routines::SQLUserFunction;
 use crate::{ColumnType, SQLError};
 use std::sync::Arc;
 mod owned;
@@ -303,7 +302,7 @@ pub trait AnalysisCatalog: Send + Sync {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError>;
 
     fn unopenable_relation_with_control(
         &self,

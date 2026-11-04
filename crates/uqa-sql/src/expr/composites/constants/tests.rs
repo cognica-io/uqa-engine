@@ -127,8 +127,19 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
     let added = AttributeChange::Add("b".into());
     let change = change(&added);
     let mut plan = UnifiedPlan::lower(statement.clone());
+    let UnifiedPlan::Query(original_query) = &plan else {
+        panic!("query fixture")
+    };
+    let replacement = change.rewritten_query(original_query).unwrap().unwrap();
     assert!(change.statement(&mut statement).unwrap());
     assert!(change.plan(&mut plan).unwrap());
+    let UnifiedPlan::Query(rewritten_query) = &plan else {
+        panic!("query fixture")
+    };
+    assert_eq!(
+        serde_json::to_value(&replacement).unwrap(),
+        serde_json::to_value(rewritten_query).unwrap()
+    );
     assert_eq!(
         serde_json::to_value(&plan).unwrap(),
         serde_json::to_value(UnifiedPlan::lower(statement)).unwrap()
@@ -145,6 +156,23 @@ fn typed_datums_expand_inside_subqueries_without_rebinding_ordinary_input_casts(
         }
     });
     assert_eq!(seen, 1);
+}
+
+#[test]
+fn unchanged_composite_rewrites_borrow_unrelated_large_query_constants() {
+    let UnifiedPlan::Query(query) = UnifiedPlan::lower(
+        crate::compile(&format!("SELECT '{}'", "x".repeat(1 << 20)))
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query fixture")
+    };
+    let added = AttributeChange::Add("b".into());
+    let change = change(&added);
+    let allocations = allocation_counter::measure(|| {
+        assert!(change.rewritten_query(&query).unwrap().is_none());
+    });
+    assert_eq!(allocations.count_total, 0);
 }
 
 #[test]

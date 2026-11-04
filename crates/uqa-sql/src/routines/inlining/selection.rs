@@ -16,11 +16,10 @@ use crate::{
     routines::{
         result_check::declared_sql_function_result_type_with_control,
         routine_returns_anonymous_record_with_control,
-        security::ensure_routine_execute_privilege_with_control, SQLUserFunction,
+        security::ensure_routine_execute_privilege_with_control,
     },
     RowSchema, SQLError, SQLParam, ScalarExpr,
 };
-use std::sync::Arc;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     Value,
@@ -44,7 +43,7 @@ pub(super) enum InlineSelection {
 }
 
 pub(super) struct OwnedInlineBody {
-    pub(super) function: Arc<SQLUserFunction>,
+    pub(super) function: crate::routines::SQLRoutine,
     specialized: Option<Produced<CreateFunction>>,
     arguments: OwnedScalarExpr,
     identity: [u8; 16],

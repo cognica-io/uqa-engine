@@ -8,6 +8,7 @@
 
 use super::{TableAclEntry, TablePrivileges};
 use crate::catalog_role::{BoundAclEntry, RoleIdentity};
+use crate::memory::OwnedMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -16,7 +17,7 @@ use std::collections::BTreeMap;
 #[serde(deny_unknown_fields)]
 pub struct RelationAclRevisions {
     pub relation: Option<[u8; 16]>,
-    pub columns: BTreeMap<String, [u8; 16]>,
+    pub columns: OwnedMap<String, [u8; 16]>,
 }
 
 impl RelationAclRevisions {

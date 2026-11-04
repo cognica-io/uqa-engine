@@ -42,11 +42,11 @@ fn captured_system_authority_keeps_absent_empty_and_tombstone_acl_identities() {
             acl: vec![entry()],
         }),
     ] {
-        let source = BTreeMap::from([(
+        let source = SystemRelationSecurities::try_from_iter([(
             RelationIdentity::new("pg_catalog", "pg_class"),
             SystemRelationSecurity {
                 table,
-                columns: BTreeMap::from([
+                columns: uqa_core::memory::OwnedMap::from_iter([
                     (
                         "empty".into(),
                         SystemAcl {
@@ -63,7 +63,8 @@ fn captured_system_authority_keeps_absent_empty_and_tombstone_acl_identities() {
                     ),
                 ]),
             },
-        )]);
+        )])
+        .unwrap();
         let captured = system_relations(&source, &control)
             .unwrap()
             .into_budgeted()
@@ -91,7 +92,7 @@ fn captured_routine_and_foreign_authority_preserve_complete_tuple_and_bound_iden
     let memory = MemoryBudget::new(16 << 10);
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&memory, &cancellation, &cancellation);
-    let routines = BTreeMap::from([
+    let routines = BuiltinRoutineSecurities::try_from_iter([
         (
             42,
             BuiltinRoutineSecurity {
@@ -114,7 +115,8 @@ fn captured_routine_and_foreign_authority_preserve_complete_tuple_and_bound_iden
                 }],
             },
         ),
-    ]);
+    ])
+    .unwrap();
     let mut security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
     security.acl = Some(vec![entry()]);
     security
@@ -184,7 +186,7 @@ fn relation_authority_capture_rejects_denied_payload_and_original_cancellation()
     };
     let system = SystemRelationSecurity {
         table: None,
-        columns: BTreeMap::from([
+        columns: uqa_core::memory::OwnedMap::from_iter([
             (
                 "small".into(),
                 SystemAcl {

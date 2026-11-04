@@ -17,7 +17,7 @@ pub fn ensure_view_drop_authorities(
     names: &[String],
 ) -> Result<(), SQLError> {
     let views = context.registry.views_read();
-    analysis::ensure_view_drop_authorities(context.ownership, names, &views)
+    analysis::ensure_view_drop_authorities(context.ownership, names, &**views)
 }
 
 /// Remove a view or materialized view with its triggers and rules; nothing else that depends on it.

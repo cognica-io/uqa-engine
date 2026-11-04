@@ -7,7 +7,6 @@
 //! Compile stored routine bodies inside their recorded creation namespace.
 
 use super::configuration::RoutineConfigurationGuard;
-use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     routines::{
@@ -76,7 +75,7 @@ pub fn persisted_routine_body(
 ) -> Result<RoutineBody, SQLError> {
     match def.body {
         FunctionBody::Statements(_) => compile_persisted_sql_function(context, def)
-            .map(|body| RoutineBody::Bound(Arc::new(body))),
+            .map(|body| RoutineBody::Bound(body.shared())),
         FunctionBody::Source(_) => Ok(RoutineBody::Source),
     }
 }

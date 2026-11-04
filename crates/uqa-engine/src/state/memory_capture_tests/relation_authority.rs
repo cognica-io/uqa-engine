@@ -7,8 +7,9 @@
 use super::{sql, Engine, StorageReadControl};
 use std::collections::BTreeMap;
 use uqa_sql::catalog::security::{
-    capture::relations::CapturedSystemRelationSecurity, system_relations::SystemRelationSecurities,
-    table_binding::CapturedTableSecurity, BoundTableSecurity,
+    system_relations::{CapturedSystemRelationSecurities, SystemRelationSecurities},
+    table_binding::CapturedTableSecurity,
+    BoundTableSecurity,
 };
 use uqa_storage::RelationIdentity;
 
@@ -16,19 +17,12 @@ fn fixture(engine: &Engine) {
     sql(engine, "CREATE ROLE reader; GRANT UPDATE ON pg_class TO reader WITH GRANT OPTION; GRANT SELECT(relname,relnamespace,relkind) ON pg_class TO reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM PUBLIC; GRANT EXECUTE ON FUNCTION lower(text) TO reader WITH GRANT OPTION; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE \"Foreign.Name\"(v integer) SERVER remote; GRANT SELECT(v) ON \"Foreign.Name\" TO reader WITH GRANT OPTION");
 }
 
-fn same_system(
-    saved: &[(RelationIdentity, CapturedSystemRelationSecurity)],
-    original: &SystemRelationSecurities,
-) {
+fn same_system(saved: &CapturedSystemRelationSecurities, original: &SystemRelationSecurities) {
     assert_eq!(saved.len(), original.len());
     for ((name, value), (expected_name, expected)) in saved.iter().zip(original) {
         assert_eq!(name, expected_name);
         assert_eq!(value.table, expected.table);
-        assert!(value
-            .columns
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(expected.columns.iter()));
+        assert!(value.columns.iter().eq(expected.columns.iter()));
     }
 }
 
@@ -88,12 +82,7 @@ fn memory_relation_authority_capture_keeps_acl_revisions_through_rollback_and_re
         let saved_system = system_key.retained(&cut).unwrap().unwrap();
         let saved_foreign = foreign_key.retained(&cut).unwrap().unwrap();
         drop(cut);
-        assert!(saved_routines
-            .get()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .eq(routines.iter()));
+        assert!(saved_routines.get().unwrap().iter().eq(routines.iter()));
         same_system(saved_system.get().unwrap(), &system);
         same_foreign(saved_foreign.get().unwrap(), &foreign);
         control.cancellation().cancel();

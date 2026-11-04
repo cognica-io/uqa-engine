@@ -516,7 +516,10 @@ pub fn collect_session_portal_routine_dependencies(
         if !visiting_routines.insert(key.clone()) {
             continue;
         }
-        match crate::routines::analyzable_routine_body(inputs.routines, &function)?.as_deref() {
+        match crate::routines::analyzable_routine_body(inputs.routines, &function)?
+            .as_deref()
+            .map(|body| &**body)
+        {
             Some(crate::routines::CompiledFunctionBody::SQL(plans)) => {
                 for plan in plans {
                     match plan {

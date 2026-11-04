@@ -9,7 +9,10 @@
 use super::*;
 use std::collections::BTreeSet;
 use uqa_core::Value;
-use uqa_sql::{catalog::stored_view::StoredViewDefinition, plan::UnifiedPlan};
+use uqa_sql::{
+    catalog::stored_view::{StoredView, StoredViewDefinition, ViewDefinitions},
+    plan::UnifiedPlan,
+};
 
 fn view(identity: u8) -> StoredView {
     let UnifiedPlan::Query(query) =
@@ -29,7 +32,7 @@ fn view(identity: u8) -> StoredView {
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
             options: vec![],
             kind: uqa_sql::catalog::view::StoredViewKind::Materialized,
-            materialized_rows: vec![[("v".into(), Value::Int(7))].into()],
+            materialized_rows: vec![[("v".into(), Value::Int(7))].into_iter().collect()],
             materialized_column_types: vec![Some(uqa_sql::ast::ColumnType::Integer)],
             materialized_column_collations: Some(vec![0]),
             populated: true,
@@ -45,23 +48,27 @@ fn relation(name: &str) -> RelationIdentity {
 
 #[test]
 fn private_view_records_preserve_complete_definitions_and_peer_changes() {
-    let latest = Arc::new(BTreeMap::from([
-        (relation("dropped"), view(1)),
-        (relation("renamed_from"), view(2)),
-        (relation("replaced"), view(3)),
-        (relation("peer"), view(4)),
-        (relation("recreated"), view(5)),
-    ]));
+    let latest = Arc::new(
+        ViewDefinitions::try_from_iter([
+            (relation("dropped"), view(1)),
+            (relation("renamed_from"), view(2)),
+            (relation("replaced"), view(3)),
+            (relation("peer"), view(4)),
+            (relation("recreated"), view(5)),
+        ])
+        .unwrap(),
+    );
     let mut replacement = view(3);
     replacement.materialized_rows.clear();
     replacement.populated = false;
-    let current = BTreeMap::from([
+    let current = ViewDefinitions::try_from_iter([
         (relation("created"), view(6)),
         (relation("renamed_to"), view(2)),
         (relation("replaced"), replacement),
         (relation("peer"), view(7)),
         (relation("recreated"), view(8)),
-    ]);
+    ])
+    .unwrap();
     let mut visited = BTreeSet::new();
     let merged = merge_private_view_definitions(&current, latest.clone(), |name| {
         assert!(
@@ -90,8 +97,8 @@ fn private_view_records_preserve_complete_definitions_and_peer_changes() {
 
 #[test]
 fn unchanged_views_share_the_committed_map_and_provenance_errors_do_not_publish() {
-    let latest = Arc::new(BTreeMap::from([(relation("saved"), view(1))]));
-    let current = BTreeMap::from([(relation("saved"), view(2))]);
+    let latest = Arc::new(ViewDefinitions::try_from_iter([(relation("saved"), view(1))]).unwrap());
+    let current = ViewDefinitions::try_from_iter([(relation("saved"), view(2))]).unwrap();
     let merged = merge_private_view_definitions(&current, latest.clone(), |_| Ok(false)).unwrap();
     assert!(Arc::ptr_eq(&latest, &merged));
     let error = merge_private_view_definitions(&current, latest.clone(), |_| {

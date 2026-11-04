@@ -118,6 +118,14 @@ impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRela
         self.0.contains_key(relation)
     }
 }
+struct ViewCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions>>
+    CreationRelationNames for ViewCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
 impl CreationRelationGuards for Engine {
     fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
         let user_type = uqa_execution::catalog::projection::named_type_exists(
@@ -165,7 +173,7 @@ impl CreationRelationGuards for Engine {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
     }
     fn views(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.views.read()))
+        Box::new(ViewCreationNamesGuard(self.durable.views.read()))
     }
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.durable.sequences.read()))

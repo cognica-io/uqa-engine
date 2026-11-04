@@ -62,26 +62,27 @@ impl RoutineOverloadCatalog for Engine {
     fn lookup_sql_routine_candidates(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         Engine::lookup_sql_routine_candidates(self, name)
     }
     fn lookup_sql_routine_candidates_with_control(
         &self,
         name: &str,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<uqa_core::memory::Produced<Vec<Arc<SQLUserFunction>>>>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<uqa_sql::routines::SQLRoutine>>>, SQLError>
+    {
         Engine::lookup_sql_routine_candidates_with_control(self, name, control)
     }
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         Engine::lookup_bound_sql_routine_candidates_by_binding(self, binding)
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         Engine::lookup_bound_sql_functions_by_binding(self, binding)
     }
     fn select_bound_routine_with_control(
@@ -89,7 +90,7 @@ impl RoutineOverloadCatalog for Engine {
         binding: &FunctionBinding,
         kind: uqa_sql::routines::resolution::RoutineCallKind,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         Engine::select_bound_routine_with_control(self, binding, kind, control)
     }
 }
@@ -98,7 +99,7 @@ impl RoutineResolution for Engine {
     fn routine_body(
         &self,
         function: &SQLUserFunction,
-    ) -> Result<Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
         self.session.routine_bodies.body(function, |def| {
             uqa_execution::routines::invocation::bodies::compile_session_body(
                 self,
@@ -111,7 +112,7 @@ impl RoutineResolution for Engine {
     fn routine_analysis_body(
         &self,
         function: &SQLUserFunction,
-    ) -> Result<Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
         if matches!(function.body, uqa_sql::routines::RoutineBody::Source) {
             self.session.routine_bodies.inspect(function, |definition| {
                 uqa_execution::routines::invocation::bodies::compile_analysis_body(
@@ -125,14 +126,14 @@ impl RoutineResolution for Engine {
         }
     }
 
-    fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+    fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         Engine::lookup_bound_sql_functions(self, name)
     }
 
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         Engine::lookup_bound_sql_functions_by_binding(self, binding)
     }
 
@@ -208,7 +209,7 @@ impl RoutineResolution for Engine {
     fn lookup_visible_sql_functions(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         Engine::lookup_visible_sql_functions(self, name)
     }
 
@@ -223,7 +224,7 @@ impl RoutineResolution for Engine {
     fn lookup_visible_sql_functions_for_analysis(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         Engine::lookup_visible_sql_functions_for_analysis(self, name)
     }
 
@@ -247,7 +248,7 @@ impl RoutineResolution for Engine {
         &self,
         binding: &FunctionBinding,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         Engine::select_bound_function_with_control(self, binding, control)
     }
 
@@ -258,7 +259,7 @@ impl RoutineResolution for Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         Engine::resolve_static_sql_function(
             self,
             name,
@@ -649,7 +650,7 @@ impl Engine {
         argument_names: &[Option<String>],
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         self.routine_overload_context().resolve_static_sql_function(
             name,
             binding,

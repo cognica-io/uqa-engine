@@ -198,7 +198,7 @@ pub fn execute_trigger_routine(
             context
                 .session
                 .plpgsql_body(function, &function.def, Some(trigger.relation_oid))?;
-        let CompiledFunctionBody::PLpgSQL(parsed) = &*body else {
+        let CompiledFunctionBody::PLpgSQL(parsed) = &**body else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),
             ));

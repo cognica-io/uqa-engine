@@ -26,9 +26,7 @@ use uqa_sql::{
             },
         },
         security::{database::BoundDatabaseSecurity, BoundSequenceSecurity, BoundTableSecurity},
-        stored_view::StoredView,
     },
-    routines::SQLUserFunction,
     SQLError,
 };
 impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
@@ -184,7 +182,10 @@ impl uqa_execution::catalog::security::role_lifecycle::context::RoleSharedDepend
 }
 impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
-        Box::new(self.durable.database_security.read())
+        Box::new(parking_lot::MappedRwLockReadGuard::map(
+            self.durable.database_security.read(),
+            AsRef::as_ref,
+        ))
     }
     fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.durable.schemas.read())
@@ -192,7 +193,7 @@ impl RoleDependencyCatalog for Engine {
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
         Box::new(RoleTableRegistryRead(self.storage.tables.read()))
     }
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
+    fn views(&self) -> RoleDependencyRead<'_, uqa_sql::catalog::stored_view::ViewDefinitions> {
         Box::new(self.durable.views.read())
     }
     fn foreign_tables(
@@ -205,7 +206,7 @@ impl RoleDependencyCatalog for Engine {
     ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
         Box::new(self.durable.sequence_security.read())
     }
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
+    fn routines(&self) -> RoleDependencyRead<'_, uqa_sql::routines::registry::RoutineRegistry> {
         Box::new(self.durable.sql_user_functions.read())
     }
     fn domains(

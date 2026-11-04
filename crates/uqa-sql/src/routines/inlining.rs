@@ -161,10 +161,7 @@ impl RoutineInliningContext<'_> {
         Ok(Some((selected, arguments)))
     }
 
-    fn selected_function(
-        &self,
-        binding: &FunctionBinding,
-    ) -> Option<std::sync::Arc<super::SQLUserFunction>> {
+    fn selected_function(&self, binding: &FunctionBinding) -> Option<crate::routines::SQLRoutine> {
         super::selected_bound_function(self.routines, binding)
     }
 

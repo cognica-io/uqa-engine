@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::RoleAttribute, catalog::roles::RoleDefinition};
 
@@ -42,20 +42,23 @@ pub(super) fn permissions() -> BuiltinRoutinePermissions {
         ])
         .unwrap(),
     );
-    snapshot.definitions.builtin_routine_security = Arc::new(BTreeMap::from([
-        (
-            870,
-            super::super::BuiltinRoutinePrivilegeUpdate::new(870, Vec::new())
-                .unwrap()
-                .entry,
-        ),
-        (
-            2108,
-            super::super::BuiltinRoutinePrivilegeUpdate::new(2108, Vec::new())
-                .unwrap()
-                .entry,
-        ),
-    ]));
+    snapshot.definitions.builtin_routine_security = Arc::new(
+        BuiltinRoutineSecurities::try_from_iter([
+            (
+                870,
+                super::super::BuiltinRoutinePrivilegeUpdate::new(870, Vec::new())
+                    .unwrap()
+                    .entry,
+            ),
+            (
+                2108,
+                super::super::BuiltinRoutinePrivilegeUpdate::new(2108, Vec::new())
+                    .unwrap()
+                    .entry,
+            ),
+        ])
+        .unwrap(),
+    );
     BuiltinRoutinePermissions::new(CatalogReadView::new(snapshot), "reader".into())
 }
 
@@ -145,9 +148,12 @@ fn unrestricted_builtin_authority_retains_its_acl_and_role_decision() {
     superuser
         .require_execute(&binding("lower", &["text"]))
         .unwrap();
-    let public =
-        BuiltinRoutinePermissions::try_unrestricted(&BTreeMap::new(), &changed_roles, &reader)
-            .unwrap();
+    let public = BuiltinRoutinePermissions::try_unrestricted(
+        &BuiltinRoutineSecurities::new(),
+        &changed_roles,
+        &reader,
+    )
+    .unwrap();
     public
         .require_execute(&binding("lower", &["text"]))
         .unwrap();

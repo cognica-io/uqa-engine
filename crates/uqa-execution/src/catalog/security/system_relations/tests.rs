@@ -48,8 +48,10 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
     .unwrap();
     let mut live = SystemRelationSecurities::new();
     for update in [table, column] {
+        let mut next = live.clone();
+        update.publish(&mut next).unwrap();
         update.persist(Some(&catalog)).unwrap();
-        update.publish(&mut live);
+        live = next;
     }
     let restored = restore(&catalog, &roles, false).unwrap();
     assert_eq!(security(&restored, relation), expected);
@@ -63,6 +65,42 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
             .column_acls
             .is_empty()
     );
+}
+
+#[test]
+fn denied_system_acl_successor_preserves_independent_tuples_and_releases_reservations() {
+    let budget = uqa_core::memory::MemoryBudget::new(65536);
+    let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
+    let identity = RelationIdentity::new(relation.namespace(), relation.name());
+    let mut live = SystemRelationSecurities::with_budget(&budget);
+    let acl = relation.bootstrap_security().acl.unwrap();
+    for column in [None, Some("rolname"), Some("rolsuper")] {
+        SystemPrivilegeUpdate::new(relation, column.map(str::to_string), acl.clone())
+            .unwrap()
+            .publish(&mut live)
+            .unwrap();
+    }
+    let before = live.clone();
+    let update = SystemPrivilegeUpdate::new(relation, Some("rolname".into()), Vec::new()).unwrap();
+    let used = budget.used();
+    let blocked = budget.reserve(budget.available()).unwrap();
+    assert_eq!(
+        update.publish(&mut live).unwrap_err().sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(live, before);
+    drop(blocked);
+    assert_eq!(budget.used(), used);
+    update.publish(&mut live).unwrap();
+    assert_eq!(live[&identity].table, before[&identity].table);
+    assert_eq!(
+        live[&identity].columns["rolsuper"],
+        before[&identity].columns["rolsuper"]
+    );
+    assert_eq!(live[&identity].columns["rolname"], update.entry);
+    assert!(!before[&identity].columns["rolname"].acl.is_empty());
+    drop((live, before));
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]

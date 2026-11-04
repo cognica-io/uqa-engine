@@ -35,7 +35,7 @@ pub use column_definitions::{
 };
 
 pub struct ResolvedUserTableFunction {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub binding: FunctionBinding,
 }
 
@@ -174,7 +174,7 @@ pub fn resolve_user_table_function(
 }
 
 pub struct ControlledUserTableFunction {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub binding: uqa_core::memory::Produced<FunctionBinding>,
 }
 

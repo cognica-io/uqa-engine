@@ -12,7 +12,7 @@ use crate::{
     routines::{CompiledFunctionBody, RoutineBody, SQLUserFunction},
     SQLError,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_core::memory::{Produced, ProductionControl};
 
 #[derive(Debug)]
@@ -33,7 +33,7 @@ impl SQLUserFunction {
         let definition = output.capture_stored(&self.def)?;
         let bound_body = match &self.body {
             RoutineBody::Source => None,
-            RoutineBody::Bound(body) => match body.as_ref() {
+            RoutineBody::Bound(body) => match &***body {
                 CompiledFunctionBody::SQL(plans) => Some(output.capture_stored(plans)?),
                 // SQL-standard bodies cannot use PL/pgSQL; its compiled form belongs to a session.
                 CompiledFunctionBody::PLpgSQL(_) => {
@@ -51,7 +51,7 @@ impl SQLUserFunction {
 }
 
 pub fn routines(
-    values: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    values: &BTreeMap<String, Vec<crate::routines::SQLRoutine>>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<CapturedRoutines>, SQLError> {
     let output = SyntaxProduction::new(*control);

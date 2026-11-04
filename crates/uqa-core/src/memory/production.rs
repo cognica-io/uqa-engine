@@ -212,6 +212,13 @@ impl<T> Produced<T> {
         self.memory.as_ref().map_or(0, MemoryReservation::bytes)
     }
 
+    /// Whether this immutable value already retains the requested allowance.
+    pub fn is_retained_by(&self, memory: &MemoryBudget) -> bool {
+        self.memory
+            .as_ref()
+            .is_some_and(|reservation| reservation.budget().shares_allowance(memory))
+    }
+
     /// Share an immutable result and its existing lease. The shared payload is admitted before allocation; reference-count bookkeeping is outside the payload allowance.
     pub fn into_shared(
         self,

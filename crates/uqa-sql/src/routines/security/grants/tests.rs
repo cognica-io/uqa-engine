@@ -12,7 +12,7 @@ use crate::{
     catalog::{roles::RoleReference, security::BoundSchemaSecurity},
     routines::{security::select_routine_acl_grantor, RoutineBody},
 };
-use std::{cell::RefCell, sync::Arc};
+use std::cell::RefCell;
 
 struct Names {
     denied: Vec<String>,
@@ -60,7 +60,7 @@ fn names() -> Names {
         visited: RefCell::new(Vec::new()),
     }
 }
-fn routine(name: &str, oid: u32, procedure: bool) -> Arc<SQLUserFunction> {
+fn routine(name: &str, oid: u32, procedure: bool) -> crate::routines::SQLRoutine {
     let sql = if procedure {
         format!("CREATE PROCEDURE {name}() LANGUAGE SQL AS 'SELECT 1'")
     } else {
@@ -72,18 +72,20 @@ fn routine(name: &str, oid: u32, procedure: bool) -> Arc<SQLUserFunction> {
     def.catalog_oid = Some(oid);
     def.object_id = Some([oid as u8; 16]);
     def.owner = Some(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP);
-    Arc::new(SQLUserFunction::new(*def, RoutineBody::Source))
+    SQLUserFunction::new(*def, RoutineBody::Source).shared()
 }
 fn registry() -> RoutineRegistry {
-    [
-        ("app.z", 101, false),
-        ("app.a", 102, false),
-        ("app.p", 103, true),
-        ("other.f", 104, false),
-    ]
-    .into_iter()
-    .map(|(name, oid, procedure)| (name.into(), vec![routine(name, oid, procedure)]))
-    .collect()
+    RoutineRegistry::try_from_iter(
+        [
+            ("app.z", 101, false),
+            ("app.a", 102, false),
+            ("app.p", 103, true),
+            ("other.f", 104, false),
+        ]
+        .into_iter()
+        .map(|(name, oid, procedure)| (name.into(), vec![routine(name, oid, procedure)])),
+    )
+    .unwrap()
 }
 fn selected(
     names: &Names,

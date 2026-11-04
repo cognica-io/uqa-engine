@@ -10,6 +10,7 @@ use crate::{
     plan::{CommandPlan, RelationalPlan},
     ScalarExpr,
 };
+use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 #[test]
@@ -17,9 +18,7 @@ fn durable_routines_borrow_quoted_names_and_exclude_temporary_bodies_before_admi
     let mut source = BTreeMap::from([
         (
             "\"public\".\"pg_temp_7.f\"".into(),
-            vec![Arc::new(routine(
-                "CREATE FUNCTION f() RETURNS integer LANGUAGE SQL RETURN 1",
-            ))],
+            vec![routine("CREATE FUNCTION f() RETURNS integer LANGUAGE SQL RETURN 1").shared()],
         ),
         ("\"pg_temp\".\"f\"".into(), Vec::new()),
     ]);
@@ -39,7 +38,7 @@ fn durable_routines_borrow_quoted_names_and_exclude_temporary_bodies_before_admi
         let mut temporary =
             routine("CREATE FUNCTION f() RETURNS text LANGUAGE SQL AS 'unexamined'");
         temporary.def.body = FunctionBody::Source("x".repeat(1 << 20));
-        source.insert(name.into(), vec![Arc::new(temporary)]);
+        source.insert(name.into(), vec![temporary.shared()]);
     }
     let selected =
         allocation_counter::measure(|| saved = Some(routines(&source, &control).unwrap()));
@@ -87,9 +86,10 @@ fn routine(sql: &str) -> SQLUserFunction {
     };
     let body = match &definition.body {
         FunctionBody::Source(_) => RoutineBody::Source,
-        FunctionBody::Statements(statements) => RoutineBody::Bound(Arc::new(
-            CompiledFunctionBody::SQL(statements.iter().cloned().map(UnifiedPlan::lower).collect()),
-        )),
+        FunctionBody::Statements(statements) => RoutineBody::Bound(
+            CompiledFunctionBody::SQL(statements.iter().cloned().map(UnifiedPlan::lower).collect())
+                .shared(),
+        ),
     };
     SQLUserFunction::new(*definition, body)
 }
@@ -112,7 +112,7 @@ fn routine_capture_preserves_overload_order_attributes_identities_and_bound_bodi
         value.def.creation_search_path = vec!["Quoted.Schema".into(), "public".into()];
         value.def.execute_acl = Some(Vec::new());
         value.definition_version().unwrap();
-        entries.push(Arc::new(value));
+        entries.push(value.shared());
     }
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
@@ -142,7 +142,7 @@ fn routine_capture_preserves_overload_order_attributes_identities_and_bound_bodi
             match (&value.bound_body, &original.body) {
                 (None, RoutineBody::Source) => {}
                 (Some(plans), RoutineBody::Bound(body)) => {
-                    let CompiledFunctionBody::SQL(old) = body.as_ref() else {
+                    let CompiledFunctionBody::SQL(old) = &***body else {
                         panic!("SQL")
                     };
                     assert_eq!(
@@ -196,15 +196,16 @@ fn routine_capture_detaches_constants_and_discards_transient_source_window_and_p
             panic!("block")
         };
         block.projections[0].expr = ScalarExpr::RetainedLiteral(literal);
-        original.body = RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(vec![
-            UnifiedPlan::Command(Box::new(CommandPlan::Explain {
+        original.body = RoutineBody::Bound(
+            CompiledFunctionBody::SQL(vec![UnifiedPlan::Command(Box::new(CommandPlan::Explain {
                 options: crate::explain::ExplainOptions::default(),
                 body: Box::new(UnifiedPlan::Query(query)),
                 unbound_parameters: Some(vec![crate::SQLParam::Scalar(Value::Str(
                     "z".repeat(1 << 20),
                 ))]),
-            })),
-        ])));
+            }))])
+            .shared(),
+        );
         source_token.cancel();
         let memory = MemoryBudget::new(256 * 1024);
         let token = CancellationToken::new();
@@ -267,10 +268,8 @@ fn routine_capture_releases_earlier_overloads_on_late_denial_or_cancellation() {
     let source = BTreeMap::from([(
         "routines".into(),
         vec![
-            Arc::new(routine(
-                "CREATE FUNCTION first() RETURNS integer LANGUAGE SQL RETURN 1",
-            )),
-            Arc::new(large),
+            routine("CREATE FUNCTION first() RETURNS integer LANGUAGE SQL RETURN 1").shared(),
+            large.shared(),
         ],
     )]);
     for cancelled in [false, true] {

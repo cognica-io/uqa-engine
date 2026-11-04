@@ -19,6 +19,7 @@ use crate::row_locks::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
+    catalog::stored_view::MaterializedViewRow,
     plan::QueryPlan,
     schema::table_creation::{
         create_table_as_columns, existing_create_as_target, validate_create_table_as_columns,
@@ -30,7 +31,7 @@ use uqa_sql::{
 fn materialized_rows(
     result: &uqa_sql::SQLResult,
     output_columns: &[String],
-) -> Result<Vec<uqa_sql::ResultRow>, SQLError> {
+) -> Result<Vec<MaterializedViewRow>, SQLError> {
     if result.columns.len() != output_columns.len() {
         return Err(SQLError::Internal(format!(
             "materialized-view query schema width {} changed to {} during execution",
@@ -121,7 +122,7 @@ fn execute_materialized_source(
     explained: Option<crate::query::measurement::ExplainedQuery<'_>>,
     params: &[SQLParam],
     output_columns: &[String],
-) -> Result<Vec<uqa_sql::ResultRow>, SQLError> {
+) -> Result<Vec<MaterializedViewRow>, SQLError> {
     let optimized;
     let (executable, measurement) = if let Some(query) = explained {
         (query.plan, Some(query.measurement))

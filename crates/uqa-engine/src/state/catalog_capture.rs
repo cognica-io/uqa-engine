@@ -6,7 +6,7 @@
 
 //! Memory catalog generations register owning producers before Engine publication.
 
-use super::{BoundDatabaseSecurity, CatalogCell, DurableCatalogState};
+use super::{CatalogCell, DatabaseAuthority, DurableCatalogState};
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_storage::{memory_capture::MemoryCaptureRegistry, StorageBackendResult};
 
@@ -21,7 +21,7 @@ impl DurableCatalogState {
         self.views = CatalogCell::capture_source(
             self.views.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::views::durable_views,
+            uqa_sql::catalog::stored_view::ViewDefinitions::capture,
         )?;
         self.triggers = CatalogCell::capture_source(
             self.triggers.snapshot(),
@@ -31,7 +31,7 @@ impl DurableCatalogState {
         self.sql_user_functions = CatalogCell::capture_source(
             self.sql_user_functions.snapshot(),
             Some(registry),
-            uqa_sql::catalog::definition_capture::routines::routines,
+            uqa_sql::routines::registry::RoutineRegistry::capture,
         )?;
         self.rules = CatalogCell::capture_source(
             self.rules.snapshot(),
@@ -102,7 +102,7 @@ impl DurableCatalogState {
         self.database_security = CatalogCell::capture_source(
             self.database_security.snapshot(),
             Some(registry),
-            BoundDatabaseSecurity::capture_security,
+            DatabaseAuthority::capture,
         )?;
         self.schemas = CatalogCell::capture_source(
             self.schemas.snapshot(),
@@ -132,12 +132,12 @@ impl DurableCatalogState {
         self.builtin_routine_security = CatalogCell::capture_source(
             self.builtin_routine_security.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::relations::builtin_routines,
+            uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::capture,
         )?;
         self.system_relation_security = CatalogCell::capture_source(
             self.system_relation_security.snapshot(),
             Some(registry),
-            uqa_sql::catalog::security::capture::relations::system_relations,
+            uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture,
         )?;
         Ok(())
     }

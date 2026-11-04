@@ -293,7 +293,16 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     )?;
                     let schema = view.definition.materialized_schema()?;
                     let columns = schema.columns().to_vec();
-                    let rows = view.definition.materialized_rows.clone();
+                    let rows = view
+                        .definition
+                        .materialized_rows
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|(name, value)| (name.clone(), value.clone()))
+                                .collect()
+                        })
+                        .collect();
                     let scan: Box<dyn PhysicalOperator + 'a> =
                         Box::new(crate::TableScan::from_rows_with_schema(schema, rows));
                     let aliases = table_source_aliases(&columns, &[], column_aliases);

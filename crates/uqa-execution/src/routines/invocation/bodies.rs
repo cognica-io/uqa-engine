@@ -31,7 +31,7 @@ pub trait RoutineBodySession {
 /// A session's compilation of a routine body and the definition version it was compiled from.
 pub(super) struct CompiledRoutine {
     pub(super) version: u64,
-    pub(super) body: Arc<CompiledFunctionBody>,
+    pub(super) body: uqa_sql::routines::SharedRoutineBody,
     pub(super) plpgsql: uqa_core::memory::OwnedMap<usize, super::plpgsql_cache::PreparedBody>,
 }
 
@@ -66,14 +66,14 @@ impl SessionRoutineBodies {
         &self,
         function: &SQLUserFunction,
         compile: impl FnOnce(&CreateFunction) -> Result<CompiledFunctionBody, SQLError>,
-    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
         if let Some(body) = self.retained(function)? {
             return Ok(body);
         }
         let identity = routine_identity(function)?;
         let version = function.definition_version()?;
         // Compiling can resolve and compile other routines, so the cache is not held meanwhile.
-        let body = Arc::new(compile(&function.def)?);
+        let body = compile(&function.def)?.shared();
         self.compiled
             .lock()
             .insert(identity, CompiledRoutine::new(version, Arc::clone(&body)));
@@ -87,15 +87,17 @@ impl SessionRoutineBodies {
         &self,
         function: &SQLUserFunction,
         compile: impl FnOnce(&CreateFunction) -> Result<CompiledFunctionBody, SQLError>,
-    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
-        self.retained(function)?
-            .map_or_else(|| compile(&function.def).map(Arc::new), Ok)
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
+        self.retained(function)?.map_or_else(
+            || compile(&function.def).map(CompiledFunctionBody::shared),
+            Ok,
+        )
     }
 
     fn retained(
         &self,
         function: &SQLUserFunction,
-    ) -> Result<Option<Arc<CompiledFunctionBody>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SharedRoutineBody>, SQLError> {
         if let RoutineBody::Bound(body) = &function.body {
             return Ok(Some(Arc::clone(body)));
         }
@@ -119,7 +121,7 @@ impl SessionRoutineBodies {
         let version = function.definition_version()?;
         self.compiled
             .lock()
-            .insert(identity, CompiledRoutine::new(version, Arc::new(body)));
+            .insert(identity, CompiledRoutine::new(version, body.shared()));
         Ok(())
     }
 }

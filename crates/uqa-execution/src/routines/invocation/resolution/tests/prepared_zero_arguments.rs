@@ -19,7 +19,7 @@ fn zero_argument_calls_keep_separate_descriptions_after_owner_moves() {
         };
         definition.object_id = Some([name.as_bytes()[0]; 16]);
         Catalog {
-            function: Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source)),
+            function: SQLUserFunction::new(*definition, RoutineBody::Source).shared(),
             ..Catalog::new()
         }
     });

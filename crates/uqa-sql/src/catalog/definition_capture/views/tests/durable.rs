@@ -42,10 +42,9 @@ fn durable_view_capture_excludes_temporary_payloads_before_admission() {
     temporary
         .options
         .push(("payload".into(), "x".repeat(1 << 20)));
-    temporary.materialized_rows = vec![BTreeMap::from([(
-        "temporary".into(),
-        Value::Str("y".repeat(1 << 20)),
-    )])];
+    temporary.materialized_rows = vec![[("temporary".into(), Value::Str("y".repeat(1 << 20)))]
+        .into_iter()
+        .collect()];
     // Eligibility is carried by the object, independently of namespace spelling.
     source.insert(
         RelationIdentity::new("public", "z".repeat(1 << 20)),

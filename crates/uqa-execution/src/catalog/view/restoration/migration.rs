@@ -8,9 +8,8 @@
 use super::{
     catalog_view_row,
     context::{ViewRestoreContext, ViewRowsStorage},
-    StoredView,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::semantics::sets::placement_scope::SetPlacementScope;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
@@ -18,7 +17,7 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 pub(super) fn migrate_persisted_views(
     context: &ViewRestoreContext<'_>,
     catalog: &dyn ViewRowsStorage,
-    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    views: &mut uqa_sql::catalog::stored_view::ViewDefinitions,
     routine_binding_migrations: &BTreeSet<RelationIdentity>,
     missing_output_columns: &[RelationIdentity],
     missing_object_ids: &[RelationIdentity],
@@ -58,16 +57,16 @@ pub(super) fn migrate_persisted_views(
                 })?;
                 uqa_sql::catalog::stored_view::restoration::restored_view_output_columns(&schema)
             };
-            let view = views.get_mut(relation).ok_or_else(|| {
+            let mut view = views.get(relation).cloned().ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "legacy view `{view_name}` disappeared while installing column metadata"
                 ))
             })?;
             view.output_columns = Some(output_columns);
-            context
-                .registry
-                .views_write()
-                .insert(relation.clone(), view.clone());
+            views.insert(relation.clone(), view).map_err(|error| {
+                StorageBackendError::backend("restore view column metadata", error)
+            })?;
+            **context.registry.views_write() = views.clone();
         }
         let migrated_views = routine_binding_migrations
             .iter()
@@ -102,7 +101,7 @@ pub(super) fn migrate_persisted_views(
 
 fn migrate_bound_definitions(
     context: &ViewRestoreContext<'_>,
-    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    views: &mut uqa_sql::catalog::stored_view::ViewDefinitions,
     routine_binding_migrations: &BTreeSet<RelationIdentity>,
     missing_collations: &BTreeSet<RelationIdentity>,
 ) -> StorageBackendResult<()> {
@@ -119,7 +118,7 @@ fn migrate_bound_definitions(
     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     for relation in &ordered {
         let view_name = relation.qualified_name();
-        let view = views.get_mut(relation).ok_or_else(|| {
+        let mut view = views.get(relation).cloned().ok_or_else(|| {
             StorageBackendError::Other(format!(
                 "view `{view_name}` disappeared during metadata migration"
             ))
@@ -149,10 +148,10 @@ fn migrate_bound_definitions(
                     ))
                 })?;
         }
-        context
-            .registry
-            .views_write()
-            .insert(relation.clone(), view.clone());
+        views
+            .insert(relation.clone(), view)
+            .map_err(|error| StorageBackendError::backend("restore view bindings", error))?;
+        **context.registry.views_write() = views.clone();
     }
     Ok(())
 }

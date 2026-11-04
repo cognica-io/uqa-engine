@@ -13,7 +13,6 @@ use super::{
 use crate::schema::{
     namespaces::NamespaceCatalogRefresh, relation_alteration::RoleTargetSchemaAccess,
 };
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_sql::{
     ast::{FunctionBinding, RenameRoutineStmt},
     catalog::roles::role_inherits,
@@ -24,7 +23,6 @@ use uqa_sql::{
             rename::{self as analysis, RoutineRenameTarget},
             require_routine_ownership,
         },
-        SQLUserFunction,
     },
     SQLError,
 };
@@ -184,7 +182,7 @@ pub fn relocate_sql_routines(
 fn resolve_routine_rename_target(
     context: &RoutineRenameContext<'_>,
     stmt: &RenameRoutineStmt,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &uqa_sql::routines::registry::RoutineRegistry,
 ) -> Result<RoutineRenameTarget, SQLError> {
     let requested_types = resolve_routine_identity_types(
         context.compilation.analysis.types,
@@ -241,23 +239,24 @@ fn rewrite_routine_owned_dependency_identity(
     context: &RoutineRenameContext<'_>,
     target: &FunctionBinding,
     new_name: &str,
-) -> Result<BTreeMap<String, Vec<Arc<SQLUserFunction>>>, SQLError> {
+) -> Result<uqa_sql::routines::registry::RoutineRegistry, SQLError> {
     let registry = context.mutation.registry.routine_snapshot();
-    let mut rewritten = BTreeMap::new();
-    for (name, overloads) in registry {
-        let mut next_overloads = Vec::with_capacity(overloads.len());
-        for function in overloads {
+    let mut rewritten = registry.clone();
+    for (name, overloads) in &registry {
+        let mut next_overloads = None;
+        for (index, function) in overloads.iter().enumerate() {
             let mut def = function.def.clone();
             let changed =
                 analysis::rewrite_routine_owned_dependency_identity(&mut def, target, new_name)?;
             if changed {
                 let body = persisted_routine_body(&context.compilation, &def)?;
-                next_overloads.push(super::catalog::revision::replacement(def, body)?);
-            } else {
-                next_overloads.push(function);
+                next_overloads.get_or_insert_with(|| overloads.clone())[index] =
+                    super::catalog::revision::replacement(def, body)?;
             }
         }
-        rewritten.insert(name, next_overloads);
+        if let Some(overloads) = next_overloads {
+            rewritten.insert(name.clone(), overloads)?;
+        }
     }
     Ok(rewritten)
 }

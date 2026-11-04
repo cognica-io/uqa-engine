@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::database::{CapturedDatabaseAuthority, DatabaseAuthority};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     events::{RuleCatalog, StoredTrigger},
@@ -52,7 +53,7 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
+    BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
 };
 
 impl StorageContext {
@@ -185,14 +186,14 @@ pub(super) struct DurableCatalogState {
         uqa_storage::catalog::scoring_params::CapturedScoringParameters,
     >,
     pub(super) views: CatalogCell<
-        BTreeMap<RelationIdentity, StoredView>,
-        uqa_sql::catalog::definition_capture::views::CapturedViews,
+        uqa_sql::catalog::stored_view::ViewDefinitions,
+        uqa_sql::catalog::stored_view::CapturedViewDefinitions,
     >,
     pub(super) catalog_indexes: CatalogCell<
         BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
         Vec<(RelationIdentity, uqa_storage::CatalogIndexRow)>,
     >,
-    pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
+    pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
     pub(super) schemas: CatalogCell<
         SchemaRegistry,
         uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
@@ -261,21 +262,15 @@ pub(super) struct DurableCatalogState {
     >,
     pub(super) builtin_routine_security: CatalogCell<
         uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
-        Vec<(
-            u32,
-            uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurity,
-        )>,
+        uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities,
     >,
     pub(super) system_relation_security: CatalogCell<
         uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
-        Vec<(
-            RelationIdentity,
-            uqa_sql::catalog::security::capture::relations::CapturedSystemRelationSecurity,
-        )>,
+        uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities,
     >,
     pub(super) sql_user_functions: CatalogCell<
-        BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>,
-        uqa_sql::catalog::definition_capture::routines::CapturedRoutines,
+        uqa_sql::routines::registry::RoutineRegistry,
+        uqa_sql::routines::registry::CapturedRoutines,
     >,
     pub(super) roles:
         CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
@@ -300,9 +295,9 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
     pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
-    pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: Arc<BoundDatabaseSecurity>,
+    pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
@@ -322,8 +317,7 @@ pub(super) struct DurableCatalogSnapshot {
         Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub(super) sql_user_functions:
-        Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
+    pub(super) sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub(super) roles: Arc<RoleDefinitions>,
     pub(super) role_memberships: Arc<RoleMemberships>,
     pub(super) triggers:
@@ -345,9 +339,9 @@ impl DurableCatalogState {
             scoring_params: CatalogCell::new(
                 uqa_storage::catalog::scoring_params::ScoringParameters::default(),
             ),
-            views: CatalogCell::new(BTreeMap::new()),
+            views: CatalogCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
             catalog_indexes: CatalogCell::new(BTreeMap::new()),
-            database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
+            database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),
@@ -366,9 +360,15 @@ impl DurableCatalogState {
             ),
             foreign_tables: CatalogCell::new(BTreeMap::new()),
             foreign_table_security: CatalogCell::new(BTreeMap::new()),
-            builtin_routine_security: CatalogCell::new(BTreeMap::new()),
-            system_relation_security: CatalogCell::new(BTreeMap::new()),
-            sql_user_functions: CatalogCell::new(BTreeMap::new()),
+            builtin_routine_security: CatalogCell::new(
+                uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
+            ),
+            system_relation_security: CatalogCell::new(
+                uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
+            ),
+            sql_user_functions: CatalogCell::new(
+                uqa_sql::routines::registry::RoutineRegistry::new(),
+            ),
             roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
             role_memberships: CatalogCell::new(RoleMemberships::new()),
             triggers: CatalogCell::new(BTreeMap::new()),

@@ -6,8 +6,6 @@
 
 //! User-defined routine API, session controls, and canonical SQL type exports.
 
-pub(crate) use uqa_sql::routines::SQLUserFunction;
-
 use crate::Engine;
 impl Engine {
     /// Current nesting cap for user-defined routine calls.

@@ -19,51 +19,61 @@ use uqa_core::{
 mod serialization;
 
 /// Borrowed catalog access shared by native generations and legacy decoded maps during validation.
-pub trait NamedDefinitionView<T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+pub trait NamedDefinitionView<T, K: DefinitionKey = String> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
-        T: 'a;
-    fn get(&self, name: &str) -> Option<&T>;
+        T: 'a,
+        K: 'a;
+    fn get(&self, name: &K::View) -> Option<&T>;
+    fn contains_key(&self, name: &K::View) -> bool {
+        self.get(name).is_some()
+    }
     fn values<'a>(&'a self) -> impl Iterator<Item = &'a T>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter().map(|(_, value)| value)
     }
 }
 
-impl<T> NamedDefinitionView<T> for std::collections::BTreeMap<String, T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for std::collections::BTreeMap<K, T> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.get(name)
     }
 }
 
-impl<T> NamedDefinitionView<T> for NamedDefinitions<T> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for DefinitionRegistry<K, T> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.get(name)
     }
 }
 
-impl<T, V: NamedDefinitionView<T>> NamedDefinitionView<T> for std::sync::Arc<V> {
-    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a String, &'a T)>
+impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K>
+    for std::sync::Arc<V>
+{
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
     where
         T: 'a,
+        K: 'a,
     {
         self.as_ref().iter()
     }
-    fn get(&self, name: &str) -> Option<&T> {
+    fn get(&self, name: &K::View) -> Option<&T> {
         self.as_ref().get(name)
     }
 }
@@ -77,6 +87,10 @@ pub(crate) mod sealed {
 pub trait StoredDefinition<K: ?Sized = str>: sealed::Definition + Clone {
     fn is_temporary(&self, key: &K) -> bool;
     fn copy_definition(&self, control: &ProductionControl<'_>) -> Result<Produced<Self>, SQLError>;
+    /// Immutable child handles retain their own native leases; captures must also fund their complete payloads.
+    fn retained_children_bytes(&self) -> Result<usize, SQLError> {
+        Ok(0)
+    }
 }
 
 /// Native keys expose only separately allocated payloads; inline key storage belongs to the retained map node.
@@ -190,6 +204,12 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
         self.temporary.clear();
     }
 
+    pub fn temporary_only(&self) -> Self {
+        let mut temporary = self.clone();
+        temporary.durable.clear();
+        temporary
+    }
+
     pub fn remove<Q: Ord + ?Sized>(&mut self, name: &Q) -> Result<bool, SQLError>
     where
         K: Borrow<Q>,
@@ -237,9 +257,11 @@ impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
             .copy_definition(&control)?
             .into_budgeted()
             .unwrap_or_else(|_| unreachable!("native definitions use admitted construction"));
+        let children = value.retained_children_bytes()?;
         let bytes = name
             .payload_bytes()
             .checked_add(value.reserved_bytes())
+            .and_then(|bytes| bytes.checked_add(children))
             .ok_or(MemoryError::SizeOverflow)?;
         let mut durable = self.durable.clone();
         let mut session = self.temporary.clone();

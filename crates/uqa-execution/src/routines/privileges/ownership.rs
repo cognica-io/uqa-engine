@@ -14,7 +14,6 @@ use crate::{
     },
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
-use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::AlterRoutineOwnerStmt,
@@ -23,7 +22,7 @@ use uqa_sql::{
     routines::{
         declaration::resolve_alter_routine_identity_types,
         lifecycle::{binding::resolve_sql_routine_alter_target, require_routine_ownership},
-        security as analysis, SQLUserFunction,
+        security as analysis,
     },
     SQLError,
 };
@@ -95,8 +94,12 @@ pub fn alter_sql_routine_owner(
             analysis::rewrite_routine_acl_owner(&mut def, previous_owner, owner.identity());
             def.owner = Some(owner.identity());
             let mut next = registry.clone();
-            next.get_mut(name).expect("resolved routine key")[position] =
-                super::super::catalog::revision::replacement(def, existing.body.clone())?;
+            next.edit(name, |overloads| {
+                overloads[position] =
+                    super::super::catalog::revision::replacement(def, existing.body.clone())?;
+                Ok(())
+            })?
+            .expect("resolved routine key");
             Ok(Some((registry, next)))
         },
     )?;
@@ -120,7 +123,7 @@ fn lock_owner_target(
     context: &RoutinePrivilegeContext<'_>,
     stmt: &AlterRoutineOwnerStmt,
     types: Option<&[String]>,
-) -> Result<Arc<SQLUserFunction>, SQLError> {
+) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
     let resolve = || {
         let registry = context.catalog.registry.routine_snapshot();
         let (name, position) = resolve_sql_routine_alter_target(

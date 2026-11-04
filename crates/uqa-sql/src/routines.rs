@@ -10,6 +10,7 @@ pub mod attributes;
 pub mod body_parameters;
 pub mod body_validation;
 pub mod compilation;
+mod composite_constants;
 pub mod configuration;
 pub mod declaration;
 mod defaults;
@@ -19,12 +20,15 @@ pub mod diagnostics;
 pub mod inlining;
 pub mod lifecycle;
 pub mod merge_columns;
+mod ownership;
 pub mod privilege_inquiry;
 pub mod regclass;
 pub mod registration;
+pub mod registry;
 pub mod resolution;
 pub mod result_check;
 pub mod security;
+pub use ownership::{SQLRoutine, SharedRoutineBody};
 
 use crate::ast::{
     ColumnType, CreateFunction, FunctionBinding, FunctionReturns, RoutineInvocationBinding,
@@ -87,7 +91,7 @@ impl SQLUserFunction {
 #[derive(Clone)]
 pub enum RoutineBody {
     /// A SQL-standard body, which the statement that defines the routine analyzes and binds.
-    Bound(Arc<CompiledFunctionBody>),
+    Bound(SharedRoutineBody),
     /// A body given as a string, which the catalog keeps as text, as `PostgreSQL` keeps `prosrc`: `CREATE FUNCTION` validates it only under `check_function_bodies`, and each session compiles it when it first calls the routine, so a body that no longer compiles reports its error then.
     Source,
 }
@@ -96,7 +100,7 @@ pub enum RoutineBody {
 pub fn analyzable_routine_body(
     resolution: &(impl RoutineResolution + ?Sized),
     function: &SQLUserFunction,
-) -> Result<Option<Arc<CompiledFunctionBody>>, SQLError> {
+) -> Result<Option<crate::routines::SharedRoutineBody>, SQLError> {
     match resolution.routine_analysis_body(function) {
         Ok(body) => Ok(Some(body)),
         Err(error) if matches!(error.primary(), SQLError::Internal(_)) => Err(error),
@@ -151,7 +155,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
     fn routine_body(
         &self,
         function: &SQLUserFunction,
-    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+    ) -> Result<crate::routines::SharedRoutineBody, SQLError> {
         match &function.body {
             RoutineBody::Bound(body) => Ok(Arc::clone(body)),
             RoutineBody::Source => Err(SQLError::Internal(format!(
@@ -167,7 +171,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
     fn routine_analysis_body(
         &self,
         function: &SQLUserFunction,
-    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+    ) -> Result<crate::routines::SharedRoutineBody, SQLError> {
         self.routine_body(function)
     }
 
@@ -229,7 +233,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
     fn lookup_visible_sql_functions(
         &self,
         _name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
 
@@ -249,7 +253,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
     fn lookup_visible_sql_functions_for_analysis(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         self.lookup_visible_sql_functions(name)
     }
 
@@ -303,14 +307,14 @@ pub trait RoutineResolution: FunctionTypeResolver {
     }
 
     /// Resolve an exact stored routine name without repeating visible-name lookup.
-    fn lookup_bound_sql_functions(&self, _name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+    fn lookup_bound_sql_functions(&self, _name: &str) -> Option<Vec<crate::routines::SQLRoutine>> {
         None
     }
 
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         None
     }
 
@@ -319,7 +323,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
         &self,
         binding: &FunctionBinding,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         control.check()?;
         let candidates = self.lookup_bound_sql_functions_by_binding(binding);
         lifecycle::lookup::select_bound_function_with_control(
@@ -336,7 +340,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
         _argument_names: &[Option<String>],
         _argument_types: &[Option<ColumnType>],
         _explicit_variadic: bool,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         Ok(None)
     }
 
@@ -481,7 +485,7 @@ pub trait RoutineResolution: FunctionTypeResolver {
 pub fn selected_bound_function(
     routines: &dyn RoutineResolution,
     binding: &FunctionBinding,
-) -> Option<std::sync::Arc<SQLUserFunction>> {
+) -> Option<crate::routines::SQLRoutine> {
     selected_bound_function_with_control(
         routines,
         binding,
@@ -494,7 +498,7 @@ pub fn selected_bound_function_with_control(
     routines: &dyn RoutineResolution,
     binding: &FunctionBinding,
     control: &uqa_core::memory::ProductionControl<'_>,
-) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
     control.check()?;
     if binding.builtin || binding.resolution_error.is_some() || binding.object_id.is_none() {
         return Ok(None);
@@ -538,7 +542,7 @@ pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
 }
 
 pub struct StaticFunctionMatch {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub invocation: Box<RoutineInvocationBinding>,
     pub argument_types: Vec<String>,
     pub raw_exact_matches: usize,

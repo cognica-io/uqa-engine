@@ -74,7 +74,7 @@ pub trait TablePrivilegeRead {
     fn retained(&self, relation: &RelationIdentity) -> Option<Arc<dyn TablePrivilegeState>>;
 }
 pub type PrivilegeViewsRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredView>> + 'a>;
+    Box<dyn Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 pub type PrivilegeForeignTablesRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type PrivilegeForeignSecurityRead<'a> =

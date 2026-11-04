@@ -49,8 +49,10 @@ impl TableGrantContext<'_> {
                 prepared::PreparedTableGrant {
                     updates,
                     view_updates,
+                    views,
                     foreign_updates,
                     system_updates,
+                    system,
                     acl_updates,
                     notices,
                 },
@@ -80,15 +82,14 @@ impl TableGrantContext<'_> {
             );
         }
         let view_changed = !view_updates.is_empty();
-        if view_changed {
-            let mut views = self.views.views_write();
-            for (relation, view) in view_updates {
+        if let Some(next) = views {
+            **self.views.views_write() = next;
+            for (_, view) in view_updates {
                 self.changes.prepared_catalog_changed(
                     crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                         view.relation_oids().relation,
                     ),
                 );
-                views.insert(relation, view);
             }
         }
         let foreign_changed = !foreign_updates.is_empty();
@@ -99,12 +100,9 @@ impl TableGrantContext<'_> {
                 securities.insert(relation, security);
             }
         }
-        let system_changed = !system_updates.is_empty();
-        if system_changed {
-            let mut securities = self.system.system_relation_securities_write();
-            for update in system_updates {
-                update.publish(&mut securities);
-            }
+        let system_changed = system.is_some();
+        if let Some(prepared::SystemPrivilegeCandidate { mut registry, next }) = system {
+            **registry = next;
         }
         drop(memberships);
         drop(roles);
