@@ -85,6 +85,17 @@ impl<K, V> RetainedMap<K, V> {
 }
 
 impl<K: Ord, V> RetainedMap<K, V> {
+    /// Seek a lower bound without visiting earlier entries or allocating a cursor.
+    pub fn range_from<Q: Ord + ?Sized>(
+        &self,
+        start: std::ops::Bound<&Q>,
+    ) -> RetainedMapIter<'_, K, V>
+    where
+        K: Borrow<Q>,
+    {
+        RetainedMapIter(self.values.range_from(start))
+    }
+
     pub fn iter_bidirectional(&self) -> RetainedMapBidirectionalIter<'_, K, V> {
         RetainedMapBidirectionalIter(self.values.iter_bidirectional())
     }

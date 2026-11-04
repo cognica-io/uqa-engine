@@ -7,6 +7,50 @@
 use super::*;
 
 #[test]
+fn retained_map_lower_bound_seeks_without_allocating_or_visiting_earlier_keys() {
+    use std::{
+        cmp::Ordering,
+        ops::Bound,
+        sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
+    };
+    static COMPARES: AtomicUsize = AtomicUsize::new(0);
+    #[derive(Eq, PartialEq)]
+    struct Key(u32);
+    impl Ord for Key {
+        fn cmp(&self, other: &Self) -> Ordering {
+            COMPARES.fetch_add(1, AtomicOrdering::Relaxed);
+            self.0.cmp(&other.0)
+        }
+    }
+    impl PartialOrd for Key {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    let mut map = RetainedMap::new(&MemoryBudget::new(1 << 20));
+    for key in 0..4096 {
+        map.insert(Key(key), key, 0).unwrap();
+    }
+    for excluded in [false, true] {
+        COMPARES.store(0, AtomicOrdering::Relaxed);
+        let allocation = allocation_counter::measure(|| {
+            let key = Key(4000);
+            let bound = if excluded {
+                Bound::Excluded(&key)
+            } else {
+                Bound::Included(&key)
+            };
+            assert!(map
+                .range_from(bound)
+                .map(|(key, value)| (key.0, *value))
+                .eq((4000 + u32::from(excluded)..4096).map(|key| (key, key))));
+        });
+        assert_eq!(allocation.count_total, 0);
+        assert!(COMPARES.load(AtomicOrdering::Relaxed) < 32);
+    }
+}
+
+#[test]
 fn retained_map_captures_nonclone_payloads_without_allocating_or_visiting_entries() {
     struct Payload(usize);
     for entries in [1, 64, 4096] {
