@@ -145,7 +145,7 @@ fn selected_rules(
             continue;
         }
         let mut entries = output.vector(values.len())?;
-        for (name, value) in values.iter() {
+        for (name, value) in values {
             entries.push((
                 output.text(name)?,
                 output.take(value.capture_definition(control)?),

@@ -161,49 +161,18 @@ fn events(
 ) -> Result<(), SQLError> {
     let mut triggers = context.registry.triggers().clone();
     let mut rules = context.registry.rules().clone();
-    let mut triggers_changed = false;
-    let mut rules_changed = false;
-    for trigger in triggers
-        .values_mut()
-        .flat_map(|entries| entries.values_mut())
-    {
-        if let Some(expression) = &mut trigger.definition.when {
-            let schema = change
-                .rename
-                .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {
-                    rename.transition_schema(&trigger.definition.table)
-                })?;
-            triggers_changed |= change.expression_in_schema(expression, &schema)?;
-        }
-    }
-    for rule in rules
-        .values_mut()
-        .flat_map(|entries| std::sync::Arc::make_mut(entries).values_mut())
-    {
-        let schema = change
-            .rename
-            .map_or(Ok(uqa_sql::RowSchema::default()), |rename| {
-                rename.transition_schema(&rule.definition.table)
-            })?;
-        if let Some(expression) = &mut rule.definition.condition {
-            rules_changed |= change.expression_in_schema(expression, &schema)?;
-        }
-        if let Some(plan) = &mut rule.condition_plan {
-            if let Some(rename) = change.rename {
-                rules_changed |= rename.expression_plan(plan, &schema)?;
-            }
-            rules_changed |= change.expression_plan(plan)?;
-        }
-        for statement in &mut rule.definition.actions {
-            rules_changed |= change.statement_in_scope(statement, None, Some(&schema))?;
-        }
-    }
+    let triggers_changed = triggers.rewrite_composite_constants(change)?;
+    let rules_changed = rules.rewrite_composite_constants(change)?;
     if triggers_changed {
         context.publication.persist_triggers(&triggers)?;
-        **context.registry.triggers() = triggers;
     }
     if rules_changed {
         context.publication.persist_rules(&rules)?;
+    }
+    if triggers_changed {
+        **context.registry.triggers() = triggers;
+    }
+    if rules_changed {
         **context.registry.rules() = rules;
     }
     if triggers_changed || rules_changed {

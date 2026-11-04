@@ -125,7 +125,7 @@ pub fn renamed_relation_events(
     rules: &RuleCatalog,
     from: &RelationIdentity,
     to: &RelationIdentity,
-) -> Result<Option<(TriggerCatalog, RuleCatalog)>, String> {
+) -> Result<Option<(TriggerCatalog, RuleCatalog)>, crate::catalog::events::EventChangeError> {
     let from_name = from.qualified_name();
     let to_name = to.qualified_name();
     let referenced_by_trigger = triggers.values().any(|entries| {
@@ -155,33 +155,52 @@ pub fn renamed_relation_events(
     }
     let mut next_triggers = triggers.clone();
     let mut next_rules = rules.clone();
-    if let Some(mut entries) = next_triggers.remove(from) {
-        for trigger in entries.values_mut() {
+    if let Some(original) = triggers.get(from) {
+        let mut entries = original.clone();
+        for (name, trigger) in original {
+            let mut trigger = trigger.clone();
             trigger.definition.table.clone_from(&to_name);
+            entries.insert(name.clone(), trigger)?;
         }
-        next_triggers.insert(to.clone(), entries);
+        next_triggers.remove(from)?;
+        next_triggers.insert(to.clone(), entries)?;
     }
-    for entries in next_triggers.values_mut() {
-        for trigger in entries.values_mut() {
-            if trigger.definition.referenced_table.as_deref() == Some(from_name.as_str()) {
-                trigger.definition.referenced_table = Some(to_name.clone());
-            }
+    next_triggers.rewrite(|_, _, trigger| {
+        if trigger.definition.referenced_table.as_deref() == Some(from_name.as_str()) {
+            let mut trigger = trigger.clone();
+            trigger.definition.referenced_table = Some(to_name.clone());
+            return Ok(Some(trigger));
         }
-    }
-    if let Some(mut entries) = next_rules.remove(from) {
-        for rule in std::sync::Arc::make_mut(&mut entries).values_mut() {
+        Ok(None)
+    })?;
+    if let Some(original) = rules.get(from) {
+        let mut entries = original.clone();
+        for (name, rule) in original {
+            let mut rule = rule.clone();
             rule.definition.table = to.qualified_name();
+            entries.insert(name.clone(), rule)?;
         }
-        next_rules.insert(to.clone(), entries);
+        next_rules.remove(from)?;
+        next_rules.insert(to.clone(), entries)?;
     }
-    for entries in next_rules.values_mut() {
-        for rule in std::sync::Arc::make_mut(entries).values_mut() {
-            rewrite_stored_rule_relation(rule, from, to).map_err(|error| {
+    let original = next_rules.clone();
+    for (relation, entries) in &original {
+        let mut next = entries.clone();
+        let mut changed = false;
+        for (name, rule) in entries {
+            let mut rule = rule.clone();
+            if rewrite_stored_rule_relation(&mut rule, from, to).map_err(|error| {
                 format!(
                     "rewrite rule `{}` relation dependency: {error}",
                     rule.definition.name
                 )
-            })?;
+            })? {
+                next.insert(name.clone(), rule)?;
+                changed = true;
+            }
+        }
+        if changed {
+            next_rules.insert(relation.clone(), next)?;
         }
     }
     Ok(Some((next_triggers, next_rules)))

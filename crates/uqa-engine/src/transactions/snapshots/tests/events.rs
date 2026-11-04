@@ -17,20 +17,32 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
     let relation = RelationIdentity::new("public", "docs");
     let trigger = engine.durable.triggers.read()[&relation]["saved"].clone();
     let rule = engine.durable.rules.read()[&relation]["changed"].clone();
-    for (name, entries) in engine.durable.triggers.write().iter_mut() {
-        if uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&name.schema) {
-            for entry in entries.values_mut() {
-                entry.definition.arguments.push("t".repeat(1 << 20));
+    engine
+        .durable
+        .triggers
+        .write()
+        .rewrite(|relation, _, entry| {
+            if !uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&relation.schema) {
+                return Ok(None);
             }
-        }
-    }
-    for (name, entries) in engine.durable.rules.write().iter_mut() {
-        if uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&name.schema) {
-            for entry in Arc::make_mut(entries).values_mut() {
-                entry.definition.name = "t".repeat(1 << 20);
+            let mut entry = entry.clone();
+            entry.definition.arguments.push("t".repeat(1 << 20));
+            Ok(Some(entry))
+        })
+        .unwrap();
+    engine
+        .durable
+        .rules
+        .write()
+        .rewrite(|relation, _, entry| {
+            if !uqa_sql::catalog::temporary_namespace::is_temporary_schema_name(&relation.schema) {
+                return Ok(None);
             }
-        }
-    }
+            let mut entry = entry.clone();
+            entry.definition.name = "t".repeat(1 << 20);
+            Ok(Some(entry))
+        })
+        .unwrap();
     for definition in engine.durable.foreign_tables.write().values_mut() {
         if definition.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             definition
@@ -61,14 +73,14 @@ fn transaction_event_sources_keep_original_bindings_and_exclude_temporary_bodies
     drop(engine);
     let triggers = selected.catalogs.triggers.captured(&selected.cut).unwrap();
     assert_eq!(triggers.get().unwrap().len(), 1);
-    assert_eq!(triggers.get().unwrap()[0].0, relation);
+    assert_eq!(triggers.get().unwrap().iter().next().unwrap().0, &relation);
     assert_eq!(
-        serde_json::to_value(&triggers.get().unwrap()[0].1[0].1).unwrap(),
+        serde_json::to_value(&triggers.get().unwrap().get(&relation).unwrap()["saved"]).unwrap(),
         serde_json::to_value(&trigger).unwrap()
     );
     let rules = selected.catalogs.rules.captured(&selected.cut).unwrap();
     assert_eq!(rules.get().unwrap().len(), 1);
-    let saved = &rules.get().unwrap()[0].1[0].1;
+    let saved = &rules.get().unwrap().get(&relation).unwrap()["changed"];
     assert_eq!(saved.catalog_oid, rule.catalog_oid);
     assert_eq!(saved.enabled, rule.enabled);
     assert_eq!(

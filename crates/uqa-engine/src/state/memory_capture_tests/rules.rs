@@ -6,14 +6,14 @@
 
 use super::{sql, Engine, StorageReadControl};
 use uqa_core::RelationIdentity;
-use uqa_sql::catalog::{definition_capture::rules::CapturedRules, events::RuleCatalog};
+use uqa_sql::catalog::events::{CapturedEventCatalog, RuleCatalog, StoredRule};
 use uqa_storage::StorageBackendError;
 
 fn fixture(engine: &Engine) {
     sql(engine,"CREATE TABLE docs(id integer); CREATE TABLE audit(id integer); CREATE FUNCTION saved(a integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN a + 1; CREATE RULE inserted AS ON INSERT TO docs DO ALSO INSERT INTO audit VALUES (saved(new.id)); CREATE RULE changed AS ON UPDATE TO docs WHERE new.id > old.id DO ALSO INSERT INTO audit VALUES (old.id); ALTER TABLE docs ENABLE ALWAYS RULE changed");
 }
 
-fn same(saved: &CapturedRules, original: &RuleCatalog) {
+fn same(saved: &CapturedEventCatalog<StoredRule>, original: &RuleCatalog) {
     assert_eq!(saved.len(), original.len());
     for ((relation, entries), (old_relation, old)) in saved.iter().zip(original) {
         assert_eq!(relation, old_relation);
@@ -36,18 +36,9 @@ fn same(saved: &CapturedRules, original: &RuleCatalog) {
             );
             let deps = value.dependencies.as_ref().unwrap();
             let old = old.dependencies.as_ref().unwrap();
-            assert_eq!(
-                deps.relations,
-                old.relations.iter().cloned().collect::<Vec<_>>()
-            );
-            assert_eq!(
-                deps.columns,
-                old.columns.iter().cloned().collect::<Vec<_>>()
-            );
-            assert_eq!(
-                deps.routines,
-                old.routines.iter().cloned().collect::<Vec<_>>()
-            );
+            assert_eq!(deps.relations, old.relations);
+            assert_eq!(deps.columns, old.columns);
+            assert_eq!(deps.routines, old.routines);
         }
     }
 }

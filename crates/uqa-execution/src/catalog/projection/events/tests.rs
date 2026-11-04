@@ -64,9 +64,9 @@ fn stored_constraints_and_triggers_ignore_invoking_role_schema_usage() {
     .remove(0) else {
         panic!("trigger");
     };
-    snapshot.definitions.triggers = Arc::new(BTreeMap::from([(
-        relation,
-        BTreeMap::from([(
+    Arc::make_mut(&mut snapshot.definitions.triggers)
+        .insert_event(
+            relation,
             "watch".into(),
             StoredTrigger {
                 definition,
@@ -77,8 +77,8 @@ fn stored_constraints_and_triggers_ignore_invoking_role_schema_usage() {
                 catalog_oid: Some(70_002),
                 constraint_catalog_oid: None,
             },
-        )]),
-    )]));
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let mut resolution = CatalogServices::default().resolution;
     resolution.current_user = "reader".into();

@@ -75,7 +75,7 @@ catalog_sources! {
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities, uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture;
     foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;
     foreign_servers: ForeignServers => uqa_sql::catalog::foreign_server::CapturedForeignServers, ForeignServers::capture;
-    triggers: TriggerCatalog => uqa_sql::catalog::definition_capture::events::CapturedTriggers, uqa_sql::catalog::definition_capture::events::durable_triggers;
-    rules: RuleCatalog => uqa_sql::catalog::definition_capture::rules::CapturedRules, uqa_sql::catalog::definition_capture::rules::durable_rules;
+    triggers: TriggerCatalog => uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredTrigger>, TriggerCatalog::capture;
+    rules: RuleCatalog => uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredRule>, RuleCatalog::capture;
     graph_catalog_oids: GraphOidRegistry => CapturedGraphOidRegistry, GraphOidRegistry::capture;
 }

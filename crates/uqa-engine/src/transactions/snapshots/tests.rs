@@ -15,6 +15,7 @@ mod capture;
 mod catalogs;
 mod comments;
 mod database_authority;
+mod event_roots;
 mod events;
 mod graph_oid_roots;
 mod identifiers;

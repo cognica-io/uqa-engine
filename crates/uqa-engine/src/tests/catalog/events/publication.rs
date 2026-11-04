@@ -231,12 +231,15 @@ fn invalid_event_column_rewrite_preserves_registry_before_any_persistence() {
         .durable
         .triggers
         .write()
-        .get_mut(&relation)
+        .edit(&relation, |entries| {
+            entries.edit("dependency_check", |trigger| {
+                trigger.definition.when = Some(uqa_sql::ast::Expr::Star);
+                Ok(())
+            })
+        })
         .unwrap()
-        .get_mut("dependency_check")
         .unwrap()
-        .definition
-        .when = Some(uqa_sql::ast::Expr::Star);
+        .unwrap();
     let before = serde_json::to_string(&engine.event_lookup_context().list_triggers()).unwrap();
     let observer = Publication {
         engine: &engine,

@@ -13,16 +13,22 @@ use uqa_sql::{
 
 fn enlarge_action(engine: &Engine, name: &str) {
     let mut rules = engine.durable.rules.write();
-    let entries = std::sync::Arc::make_mut(
-        rules
-            .get_mut(&RelationIdentity::new("public", "items"))
-            .unwrap(),
-    );
-    let rule = entries.get_mut(name).unwrap();
-    let Statement::Select(query) = &mut rule.definition.actions[0] else {
-        panic!("action query")
-    };
-    query.projections[0].expr = Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+    rules
+        .edit(&RelationIdentity::new("public", "items"), |entries| {
+            entries
+                .edit(name, |rule| {
+                    let Statement::Select(query) = &mut rule.definition.actions[0] else {
+                        panic!("action query")
+                    };
+                    query.projections[0].expr =
+                        Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+                    Ok(())
+                })?
+                .expect("rule");
+            Ok(())
+        })
+        .unwrap()
+        .expect("relation");
 }
 
 #[rstest::rstest]
@@ -76,14 +82,16 @@ fn native_rule_selection_borrows_the_live_generation_and_retains_its_owner(
     );
     {
         let mut rules = engine.durable.rules.write();
-        std::sync::Arc::make_mut(
-            rules
-                .get_mut(&RelationIdentity::new("public", "items"))
-                .unwrap(),
-        )
-        .get_mut("r")
-        .unwrap()
-        .enabled = EventEnableMode::Disabled;
+        rules
+            .edit(&RelationIdentity::new("public", "items"), |entries| {
+                entries.edit("r", |rule| {
+                    rule.enabled = EventEnableMode::Disabled;
+                    Ok(())
+                })
+            })
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
     assert!(
         RuleCatalog::rules_for(&engine, "public.items", RuleEvent::Insert)
@@ -325,17 +333,19 @@ fn retained_view_rule_selection_keeps_its_catalog_and_original_control(#[case] p
         replica: false,
         control: control.capture(),
     };
-    std::sync::Arc::make_mut(
-        engine
-            .durable
-            .rules
-            .write()
-            .get_mut(&RelationIdentity::new("public", "items"))
-            .unwrap(),
-    )
-    .get_mut("r")
-    .unwrap()
-    .enabled = EventEnableMode::Disabled;
+    engine
+        .durable
+        .rules
+        .write()
+        .edit(&RelationIdentity::new("public", "items"), |entries| {
+            entries.edit("r", |rule| {
+                rule.enabled = EventEnableMode::Disabled;
+                Ok(())
+            })
+        })
+        .unwrap()
+        .unwrap()
+        .unwrap();
     let before = memory.used();
     let occupied = memory.reserve(memory.available() - 16 * 1024).unwrap();
     let mut selected = None;

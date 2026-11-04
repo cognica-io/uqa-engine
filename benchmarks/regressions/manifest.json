@@ -40521,6 +40521,192 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "both_ends_match_independent_ordered_map_after_source_replacement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/bidirectional.rs",
+      "capability": "Immutable bidirectional map iteration",
+      "workload": "Compare mixed forward and reverse reads with an independent ordered map after random replacement and source retirement.",
+      "invariant": "Every original entry appears exactly once in the selected direction; exact remaining length, exhaustion and final allowance release match the independent oracle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "bidirectional_cursor_bounds_space_work_and_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/bidirectional.rs",
+      "capability": "Bounded bidirectional cursor",
+      "workload": "Alternate both ends of maps containing 0, 1, 64 and 8192 entries with the native allowance exhausted.",
+      "invariant": "Cursor state occupies at most 64 bytes, each step uses fewer than 32 comparisons and traversal allocates no heap object.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_both_ends_share_original_values_and_exact_footprint",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Retained bidirectional payloads",
+      "workload": "Capture 128 payload entries, replace a source value, retire the source and read both ends of the original root.",
+      "invariant": "Capture equals the cached complete footprint and allocates no heap object; selected original values and final native/capture release remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_capture_shares_durable_roots_with_independent_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Bounded native trigger capture",
+      "workload": "Capture 1, 64 and 4096 durable relation trigger roots beside excluded temporary definitions under exact and one-byte-insufficient allowances.",
+      "invariant": "Capture allocates no heap object, independently admits the complete durable footprint, preserves original definitions after native retirement and releases every allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_capture_shares_original_bound_roots_with_independent_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Bounded native rule capture",
+      "workload": "Capture 1, 64 and 4096 durable relation rule roots containing bound OLD/NEW conditions and dependencies beside temporary definitions.",
+      "invariant": "Constant-work capture preserves original definitions and bound identities, rejects insufficient admission without retained bytes and releases native and independent capture allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_copy_funds_every_owned_dependency_node_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Exact native rule ownership",
+      "workload": "Copy a rule with a bound condition, removed-column identity and relation dependency under an independent allowance.",
+      "invariant": "Measured retained heap bytes equal admitted bytes; complete encoding and original OLD/NEW identities remain equal, and final release retires every owned node.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_publication_keeps_unrelated_large_declarations_shared",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Selected native event publication",
+      "workload": "Change one trigger beside an unrelated four-MiB declaration retained by the original relation root.",
+      "invariant": "Selected replacement stays below 32 KiB and 256 allocations, shares the unrelated payload and leaves the original enable mode unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_updates_release_failed_candidates_and_preserve_complete_originals",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Atomic event successors",
+      "workload": "Fail a later multi-relation rewrite and exhaust admission before replacement and removal.",
+      "invariant": "No partial successor is published; original declaration addresses and exact allowance usage survive every failure, and retirement releases all bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_transfer_and_cancelled_capture_leave_allowances_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Independent event ownership",
+      "workload": "Transfer native rule entries between allowances, reject underfunded transfer and cancel original or invoking capture controls.",
+      "invariant": "Cross-allowance transfer owns independent payloads; failed transfer and capture retain no output allowance or partial catalog, and source retirement releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_encodings_preserve_definition_maps_and_ordered_trigger_capture_pairs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/registry/tests.rs",
+      "capability": "Exact native event encoding",
+      "workload": "Compare native declaration maps with independent ordered maps and native trigger capture with the prior ordered-pair producer, including empty and temporary roots.",
+      "invariant": "Definition encodings and durable capture pairs remain equal; rule decoding retains original fields and ordered dependencies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "event_rename_admits_both_catalogs_before_persistence_and_keeps_typed_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/events/tests.rs",
+      "capability": "Atomic trigger and rule rename",
+      "workload": "Exhaust rule admission after a trigger successor can be prepared, then fund the same relation rename.",
+      "invariant": "Denied admission reports 53200 before any persistent write or epoch change and retains both original roots; funded publication writes both successors and preserves retained originals.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_event_restore_admission_preserves_both_originals_and_stored_metadata",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/tests/catalog/events/restoration/native.rs",
+      "capability": "Admitted native event restoration",
+      "workload": "Exhaust native trigger/rule admission while restoring real persistent catalogs, then restore and execute with the allowance available.",
+      "invariant": "Each failure reports 53200 without replacing either native authority or stored metadata; funded restoration remains usable and all native allowances release.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_native_event_migration_write_preserves_original_authority",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/tests/catalog/events/restoration/native.rs",
+      "capability": "Event migration publication order",
+      "workload": "Restore legacy trigger object identity and rule catalog OID records from an independent provider input into the existing native namespace while injecting failed migration persistence.",
+      "invariant": "Persistence observers see both original registry identities; the failure retains those roots, original native metadata and unchanged legacy input bytes, and subsequent native execution succeeds.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_event_roots_preserve_original_definitions_with_bounded_capture_work",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/event_roots.rs",
+      "capability": "Committed native event roots",
+      "workload": "Capture 1, 32 and 128 triggers and rules through private changes, savepoint rollback, COMMIT, relation replacement and Engine closure.",
+      "invariant": "Selected capture stays below 32 KiB and 128 allocations, preserves both complete original catalogs after live owner retirement, honors cancellation and releases the capture allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

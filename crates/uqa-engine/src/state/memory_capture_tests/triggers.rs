@@ -14,7 +14,7 @@ fn fixture(engine: &Engine) {
 }
 
 fn same(
-    saved: &uqa_sql::catalog::definition_capture::events::CapturedTriggers,
+    saved: &uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredTrigger>,
     original: &TriggerCatalog,
 ) {
     assert_eq!(saved.len(), original.len());
@@ -112,7 +112,7 @@ fn denied_trigger_capture_preserves_ordinary_ddl_and_independently_funded_defini
         .unwrap()
         .iter()
         .flat_map(|(_, entries)| entries)
-        .find(|(name, _)| name == "large")
+        .find(|(name, _)| name.as_str() == "large")
         .unwrap();
     assert_eq!(entry.1.definition.arguments, [argument]);
     drop((saved, cut, failed));

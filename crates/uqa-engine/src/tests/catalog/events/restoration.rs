@@ -8,6 +8,8 @@ use crate::Engine;
 use std::sync::Arc;
 use uqa_execution::schema::events::persistence::{RULES_METADATA_KEY, TRIGGERS_METADATA_KEY};
 
+mod native;
+
 #[test]
 fn load_only_rule_restore_rejects_legacy_metadata_without_publishing_or_writing() {
     let directory = tempfile::tempdir().unwrap();

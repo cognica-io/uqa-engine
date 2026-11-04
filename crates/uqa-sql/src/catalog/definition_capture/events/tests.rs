@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::ast::{EventEnableMode, Expr};
-use std::collections::BTreeMap;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 fn trigger(sql: &str) -> StoredTrigger {
@@ -30,16 +29,18 @@ fn ordinary() -> StoredTrigger {
 
 #[test]
 fn durable_triggers_exclude_temporary_relations_before_admitting_names_and_bodies() {
-    let mut source = TriggerCatalog::from([
+    let mut source = TriggerCatalog::try_from_iter([
         (
             RelationIdentity::new("Quoted.Schema", "Table.Name"),
-            BTreeMap::from([("saved".into(), ordinary())]),
+            crate::catalog::events::EventDefinitions::try_from_iter([("saved".into(), ordinary())])
+                .unwrap(),
         ),
         (
             RelationIdentity::new("public", "pg_temp_local"),
-            BTreeMap::new(),
+            crate::catalog::events::EventDefinitions::new(),
         ),
-    ]);
+    ])
+    .unwrap();
     let memory = MemoryBudget::new(64 << 10);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -47,14 +48,19 @@ fn durable_triggers_exclude_temporary_relations_before_admitting_names_and_bodie
     let retained = memory.used();
     let mut temporary = ordinary();
     temporary.definition.arguments.push("x".repeat(1 << 20));
-    source.insert(
-        RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
-        BTreeMap::from([("huge".into(), temporary)]),
-    );
-    source.insert(
-        RelationIdentity::new("pg_toast_temp_1", "toast"),
-        BTreeMap::new(),
-    );
+    source
+        .insert(
+            RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
+            crate::catalog::events::EventDefinitions::try_from_iter([("huge".into(), temporary)])
+                .unwrap(),
+        )
+        .unwrap();
+    source
+        .insert(
+            RelationIdentity::new("pg_toast_temp_1", "toast"),
+            crate::catalog::events::EventDefinitions::new(),
+        )
+        .unwrap();
     let saved = durable_triggers(&source, &control).unwrap();
     assert_eq!(memory.used(), retained * 2);
     assert_eq!(
@@ -85,10 +91,13 @@ fn trigger_capture_preserves_complete_declarations_bound_identities_and_enable_m
         trigger("CREATE TRIGGER instead INSTEAD OF DELETE ON docs FOR EACH ROW EXECUTE FUNCTION fire()"),
     ];
     let mut source = TriggerCatalog::new();
-    source.insert(RelationIdentity::new("empty", "relation"), BTreeMap::new());
-    let entries = source
-        .entry(RelationIdentity::new("Quoted.Schema", "Table.Name"))
-        .or_default();
+    source
+        .insert(
+            RelationIdentity::new("empty", "relation"),
+            crate::catalog::events::EventDefinitions::new(),
+        )
+        .unwrap();
+    let mut entries = crate::catalog::events::EventDefinitions::new();
     for (mut value, enabled) in declarations.into_iter().zip([
         EventEnableMode::Origin,
         EventEnableMode::Disabled,
@@ -105,8 +114,16 @@ fn trigger_capture_preserves_complete_declarations_bound_identities_and_enable_m
             value.object_id = None;
             value.catalog_oid = None;
         }
-        entries.insert(value.definition.name.clone(), value);
+        entries
+            .insert(value.definition.name.clone(), value)
+            .unwrap();
     }
+    source
+        .insert(
+            RelationIdentity::new("Quoted.Schema", "Table.Name"),
+            entries,
+        )
+        .unwrap();
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -202,10 +219,15 @@ fn trigger_capture_detaches_retained_condition_constants_from_cancelled_source_o
 fn trigger_capture_releases_prior_definitions_on_late_argument_denial_and_cancellation() {
     let mut large = ordinary();
     large.definition.arguments.push("x".repeat(32768));
-    let source = TriggerCatalog::from([(
+    let source = TriggerCatalog::try_from_iter([(
         RelationIdentity::new("schema", "table"),
-        BTreeMap::from([("first".into(), ordinary()), ("last".into(), large)]),
-    )]);
+        crate::catalog::events::EventDefinitions::try_from_iter([
+            ("first".into(), ordinary()),
+            ("last".into(), large),
+        ])
+        .unwrap(),
+    )])
+    .unwrap();
     for cancelled in [false, true] {
         let memory = MemoryBudget::new(if cancelled { 1 << 20 } else { 4096 });
         let token = CancellationToken::new();

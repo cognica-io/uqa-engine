@@ -10,7 +10,6 @@ use crate::{
     catalog::events::{PreparedRuleColumnDrop, RuleColumnDependency},
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 pub struct EventColumnDependencies {
     pub triggers: Vec<String>,
@@ -21,16 +20,19 @@ impl EventLookupContext<'_> {
         &self,
         table: &str,
         column: &str,
-    ) -> Result<PreparedRuleColumnDrop, String> {
+    ) -> Result<PreparedRuleColumnDrop, crate::catalog::events::EventChangeError> {
         let relation = RelationIdentity::from_legacy_name(table)?;
         let dependency = RuleColumnDependency {
             relation: relation.clone(),
             column: column.to_string(),
         };
-        let mut rules = self.registry.read_rules().clone();
+        let original = self.registry.read_rules().clone();
+        let mut rules = original.clone();
         let mut rebind = std::collections::BTreeSet::new();
-        for (event_relation, entries) in &mut rules {
-            for (name, rule) in std::sync::Arc::make_mut(entries) {
+        for (event_relation, entries) in &original {
+            let mut next = entries.clone();
+            let mut changed = false;
+            for (name, rule) in entries {
                 let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
                     format!(
                         "rule `{}` on `{}` has no bound dependency state",
@@ -43,11 +45,12 @@ impl EventLookupContext<'_> {
                         "cannot drop column {column} of table {table} because rule {} on {} depends on it",
                         rule.definition.name,
                         event_relation.qualified_name()
-                    ));
+                    ).into());
                 }
                 if event_relation != &relation && !dependencies.relations.contains(&relation) {
                     continue;
                 }
+                let mut rule = rule.clone();
                 crate::binding::stored_columns::remove_rule_source_column_aliases(
                     self.analysis.columns,
                     &mut rule.definition,
@@ -60,6 +63,11 @@ impl EventLookupContext<'_> {
                     )
                 })?;
                 rebind.insert((event_relation.clone(), name.clone()));
+                next.insert(name.clone(), rule)?;
+                changed = true;
+            }
+            if changed {
+                rules.insert(event_relation.clone(), next)?;
             }
         }
         Ok(PreparedRuleColumnDrop { rules, rebind })
@@ -78,7 +86,7 @@ impl EventLookupContext<'_> {
             .read_triggers()
             .get(&relation)
             .into_iter()
-            .flat_map(BTreeMap::values)
+            .flat_map(|entries| entries.values())
             .filter(|trigger| {
                 trigger
                     .definition

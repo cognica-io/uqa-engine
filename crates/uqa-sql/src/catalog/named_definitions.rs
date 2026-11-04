@@ -156,6 +156,10 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
     pub fn len(&self) -> usize {
         self.durable.len() + self.temporary.len()
     }
+
+    pub fn budget(&self) -> &MemoryBudget {
+        self.durable.budget()
+    }
     pub fn is_empty(&self) -> bool {
         self.durable.is_empty() && self.temporary.is_empty()
     }

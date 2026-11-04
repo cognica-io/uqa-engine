@@ -17,20 +17,24 @@ fn retained_event_addresses_survive_rename_and_removal() {
     let original_view = view_rule_by_oid(&catalog, 90_003).unwrap().1;
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "items");
-    let triggers = Arc::make_mut(&mut snapshot.definitions.triggers)
-        .get_mut(&relation)
+    Arc::make_mut(&mut snapshot.definitions.triggers)
+        .edit(&relation, |triggers| {
+            let mut trigger = triggers["watch_000"].clone();
+            triggers.remove("watch_000")?;
+            trigger.definition.name = "renamed_trigger".into();
+            triggers.insert(trigger.definition.name.clone(), trigger)
+        })
+        .unwrap()
         .unwrap();
-    let mut trigger = triggers.remove("watch_000").unwrap();
-    trigger.definition.name = "renamed_trigger".into();
-    triggers.insert(trigger.definition.name.clone(), trigger);
-    let rules = Arc::make_mut(
-        Arc::make_mut(&mut snapshot.definitions.rules)
-            .get_mut(&relation)
-            .unwrap(),
-    );
-    let mut rule = rules.remove("rule_000").unwrap();
-    rule.definition.name = "renamed_rule".into();
-    rules.insert(rule.definition.name.clone(), rule);
+    Arc::make_mut(&mut snapshot.definitions.rules)
+        .edit(&relation, |rules| {
+            let mut rule = rules["rule_000"].clone();
+            rules.remove("rule_000")?;
+            rule.definition.name = "renamed_rule".into();
+            rules.insert(rule.definition.name.clone(), rule)
+        })
+        .unwrap()
+        .unwrap();
     let views = Arc::make_mut(&mut snapshot.definitions.views);
     let relation = RelationIdentity::new("public", "view_000");
     let view = views[&relation].clone();

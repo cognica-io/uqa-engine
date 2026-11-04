@@ -43,9 +43,8 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
             constraint_catalog_oid: None,
         };
         Arc::make_mut(&mut snapshot.definitions.triggers)
-            .entry(relation.clone())
-            .or_default()
-            .insert(trigger.definition.name.clone(), trigger);
+            .insert_event(relation.clone(), trigger.definition.name.clone(), trigger)
+            .unwrap();
         let Statement::CreateRule(definition) = uqa_sql::compile(&format!(
             "CREATE RULE rule_{position:03} AS ON UPDATE TO public.items DO ALSO NOTHING"
         ))
@@ -61,12 +60,9 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
             dependencies: None,
             catalog_oid: Some(80_000 + i64::try_from(position).unwrap()),
         };
-        Arc::make_mut(
-            Arc::make_mut(&mut snapshot.definitions.rules)
-                .entry(relation.clone())
-                .or_default(),
-        )
-        .insert(rule.definition.name.clone(), rule);
+        Arc::make_mut(&mut snapshot.definitions.rules)
+            .insert_event(relation.clone(), rule.definition.name.clone(), rule)
+            .unwrap();
         Arc::make_mut(&mut snapshot.definitions.views)
             .insert(
                 RelationIdentity::new("public", format!("view_{position:03}")),

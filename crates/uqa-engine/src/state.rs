@@ -14,7 +14,7 @@ use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::database::{CapturedDatabaseAuthority, DatabaseAuthority};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
-    events::{RuleCatalog, StoredTrigger},
+    events::{RuleCatalog, StoredTrigger, TriggerCatalog},
     type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
 };
 
@@ -276,12 +276,12 @@ pub(super) struct DurableCatalogState {
         CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
     pub(super) role_memberships:
         CatalogCell<RoleMemberships, uqa_sql::catalog::roles::CapturedRoleMemberships>,
-    pub(super) triggers: CatalogCell<
-        BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>,
-        uqa_sql::catalog::definition_capture::events::CapturedTriggers,
+    pub(super) triggers:
+        CatalogCell<TriggerCatalog, uqa_sql::catalog::events::CapturedEventCatalog<StoredTrigger>>,
+    pub(super) rules: CatalogCell<
+        RuleCatalog,
+        uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredRule>,
     >,
-    pub(super) rules:
-        CatalogCell<RuleCatalog, uqa_sql::catalog::definition_capture::rules::CapturedRules>,
 }
 
 #[derive(Clone)]
@@ -320,8 +320,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
     pub(super) roles: Arc<RoleDefinitions>,
     pub(super) role_memberships: Arc<RoleMemberships>,
-    pub(super) triggers:
-        Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
+    pub(super) triggers: Arc<TriggerCatalog>,
     pub(super) rules: Arc<RuleCatalog>,
 }
 
@@ -371,8 +370,8 @@ impl DurableCatalogState {
             ),
             roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
             role_memberships: CatalogCell::new(RoleMemberships::new()),
-            triggers: CatalogCell::new(BTreeMap::new()),
-            rules: CatalogCell::new(BTreeMap::new()),
+            triggers: CatalogCell::new(TriggerCatalog::new()),
+            rules: CatalogCell::new(RuleCatalog::new()),
         }
     }
 

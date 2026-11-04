@@ -7,8 +7,6 @@
 //! Event metadata I/O and catalog restoration inside the caller's existing transaction boundary.
 use super::EventCatalogContext;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
-use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
     catalog::{
@@ -46,14 +44,10 @@ impl EventRestoreContext<'_> {
         let migrating_catalog =
             model::rule_catalog_requires_migration(stored.format_version, allows_migration)
                 .map_err(StorageBackendError::Other)?;
-        let temporary_rules = self
-            .reads
-            .read_rules()
-            .iter()
-            .filter(|(relation, _)| self.relations.rule_relation_is_temporary(relation))
-            .map(|(relation, entries)| (relation.clone(), entries.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let mut rules = temporary_rules;
+        let mut rules = self.reads.read_rules().clone();
+        rules
+            .retain(|relation, _| self.relations.rule_relation_is_temporary(relation))
+            .map_err(|error| StorageBackendError::backend("admit restored rules", error))?;
         let mut recorded_oids = false;
         let mut restored_expressions = false;
         for mut rule in stored.rules {
@@ -114,23 +108,25 @@ impl EventRestoreContext<'_> {
                 recorded_oids = true;
             }
             let name = rule.definition.name.clone();
-            if std::sync::Arc::make_mut(rules.entry(relation).or_default())
-                .insert(name.clone(), rule)
-                .is_some()
+            if rules
+                .get(&relation)
+                .is_some_and(|entries| entries.contains_key(&name))
             {
                 return Err(StorageBackendError::Other(format!(
                     "duplicate persisted rule `{name}`"
                 )));
             }
+            rules
+                .insert_event(relation, name, rule)
+                .map_err(|error| StorageBackendError::backend("admit restored rule", error))?;
         }
-        **self.catalog.registry.rules() = rules;
         if migrating_catalog || recorded_oids || restored_expressions {
-            let rules = self.reads.read_rules();
             self.catalog
                 .publication
                 .persist_rules(&rules)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
+        **self.catalog.registry.rules() = rules;
         Ok(())
     }
 
@@ -143,17 +139,13 @@ impl EventRestoreContext<'_> {
             Some(json) => serde_json::from_str::<StoredTriggerCatalog>(&json)?,
             None => StoredTriggerCatalog::default(),
         };
-        let temporary_triggers = self
-            .reads
-            .read_triggers()
-            .iter()
-            .filter(|(relation, _)| {
+        let mut triggers = self.reads.read_triggers().clone();
+        triggers
+            .retain(|relation, _| {
                 self.relations.trigger_relation_persistence(relation)
                     == Some(RelationPersistence::Temporary)
             })
-            .map(|(relation, entries)| (relation.clone(), entries.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let mut triggers = temporary_triggers;
+            .map_err(|error| StorageBackendError::backend("admit restored triggers", error))?;
         let mut migrated = false;
         for mut trigger in stored.triggers {
             if trigger.definition.constraint && trigger.constraint_name.is_none() {
@@ -213,24 +205,24 @@ impl EventRestoreContext<'_> {
             }
             let name = trigger.definition.name.clone();
             if triggers
-                .entry(relation)
-                .or_default()
-                .insert(name.clone(), trigger)
-                .is_some()
+                .get(&relation)
+                .is_some_and(|entries| entries.contains_key(&name))
             {
                 return Err(StorageBackendError::Other(format!(
                     "duplicate persisted trigger `{name}`"
                 )));
             }
+            triggers
+                .insert_event(relation, name, trigger)
+                .map_err(|error| StorageBackendError::backend("admit restored trigger", error))?;
         }
-        **self.catalog.registry.triggers() = triggers;
         if migrated {
-            let triggers = self.reads.read_triggers();
             self.catalog
                 .publication
                 .persist_triggers(&triggers)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
+        **self.catalog.registry.triggers() = triggers;
         Ok(())
     }
 }
@@ -308,7 +300,7 @@ pub fn persist_rule_catalog_snapshot(
 pub fn persist_trigger_catalog_snapshot(
     catalog: Option<&dyn CatalogFacade>,
     relations: &dyn EventRelationPersistence,
-    triggers: &BTreeMap<RelationIdentity, BTreeMap<String, StoredTrigger>>,
+    triggers: &uqa_sql::catalog::events::TriggerCatalog,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());

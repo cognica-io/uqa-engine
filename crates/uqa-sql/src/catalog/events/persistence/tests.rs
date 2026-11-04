@@ -105,12 +105,17 @@ fn rule_snapshots_exclude_temporary_relations_and_preserve_missing_relation_entr
         temporary: BTreeSet::from([relation("temporary")]),
         ..Relations::default()
     };
-    let rules = RuleCatalog::from(["missing", "permanent", "temporary"].map(|name| {
+    let rules = RuleCatalog::try_from_iter(["missing", "permanent", "temporary"].map(|name| {
         (
             relation(name),
-            BTreeMap::from([("saved".into(), stored_rule(name))]).into(),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "saved".into(),
+                stored_rule(name),
+            )])
+            .unwrap(),
         )
-    }));
+    }))
+    .unwrap();
     let snapshot = stored_rules_snapshot(&rules, &relations);
     assert_eq!(snapshot.format_version, 4);
     assert_eq!(
@@ -137,14 +142,19 @@ fn trigger_snapshots_require_persistent_relation_metadata_in_catalog_order() {
         ]),
         ..Relations::default()
     };
-    let triggers = TriggerCatalog::from(["missing", "permanent", "temporary", "unlogged"].map(
-        |name| {
+    let triggers = TriggerCatalog::try_from_iter(
+        ["missing", "permanent", "temporary", "unlogged"].map(|name| {
             (
                 relation(name),
-                BTreeMap::from([("saved".into(), stored_trigger(name))]),
+                crate::catalog::events::EventDefinitions::try_from_iter([(
+                    "saved".into(),
+                    stored_trigger(name),
+                )])
+                .unwrap(),
             )
-        },
-    ));
+        }),
+    )
+    .unwrap();
     let snapshot = stored_triggers_snapshot(&triggers, &relations);
     assert_eq!(
         snapshot

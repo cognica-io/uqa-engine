@@ -158,12 +158,7 @@ pub struct CatalogDefinitionSnapshot {
     pub system_relation_security:
         Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
     pub roles: Arc<RoleDefinitions>,
-    pub triggers: Arc<
-        BTreeMap<
-            uqa_storage::RelationIdentity,
-            BTreeMap<String, uqa_sql::catalog::events::StoredTrigger>,
-        >,
-    >,
+    pub triggers: Arc<uqa_sql::catalog::events::TriggerCatalog>,
     pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
 }
 
