@@ -9,6 +9,8 @@ use crate::{document_store::Document, DocumentStore, MemoryDocumentStore, ReadOn
 use std::collections::BTreeMap;
 use uqa_core::{DatumValue, RecordValue};
 
+mod stream;
+
 #[test]
 fn document_image_headers_keep_typed_cancellation_between_io_attempts() {
     struct Interrupted {

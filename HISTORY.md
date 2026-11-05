@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add resumable evaluated-value and memory-document image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Complete Engine backup and restore remain under implementation.
+
 - Add scheduled repository image capture with bounded source, payload, parent-inventory and verification steps. Jobs retain their original cancellation and memory controls, report actual work, release source/workspace ownership on failure and permit publication only after complete verification. Full and incremental preparation share this state machine; public Engine backup and restore remain under implementation.
 
 - Expose the existing native SQLite, SQLite Key/Value and redb committed image streams through the common persistent-provider interface. The independently owned stream retains its original cut, cancellation and memory allowance after the provider or Engine closes; unsupported providers reject capture without opening a session. Public Engine backup jobs and complete memory-image restoration remain under implementation.

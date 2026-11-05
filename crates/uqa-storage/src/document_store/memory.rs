@@ -133,6 +133,33 @@ impl MemoryDocumentStore {
 }
 
 impl DocumentStore for MemoryDocumentStore {
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        control.check()?;
+        self.check_retained_read()?;
+        self.state
+            .documents
+            .get(&doc_id)
+            .map(|row| {
+                let cursor = super::image::DocumentImageCursor::new(
+                    self.state.layouts[row.layout_id]
+                        .iter()
+                        .map(String::as_str)
+                        .zip(row.values.iter()),
+                    row.metadata,
+                    control,
+                );
+                crate::image_io::ImageReader::new(cursor, control)?.with_source_control(
+                    self.retention.as_ref().map(|retention| &retention.control),
+                    control,
+                )
+            })
+            .transpose()
+    }
+
     fn write_image_document(
         &self,
         doc_id: DocId,

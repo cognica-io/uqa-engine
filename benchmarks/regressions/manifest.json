@@ -42289,6 +42289,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_reads_resume_at_every_carrier_boundary_without_changing_bytes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Resumable value image identity",
+      "workload": "Read every value carrier with one-byte through 32-KiB output requests, interspersed empty reads and cancellation after completed EOF.",
+      "invariant": "Segmented reads preserve exact encoded bytes and opaque metadata; completion retires all numerical scratch and remains at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_reads_borrow_large_payloads_and_bound_each_output_window",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Bounded borrowed value image reads",
+      "workload": "Stream six MiB of strings, bytes and lazy tuple backing into preallocated output with a zero-byte allocation allowance.",
+      "invariant": "Every read emits at most 16 KiB, the fixed reader fits within 16 KiB, measured heap allocation is zero and complete bytes match the wire codec.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_field_reads_visit_only_the_current_position",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Incremental field traversal",
+      "workload": "Read a two-field image one byte at a time while the first field holds more than two output windows.",
+      "invariant": "Header reads visit no fields, partial payload reads visit only the current field, and cancellation prevents further traversal or resumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_decimal_reads_release_scratch_on_completion_cancel_denial_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Numerical image scratch ownership",
+      "workload": "Suspend decimal output with admitted formatting text, cancel or drop it, then retry under zero allowance and pre-cancellation.",
+      "invariant": "Formatting text remains charged until consumption or release; cancellation and denial retain their typed errors and permanently fail the reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_field_errors_and_unwind_permanently_close_the_reader",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Ordered field source failure ownership",
+      "workload": "Stream short, long, duplicate, unordered and panicking field iterators through one-byte windows.",
+      "invariant": "Each invalid source fails at its owning transition, retires iterator and numerical scratch exactly once, and cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_reads_keep_the_nesting_limit_across_mixed_containers",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Bounded mixed image nesting",
+      "workload": "Stream 128 mixed list, map, record and typed-row containers one byte at a time, then add one excess container.",
+      "invariant": "Permitted nesting retains exact wire bytes; excess depth fails permanently without retaining an allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "value_image_writer_preserves_interruption_zero_write_and_invalid_count_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/stream.rs",
+      "capability": "Shared image writer I/O boundaries",
+      "workload": "Drive the shared encoder into zero writes, invalid byte counts, repeated interrupted writes and cancellation on the final successful write.",
+      "invariant": "Typed output and cancellation failures survive without a retry after cancellation or retained codec memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_image_readers_preserve_captured_bytes_after_source_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/stream.rs",
+      "capability": "Actual memory document image cursors",
+      "workload": "Replace and remove the actual source, then read its captured document through nested read-only adapters with one-byte, short and oversized windows.",
+      "invariant": "Exact private tuple metadata, evaluated fields, opaque values and absence semantics survive; reads allocate no payload copy and EOF releases cursor admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_image_readers_release_current_scratch_for_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/stream.rs",
+      "capability": "Document cursor cancellation ownership",
+      "workload": "Suspend an actual captured numeric document after formatting, then independently cancel the original or invoking scope.",
+      "invariant": "Either original typed cancellation permanently closes the cursor, releases all invoking scratch/header admission and preserves the captured generation until its last owner drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_image_reader_admission_and_early_drop_preserve_the_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/stream.rs",
+      "capability": "Document cursor header admission",
+      "workload": "Open a captured two-MiB document under zero allowance, distinguish absence, drop a partially read cursor and open an independent cursor.",
+      "invariant": "Header admission precedes allocation, denial performs zero heap allocation, and early cursor retirement leaves the original generation usable and charged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_image_readers_release_sources_on_failure_unwind_and_complete_only_nonempty_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/stream.rs",
+      "capability": "Image cursor terminal transitions",
+      "workload": "Read sources that error, unwind, over-report bytes, cancel during output or reach EOF while owning an admitted payload.",
+      "invariant": "Failure and unwind release source/header memory exactly once; empty reads preserve active ownership and completed EOF survives later cancellation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

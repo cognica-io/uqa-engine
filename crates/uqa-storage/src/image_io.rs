@@ -10,7 +10,9 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 use std::io::{Read, Write};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
+mod reader;
 mod retained;
+pub use reader::{ImageRead, ImageReader};
 pub use retained::with_retained_control;
 
 const CHUNK: usize = 4096;

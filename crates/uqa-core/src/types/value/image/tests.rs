@@ -12,6 +12,8 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+mod stream;
+
 fn encode(value: &Value) -> Vec<u8> {
     let mut bytes = Vec::new();
     let memory = MemoryBudget::new(1 << 20);

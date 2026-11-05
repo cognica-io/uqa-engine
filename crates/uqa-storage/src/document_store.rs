@@ -182,6 +182,17 @@ impl SharedDocumentRow {
 
 /// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
+    /// Borrow a resumable evaluated document image from this exact read view. The cursor header is admitted before allocation, payloads remain owned by the source, and reads retain both source and invoking cancellation. Unsupported owners do not materialize a document or execute SQL as a fallback.
+    fn image_document_reader<'a>(
+        &'a self,
+        _doc_id: DocId,
+        _control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        Err(StorageBackendError::Other(
+            "document image reader is unsupported by this owner".into(),
+        ))
+    }
+
     /// Stream an evaluated document image from this exact read view, returning `None` for an absent document. Only owners with a lossless image codec implement this method; the default does not collect or re-evaluate fields. This primitive does not capture a committed Engine backup cut.
     fn write_image_document(
         &self,
