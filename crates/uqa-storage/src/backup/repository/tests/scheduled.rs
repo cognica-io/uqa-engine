@@ -233,38 +233,113 @@ fn scheduled_capture_resolves_uncertain_publication_before_original_cancellation
 
 #[test]
 fn scheduled_capture_rechecks_repository_generation_after_incremental_verification() {
-    let directory = tempfile::tempdir().unwrap();
-    let control = control();
-    let repository = repository(directory.path(), &control);
-    let mut job = repository
-        .begin_image_backup(
-            Image::new(vec![Unit::record(1, b"retained")]),
+    for collect in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let control = control();
+        let repository = repository(directory.path(), &control);
+        let (retired, _) = capture(
+            &repository,
             None,
-            1 << 20,
-            1 << 20,
+            vec![Unit::record(7, b"obsolete")],
             &control,
-        )
-        .unwrap();
-    let id = job.id();
-    while job.progress().phase != BackupCapturePhase::Verifying {
-        job.advance(1, 128).unwrap();
+            1 << 20,
+        );
+        if collect {
+            repository
+                .remove_backup(retired.backup(), &control)
+                .unwrap();
+        }
+        let mut job = repository
+            .begin_image_backup(
+                Image::new(vec![Unit::record(1, b"retained")]),
+                None,
+                1 << 20,
+                1 << 20,
+                &control,
+            )
+            .unwrap();
+        let id = job.id();
+        while job.progress().phase != BackupCapturePhase::Verifying {
+            job.advance(1, 128).unwrap();
+        }
+        if collect {
+            let removed = repository.collect_garbage(100, 1 << 20, &control).unwrap();
+            assert!(removed.removed_objects > 0);
+        } else {
+            repository
+                .remove_backup(retired.backup(), &control)
+                .unwrap();
+        }
+        loop {
+            match job.advance(1, 128) {
+                Ok(BackupCaptureStep::Pending) => (),
+                Err(BackupError::Busy) => break,
+                result => {
+                    panic!("changed repository cannot acquire prepared authority: {result:?}")
+                }
+            }
+        }
+        assert_eq!(job.progress().phase, BackupCapturePhase::Failed);
+        assert!(matches!(job.publish(), Err(BackupError::Finished)));
+        assert_eq!(job.cancel().unwrap(), None);
+        drop(job);
+        assert_eq!(control.memory().used(), 0);
+        assert!(repository.open_backup(id, &control).is_err());
     }
-    repository
-        .begin_backup(cut(), None, 1 << 20, &control)
-        .unwrap()
-        .cancel()
-        .unwrap();
-    loop {
-        match job.advance(1, 128) {
-            Ok(BackupCaptureStep::Pending) => (),
-            Err(BackupError::Busy) => break,
-            result => panic!("changed repository cannot acquire prepared authority: {result:?}"),
+}
+
+#[test]
+fn scheduled_capture_finishes_across_independent_publications() {
+    for incremental in [false, true] {
+        for publish in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let control = control();
+            let repository = repository(directory.path(), &control);
+            let units = vec![Unit::record(1, b"retained")];
+            let parent =
+                incremental.then(|| capture(&repository, None, units.clone(), &control, 1 << 20).0);
+            let mut job = repository
+                .begin_image_backup(
+                    Image::new(units.clone()),
+                    parent.map(BackupRoot::backup),
+                    1 << 20,
+                    1 << 20,
+                    &control,
+                )
+                .unwrap();
+            while job.progress().phase != BackupCapturePhase::Verifying {
+                job.advance(1, 128).unwrap();
+            }
+            if publish {
+                capture(
+                    &repository,
+                    None,
+                    vec![Unit::record(9, b"independent")],
+                    &control,
+                    1 << 20,
+                );
+            } else {
+                drop(
+                    repository
+                        .begin_backup(cut(), None, 1 << 20, &control)
+                        .unwrap(),
+                );
+            }
+            finish(&mut job, 128);
+            let root = job.publish().unwrap();
+            drop(job);
+            if let Some(parent) = parent {
+                repository.remove_backup(parent.backup(), &control).unwrap();
+                repository.collect_garbage(100, 1 << 20, &control).unwrap();
+            }
+            assert_eq!(
+                read(&repository, root, &control)
+                    .into_iter()
+                    .map(|entry| entry.0)
+                    .collect::<Vec<_>>(),
+                units
+            );
+            assert_eq!(control.memory().used(), 0);
         }
     }
-    assert_eq!(job.progress().phase, BackupCapturePhase::Failed);
-    assert!(matches!(job.publish(), Err(BackupError::Finished)));
-    assert_eq!(job.cancel().unwrap(), None);
-    drop(job);
-    assert_eq!(control.memory().used(), 0);
-    assert!(repository.open_backup(id, &control).is_err());
 }

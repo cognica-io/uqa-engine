@@ -106,7 +106,7 @@ enum State {
 #[derive(Clone, Copy)]
 struct Preparation {
     root: BackupRoot,
-    generation: [u8; 16],
+    removal_generation: [u8; 16],
 }
 
 /// Repository capture ownership. A failed capture cannot append or publish. A fully prepared image can finish publication after source loss; uncertain publication keeps its exact root for idempotent resolution.
@@ -365,7 +365,7 @@ impl BackupOperation<'_> {
             let _admission = self.repository.admission(control)?;
             Ok(Preparation {
                 root,
-                generation: self.repository.generation(control)?,
+                removal_generation: self.repository.removal_generation(control)?,
             })
         })();
         if result.is_err() {
@@ -392,7 +392,7 @@ impl BackupOperation<'_> {
                 observe();
             }
             let _admission = self.repository.admission(control)?;
-            if self.repository.generation(control)? != candidate.generation {
+            if self.repository.removal_generation(control)? != candidate.removal_generation {
                 return Err(BackupError::Busy);
             }
             self.repository.advance_generation(control)?;

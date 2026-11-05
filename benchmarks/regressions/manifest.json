@@ -2,6 +2,58 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "cloned_graph_errors_retain_the_original_typed_provider_cause",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/store/error.rs",
+      "capability": "Concrete graph error identity",
+      "workload": "Clone a typed provider error through Graph and Cypher, compare its concrete retained cause, then release the original graph error.",
+      "invariant": "The exact same concrete storage allocation and typed memory cause remain available independently of trait-object vtable identity and optimization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "preparation_preserves_verified_references_across_unrelated_publications",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/generations.rs",
+      "capability": "Independent repository publication during preparation",
+      "workload": "Start an unrelated operation or fully publish another image after exact verification and before descriptor installation.",
+      "invariant": "Both preparations retain exact references and finish; destructive-generation races remain rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "repository_generation_upgrade_preserves_removal_identity_and_strict_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/generations.rs",
+      "capability": "Independent publication and removal generations",
+      "workload": "Open a legacy generation record, publish a new operation, retire it, and supply truncated, trailing and zero removal identities.",
+      "invariant": "Non-destructive publication preserves the removal epoch; retirement advances both epochs; atomic current records round-trip and malformed records reject opening.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retried_unpublished_retirement_requires_a_durable_cancellation_marker",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Durable retirement retries before root publication",
+      "workload": "Interrupt retirement after installing its marker for both unfinished and prepared operations; fail marker synchronization on retry, then finish after reopening.",
+      "invariant": "Retry cannot report success before the marker synchronization boundary; retired IDs cannot publish or reopen, and collection removes only unreferenced content.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "streaming_lengths_preserve_full_and_incremental_inventory_and_reference_equality",
@@ -42297,8 +42349,21 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
       "capability": "Prepared image generation isolation",
-      "workload": "Change repository generation while a scheduled job verifies its complete candidate.",
+      "workload": "Retire a root or collect unreferenced objects while a scheduled job verifies its complete candidate.",
       "invariant": "Preparation reports Busy, retires its source/workspace and cannot publish the stale candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_finishes_across_independent_publications",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Independent scheduled backup publication",
+      "workload": "Suspend full and incremental jobs during verification while another operation is created or a complete root is published; retire and collect the incremental ancestor afterward.",
+      "invariant": "Publication-only changes preserve preparation and exact restored units, with source/workspace ownership released and no parent dependency.",
       "case_names": [
         ""
       ]

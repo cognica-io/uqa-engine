@@ -11,6 +11,7 @@ use super::{
 use std::sync::Arc;
 
 mod failures;
+mod generations;
 mod processes;
 
 fn repository(path: impl AsRef<std::path::Path>, control: &StorageReadControl) -> LocalRepository {

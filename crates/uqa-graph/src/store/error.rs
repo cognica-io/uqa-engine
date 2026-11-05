@@ -58,7 +58,11 @@ mod tests {
         let original = error.source().unwrap().source().unwrap();
         let cypher = CypherError::from(retained);
         let stored = cypher.source().unwrap().source().unwrap();
-        assert!(std::ptr::eq(original, stored));
+        // Trait-object vtables can differ across codegen units; compare the retained concrete allocation.
+        assert!(std::ptr::eq(
+            original.downcast_ref::<StorageBackendError>().unwrap(),
+            stored.downcast_ref::<StorageBackendError>().unwrap(),
+        ));
         drop(error);
         let provider = stored.downcast_ref::<StorageBackendError>().unwrap();
         let memory = provider
