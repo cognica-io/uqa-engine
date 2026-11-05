@@ -11,7 +11,7 @@ use uqa_core::{Edge, Vertex};
 #[test]
 fn native_path_image_admits_actual_immutable_capacity_without_copying_or_replaying_paths() {
     let mut graph = MemoryGraphStore::new();
-    graph.create_graph("g");
+    graph.create_graph("g").unwrap();
     for id in 0..=128 {
         graph.add_vertex(Vertex::new(id, "node"), "g").unwrap();
         if id > 0 {

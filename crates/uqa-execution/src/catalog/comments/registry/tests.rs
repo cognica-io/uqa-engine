@@ -22,7 +22,11 @@ fn native_comment_capture_shares_exact_roots_without_visiting_payloads() {
         let mut source = CommentRegistry::with_budget(&native);
         for index in 0..count {
             source
-                .insert(address(index + 1), "original 한글\n")
+                .insert(
+                    address(index + 1),
+                    "original 한글\n",
+                    RelationPersistence::Permanent,
+                )
                 .unwrap();
         }
         let memory = MemoryBudget::new(8 << 20);
@@ -53,7 +57,9 @@ fn native_comment_capture_shares_exact_roots_without_visiting_payloads() {
         let independent = source
             .capture(&ProductionControl::new(&exact, &token, &token))
             .unwrap();
-        source.insert(address(1), "replacement").unwrap();
+        source
+            .insert(address(1), "replacement", RelationPersistence::Permanent)
+            .unwrap();
         drop(source);
         assert!(captured.iter().all(|(_, text)| text == "original 한글\n"));
         drop(captured);
@@ -70,12 +76,22 @@ fn native_comment_changes_share_unrelated_text_and_preserve_failed_roots() {
     let memory = MemoryBudget::new(16 << 20);
     let mut source = CommentRegistry::with_budget(&memory);
     for index in 1..=128 {
-        source.insert(address(index), "original").unwrap();
+        source
+            .insert(address(index), "original", RelationPersistence::Permanent)
+            .unwrap();
     }
-    source.insert(address(129), &"x".repeat(4 << 20)).unwrap();
+    source
+        .insert(
+            address(129),
+            &"x".repeat(4 << 20),
+            RelationPersistence::Permanent,
+        )
+        .unwrap();
     let original = source.clone();
     let allocated = allocation_counter::measure(|| {
-        source.insert(address(64), "replacement").unwrap();
+        source
+            .insert(address(64), "replacement", RelationPersistence::Permanent)
+            .unwrap();
         source.remove(&address(1)).unwrap();
     });
     assert!(allocated.bytes_total < 16 << 10, "{allocated:?}");
@@ -90,7 +106,10 @@ fn native_comment_changes_share_unrelated_text_and_preserve_failed_roots() {
     let used = memory.used();
     let occupied = memory.reserve(memory.available()).unwrap();
     assert_eq!(
-        source.insert(address(64), "denied").unwrap_err().sqlstate(),
+        source
+            .insert(address(64), "denied", RelationPersistence::Permanent)
+            .unwrap_err()
+            .sqlstate(),
         Some("53200")
     );
     assert_eq!(
@@ -122,7 +141,16 @@ fn native_comment_ranges_preserve_object_subobject_and_class_order() {
             }
         }
     }
-    let source = CommentRegistry::try_from_iter(values.clone()).unwrap();
+    let source =
+        CommentRegistry::try_from_iter(values.clone().into_iter().map(|(address, text)| {
+            let persistence = if address.object_id % 2 == 0 {
+                RelationPersistence::Temporary
+            } else {
+                RelationPersistence::Permanent
+            };
+            (address, text, persistence)
+        }))
+        .unwrap();
     for (start, end) in [(0, 0), (0, 3), (16, 16), (32, 49), (63, 65)] {
         let first = CommentAddress {
             object_id: start,
@@ -153,5 +181,72 @@ fn native_comment_ranges_preserve_object_subobject_and_class_order() {
             Err(SQLError::Cancelled(_))
         ));
         assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn native_comment_scope_changes_publish_complete_roots_or_preserve_original_eligibility() {
+    for slack in [0, 64, 128, 256, 512, 1024, 4096] {
+        for destination in [
+            RelationPersistence::Permanent,
+            RelationPersistence::Temporary,
+        ] {
+            let memory = MemoryBudget::new(1 << 20);
+            let mut source = CommentRegistry::with_budget(&memory);
+            for index in 1..64 {
+                source
+                    .insert(
+                        address(index),
+                        "original",
+                        if index % 2 == 0 {
+                            RelationPersistence::Temporary
+                        } else {
+                            RelationPersistence::Permanent
+                        },
+                    )
+                    .unwrap();
+            }
+            let selected = if destination == RelationPersistence::Temporary {
+                31
+            } else {
+                32
+            };
+            let original = source.clone();
+            let before = memory.used();
+            let occupied = memory.reserve(memory.available() - slack).unwrap();
+            match source.insert(address(selected), "changed", destination) {
+                Ok(()) => {
+                    assert_eq!(source.len(), original.len());
+                    assert_eq!(source[&address(selected)], "changed");
+                    assert_eq!(
+                        source.is_temporary(&address(selected)),
+                        destination == RelationPersistence::Temporary
+                    );
+                }
+                Err(error) => {
+                    assert_eq!(error.sqlstate(), Some("53200"));
+                    assert_eq!(source, original);
+                    for (key, text) in original.iter() {
+                        assert!(std::ptr::eq(source.get(key).unwrap(), text));
+                    }
+                }
+            }
+            drop(occupied);
+            if source == original {
+                assert_eq!(memory.used(), before);
+            }
+            assert_eq!(original[&address(selected)], "original");
+            source
+                .insert(address(selected), "usable", destination)
+                .unwrap();
+            let durable = source.durable_generation();
+            assert_eq!(
+                durable.get(&address(selected)).is_some(),
+                destination != RelationPersistence::Temporary
+            );
+            assert_eq!(source.iter().count(), source.len());
+            drop((source, original, durable));
+            assert_eq!(memory.used(), 0);
+        }
     }
 }

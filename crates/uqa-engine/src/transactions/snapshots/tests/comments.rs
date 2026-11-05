@@ -7,7 +7,9 @@
 use super::{capture::capture, *};
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_execution::catalog::comments::CommentAddress;
-use uqa_sql::catalog::dependencies::*;
+use uqa_sql::{ast::RelationPersistence, catalog::dependencies::*};
+
+mod native;
 
 fn addresses(engine: &Engine, class_id: u32, query: &str) -> Vec<CommentAddress> {
     let result = engine.sql(query, &[]).unwrap();
@@ -65,7 +67,9 @@ fn definitions(engine: &Engine) -> BTreeSet<CommentAddress> {
     );
     let mut comments = engine.durable.comments.write();
     for address in &excluded {
-        comments.insert(*address, "temporary").unwrap();
+        comments
+            .insert(*address, "temporary", RelationPersistence::Temporary)
+            .unwrap();
     }
     comments
         .insert(
@@ -76,6 +80,7 @@ fn definitions(engine: &Engine) -> BTreeSet<CommentAddress> {
             }
             .into(),
             "opaque class",
+            RelationPersistence::Permanent,
         )
         .unwrap();
     comments
@@ -87,6 +92,7 @@ fn definitions(engine: &Engine) -> BTreeSet<CommentAddress> {
             }
             .into(),
             "dangling",
+            RelationPersistence::Permanent,
         )
         .unwrap();
     excluded

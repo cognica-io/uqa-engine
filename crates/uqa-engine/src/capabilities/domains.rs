@@ -211,11 +211,10 @@ impl TypeObjectCatalog for Engine {
             .cloned()
     }
     fn user_array_element(&self, oid: u32) -> Option<u32> {
-        self.durable.domains.read().values().find_map(|domain| {
-            (uqa_sql::catalog::type_metadata::pg_type_array_oid(&domain.column_type())
-                == i64::from(oid))
-            .then_some(domain.oid)
-        })
+        uqa_execution::catalog::projection::type_object_array_element(
+            &self.catalog_execution(),
+            oid,
+        )
     }
     fn row_type_relation(
         &self,

@@ -61,6 +61,14 @@ fn column_type(identity: &RelationIdentity, oids: RelationCatalogOids) -> Option
     oids.row_type_reference(identity).map(ColumnType::Composite)
 }
 
+pub(crate) fn array_element(catalog: &CatalogReadView, oid: u32) -> Option<u32> {
+    definitions(catalog).find_map(|(_, oids, _)| {
+        (oids.array_type == Some(oid))
+            .then_some(oids.row_type)
+            .flatten()
+    })
+}
+
 pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> {
     definitions(catalog).find_map(|(identity, oids, _)| {
         if oids.row_type == Some(oid) {

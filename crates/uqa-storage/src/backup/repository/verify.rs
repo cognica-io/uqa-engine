@@ -55,12 +55,11 @@ struct Ledger {
 }
 
 impl Ledger {
-    fn new(maximum_workspace_bytes: u64, control: &StorageReadControl) -> Self {
+    fn new(files: &FileBudget, control: &StorageReadControl) -> Self {
         let resident = (control.memory().available() / 8).min(32 * 1024);
-        let files = FileBudget::new(maximum_workspace_bytes);
         Self {
-            objects: Map::with_file_budget(control.memory(), resident, &files),
-            ranges: Map::with_file_budget(control.memory(), resident, &files),
+            objects: Map::with_file_budget(control.memory(), resident, files),
+            ranges: Map::with_file_budget(control.memory(), resident, files),
         }
     }
 
@@ -123,7 +122,16 @@ impl LocalRepository {
         maximum_workspace_bytes: u64,
         control: &StorageReadControl,
     ) -> BackupResult<()> {
-        let mut input = reader(self, root, maximum_workspace_bytes, control)?;
+        self.verify_root_with_files(root, &FileBudget::new(maximum_workspace_bytes), control)
+    }
+
+    pub(super) fn verify_root_with_files(
+        &self,
+        root: BackupRoot,
+        files: &FileBudget,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        let mut input = BackupImageReader::with_file_budget(self, root, files, control)?;
         let mut buffer = [0; 16 * 1024];
         loop {
             match input.advance(buffer.len())? {

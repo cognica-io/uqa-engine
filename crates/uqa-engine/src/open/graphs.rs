@@ -30,17 +30,10 @@ impl Engine {
         if self.storage.backend.is_none() {
             return Ok(());
         }
-        let names = self
-            .durable
-            .graphs
-            .read()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        let stores = names
-            .into_iter()
-            .map(|name| Ok((name, Arc::new(self.new_graph_store()?))))
-            .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
+        let stores = self.durable.graphs.read().rebind_persistent(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
+        )?;
         self.durable.graphs.restore(&Arc::new(stores));
         let indexes = self
             .durable
@@ -81,27 +74,12 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        let names = catalog
-            .load_named_graphs()?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let existing = self.durable.graphs.read();
-        let mut stores = BTreeMap::new();
-        for name in names {
-            let store = match existing.get(&name) {
-                Some(store) => Arc::clone(store),
-                None => Arc::new(self.new_graph_store()?),
-            };
-            // Labels are small catalog metadata. Entity payloads are validated
-            // when a query reads the corresponding durable records.
-            store
-                .label_registry(&name)
-                .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
-            stores.insert(name, store);
-        }
-        let changed = existing.len() != stores.len() || existing.keys().ne(stores.keys());
-        drop(existing);
-        if changed {
+        let successor = self
+            .durable
+            .graphs
+            .read()
+            .restored(catalog, || self.new_graph_store())?;
+        if let Some(stores) = successor {
             self.durable.graphs.restore(&Arc::new(stores));
         }
         Ok(())

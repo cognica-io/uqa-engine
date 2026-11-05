@@ -4,55 +4,123 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Per-graph membership and adjacency indexes.
+//! Immutable per-graph membership, adjacency and label roots.
 
-use super::{BTreeMap, BTreeSet, Edge, EdgeId, Vertex, VertexId};
+use super::{Edge, EdgeId, NativeMap, NativeSet, Vertex, VertexId};
+use uqa_core::memory::{MemoryBudget, MemoryError};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct Partition {
-    pub(super) vertex_ids: BTreeSet<VertexId>,
-    pub(super) edge_ids: BTreeSet<EdgeId>,
-    pub(super) adj_out: BTreeMap<VertexId, BTreeSet<EdgeId>>,
-    pub(super) adj_in: BTreeMap<VertexId, BTreeSet<EdgeId>>,
-    pub(super) label_index: BTreeMap<String, BTreeSet<EdgeId>>,
-    pub(super) vertex_label_index: BTreeMap<String, BTreeSet<VertexId>>,
+    pub(super) vertex_ids: NativeSet<VertexId>,
+    pub(super) edge_ids: NativeSet<EdgeId>,
+    pub(super) adj_out: NativeMap<VertexId, NativeSet<EdgeId>>,
+    pub(super) adj_in: NativeMap<VertexId, NativeSet<EdgeId>>,
+    pub(super) label_index: NativeMap<String, NativeSet<EdgeId>>,
+    pub(super) vertex_label_index: NativeMap<String, NativeSet<VertexId>>,
 }
 
 impl Partition {
-    pub(super) fn add_vertex(&mut self, vertex: &Vertex) {
-        self.vertex_ids.insert(vertex.vertex_id);
-        self.vertex_label_index
-            .entry(vertex.label.clone())
-            .or_default()
-            .insert(vertex.vertex_id);
+    pub(super) fn new(memory: &MemoryBudget) -> Self {
+        Self {
+            vertex_ids: NativeSet::new(memory),
+            edge_ids: NativeSet::new(memory),
+            adj_out: NativeMap::new(memory),
+            adj_in: NativeMap::new(memory),
+            label_index: NativeMap::new(memory),
+            vertex_label_index: NativeMap::new(memory),
+        }
     }
 
-    pub(super) fn add_edge(&mut self, edge: &Edge) {
-        self.edge_ids.insert(edge.edge_id);
-        self.adj_out
-            .entry(edge.source_id)
-            .or_default()
-            .insert(edge.edge_id);
-        self.adj_in
-            .entry(edge.target_id)
-            .or_default()
-            .insert(edge.edge_id);
-        self.label_index
-            .entry(edge.label.clone())
-            .or_default()
-            .insert(edge.edge_id);
+    pub(super) fn retained_bytes(&self) -> Result<usize, MemoryError> {
+        [
+            self.vertex_ids.retained_bytes()?,
+            self.edge_ids.retained_bytes()?,
+            self.adj_out.retained_bytes()?,
+            self.adj_in.retained_bytes()?,
+            self.label_index.retained_bytes()?,
+            self.vertex_label_index.retained_bytes()?,
+        ]
+        .into_iter()
+        .try_fold(0_usize, |sum, bytes| {
+            sum.checked_add(bytes).ok_or(MemoryError::SizeOverflow)
+        })
     }
 
-    pub(super) fn remove_edge(&mut self, edge: &Edge) {
-        self.edge_ids.remove(&edge.edge_id);
-        if let Some(set) = self.adj_out.get_mut(&edge.source_id) {
-            set.remove(&edge.edge_id);
-        }
-        if let Some(set) = self.adj_in.get_mut(&edge.target_id) {
-            set.remove(&edge.edge_id);
-        }
-        if let Some(set) = self.label_index.get_mut(&edge.label) {
-            set.remove(&edge.edge_id);
-        }
+    pub(super) fn add_vertex(&mut self, vertex: &Vertex) -> Result<(), MemoryError> {
+        self.vertex_ids.insert(vertex.vertex_id, 0)?;
+        update_label_index(
+            &mut self.vertex_label_index,
+            &vertex.label,
+            vertex.vertex_id,
+            true,
+        )
     }
+
+    pub(super) fn remove_vertex(&mut self, vertex: &Vertex) -> Result<(), MemoryError> {
+        self.vertex_ids.remove(&vertex.vertex_id)?;
+        update_label_index(
+            &mut self.vertex_label_index,
+            &vertex.label,
+            vertex.vertex_id,
+            false,
+        )
+    }
+
+    pub(super) fn add_edge(&mut self, edge: &Edge) -> Result<(), MemoryError> {
+        self.edge_ids.insert(edge.edge_id, 0)?;
+        update_index(&mut self.adj_out, edge.source_id, edge.edge_id, true)?;
+        update_index(&mut self.adj_in, edge.target_id, edge.edge_id, true)?;
+        update_label_index(&mut self.label_index, &edge.label, edge.edge_id, true)
+    }
+
+    pub(super) fn remove_edge(&mut self, edge: &Edge) -> Result<(), MemoryError> {
+        self.edge_ids.remove(&edge.edge_id)?;
+        update_index(&mut self.adj_out, edge.source_id, edge.edge_id, false)?;
+        update_index(&mut self.adj_in, edge.target_id, edge.edge_id, false)?;
+        update_label_index(&mut self.label_index, &edge.label, edge.edge_id, false)
+    }
+}
+
+fn update_index(
+    map: &mut NativeMap<u64, NativeSet<u64>>,
+    key: u64,
+    id: u64,
+    add: bool,
+) -> Result<(), MemoryError> {
+    let existing = map.get(&key);
+    if !add && existing.is_none() {
+        return Ok(());
+    }
+    let mut ids = existing
+        .cloned()
+        .unwrap_or_else(|| NativeSet::new(map.budget()));
+    if add {
+        ids.insert(id, 0)?;
+    } else {
+        ids.remove(&id)?;
+    }
+    let retained = ids.retained_bytes()?;
+    map.insert(key, ids, 0, retained)
+}
+
+fn update_label_index(
+    map: &mut NativeMap<String, NativeSet<u64>>,
+    label: &str,
+    id: u64,
+    add: bool,
+) -> Result<(), MemoryError> {
+    let existing = map.get(label);
+    if !add && existing.is_none() {
+        return Ok(());
+    }
+    let mut ids = existing
+        .cloned()
+        .unwrap_or_else(|| NativeSet::new(map.budget()));
+    if add {
+        ids.insert(id, 0)?;
+    } else {
+        ids.remove(&id)?;
+    }
+    let bytes = ids.retained_bytes()?;
+    map.insert_named(label, ids, 0, bytes)
 }

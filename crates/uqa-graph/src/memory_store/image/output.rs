@@ -7,7 +7,7 @@
 //! Deterministic primary images borrow entity properties and ordered memberships.
 
 use super::{
-    GraphLabelRegistry, ImageOutput, LabelKind, MemoryGraphStore, StorageBackendResult,
+    ImageOutput, LabelKind, MemoryGraphStore, NativeLabels, StorageBackendResult,
     StorageReadControl, MAGIC,
 };
 
@@ -66,10 +66,7 @@ pub(super) fn write(
     Ok(out.written)
 }
 
-fn write_registry(
-    out: &mut ImageOutput<'_>,
-    registry: &GraphLabelRegistry,
-) -> StorageBackendResult<()> {
+fn write_registry(out: &mut ImageOutput<'_>, registry: &NativeLabels) -> StorageBackendResult<()> {
     out.bytes(&registry.allocation_id)?;
     out.bytes(&registry.next_label_id.to_le_bytes())?;
     out.count(registry.labels.len())?;

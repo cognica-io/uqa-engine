@@ -10,7 +10,7 @@ use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
 fn materialized(label: &str) -> PathIndex {
     let mut graph = MemoryGraphStore::new();
-    graph.create_graph("g");
+    graph.create_graph("g").unwrap();
     PathIndex::build(&graph, "g", &[vec![label.into()]]).unwrap()
 }
 

@@ -49,7 +49,7 @@ impl FileBudget {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn usage(&self) -> (u64, u64) {
         let usage = self.0.lock();
         (usage.used, usage.peak)

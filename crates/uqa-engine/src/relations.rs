@@ -152,7 +152,9 @@ impl Engine {
                 .relation_kind_resolution(resolution, name);
         }
         let mut durable = self.durable.snapshot();
-        durable.graphs = self.visible_graph_handles();
+        durable.graphs = self.visible_graph_handles().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("select graph catalog", &error)
+        })?;
         let definitions = Self::catalog_definition_snapshot(&durable);
         let tables = self.storage.tables.read();
         uqa_execution::catalog::relation_names::RelationNameCatalog::new(&*tables, &definitions)

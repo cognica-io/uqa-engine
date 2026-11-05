@@ -6,11 +6,7 @@
 
 //! Transaction catalog roots retain the same immutable resource owners as ordinary undo.
 
-use crate::state::{
-    resource_capture::{resources, CapturedResources},
-    CatalogCell, DurableCatalogSnapshot, SnapshotTableSources,
-};
-use std::{collections::BTreeMap, sync::Arc};
+use crate::state::{CatalogCell, DurableCatalogSnapshot, SnapshotTableSources};
 use uqa_storage::{memory_capture::MemoryCaptureRegistry, StorageBackendResult};
 
 macro_rules! resource_sources {
@@ -48,8 +44,8 @@ macro_rules! resource_sources {
 }
 
 resource_sources! {
-    graphs: BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>> => CapturedResources<uqa_graph::GraphImageSnapshot>,
-        |values, control| resources(values, control, uqa_graph::GraphStoreHandle::capture_image_with_control);
+    graphs: uqa_graph::GraphCatalog => uqa_graph::CapturedGraphCatalog,
+        uqa_graph::GraphCatalog::capture;
     models: uqa_ml::model_catalog::ModelCatalog => uqa_ml::model_catalog::CapturedModelCatalog,
         uqa_ml::model_catalog::ModelCatalog::capture;
     path_indexes: uqa_graph::PathIndexCatalog => uqa_graph::CapturedPathIndexes,

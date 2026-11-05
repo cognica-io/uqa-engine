@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use uqa_core::memory::MemoryBudget;
 use uqa_core::{Edge, EdgeId, Vertex, VertexId};
 
 use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
@@ -20,7 +21,10 @@ use crate::types::Direction;
 
 mod graphid;
 mod image;
+mod labels;
+mod native;
 mod partition;
+mod publication;
 mod store;
 mod trait_impl;
 
@@ -31,19 +35,23 @@ pub use graphid::{
 };
 
 pub(crate) use graphid::{usize_to_f64_exact, MAX_GRAPHID_LABEL_ID, MAX_GRAPHID_SEQUENCE};
+use labels::NativeLabels;
+use native::{NativeMap, NativeSet};
 use partition::Partition;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct MemoryGraphStore {
-    vertices: BTreeMap<VertexId, Vertex>,
-    edges: BTreeMap<EdgeId, Edge>,
-    graphs: BTreeMap<String, Partition>,
-    vertex_membership: BTreeMap<VertexId, BTreeSet<String>>,
-    edge_membership: BTreeMap<EdgeId, BTreeSet<String>>,
-    label_registries: BTreeMap<String, GraphLabelRegistry>,
+    vertices: NativeMap<VertexId, Vertex>,
+    edges: NativeMap<EdgeId, Edge>,
+    graphs: NativeMap<String, Partition>,
+    vertex_membership: NativeMap<VertexId, NativeSet<String>>,
+    edge_membership: NativeMap<EdgeId, NativeSet<String>>,
+    label_registries: NativeMap<String, NativeLabels>,
     next_vertex_id: VertexId,
     next_edge_id: EdgeId,
 }
 
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 mod tests;

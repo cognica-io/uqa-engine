@@ -8,7 +8,7 @@ use super::*;
 
 fn build_basic_graph() -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.add_vertex(Vertex::new(1, "person"), "g").unwrap();
     store.add_vertex(Vertex::new(2, "person"), "g").unwrap();
     store.add_vertex(Vertex::new(3, "company"), "g").unwrap();
@@ -44,8 +44,8 @@ fn missing_query_vertex_is_not_an_empty_neighborhood() {
 #[test]
 fn edge_endpoints_must_belong_to_the_target_graph() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("left");
-    store.create_graph("right");
+    store.create_graph("left").unwrap();
+    store.create_graph("right").unwrap();
     store.add_vertex(Vertex::new(1, "v"), "left").unwrap();
     store.add_vertex(Vertex::new(2, "v"), "right").unwrap();
 
@@ -114,7 +114,7 @@ fn neighbors_both_dedupes() {
 #[test]
 fn drop_graph_releases_orphan_records() {
     let mut store = build_basic_graph();
-    store.drop_graph("g");
+    store.drop_graph("g").unwrap();
     assert!(store.get_vertex(1).is_none());
     assert!(store.get_edge(10).is_none());
     assert!(!store.has_graph("g"));
@@ -123,13 +123,13 @@ fn drop_graph_releases_orphan_records() {
 #[test]
 fn membership_tracks_multiple_graphs() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("a");
-    store.create_graph("b");
+    store.create_graph("a").unwrap();
+    store.create_graph("b").unwrap();
     store.add_vertex(Vertex::new(1, "node"), "a").unwrap();
     store.add_vertex(Vertex::new(1, "node"), "b").unwrap();
     let mship = store.vertex_graphs(1);
     assert!(mship.contains("a") && mship.contains("b"));
-    store.drop_graph("a");
+    store.drop_graph("a").unwrap();
     // Vertex 1 still belongs to "b", so it must survive.
     assert!(store.get_vertex(1).is_some());
     assert_eq!(
@@ -141,8 +141,8 @@ fn membership_tracks_multiple_graphs() {
 #[test]
 fn graph_algebra_union_intersect_difference() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g1");
-    store.create_graph("g2");
+    store.create_graph("g1").unwrap();
+    store.create_graph("g2").unwrap();
     store.add_vertex(Vertex::new(1, "v"), "g1").unwrap();
     store.add_vertex(Vertex::new(2, "v"), "g1").unwrap();
     store.add_vertex(Vertex::new(2, "v"), "g2").unwrap();
@@ -176,7 +176,7 @@ fn graph_algebra_union_intersect_difference() {
 #[test]
 fn next_id_advances() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     assert_eq!(store.next_vertex_id().unwrap(), 1);
     assert_eq!(store.next_vertex_id().unwrap(), 2);
     assert_eq!(store.next_edge_id().unwrap(), 1);
@@ -187,7 +187,7 @@ fn next_id_advances() {
 #[test]
 fn allocate_ids_follow_age_graphid_scheme() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     // First user vertex label -> label id 3, sequence 1.
     assert_eq!(
         store.allocate_vertex_id("Person", "g").unwrap(),
@@ -226,7 +226,7 @@ fn allocate_ids_follow_age_graphid_scheme() {
 #[test]
 fn label_registry_rebuild_from_ids_self_heals() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store
         .add_vertex(Vertex::new(make_graphid(3, 7).unwrap(), "Person"), "g")
         .unwrap();
@@ -241,7 +241,7 @@ fn label_registry_rebuild_from_ids_self_heals() {
             "g",
         )
         .unwrap();
-    store.rebuild_label_registry_from_ids("g");
+    store.rebuild_label_registry_from_ids("g").unwrap();
     // New allocations continue after the observed watermarks.
     assert_eq!(
         store.allocate_vertex_id("Person", "g").unwrap(),
@@ -261,15 +261,15 @@ fn label_registry_rebuild_from_ids_self_heals() {
 #[test]
 fn label_registry_survives_round_trip_via_import() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.allocate_vertex_id("Person", "g").unwrap();
     let registry = store.label_registry("g");
     let json = serde_json::to_string(&registry).unwrap();
     let restored: GraphLabelRegistry = serde_json::from_str(&json).unwrap();
 
     let mut fresh = MemoryGraphStore::new();
-    fresh.create_graph("g");
-    fresh.import_label_registry("g", &restored);
+    fresh.create_graph("g").unwrap();
+    fresh.import_label_registry("g", &restored).unwrap();
     assert_eq!(
         fresh.allocate_vertex_id("Person", "g").unwrap(),
         make_graphid(3, 2).unwrap()
@@ -279,10 +279,10 @@ fn label_registry_survives_round_trip_via_import() {
 #[test]
 fn drop_graph_resets_label_registry() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let first = store.allocate_vertex_id("Person", "g").unwrap();
-    store.drop_graph("g");
-    store.create_graph("g");
+    store.drop_graph("g").unwrap();
+    store.create_graph("g").unwrap();
     assert_eq!(store.allocate_vertex_id("Person", "g").unwrap(), first);
 }
 
@@ -300,7 +300,7 @@ fn graph_id_allocation_rejects_missing_graph_and_exhaustion() {
 #[test]
 fn label_kinds_are_recorded_and_enforced_like_age() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.allocate_vertex_id("Person", "g").unwrap();
     store.allocate_edge_id("KNOWS", "g").unwrap();
     assert_eq!(
@@ -331,7 +331,7 @@ fn label_kinds_are_recorded_and_enforced_like_age() {
 #[test]
 fn label_registry_lists_default_labels_first_then_user_labels_by_id() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store.allocate_vertex_id("Zeta", "g").unwrap();
     store.allocate_edge_id("Alpha", "g").unwrap();
     assert_eq!(
@@ -384,7 +384,7 @@ fn label_registry_lists_default_labels_first_then_user_labels_by_id() {
 #[test]
 fn drop_label_removes_entities_and_releases_the_label() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let a = store.allocate_vertex_id("Person", "g").unwrap();
     let b = store.allocate_vertex_id("Person", "g").unwrap();
     let c = store.allocate_vertex_id("City", "g").unwrap();
@@ -442,7 +442,7 @@ fn drop_label_removes_entities_and_releases_the_label() {
 #[test]
 fn default_label_drop_restrict_state_survives_round_trip_and_graph_lifecycle() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let a = store.allocate_vertex_id("", "g").unwrap();
     let b = store.allocate_vertex_id("", "g").unwrap();
     store.add_vertex(Vertex::new(a, ""), "g").unwrap();
@@ -499,8 +499,8 @@ fn default_label_drop_restrict_state_survives_round_trip_and_graph_lifecycle() {
     let json = serde_json::to_string(&registry).unwrap();
     let restored: GraphLabelRegistry = serde_json::from_str(&json).unwrap();
     let mut reopened = MemoryGraphStore::new();
-    reopened.create_graph("g");
-    reopened.import_label_registry("g", &restored);
+    reopened.create_graph("g").unwrap();
+    reopened.import_label_registry("g", &restored).unwrap();
     assert_eq!(
         reopened.graph_label_kind("g", "_ag_label_vertex").unwrap(),
         None
@@ -512,8 +512,8 @@ fn default_label_drop_restrict_state_survives_round_trip_and_graph_lifecycle() {
             .unwrap(),
         None
     );
-    reopened.drop_graph("renamed");
-    reopened.create_graph("renamed");
+    reopened.drop_graph("renamed").unwrap();
+    reopened.create_graph("renamed").unwrap();
     assert_eq!(
         reopened
             .graph_label_kind("renamed", "_ag_label_vertex")
@@ -529,7 +529,7 @@ fn default_label_drop_is_restricted_by_same_kind_user_labels_only() {
         (LabelKind::Edge, "_ag_label_edge", "KNOWS"),
     ] {
         let mut store = MemoryGraphStore::new();
-        store.create_graph("g");
+        store.create_graph("g").unwrap();
         store.create_label("g", child_label, kind).unwrap();
         let error = store.drop_label("g", default_label).unwrap_err();
         assert!(
@@ -548,8 +548,8 @@ fn default_label_drop_is_restricted_by_same_kind_user_labels_only() {
 #[test]
 fn rename_graph_moves_partition_membership_and_registry() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("old");
-    store.create_graph("other");
+    store.create_graph("old").unwrap();
+    store.create_graph("other").unwrap();
     let a = store.allocate_vertex_id("Person", "old").unwrap();
     store.add_vertex(Vertex::new(a, "Person"), "old").unwrap();
     assert!(matches!(
@@ -581,7 +581,7 @@ fn rename_graph_moves_partition_membership_and_registry() {
 #[test]
 fn legacy_registries_without_kinds_learn_them_from_entities() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     store
         .add_vertex(Vertex::new(make_graphid(3, 1).unwrap(), "Person"), "g")
         .unwrap();
@@ -601,8 +601,8 @@ fn legacy_registries_without_kinds_learn_them_from_entities() {
     )
     .unwrap();
     assert!(legacy.kinds.is_empty());
-    store.import_label_registry("g", &legacy);
-    store.rebuild_label_registry_from_ids("g");
+    store.import_label_registry("g", &legacy).unwrap();
+    store.rebuild_label_registry_from_ids("g").unwrap();
     assert_eq!(
         store.graph_label_kind("g", "Person").unwrap(),
         Some(LabelKind::Vertex)
@@ -616,7 +616,7 @@ fn legacy_registries_without_kinds_learn_them_from_entities() {
 #[test]
 fn reserved_label_names_resolve_to_the_default_labels() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     assert_eq!(
         store.allocate_vertex_id("_ag_label_vertex", "g").unwrap(),
         make_graphid(1, 1).unwrap()
@@ -652,12 +652,12 @@ fn reserved_label_names_resolve_to_the_default_labels() {
 #[test]
 fn legacy_labels_without_kind_and_entities_report_consistently() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let legacy: GraphLabelRegistry =
         serde_json::from_str(r#"{"labels":{"Ghost":3},"sequences":{"3":2},"next_label_id":4}"#)
             .unwrap();
-    store.import_label_registry("g", &legacy);
-    store.rebuild_label_registry_from_ids("g");
+    store.import_label_registry("g", &legacy).unwrap();
+    store.rebuild_label_registry_from_ids("g").unwrap();
     // No entity can tell the kind, so the catalog and the drop path agree
     // on the vertex default until the label is used again.
     assert_eq!(

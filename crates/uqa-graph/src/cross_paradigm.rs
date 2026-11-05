@@ -81,7 +81,7 @@ impl ToGraph {
 
     pub fn execute(self) -> CrossParadigmResult<MemoryGraphStore> {
         let mut graph = MemoryGraphStore::new();
-        graph.create_graph("default");
+        graph.create_graph("default")?;
         for doc in &self.documents {
             let mut props: BTreeMap<String, Value> = doc.fields.clone();
             props.remove(&self.edge_field);
@@ -219,7 +219,7 @@ impl TextToGraph {
         }
 
         let mut graph = MemoryGraphStore::new();
-        graph.create_graph("default");
+        graph.create_graph("default")?;
         let mut token_to_id: BTreeMap<String, VertexId> = BTreeMap::new();
         for (idx, token) in token_set.iter().enumerate() {
             let vid = VertexId::try_from(idx)
