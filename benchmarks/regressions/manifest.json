@@ -4,6 +4,53 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "owned_provider_image_admits_before_capture_and_retires_with_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/owned/tests.rs",
+      "capability": "Admitted common provider image ownership",
+      "workload": "Deny the exact concrete header allowance, cancel before and during capture, and move the successful image to another thread before cancellation and destruction.",
+      "invariant": "No denied capture closure runs; a captured source keeps its original cancellation and exact heap charge through destruction, and all failed or retired owners release their allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "provider_without_image_mapping_rejects_capture_without_opening_a_session",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/owned/tests.rs",
+      "capability": "Explicit backup mapping capability",
+      "workload": "Invoke image capture through an unsupported dynamic provider with an ordinary session factory, then repeat under prior cancellation.",
+      "invariant": "No ordinary session opens or inferred mapping escapes; unsupported and cancelled outcomes remain typed with no retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "common_provider_images_restore_engine_state_and_independent_incremental_roots",
+      "cases": 9,
+      "source": "crates/uqa-engine/tests/storage/backup_provider.rs",
+      "capability": "Common provider images over actual Engine state",
+      "workload": "Capture actual native SQLite and SQLite KV engines in four file modes each and redb beside private writes; commit an independent writer between source reads; retain a later incremental source after Engine/provider retirement; remove the source and parent root before fresh restore and reopen.",
+      "invariant": "Committed SQL/catalog/security/sequence/unlogged/materialized/text/vector/graph observations retain their selected values and identities; private and temporary state is absent, unchanged units are reused with truthful payload reads, and new target histories preserve later writes.",
+      "case_names": [
+        "case_1_native_plain",
+        "case_2_native_encrypted",
+        "case_3_native_compressed",
+        "case_4_native_compressed_encrypted",
+        "case_5_kv_plain",
+        "case_6_kv_encrypted",
+        "case_7_kv_compressed",
+        "case_8_kv_compressed_encrypted",
+        "case_9_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "selected_sources_ignore_unselected_writes_retirement_and_failed_reads",
       "cases": 1,
       "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",

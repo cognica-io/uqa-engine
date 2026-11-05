@@ -40,7 +40,9 @@ pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, Inventory
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
-pub use source::{BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit};
+pub use source::{
+    BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, OwnedBackupImage,
+};
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,
     NamespaceId, ObjectId, ObjectSpan, ProtectionId, RepositoryId, RestoreId, SnapshotId,

@@ -77,6 +77,15 @@ impl SQLiteStorageProvider {
 }
 
 impl PersistentStorageProvider for SQLiteStorageProvider {
+    fn capture_backup_image(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<uqa_storage::backup::OwnedBackupImage> {
+        uqa_storage::backup::OwnedBackupImage::capture(control, || {
+            SQLiteStorageProvider::capture_backup_image(self, control)
+        })
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.connection.auxiliary_encryption_key()
     }

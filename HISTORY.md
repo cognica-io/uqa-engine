@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Expose the existing native SQLite, SQLite Key/Value and redb committed image streams through the common persistent-provider interface. The independently owned stream retains its original cut, cancellation and memory allowance after the provider or Engine closes; unsupported providers reject capture without opening a session. Public Engine backup jobs and complete memory-image restoration remain under implementation.
+
 - Retain materialized memory path indexes and their registration catalogs as immutable native generations. Captures admit cached complete footprints without copying label sequences or evaluated pairs; selected children preserve their original memory and cancellation controls after source closure. Failed registration admission preserves prior path definitions and materializations across all storage providers. Complete Engine backup remains under implementation.
 
 - Retain named and historical field analyzer catalogs as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors, dictionaries or table membership, and does not retain executable pipelines or decoded models. Temporary field bindings remain outside the durable encoded root; failed native publication preserves previous catalogs and stored definitions. Complete Engine backup integration remains in progress.

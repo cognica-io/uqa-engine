@@ -6,6 +6,9 @@
 
 use super::{BackupCut, BackupResult, UnitAddress, UnitKind};
 
+mod owned;
+pub use owned::OwnedBackupImage;
+
 pub struct BackupSourceUnit<'a> {
     pub address: UnitAddress<'a>,
     pub kind: UnitKind,
