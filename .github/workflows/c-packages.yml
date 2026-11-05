@@ -98,7 +98,7 @@ jobs:
         with:
           shared-key: c-distribution
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - name: Build and install the C distribution
         # Native Perl must remain ahead of Git Bash for Windows dependencies.
         run: python scripts/build-c-bindings.py --target '${{ matrix.target }}' --profile release --prefix '${{ runner.temp }}/uqa-c-package/installed' --build-directory '${{ runner.temp }}/uqa-c-package/build'

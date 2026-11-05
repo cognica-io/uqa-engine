@@ -179,6 +179,40 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("performance-checks-${{ inputs.os }}", build)
         self.assertNotIn("actions/download-artifact", build)
 
+    def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
+        main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
+                     "performance-platform.yml", "workspace-tests.yml"}
+        checked = 0
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            source = path.read_text(encoding="utf-8")
+            if "jobs:\n" not in source:
+                continue
+            for job in re.split(r"(?m)(?=^  [A-Za-z0-9_-]+:\n)", source.split("jobs:\n", 1)[1]):
+                if "name: Limit shared macOS worker parallelism" not in job:
+                    continue
+                cache = re.search(r"(?m)^      - uses: Swatinem/rust-cache@v2\n((?:        .*\n|\n)*)", job)
+                if cache is None:
+                    continue
+                condition = re.search(r"(?m)^          save-if: \$\{\{ (.*) \}\}$", cache[1])
+                self.assertIsNotNone(condition, f"{path.name}: cache saving invokes sudo on macOS")
+                checked += 1
+                for operating_system in ("Linux", "Windows", "macOS"):
+                    for environment in ("github-hosted", "self-hosted"):
+                        for ref in ("refs/heads/main", "refs/pull/42/merge", "refs/tags/v1.2.3"):
+                            expression = condition[1]
+                            for key, value in (("runner.os", operating_system),
+                                               ("runner.environment", environment), ("github.ref", ref)):
+                                expression = expression.replace(key, repr(value))
+                            expression = expression.replace("&&", "and").replace("||", "or")
+                            allowed = eval(expression, {"__builtins__": {}}, {})
+                            expected = not (operating_system == "macOS" and environment == "self-hosted")
+                            if path.name in main_only:
+                                expected = expected and ref == "refs/heads/main"
+                            with self.subTest(workflow=path.name, job=job.splitlines()[0],
+                                              os=operating_system, environment=environment, ref=ref):
+                                self.assertIs(allowed, expected)
+        self.assertEqual(checked, 13)
+
     def test_self_hosted_workers_use_distinct_toolchains_and_cargo_homes(self) -> None:
         scripts = []
         for path in (ROOT / ".github/workflows").glob("*.yml"):
@@ -281,7 +315,12 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
 
         cache_count = self.workflow.count("      - uses: Swatinem/rust-cache@v2\n")
         self.assertGreater(cache_count, 0)
-        self.assertEqual(self.workflow.count(cache_step), cache_count)
+        hosted_cache_step = cache_step.replace(
+            "github.ref == 'refs/heads/main'",
+            "(runner.os != 'macOS' || runner.environment != 'self-hosted') && "
+            "github.ref == 'refs/heads/main'",
+        )
+        self.assertEqual(self.workflow.count(cache_step) + self.workflow.count(hosted_cache_step), cache_count)
 
 
 class PremergeCITest(unittest.TestCase):

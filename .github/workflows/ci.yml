@@ -140,7 +140,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Lint morphology bundle tools and data
         run: cargo clippy -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --all-targets --locked -- -D warnings
@@ -369,7 +369,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - name: Lint transaction owners and consumers
         run: >-
           cargo clippy --locked

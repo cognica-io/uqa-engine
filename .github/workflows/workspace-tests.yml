@@ -47,7 +47,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
       - name: Build workspace tests once
         shell: bash
@@ -115,7 +115,7 @@ jobs:
         with:
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - name: Test morphology bundle tools and embedded models
         run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
       - name: Verify independent analyzer features

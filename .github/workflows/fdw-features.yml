@@ -91,7 +91,7 @@ jobs:
           shared-key: fdw-${{ matrix.configuration }}
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - run: cargo fetch --locked
       - name: Verify native, development and browser dependency isolation
         if: matrix.configuration == 'memory'

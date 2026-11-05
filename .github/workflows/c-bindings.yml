@@ -85,7 +85,7 @@ jobs:
         with:
           shared-key: c-${{ matrix.group }}
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - name: Execute every grouped configuration on all four storage providers
         run: python3 scripts/verify-c-configurations.py --group '${{ matrix.group }}'
 
