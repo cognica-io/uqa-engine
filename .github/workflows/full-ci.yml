@@ -126,7 +126,9 @@ jobs:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
         shell: bash
-        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -195,7 +197,9 @@ jobs:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
         shell: bash
-        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk

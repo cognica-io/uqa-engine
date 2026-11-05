@@ -22,16 +22,18 @@ env:
 
 jobs:
   build:
-    name: Build test archive and check documentation
+    name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 90 || 60 }}
     outputs:
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
         shell: bash
-        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -57,6 +59,21 @@ jobs:
         run: |
           archive_checksum="$(shasum -a 256 "$RUNNER_TEMP/uqa-tests.tar.zst")"
           echo "sha256=${archive_checksum%% *}" >> "$GITHUB_OUTPUT"
+      - name: Run every macOS workspace test on its build worker
+        if: runner.os == 'macOS'
+        run: >-
+          cargo nextest run --profile ci
+          --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
+          --extract-to "$GITHUB_WORKSPACE" --extract-overwrite
+          --workspace-remap "$GITHUB_WORKSPACE"
+      - name: Retain macOS workspace test results
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-results-${{ inputs.os }}
+          path: target/nextest/ci/junit.xml
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-tests-${{ inputs.os }}
@@ -80,7 +97,9 @@ jobs:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
         shell: bash
-        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -117,6 +136,7 @@ jobs:
   test:
     name: Test shard ${{ matrix.shard }}/8
     needs: build
+    if: inputs.os != 'macos-26-arm64'
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 25
     strategy:
@@ -127,7 +147,9 @@ jobs:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
         shell: bash
-        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
