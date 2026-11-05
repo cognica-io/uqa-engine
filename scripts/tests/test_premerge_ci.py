@@ -144,6 +144,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("shard: [1, 2, 3, 4, 5, 6, 7, 8]", workspace)
         shard = workspace.split("  test:\n", 1)[1]
         self.assertIn("needs: build", shard)
+        self.assertIn("if: inputs.os != 'macos-26-arm64'", shard)
         self.assertIn("--archive-file", shard)
         self.assertNotIn("cargo test", shard)
         self.assertIn("--workspace --locked --doc --exclude uqa-node --exclude uqa-ffi", workspace)
@@ -156,6 +157,56 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("retries = 0", profile)
         self.assertIn("terminate-after = 10", profile)
         self.assertNotIn('on-timeout = "pass"', profile)
+
+    def test_macos_runs_complete_local_archives_before_reporting_success(self) -> None:
+        workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
+        build = workspace.split("  build:\n", 1)[1].split("  features:\n", 1)[0]
+        run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: runner.os == 'macOS'", run)
+        self.assertIn("cargo nextest run --profile ci", run)
+        self.assertIn('--archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"', run)
+        self.assertIn("--extract-overwrite", run)
+        for option in ("--partition", "--filter", "--skip", "continue-on-error"):
+            self.assertNotIn(option, run)
+        self.assertIn("workspace-results-${{ inputs.os }}", build)
+        self.assertIn("target/nextest/ci/junit.xml", build)
+        self.assertNotIn("actions/download-artifact", build)
+        performance = (ROOT / ".github/workflows/performance-platform.yml").read_text(encoding="utf-8")
+        build, downstream = performance.split("  deterministic-work:\n", 1)
+        self.assertIn("if: inputs.os != 'macos-26-arm64'", downstream)
+        self.assertIn('scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"', build)
+        self.assertIn("row_claim_contention --verify > target/performance-checks/claim-contention.json", build)
+        self.assertIn("performance-checks-${{ inputs.os }}", build)
+        self.assertNotIn("actions/download-artifact", build)
+
+    def test_self_hosted_workers_use_distinct_toolchain_installations(self) -> None:
+        scripts = []
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            source = path.read_text(encoding="utf-8")
+            for block in re.findall(r"(?m)^      - name: Limit shared macOS worker parallelism\n((?:        .*\n|\n)*)", source):
+                self.assertIn("if: runner.os == 'macOS' && runner.environment == 'self-hosted'", block)
+                script = block.split("        run: |\n", 1)[1]
+                scripts.append(textwrap.dedent(script))
+        self.assertEqual(len(scripts), 16)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            for index, script in enumerate(scripts):
+                installations = []
+                for worker in ("worker one", "worker two"):
+                    output = directory / f"{index}-{worker}.env"
+                    tools = directory / worker / "tools"
+                    environment = dict(os.environ, RUNNER_TOOL_CACHE=str(tools),
+                                       GITHUB_ENV=str(output), RUSTUP_HOME="/host/toolchains")
+                    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script],
+                                            env=environment, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                    self.assertEqual(values["RUSTUP_HOME"], str(tools / "rustup"))
+                    self.assertEqual(values["CARGO_BUILD_JOBS"], "4")
+                    self.assertEqual(values["RUST_TEST_THREADS"], "4")
+                    self.assertEqual(values["NEXTEST_TEST_THREADS"], "4")
+                    installations.append(values["RUSTUP_HOME"])
+                self.assertNotEqual(*installations)
 
     def test_downloaded_archive_must_match_the_original_builder_bytes(self) -> None:
         workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
