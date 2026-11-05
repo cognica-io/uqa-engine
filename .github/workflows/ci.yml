@@ -85,6 +85,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   CARGO_PROFILE_TEST_DEBUG: "0"
