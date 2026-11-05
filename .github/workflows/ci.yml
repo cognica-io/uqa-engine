@@ -124,7 +124,9 @@ jobs:
         shell: bash
         run: |
           printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
-            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -351,7 +353,9 @@ jobs:
         shell: bash
         run: |
           printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
-            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" >> "$GITHUB_ENV"
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

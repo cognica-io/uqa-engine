@@ -179,7 +179,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("performance-checks-${{ inputs.os }}", build)
         self.assertNotIn("actions/download-artifact", build)
 
-    def test_self_hosted_workers_use_distinct_toolchain_installations(self) -> None:
+    def test_self_hosted_workers_use_distinct_toolchains_and_cargo_homes(self) -> None:
         scripts = []
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             source = path.read_text(encoding="utf-8")
@@ -194,18 +194,23 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                 installations = []
                 for worker in ("worker one", "worker two"):
                     output = directory / f"{index}-{worker}.env"
+                    paths = directory / f"{index}-{worker}.path"
                     tools = directory / worker / "tools"
                     environment = dict(os.environ, RUNNER_TOOL_CACHE=str(tools),
-                                       GITHUB_ENV=str(output), RUSTUP_HOME="/host/toolchains")
+                                       GITHUB_ENV=str(output), GITHUB_PATH=str(paths),
+                                       RUSTUP_HOME="/host/toolchains", CARGO_HOME="/host/cargo")
                     result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script],
                                             env=environment, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     values = dict(line.split("=", 1) for line in output.read_text().splitlines())
                     self.assertEqual(values["RUSTUP_HOME"], str(tools / "rustup"))
+                    self.assertEqual(values["CARGO_HOME"], str(tools / "cargo"))
+                    self.assertEqual(paths.read_text().splitlines(), [str(tools / "cargo/bin")])
+                    self.assertTrue((tools / "cargo/bin").is_dir())
                     self.assertEqual(values["CARGO_BUILD_JOBS"], "4")
                     self.assertEqual(values["RUST_TEST_THREADS"], "4")
                     self.assertEqual(values["NEXTEST_TEST_THREADS"], "4")
-                    installations.append(values["RUSTUP_HOME"])
+                    installations.append((values["RUSTUP_HOME"], values["CARGO_HOME"]))
                 self.assertNotEqual(*installations)
 
     def test_downloaded_archive_must_match_the_original_builder_bytes(self) -> None:
