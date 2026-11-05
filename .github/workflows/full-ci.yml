@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   # Full debuginfo for every workspace test binary exhausts the Ubuntu runner's

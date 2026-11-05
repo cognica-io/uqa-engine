@@ -22,6 +22,7 @@ permissions:
   contents: read
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
 

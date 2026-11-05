@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   RUSTFLAGS: ${{ inputs.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
   CARGO_PROFILE_TEST_DEBUG: "0"
