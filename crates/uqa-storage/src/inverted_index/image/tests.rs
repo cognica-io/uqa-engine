@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod stream;
 use crate::{
     inverted_index::{AnalyzerBindings, AnalyzerPhase, RetainedInvertedIndexBuilder},
     memory_capture::MemoryCaptureRegistry,

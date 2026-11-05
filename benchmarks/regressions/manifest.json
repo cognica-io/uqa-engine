@@ -2,6 +2,58 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "text_image_reader_preserves_independent_wire_fixtures_across_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/stream.rs",
+      "capability": "Resumable evaluated-text wire identity",
+      "workload": "Independent raw UTF-16 and duplicate-occurrence fixtures, empty field metadata and one-byte through 32 KiB caller buffers.",
+      "invariant": "Every output byte matches the independent image, each read emits at most 16 KiB, EOF releases cursor admission and absent documents allocate no cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "text_image_reader_streams_large_raw_terms_without_payload_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/stream.rs",
+      "capability": "Bounded evaluated-text export memory",
+      "workload": "Stream a retained raw UTF-16 term exceeding 2 MiB through 4,093-byte buffers.",
+      "invariant": "Exact output uses less than 16 KiB total export allocation under a 16 KiB job allowance, without copying or reanalyzing term payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "text_image_reader_admission_and_each_cancellation_owner_are_terminal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/stream.rs",
+      "capability": "Evaluated-text cursor admission and cancellation",
+      "workload": "Exact and insufficient cursor budgets, then cancellation of the original source, read-only adapter or invoking reader.",
+      "invariant": "Admission failure and typed cancellation release all cursor memory; failed readers cannot resume or acknowledge EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "text_image_reader_keeps_captured_occurrences_and_statistics_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/stream.rs",
+      "capability": "Retained evaluated-text source identity",
+      "workload": "Capture an actual memory index, replace its source document and retire its source, registry and capture handle before streaming.",
+      "invariant": "The selected image and corpus statistics remain unchanged, while final snapshot retirement releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-graph",
       "kind": "lib",
       "test": "cloned_graph_errors_retain_the_original_typed_provider_cause",

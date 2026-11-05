@@ -50,6 +50,18 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Read one evaluated text image in bounded windows, retaining its exact term and occurrence positions. Unsupported providers reject construction before producing bytes.
+    fn image_document_reader<'a>(
+        &'a self,
+        _doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text image readers are not supported by this backend".into(),
+        ))
+    }
+
     /// Write one evaluated memory text document without analyzing source text or resolving analyzer resources. The enclosing image owns document identity and the referenced analyzer descriptors. Unsupported providers must reject this capability before writing bytes.
     fn write_image_document(
         &self,

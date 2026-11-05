@@ -59,6 +59,18 @@ impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        self.check_inverted_read()?;
+        self.0
+            .image_document_reader(doc_id, control)?
+            .map(|reader| reader.with_source_control(self.2.as_ref(), control))
+            .transpose()
+    }
+
     fn write_image_document(
         &self,
         doc_id: DocId,
