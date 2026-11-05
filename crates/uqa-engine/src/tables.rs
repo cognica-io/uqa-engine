@@ -529,7 +529,7 @@ impl Engine {
             if let Err(err) = self.try_save_table_schema(&table_name, &t) {
                 let mut vectors = t.vector_indexes.write();
                 let mut indexes = vectors.live_mut()?;
-                indexes.remove(&field);
+                indexes.remove(&field)?;
                 if let Some(old) = old {
                     indexes.insert(field, old)?;
                 }

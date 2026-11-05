@@ -20,8 +20,8 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 
 mod failure;
 mod selection;
-pub use selection::MemoryCaptureSources;
 use selection::SelectedSources;
+pub use selection::{MemoryCaptureMember, MemoryCaptureMembership, MemoryCaptureSources};
 #[cfg(test)]
 mod tests;
 

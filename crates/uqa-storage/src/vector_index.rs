@@ -37,7 +37,7 @@ pub(crate) use canonical::{
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     CapturedVectorIndexes, LiveVectorIndexesMut, RetainedVectorIndexesBuilder, VectorIndexSource,
-    VectorIndexes, VectorIndexesIter,
+    VectorIndexes, VectorIndexesIter, VectorSourcePublication,
 };
 pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,

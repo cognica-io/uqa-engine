@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -41922,6 +41922,110 @@
       "capability": "Process-independent repository retention",
       "workload": "Hold reader, capture and prepared leases in separate processes, collect concurrently and terminate each process without Rust cleanup.",
       "invariant": "Removal cannot bypass a live OS lease; pending objects survive collection, process exit releases ownership and prepared images remain recoverable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_membership_capture_has_constant_work_and_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/native/tests.rs",
+      "capability": "Native vector membership capture",
+      "workload": "Capture 1, 64 and 4,096 fields with exact and insufficient independent allowances, then close sources and cancel one captured owner.",
+      "invariant": "Capture allocation counts and bytes are constant below 4 KiB; exact admission succeeds, short admission fails, original cancellation stays independent and final release returns every allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_publication_failure_preserves_membership_and_child_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/native/tests.rs",
+      "capability": "Native vector membership publication",
+      "workload": "Exhaust the native field owner during insert, replacement, removal and whole-collection replacement, then resume successful changes.",
+      "invariant": "Rejected successors preserve field membership and child incarnations; original images remain exact after later successful replacement and removal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_publication_changes_only_the_selected_field_path",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/native/tests.rs",
+      "capability": "Bounded vector field publication",
+      "workload": "Replace one field in a 4,096-field source with an earlier captured generation still retained.",
+      "invariant": "The changed path allocates less than 16 KiB and preserves the original physical image and complete membership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_children_follow_membership_without_reviving_retired_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/native/tests.rs",
+      "capability": "Published vector child eligibility",
+      "workload": "Publish a collection, add/remove fields, retire its parent, mutate the detached collection and attach it through a new incarnation.",
+      "invariant": "Each cut preserves its exact child identities; detached writes charge no excluded cut and retired update addresses cannot revive membership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_child_publication_failure_keeps_live_and_selected_membership_together",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/native/tests.rs",
+      "capability": "Atomic vector source publication",
+      "workload": "Exhaust the publication owner while its vector field owner has remaining allowance, then attempt replacement and removal.",
+      "invariant": "Failed global publication preserves live fields, native admission and the exact selected source set; later successful removal retains the old image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "published_membership_preserves_selected_incarnations_after_retirement_and_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/selection/publication/tests.rs",
+      "capability": "Published memory source incarnations",
+      "workload": "Replace and retire members while original cuts and detached update addresses remain alive.",
+      "invariant": "Original and current cuts select only their matching sources; retired addresses never reinsert sources and excluded writes perform no preservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "published_child_updates_are_atomic_under_admission_domain_and_overlap_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/selection/publication/tests.rs",
+      "capability": "Memory source publication failure isolation",
+      "workload": "Reject underfunded updates/removal, foreign domains, missing predecessors and overlapping source ownership, then publish a valid child replacement.",
+      "invariant": "Every rejection preserves both roots and active update addresses; unchanged source sets need no new admission and successful replacement selects exactly its new child.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "published_selection_snapshot_does_not_visit_members_or_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/selection/publication/tests.rs",
+      "capability": "Bounded published source selection",
+      "workload": "Publish 4,096 independent members, retain the completed selection and register its cut.",
+      "invariant": "Selection snapshot allocates zero bytes; cut registration allocates less than 4 KiB and freezes no source before actual observation or mutation.",
       "case_names": [
         ""
       ]

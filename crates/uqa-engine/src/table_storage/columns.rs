@@ -112,7 +112,7 @@ impl Engine {
                     .map(uqa_storage::VectorIndex::dimensions);
                 if let Some(dimensions) = dimensions {
                     self.prepare_vector_column_rewrite(&table_name, column, dimensions)?;
-                    state.vector_indexes.write().live_mut()?.remove(column);
+                    state.vector_indexes.write().live_mut()?.remove(column)?;
                 }
                 self.try_save_table_schema(&table_name, &state)
             },

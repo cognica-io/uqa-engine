@@ -87,7 +87,13 @@ fn memory_vector_membership_preserves_all_owners_across_replacement_and_source_r
     assert!(control.memory().used() < 4096);
     let key = source.key().unwrap();
     assert!(key.retained(&cut).unwrap().is_none());
-    let detached = source.write().live_mut().unwrap().remove("ivf").unwrap();
+    let detached = source
+        .write()
+        .live_mut()
+        .unwrap()
+        .remove("ivf")
+        .unwrap()
+        .unwrap();
     // A removed index still has a live owner; unpublication must already have preserved its image.
     source
         .write()
@@ -266,7 +272,7 @@ fn memory_vector_membership_rejects_foreign_registration_without_changing_curren
     assert_eq!(source.read()["v"].count().unwrap(), 101);
     // An underfunded archive must not prevent the mutation, retirement or replacement of the source.
     assert!(cut.check().is_err());
-    source.write().live_mut().unwrap().remove("v");
+    source.write().live_mut().unwrap().remove("v").unwrap();
     assert!(source.read().is_empty());
     drop(cut);
     assert_eq!(control.memory().used(), 0);
@@ -387,7 +393,7 @@ fn partial_capture_unwinds_nodes_and_names_when_a_later_field_exceeds_quota() {
 #[test]
 fn retained_collections_reject_mutation_and_preserve_original_cancellation() {
     let mut live = source();
-    live.live_mut().unwrap().remove("z");
+    live.live_mut().unwrap().remove("z").unwrap();
     let control = StorageReadControl::with_limit(64 * 1024);
     let mut retained = VectorIndexes::capture(&live, &control).unwrap();
     assert!(retained.live_mut().is_err());
