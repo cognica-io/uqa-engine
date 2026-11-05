@@ -9,7 +9,10 @@
 use super::{
     active_key, invalid, HNSWIndex, StorageBackendResult, StorageReadControl, MAX_HNSW_LEVEL,
 };
-use crate::vector_index::validate_vector_values_controlled;
+use crate::{
+    hnsw_index::store::VectorRead,
+    vector_index::{validate_vector_components_controlled, validate_vector_dimensions},
+};
 
 pub(super) fn validate(
     index: &HNSWIndex,
@@ -50,16 +53,14 @@ pub(super) fn validate(
             (false, &index.raw_vectors),
             (true, &index.normalized_vectors),
         ] {
-            let vector = map
-                .get_with_memory(id, control.memory())?
-                .ok_or_else(invalid)?;
-            if vector.norm.is_nan()
-                || vector.norm < 0.0
-                || (normalized && vector.norm.to_bits() != 1.0_f32.to_bits())
+            let vector = VectorRead::open(map, id, control)?.ok_or_else(invalid)?;
+            if vector.norm().is_nan()
+                || vector.norm() < 0.0
+                || (normalized && vector.norm().to_bits() != 1.0_f32.to_bits())
             {
                 return Err(invalid());
             }
-            validate_vector_values_controlled(index.dimensions, &vector.values, Some(control))?;
+            validate_coordinates(index.dimensions, &vector, control)?;
         }
     }
     if live != index.active.len() || deleted != index.deleted_count {
@@ -91,4 +92,20 @@ pub(super) fn validate(
         }
     }
     index.validate_controlled(Some(control))
+}
+
+fn validate_coordinates(
+    dimensions: u32,
+    vector: &VectorRead<'_>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    validate_vector_dimensions(dimensions, vector.len())?;
+    let mut values = [0_f32; 1024];
+    let mut offset = 0;
+    while offset < vector.len() {
+        let count = vector.read_values(offset, &mut values, control)?;
+        validate_vector_components_controlled(&values[..count], offset, Some(control))?;
+        offset += count;
+    }
+    control.check()
 }

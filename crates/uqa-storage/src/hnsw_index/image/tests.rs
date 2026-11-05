@@ -216,3 +216,65 @@ fn spilled_graph_images_use_the_invoking_workspace_and_restore_below_corpus_size
     assert_eq!(source_control.memory().used(), 0);
     assert_eq!(target_control.memory().used(), 0);
 }
+
+#[test]
+fn hnsw_images_validate_and_write_spilled_vectors_larger_than_the_invoking_allowance() {
+    let owner = StorageReadControl::with_limit(32 << 20);
+    let dimensions = 1 << 19;
+    let mut index =
+        HNSWIndex::with_memory(dimensions, HNSWIndexParams::default(), owner.memory()).unwrap();
+    index.add(7, vec![-0.0; dimensions as usize]).unwrap();
+    assert!(index.raw_vectors.is_spilled() && index.normalized_vectors.is_spilled());
+    let expected = encode(&index);
+    assert!(expected.len() > 4 << 20);
+    let held = owner.memory().reserve(owner.memory().available()).unwrap();
+    let invoking = StorageReadControl::with_limit(64 << 10);
+    crate::hnsw_index::store::DECODED_VECTOR_FLOATS.set(0);
+    let mut bytes = Vec::new();
+    index.write_image(&mut bytes, &invoking).unwrap();
+    assert_eq!(bytes, expected);
+    assert_eq!(crate::hnsw_index::store::DECODED_VECTOR_FLOATS.get(), 0);
+    assert_eq!(invoking.memory().used(), 0);
+    drop((held, index));
+    assert_eq!(owner.memory().used(), 0);
+}
+
+#[test]
+fn hnsw_coordinate_windows_report_absolute_errors_before_output() {
+    for resident in [0, 1 << 20] {
+        for normalized in [false, true] {
+            let owner = StorageReadControl::with_limit(8 << 20);
+            let mut index =
+                HNSWIndex::with_memory(2048, HNSWIndexParams::default(), owner.memory()).unwrap();
+            index.add(7, vec![1.0; 2048]).unwrap();
+            let id = *index.active.get(active_key(7, 0)).unwrap().unwrap();
+            let mut values = vec![1.0; 2048];
+            values[1500] = f32::NAN;
+            let mut replacement = crate::spill_map::Map::new(owner.memory(), resident);
+            replacement
+                .insert(
+                    u128::from(id),
+                    HNSWVector { values, norm: 1.0 },
+                    Some(&owner),
+                )
+                .unwrap();
+            if normalized {
+                index.normalized_vectors = replacement;
+            } else {
+                index.raw_vectors = replacement;
+            }
+            let invoking = StorageReadControl::with_limit(64 << 10);
+            let mut bytes = Vec::new();
+            let error = index.write_image(&mut bytes, &invoking).unwrap_err();
+            assert!(matches!(
+                error,
+                crate::StorageBackendError::Other(message)
+                    if message == "vector component 1500 must be finite, got NaN"
+            ));
+            assert!(bytes.is_empty());
+            assert_eq!(invoking.memory().used(), 0);
+            drop(index);
+            assert_eq!(owner.memory().used(), 0);
+        }
+    }
+}

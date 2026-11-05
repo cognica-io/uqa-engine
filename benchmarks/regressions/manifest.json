@@ -43210,6 +43210,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resident_removal_prunes_keys_without_changing_retained_generations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests/records.rs",
+      "capability": "Resident ordered removal",
+      "workload": "Remove all but three of 4096 resident keys while retaining the original root.",
+      "invariant": "The selected tree contains exactly the live keys; ordered reads skip no removed positions and the original generation remains unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "denied_resident_removal_keeps_both_roots_and_the_selected_value",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests/records.rs",
+      "capability": "Atomic resident removal admission",
+      "workload": "Exhaust the shared memory allowance and prohibit temporary files before removing a retained key.",
+      "invariant": "Denied removal preserves both roots, values, counts and leases; released admission permits the same removal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "spilled_record_windows_preserve_retained_bytes_after_replacement_without_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests/records.rs",
+      "capability": "Retained spill record windows",
+      "workload": "Replace a one-MiB spilled value through a sibling root and read the original with zero spare memory.",
+      "invariant": "Authenticated reads preserve exact retained bytes, cap each window at 4096 bytes and allocate no payload; bounds and cancellation remain enforced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_record_windows_preserve_all_float_bits_without_decoding_spilled_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/store/vector/view/tests.rs",
+      "capability": "Selected vector coordinate windows",
+      "workload": "Read 6000 resident and spilled coordinates through varying windows under exhausted spare admission.",
+      "invariant": "Each read returns at most 1024 coordinates without full decoding or allocation and preserves signed zero, finite extremes and nonfinite bit patterns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_images_validate_and_write_spilled_vectors_larger_than_the_invoking_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "Spilled HNSW image coordinates",
+      "workload": "Write over four MiB of evaluated raw and normalized vectors with a 64-KiB invoking allowance and exhausted source admission.",
+      "invariant": "The existing image bytes are preserved without decoding complete vectors, and source and invoking leases are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_coordinate_windows_report_absolute_errors_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests.rs",
+      "capability": "HNSW coordinate validation order",
+      "workload": "Place a nonfinite coordinate at absolute index 1500 in resident and spilled raw or normalized vectors.",
+      "invariant": "Validation reports the original absolute coordinate diagnostic before writing any image bytes and releases invoking scratch.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

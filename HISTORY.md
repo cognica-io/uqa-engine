@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Complete resumable HNSW validation and Engine memory backup remain under implementation.
+
 - Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.
 
 - Add resumable IVF image validation and output over frozen training generations. Preparation counts coordinate windows and empty membership boundaries, preserves absolute coordinate diagnostics and rejects invalid state before output; captured readers survive live retraining and source retirement without copying complete encoded images.

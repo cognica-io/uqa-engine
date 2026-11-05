@@ -110,18 +110,6 @@ pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> Storag
     Ok(())
 }
 
-pub(crate) fn floats(out: &mut ImageOutput<'_>, values: &[f32]) -> StorageBackendResult<()> {
-    out.count(values.len())?;
-    let mut buffer = [0_u8; 4096];
-    let mut values = values.iter();
-    while !values.as_slice().is_empty() {
-        out.control.check()?;
-        let count = coordinate_bytes(&mut values, &mut buffer)?;
-        out.bytes(&buffer[..count])?;
-    }
-    Ok(())
-}
-
 pub(crate) fn coordinate_bytes(
     values: &mut std::slice::Iter<'_, f32>,
     output: &mut [u8],

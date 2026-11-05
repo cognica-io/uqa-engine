@@ -7,13 +7,14 @@
 //! Complete HNSW images retain topology, exact normalization and pending persistence without graph replay.
 
 use super::{
+    store::VectorRead,
     types::{active_key, HNSWIndex, HNSWNode, HNSWVector},
     MAX_HNSW_LEVEL,
 };
 use crate::{
     image_io::{ImageInput, ImageOutput},
     read_control::StorageReadControl,
-    vector_index::image::{floats, header, invalid, read_floats},
+    vector_index::image::{coordinate_bytes, header, invalid, read_floats},
     StorageBackendResult,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec};
@@ -65,11 +66,8 @@ pub(super) fn write(
         out.count(node.level)?;
         out.bytes(&[u8::from(node.deleted)])?;
         for map in [&index.raw_vectors, &index.normalized_vectors] {
-            let vector = map
-                .get_with_memory(id, control.memory())?
-                .ok_or_else(invalid)?;
-            out.bytes(&vector.norm.to_bits().to_le_bytes())?;
-            floats(&mut out, &vector.values)?;
+            let vector = VectorRead::open(map, id, control)?.ok_or_else(invalid)?;
+            write_vector(&mut out, &vector)?;
         }
         for layer in &node.neighbors {
             out.count(layer.len())?;
@@ -86,6 +84,21 @@ pub(super) fn write(
     }
     control.check()?;
     Ok(out.written)
+}
+
+fn write_vector(out: &mut ImageOutput<'_>, vector: &VectorRead<'_>) -> StorageBackendResult<()> {
+    out.bytes(&vector.norm().to_bits().to_le_bytes())?;
+    out.count(vector.len())?;
+    let mut values = [0_f32; 1024];
+    let mut bytes = [0; 4096];
+    let mut offset = 0;
+    while offset < vector.len() {
+        let count = vector.read_values(offset, &mut values, out.control)?;
+        let length = coordinate_bytes(&mut values[..count].iter(), &mut bytes)?;
+        out.bytes(&bytes[..length])?;
+        offset += count;
+    }
+    out.control.check()
 }
 
 fn flag(input: &mut ImageInput<'_>) -> StorageBackendResult<bool> {
