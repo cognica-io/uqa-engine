@@ -142,12 +142,10 @@ impl BackupOperation<'_> {
         if !matches!(self.state, State::Capturing) {
             return Err(BackupError::Finished);
         }
-        let result = self.capture_image(
-            source,
-            &FileBudget::new(maximum_workspace_bytes),
-            None,
-            control,
-        );
+        let result = (|| {
+            let files = workspace(control, maximum_workspace_bytes)?;
+            self.capture_image(source, &files, None, &control.with_file_budget(&files))
+        })();
         if result.is_err() {
             self.state = State::Failed;
         }
@@ -165,7 +163,29 @@ impl BackupOperation<'_> {
     }
 }
 
+fn workspace(control: &StorageReadControl, maximum: u64) -> BackupResult<FileBudget> {
+    match control.file_budget() {
+        Some(files) if files.limit() <= maximum => Ok(files.clone()),
+        Some(_) => Err(BackupError::Invalid(
+            "source temporary limit exceeds capture workspace limit",
+        )),
+        None => Ok(FileBudget::new(maximum)),
+    }
+}
+
 pub(super) fn workspace_error(error: BackupError) -> BackupError {
+    if let BackupError::Limit {
+        resource: "verification workspace",
+        required,
+        limit,
+    } = error
+    {
+        return BackupError::Limit {
+            resource: "capture workspace",
+            required,
+            limit,
+        };
+    }
     if let BackupError::Io(io) = &error {
         if let Some(limit) = io
             .get_ref()

@@ -82,17 +82,13 @@ impl LocalRepository {
         let memory = control
             .memory()
             .reserve(size_of::<BackupImageCapture<'_, S>>())?;
+        let files = super::workspace(control, maximum_workspace_bytes)?;
+        let control = control.with_file_budget(&files);
         let mut operation =
-            self.begin_backup(source.cut(), parent, maximum_encoded_bytes, control)?;
+            self.begin_backup(source.cut(), parent, maximum_encoded_bytes, &control)?;
         operation.state = State::Imaging;
-        let machine = Machine::new(
-            &operation,
-            source,
-            &FileBudget::new(maximum_workspace_bytes),
-            None,
-            control,
-        )
-        .map_err(workspace_error)?;
+        let machine =
+            Machine::new(&operation, source, &files, None, &control).map_err(workspace_error)?;
         let progress = machine.progress();
         Ok(BackupImageCapture {
             machine: Some(machine),

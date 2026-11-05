@@ -30,6 +30,13 @@ impl VectorIndex for HNSWIndex {
         super::image::write(self, output, control)
     }
 
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        super::image::reader(self, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self
             .active

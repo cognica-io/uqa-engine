@@ -11,6 +11,9 @@ use crate::hnsw_index::types::HNSWNode;
 use crate::StorageBackendResult;
 use uqa_core::memory::MemoryError;
 
+mod view;
+pub(in crate::hnsw_index) use view::NodeRead;
+
 impl Record for HNSWNode {
     fn memory_bytes(&self) -> StorageBackendResult<usize> {
         let mut bytes = size_of::<Self>()

@@ -91,16 +91,6 @@ pub(crate) fn boxed<T: VectorIndex + 'static>(
     Budgeted::new(Box::new(value), memory)
 }
 
-pub(crate) fn header(
-    out: &mut ImageOutput<'_>,
-    kind: u8,
-    dimensions: u32,
-) -> StorageBackendResult<()> {
-    out.bytes(MAGIC)?;
-    out.bytes(&[kind])?;
-    out.bytes(&dimensions.to_le_bytes())
-}
-
 pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> StorageBackendResult<()> {
     memory.grow(
         count

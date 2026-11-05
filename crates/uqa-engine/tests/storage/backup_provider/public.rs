@@ -192,6 +192,41 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
 }
 
 #[rstest::rstest]
+#[case::native(Provider::Native)]
+#[case::kv(Provider::KV)]
+#[case::redb(Provider::Redb)]
+fn public_backup_repository_admission_failure_preserves_the_source_transaction(
+    #[case] kind: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = kind.open(&directory.path().join("database"), 0);
+    let engine = Engine::from_persistent_provider(provider).unwrap();
+    let control = StorageReadControl::with_limit(16 << 20);
+    let repository = repository(&directory.path().join("repository"), &control, false);
+    sql(&engine, "CREATE TABLE values_to_keep (value INTEGER)");
+    sql(&engine, "BEGIN");
+    sql(&engine, "INSERT INTO values_to_keep VALUES (42)");
+    let error = engine
+        .begin_backup(&repository, BackupOptions::new(1 << 20, 1), &control)
+        .err()
+        .unwrap();
+    assert!(
+        matches!(error, uqa_sql::SQLError::Host(ref source) if matches!(source.downcast_ref::<BackupError>(), Some(BackupError::Limit { resource: "capture workspace", .. })))
+    );
+    assert_eq!(engine.transaction_depth(), 1);
+    assert_eq!(
+        sql(&engine, "SELECT value FROM values_to_keep")[0]["value"],
+        Value::Int(42)
+    );
+    sql(&engine, "COMMIT");
+    assert_eq!(
+        sql(&engine, "SELECT value FROM values_to_keep")[0]["value"],
+        Value::Int(42)
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
 #[case::native_encrypted(Provider::Native, 1)]
 #[case::native_compressed_encrypted(Provider::Native, 3)]
 #[case::kv_encrypted(Provider::KV, 1)]

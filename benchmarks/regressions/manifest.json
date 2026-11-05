@@ -43288,6 +43288,190 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "topology_record_windows_preserve_layers_and_retained_identity_without_decoding_nodes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/store/node/view/tests.rs",
+      "capability": "Selected HNSW adjacency windows",
+      "workload": "Read resident and spilled retained layers through 1, 7, 512 and 1024 entry buffers after source replacement and under exhausted admission.",
+      "invariant": "Exact metadata and neighbor order survive; each read copies at most 512 identities without heap allocation, and bounds and cancellation remain enforced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "topology_record_views_retain_the_existing_decoder_rejection_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/store/node/view/tests.rs",
+      "capability": "HNSW record diagnostics",
+      "workload": "Compare truncated fields, invalid flags, levels, counts and trailing bytes with the existing private node decoder.",
+      "invariant": "Borrowed spilled views retain the decoder rejection order and exact diagnostics without materializing adjacency lists.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_scratch_keeps_fixed_update_work_beyond_compaction_thresholds",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/scratch/tests.rs",
+      "capability": "Bounded private map updates",
+      "workload": "Replace 257 integer keys through 8192 updates beyond the ordinary spill map compaction threshold.",
+      "invariant": "Each disk update writes at most two authenticated blocks for this fixed trie, values remain exact, and all physical and memory reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_scratch_shares_file_quota_and_retires_denied_or_cancelled_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/scratch/tests.rs",
+      "capability": "Shared scratch quota",
+      "workload": "Use two private sets under one 12-KiB ciphertext allowance, then exhaust file admission and cancel both owners.",
+      "invariant": "Denied insertion preserves existing values and the original root; combined physical usage stays within the shared limit and returns to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_topology_checks_keep_all_nodes_and_fixed_work_under_small_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/validation/tests.rs",
+      "capability": "Scheduled HNSW topology",
+      "workload": "Validate a spilled 512-node chain including tombstones with preparation windows 1, 7 and 129 and a 32-KiB invoking allowance.",
+      "invariant": "All schedules visit the same bounded positions and accept the complete graph without decoding nodes under the exhausted source allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_topology_preserves_identity_edge_and_deleted_reachability_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/validation/tests.rs",
+      "capability": "HNSW structural diagnostic order",
+      "workload": "Combine invalid identity counts, allocation metadata, entry selection, duplicates, degree bounds, missing edges, reciprocity and disconnected tombstones.",
+      "invariant": "The original first structural error remains exact under different schedules; deleted nodes remain part of reachability.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_topology_file_denial_and_cancellation_retire_their_workspace",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/validation/tests.rs",
+      "capability": "HNSW validation retirement",
+      "workload": "Deny temporary overflow and cancel a partially built reachability set.",
+      "invariant": "Both failures stop validation and dropping the owner releases all temporary file and invoking memory usage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_image_continuations_preserve_independent_bytes_and_owned_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests/stream.rs",
+      "capability": "Resumable HNSW image identity",
+      "workload": "Read independent one-node and multilevel tombstone fixtures under varying preparation/output windows and transfer an owned reader to another thread after source loss.",
+      "invariant": "Exact vector bits, adjacency order, allocation metadata and dirty entries survive every schedule; source and invoking leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_image_continuations_stream_large_spilled_vectors_without_output_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests/stream.rs",
+      "capability": "Bounded HNSW coordinate output",
+      "workload": "Prepare and emit over four MiB of spilled coordinates with 64-KiB admission and only 1024 spare workspace bytes during output.",
+      "invariant": "Preparation counts 1024-coordinate windows, reads emit at most 16 KiB, all bytes remain exact and output allocates no heap scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_image_continuations_bound_empty_vectors_and_spilled_topology",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests/stream.rs",
+      "capability": "Bounded empty HNSW images",
+      "workload": "Prepare a spilled 256-node zero-dimensional chain one position at a time and emit through 127-byte windows.",
+      "invariant": "Empty vectors and layers still consume bounded preparation positions; output and temporary-file limits are preserved and leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "hnsw_image_continuations_fail_before_output_and_retire_each_cancellation_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/image/tests/stream.rs",
+      "capability": "HNSW image terminal failure",
+      "workload": "Cancel either captured or invoking controls during preparation or before output and separately inject a self edge.",
+      "invariant": "No invalid image prefix reaches the caller; failed readers release scratch and cannot resume after token reset.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_source_and_repository_share_one_physical_workspace_limit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/workspace.rs",
+      "capability": "Joint source and repository workspace",
+      "workload": "Fill the attached ciphertext allowance with source workspace, then begin repository capture before retiring that source.",
+      "invariant": "Combined admission rejects the extra repository spool without exceeding the quota, removes source files and permits a later empty capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_rejects_a_source_workspace_that_exceeds_its_declared_limit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/workspace.rs",
+      "capability": "Capture workspace admission",
+      "workload": "Start capture with an attached source quota larger than the declared job maximum, then use a compatible maximum.",
+      "invariant": "Incompatible admission drops the supplied source before operation creation; a stricter shared source quota is accepted without replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_backup_repository_admission_failure_preserves_the_source_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Backup repository failure boundary",
+      "workload": "Begin backup with an insufficient repository workspace while an explicit transaction retains a private row on native SQLite, SQLite KV and redb.",
+      "invariant": "The repository error remains typed, the existing transaction remains usable, and its private row can be committed without rollback.",
+      "case_names": [
+        "case_1_native",
+        "case_2_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }

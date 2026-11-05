@@ -11,9 +11,10 @@ use parking_lot::Mutex;
 /// Shared physical byte allowance, including ciphertext slots and framing. A
 /// reservation follows the file owner, including reopened handles and failed
 /// truncation; filesystem allocation metadata is outside this byte count.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct FileBudget(Arc<Mutex<Usage>>);
 
+#[derive(Debug)]
 struct Usage {
     limit: u64,
     used: u64,
@@ -33,13 +34,21 @@ pub(super) struct Reservation {
 }
 
 impl FileBudget {
-    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn new(limit: u64) -> Self {
         Self(Arc::new(Mutex::new(Usage {
             limit,
             used: 0,
             peak: 0,
         })))
+    }
+
+    pub(crate) fn shares_allowance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn limit(&self) -> u64 {
+        self.0.lock().limit
     }
 
     pub(super) fn reserve(&self) -> Reservation {

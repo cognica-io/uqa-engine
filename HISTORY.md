@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Complete resumable HNSW validation and Engine memory backup remain under implementation.
+- Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Resumable HNSW preparation and output preserve node/layer order, structural diagnostics and tombstone reachability with bounded work and shared temporary-file admission. Borrowed, independently owned and synchronous readers use the same codec; complete memory Engine backup remains under implementation.
 
 - Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.
 

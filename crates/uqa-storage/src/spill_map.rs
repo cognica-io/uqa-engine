@@ -8,12 +8,14 @@
 
 mod builder;
 mod disk;
+mod scratch;
 #[cfg(test)]
 mod tests;
 mod workspace;
 
 pub(crate) use builder::Builder;
 pub(crate) use disk::RecordBytes;
+pub(crate) use scratch::Scratch;
 
 use std::{ops::Deref, sync::Arc};
 use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, MemoryReservation};

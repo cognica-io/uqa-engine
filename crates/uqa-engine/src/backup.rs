@@ -61,6 +61,7 @@ impl Engine {
         options: BackupOptions,
         control: &StorageReadControl,
     ) -> Result<BackupJob<'a>, SQLError> {
+        let control = control.with_temporary_limit(options.maximum_workspace_bytes);
         let source = self.with_direct_query_snapshot(
             true,
             |engine| {
@@ -90,7 +91,7 @@ impl Engine {
                 if options.maximum_encoded_bytes == 0 || options.maximum_workspace_bytes == 0 {
                     return Err(start_error(BackupError::Invalid("zero backup job limit")));
                 }
-                provider.capture_backup_image(control).map_err(start_error)
+                provider.capture_backup_image(&control).map_err(start_error)
             },
             std::convert::identity,
         )?;
@@ -100,7 +101,7 @@ impl Engine {
                 options.parent,
                 options.maximum_encoded_bytes,
                 options.maximum_workspace_bytes,
-                control,
+                &control,
             )
             .map_err(start_error)
     }

@@ -13,6 +13,8 @@ use crate::{
     HNSWIndexParams, VectorIndex,
 };
 
+mod stream;
+
 fn fixture() -> Vec<u8> {
     let mut bytes = b"UQAVEC01\x02\x02\x00\x00\x00".to_vec();
     for value in [2_u64, 4, 3, 10, 0xf00d] {
