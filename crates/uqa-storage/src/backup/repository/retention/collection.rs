@@ -250,7 +250,7 @@ impl LocalRepository {
         }
         let mut collection = discovered?;
         if !collection.candidates.is_empty() {
-            self.advance_generation(control)?;
+            self.advance_removal_generation(control)?;
             collection.remove(self, control)?;
         }
         collection.report.workspace_peak_bytes = files.usage().1;

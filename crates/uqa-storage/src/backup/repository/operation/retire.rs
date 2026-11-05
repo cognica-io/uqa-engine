@@ -34,10 +34,13 @@ impl LocalRepository {
         }
         let retired = self.operation_cancelled(&operation, id, control)?;
         if retired && root.is_none() {
+            #[cfg(test)]
+            self.before(super::super::Fault::RemovalMarkerSync)?;
+            directory::synchronize(&operation)?;
             return directory::synchronize(&self.roots);
         }
         control.cancellation().check()?;
-        self.advance_generation(control)?;
+        self.advance_removal_generation(control)?;
         // After retirement starts, cancellation cannot interrupt the durable fence
         // and unlink boundary. I/O errors remain recoverable by this same ID.
         let completion = StorageReadControl::new(control.memory(), &CancellationToken::new());
@@ -50,6 +53,8 @@ impl LocalRepository {
         if !self.operation_cancelled(&operation, id, &completion)? {
             return Err(BackupError::Integrity);
         }
+        #[cfg(test)]
+        self.before(super::super::Fault::RemovalMarkerSync)?;
         directory::synchronize(&operation)?;
         #[cfg(test)]
         self.before(super::super::Fault::RemovalRoot)?;

@@ -348,7 +348,7 @@ impl BackupOperation<'_> {
         )?)?;
         let generation = {
             let _admission = self.repository.admission(control)?;
-            self.repository.generation(control)?
+            self.repository.removal_generation(control)?
         };
         let remaining = FileBudget::new(self.maximum - self.used);
         self.repository
@@ -358,7 +358,7 @@ impl BackupOperation<'_> {
             observe();
         }
         let _admission = self.repository.admission(control)?;
-        if self.repository.generation(control)? != generation {
+        if self.repository.removal_generation(control)? != generation {
             return Err(BackupError::Busy);
         }
         self.repository.advance_generation(control)?;

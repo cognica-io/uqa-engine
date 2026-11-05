@@ -108,7 +108,7 @@ impl LocalRepository {
         directory::synchronize(&repository.roots)?;
         directory::synchronize(&repository.operations)?;
         directory::synchronize(&repository.root)?;
-        repository.advance_generation(control)?;
+        repository.advance_removal_generation(control)?;
         let mut header = directory::create_file(&repository.root, "repository")?;
         let bytes = repository.header();
         write_all(&mut header, &bytes, control)?;
@@ -306,6 +306,7 @@ enum Fault {
     RestoreCancel,
     RestoreRecordSync,
     RemovalMarker,
+    RemovalMarkerSync,
     RemovalRoot,
     RemovalSync,
     CollectionUnlink,

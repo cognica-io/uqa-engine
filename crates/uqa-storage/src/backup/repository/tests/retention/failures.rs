@@ -9,7 +9,12 @@ use std::io::{Seek, SeekFrom, Write};
 
 #[test]
 fn interrupted_root_removal_keeps_discoverable_content_and_resolves_after_reopen() {
-    for fault in [Fault::RemovalMarker, Fault::RemovalRoot, Fault::RemovalSync] {
+    for fault in [
+        Fault::RemovalMarker,
+        Fault::RemovalMarkerSync,
+        Fault::RemovalRoot,
+        Fault::RemovalSync,
+    ] {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("repository");
         let control = control();
@@ -35,6 +40,43 @@ fn interrupted_root_removal_keeps_discoverable_content_and_resolves_after_reopen
         ));
         collect_all(&reopened, &control);
         assert_eq!(objects(&reopened), (0, 0));
+    }
+}
+
+#[test]
+fn retried_unpublished_retirement_requires_a_durable_cancellation_marker() {
+    for prepared in [false, true] {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("repository");
+        let control = control();
+        let repository = repository(&path, &control);
+        let image = Image::new(vec![Unit::record(0, b"not yet published")]);
+        let mut operation = repository
+            .begin_backup(image.cut(), None, 1 << 20, &control)
+            .unwrap();
+        let id = operation.id();
+        if prepared {
+            operation.prepare_image(image, 1 << 20, &control).unwrap();
+        }
+        drop(operation);
+        *repository.fault.lock() = Some(Fault::RemovalMarker);
+        assert!(repository.remove_backup(id, &control).is_err());
+        let reopened = LocalRepository::open(&path, protected(), limits(), &control).unwrap();
+        *reopened.fault.lock() = Some(Fault::RemovalMarkerSync);
+        assert!(reopened.remove_backup(id, &control).is_err());
+        assert!(
+            reopened.fault.lock().is_none(),
+            "retry must reach the marker synchronization boundary"
+        );
+        reopened.remove_backup(id, &control).unwrap();
+        assert!(matches!(
+            reopened.resume_publication(id, 1 << 20, &control),
+            Err(BackupError::Finished)
+        ));
+        assert!(reopened.open_backup(id, &control).is_err());
+        collect_all(&reopened, &control);
+        assert_eq!(objects(&reopened), (0, 0));
+        assert_eq!(control.memory().used(), 0);
     }
 }
 
