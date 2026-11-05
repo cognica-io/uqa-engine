@@ -118,7 +118,7 @@ impl MemoryCaptureSources {
         &self,
         registry: &MemoryCaptureRegistry,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<SelectedSources> {
+    ) -> StorageBackendResult<Budgeted<BudgetedSharedMapSnapshot<u64, ()>>> {
         control.check()?;
         if !Weak::ptr_eq(&self.registry, &Arc::downgrade(&registry.0)) {
             return Err(StorageBackendError::Other(
@@ -126,16 +126,14 @@ impl MemoryCaptureSources {
             ));
         }
         let memory = control.memory().reserve(self.root.structural_bytes()?)?;
-        Ok(SelectedSources::Exact(Budgeted::new(
-            self.root.clone(),
-            memory,
-        )))
+        Ok(Budgeted::new(self.root.clone(), memory))
     }
 }
 
 pub(super) enum SelectedSources {
     All,
     Exact(Budgeted<BudgetedSharedMapSnapshot<u64, ()>>),
+    Union([Budgeted<BudgetedSharedMapSnapshot<u64, ()>>; 2]),
 }
 
 impl SelectedSources {
@@ -143,6 +141,7 @@ impl SelectedSources {
         match self {
             Self::All => true,
             Self::Exact(root) => root.get(&id).is_some(),
+            Self::Union(roots) => roots.iter().any(|root| root.get(&id).is_some()),
         }
     }
 }

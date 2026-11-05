@@ -18880,7 +18880,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -36988,6 +36988,19 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "registry_retirement_releases_registration_without_releasing_captured_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests.rs",
+      "capability": "Independent memory capture registration lifetime",
+      "workload": "Retain an exact captured value while dropping its live source, registry, cut and final value in ownership order.",
+      "invariant": "Registry retirement releases exactly its registration entry; the admitted immutable value remains unchanged after all live owners disappear and its final release returns the remaining allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "memory_capture_source_retirement_observes_original_limits_and_cancellation",
       "cases": 1,
       "source": "crates/uqa-storage/src/memory_capture/tests.rs",
@@ -42028,6 +42041,102 @@
       "invariant": "Selection snapshot allocates zero bytes; cut registration allocates less than 4 KiB and freezes no source before actual observation or mutation.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_union_preserves_overlapping_identities_once_and_excludes_other_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Published source root union",
+      "workload": "Capture overlapping published roots beside a source that cannot freeze, mutate the sources and close all owners.",
+      "invariant": "Both roots select their exact identities; overlapping sources freeze once, excluded writes consume no admission and original values survive source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_union_admits_complete_roots_before_registration_and_captures_in_constant_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/selection.rs",
+      "capability": "Bounded source union admission",
+      "workload": "Register one and 4096-source roots with an independent catalog root; exercise exact, one-byte-short and foreign-domain admission.",
+      "invariant": "Capture allocation is identical below 4 KiB without source freezing; incomplete admission registers no cut and releases both root leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "denied_live_table_publication_preserves_members_and_child_update_addresses",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/publication/tests.rs",
+      "capability": "Engine source publication atomicity",
+      "workload": "Exhaust the live publication allowance before insertion, removal and whole-registry replacement, rename an existing table, then publish child changes and reattach a detached owner.",
+      "invariant": "Failed preparation preserves live membership and child addresses; renaming preserves selection and a newly admitted incarnation includes only its current children.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_registry_restore_token_cannot_admit_memory_source_restoration",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/state/table_membership/publication/tests.rs",
+      "capability": "Catalog restoration ownership",
+      "workload": "Reject a persistent restoration token for a memory registry; restore exact native SQLite, SQLite KV and redb table handles through their persistent owner.",
+      "invariant": "Memory physical undo cannot be replaced with logical handle restoration; provider tokens restore their original registry without new admission.",
+      "case_names": [
+        "case_1",
+        "case_2",
+        "case_3"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_capture_selects_published_roots_without_walking_tables_or_vector_fields",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/live_publication.rs",
+      "capability": "Bounded idle Engine source selection",
+      "workload": "Capture idle engines with one and 128 durable vector-bearing tables beside a one-MiB temporary value.",
+      "invariant": "Allocation is identical below 64 KiB, table sources remain unread and temporary membership is excluded without starting a transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "detached_table_children_cannot_reenter_idle_selection_after_same_name_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/live_publication.rs",
+      "capability": "Retired Engine child exclusion",
+      "workload": "Keep an old table handle after DROP and same-name CREATE; add and remove its vector children after selecting the replacement generation.",
+      "invariant": "Detached writes do not charge or invalidate the current cut, while the original cut preserves the old physical image and the replacement retains its own object identity and rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_publication_tracks_restored_physical_vector_incarnations_and_later_fields",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/live_publication.rs",
+      "capability": "Rollback source incarnation publication",
+      "workload": "Exercise exact, IVF, HNSW and DiskANN images through private writes, DROP/recreate, savepoint and outer rollback, rename and a later vector column.",
+      "invariant": "Idle selection follows the restored physical source keys, keeps byte-identical original images after closure and includes later fields only in later cuts.",
+      "case_names": [
+        "case_1",
+        "case_2",
+        "case_3",
+        "case_4"
       ]
     }
   ]

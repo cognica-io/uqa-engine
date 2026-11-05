@@ -119,7 +119,7 @@ impl MemoryCaptureMembership {
 }
 
 impl MemoryCaptureMember {
-    /// Change one selected child without traversing its containing member. The temporary identities and changed paths use the publication owner's allowance.
+    /// Change one selected child without traversing its containing member. Temporary identities use the publication allowance; each changed root preserves its original construction allowance.
     pub fn replace_source<F: Send + Sync + 'static>(
         &self,
         previous: Option<&crate::memory_capture::MemoryCaptureKey<F>>,

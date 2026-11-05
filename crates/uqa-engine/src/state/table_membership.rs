@@ -24,6 +24,8 @@ use uqa_storage::{
 
 use crate::TableState;
 
+mod publication;
+use publication::Publication;
 mod sources;
 use sources::TableSources;
 mod snapshot;
@@ -36,6 +38,7 @@ mod tests;
 
 type Tables = BTreeMap<RelationIdentity, Arc<TableState>>;
 
+#[derive(Clone)]
 struct Membership {
     sources: BudgetedSharedMap<RelationIdentity, TableSources>,
     payload_bytes: usize,
@@ -136,20 +139,29 @@ pub(crate) struct MembershipSnapshot {
     payload_bytes: usize,
 }
 
-pub(crate) struct TableRegistrySnapshot {
+pub(crate) struct PersistentTableRegistrySnapshot<'a> {
+    registry: &'a TableRegistry,
     live: Arc<Tables>,
-    membership: Option<MembershipSnapshot>,
 }
 
-impl TableRegistrySnapshot {
+impl PersistentTableRegistrySnapshot<'_> {
     pub(crate) fn tables(&self) -> &Tables {
         &self.live
     }
+
+    pub(crate) fn restore(&self) {
+        self.registry.0.write().live.clone_from(&self.live);
+    }
+}
+
+struct MemoryTables {
+    membership: Membership,
+    publication: Publication,
 }
 
 struct State {
     live: Arc<Tables>,
-    membership: Option<Membership>,
+    memory: Option<MemoryTables>,
 }
 
 impl MemoryCaptureSource for State {
@@ -168,10 +180,10 @@ impl MemoryCaptureSource for State {
         identity: &MemoryCaptureIdentity,
     ) -> StorageBackendResult<Self::Frozen> {
         control.check()?;
-        let membership = self.membership.as_ref().ok_or_else(|| {
+        let memory = self.memory.as_ref().ok_or_else(|| {
             StorageBackendError::Other("persistent table membership has no memory capture".into())
         })?;
-        membership.freeze_at(control, identity)
+        memory.membership.freeze_at(control, identity)
     }
 }
 
@@ -211,14 +223,17 @@ impl TableRegistry {
     pub(crate) fn memory(registry: &MemoryCaptureRegistry) -> StorageBackendResult<Self> {
         Ok(Self(registry.cell(State {
             live: Arc::new(Tables::new()),
-            membership: Some(Membership::new()),
+            memory: Some(MemoryTables {
+                membership: Membership::new(),
+                publication: Publication::new(registry, &MemoryBudget::new(usize::MAX))?,
+            }),
         })?))
     }
 
     pub(crate) fn persistent() -> Self {
         Self(MemoryCaptureCell::new(State {
             live: Arc::new(Tables::new()),
-            membership: None,
+            memory: None,
         }))
     }
 
@@ -242,41 +257,63 @@ impl TableRegistry {
 
     pub(crate) fn memory_snapshot(&self) -> Option<MembershipSnapshot> {
         let state = self.0.read();
-        state.membership.as_ref().map(Membership::snapshot)
+        state
+            .memory
+            .as_ref()
+            .map(|memory| memory.membership.snapshot())
     }
 
     pub(crate) fn restore_memory(
         &self,
         snapshot: &MembershipSnapshot,
         tables: impl Iterator<Item = (RelationIdentity, Arc<TableState>)>,
-    ) {
-        // Undo already owns the selected TableState handles. Reconstruct only their live lookup map; the retained membership root is restored without copying source keys or retaining another mutable table map during the transaction.
+    ) -> StorageBackendResult<()> {
+        // The transaction owner restores physical sources before publishing the matching live lookup and exact source groups. Undo retains its original immutable name/metadata root.
         let live = Arc::new(tables.collect());
         let mut state = self.0.write();
-        state
-            .membership
-            .as_mut()
-            .expect("memory registry undo owner")
-            .restore(snapshot);
+        let memory = state.memory.as_ref().expect("memory registry undo owner");
+        let mut membership = memory.membership.clone();
+        membership.restore(snapshot);
+        let publication = memory.publication.replacement(&membership, &live)?;
+        state.memory = Some(MemoryTables {
+            membership,
+            publication,
+        });
         state.live = live;
+        Ok(())
     }
 
-    pub(crate) fn snapshot(&self) -> TableRegistrySnapshot {
+    /// Persistent catalog reloads restore retained logical handles independently of memory's physical undo and source publication.
+    pub(crate) fn persistent_snapshot(
+        &self,
+    ) -> StorageBackendResult<PersistentTableRegistrySnapshot<'_>> {
         let state = self.0.read();
-        TableRegistrySnapshot {
-            live: state.live.clone(),
-            membership: state.membership.as_ref().map(Membership::snapshot),
+        if state.memory.is_some() {
+            return Err(StorageBackendError::Other(
+                "memory table restoration requires physical transaction undo".into(),
+            ));
         }
+        Ok(PersistentTableRegistrySnapshot {
+            registry: self,
+            live: state.live.clone(),
+        })
     }
 
-    pub(crate) fn restore(&self, snapshot: &TableRegistrySnapshot) {
-        let mut state = self.0.write();
-        match (&mut state.membership, &snapshot.membership) {
-            (Some(membership), Some(snapshot)) => membership.restore(snapshot),
-            (None, None) => (),
-            _ => unreachable!("registry snapshots retain their original storage kind"),
-        }
-        state.live.clone_from(&snapshot.live);
+    #[cfg(test)]
+    pub(crate) fn snapshot_sources(
+        &self,
+    ) -> StorageBackendResult<(MemoryCaptureRegistry, SnapshotTableSources)> {
+        let state = self.0.read();
+        let memory = state.memory.as_ref().ok_or_else(|| {
+            StorageBackendError::Other("persistent table membership has no memory capture".into())
+        })?;
+        let registry = memory.publication.registry().clone();
+        let sources = SnapshotTableSources::live(
+            registry.clone(),
+            memory.publication.selected(),
+            self.0.key()?,
+        )?;
+        Ok((registry, sources))
     }
 
     #[cfg(test)]
@@ -316,30 +353,26 @@ impl TableRegistryWrite<'_> {
         relation: RelationIdentity,
         table: Arc<TableState>,
     ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        let membership = self
-            .0
-            .membership
-            .as_ref()
-            .map(|members| members.with_table(&relation, &table))
-            .transpose()?;
-        let previous = Arc::make_mut(&mut self.0.live).insert(relation, table);
-        self.0.membership = membership;
-        Ok(previous)
+        if let Some(memory) = &mut self.0.memory {
+            let membership = memory.membership.with_table(&relation, &table)?;
+            memory
+                .publication
+                .insert(&relation, &table, membership.sources.get(&relation))?;
+            memory.membership = membership;
+        }
+        Ok(Arc::make_mut(&mut self.0.live).insert(relation, table))
     }
 
     pub(crate) fn remove(
         &mut self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        let membership = self
-            .0
-            .membership
-            .as_ref()
-            .map(|members| members.without_table(relation))
-            .transpose()?;
-        let previous = Arc::make_mut(&mut self.0.live).remove(relation);
-        self.0.membership = membership;
-        Ok(previous)
+        if let Some(memory) = &mut self.0.memory {
+            let membership = memory.membership.without_table(relation)?;
+            memory.publication.remove(relation)?;
+            memory.membership = membership;
+        }
+        Ok(Arc::make_mut(&mut self.0.live).remove(relation))
     }
 
     pub(crate) fn rename(
@@ -353,37 +386,33 @@ impl TableRegistryWrite<'_> {
         let Some(table) = self.0.live.get(from).cloned() else {
             return Ok(None);
         };
-        let membership = self
-            .0
-            .membership
-            .as_ref()
-            .map(|members| members.with_rename(from, &to))
-            .transpose()?;
+        if let Some(memory) = &mut self.0.memory {
+            let membership = memory.membership.with_rename(from, &to)?;
+            memory.publication.rename(from, &to);
+            memory.membership = membership;
+        }
         let live = Arc::make_mut(&mut self.0.live);
         live.remove(from);
         live.insert(to, table.clone());
-        self.0.membership = membership;
         Ok(Some(table))
     }
 
     pub(crate) fn replace(&mut self, live: Tables) -> StorageBackendResult<()> {
-        let membership = self
-            .0
-            .membership
-            .as_ref()
-            .map(|previous| {
-                let mut next = Membership {
-                    sources: BudgetedSharedMap::new(previous.sources.budget()),
-                    payload_bytes: 0,
-                };
-                for (relation, table) in &live {
-                    next = next.with_table(relation, table)?;
-                }
-                Ok::<_, StorageBackendError>(next)
-            })
-            .transpose()?;
+        if let Some(memory) = &mut self.0.memory {
+            let mut membership = Membership {
+                sources: BudgetedSharedMap::new(memory.membership.sources.budget()),
+                payload_bytes: 0,
+            };
+            for (relation, table) in &live {
+                membership = membership.with_table(relation, table)?;
+            }
+            let publication = memory.publication.replacement(&membership, &live)?;
+            *memory = MemoryTables {
+                membership,
+                publication,
+            };
+        }
         self.0.live = Arc::new(live);
-        self.0.membership = membership;
         Ok(())
     }
 
@@ -391,7 +420,7 @@ impl TableRegistryWrite<'_> {
         &mut self,
         mut keep: impl FnMut(&RelationIdentity, &Arc<TableState>) -> bool,
     ) -> StorageBackendResult<()> {
-        if self.0.membership.is_none() {
+        if self.0.memory.is_none() {
             Arc::make_mut(&mut self.0.live).retain(|relation, table| keep(relation, table));
             return Ok(());
         }

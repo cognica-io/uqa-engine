@@ -148,9 +148,10 @@ fn table_membership_rollback_restores_the_original_root_without_another_live_map
     {
         let state = engine.storage.tables.0.read();
         let live = state
-            .membership
+            .memory
             .as_ref()
             .unwrap()
+            .membership
             .sources
             .get(&relation("kept"))
             .unwrap();

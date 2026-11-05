@@ -20,6 +20,7 @@ mod events;
 mod graph_oid_roots;
 mod identifiers;
 mod idle;
+mod live_publication;
 mod resources;
 mod role_roots;
 mod routine_roots;

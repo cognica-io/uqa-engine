@@ -138,6 +138,8 @@ fn denied_metadata_capture_does_not_prevent_scoring_parameter_publication() {
 #[test]
 fn committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads() {
     let engine = Engine::new();
+    // Keep registration admission live while checking that later writes do not change the retained payload charge.
+    let registry = engine.storage.memory_capture.as_ref().unwrap().clone();
     let original = format!("{{\"payload\":\"{}\"}}", "x".repeat(4 << 20));
     engine.save_scoring_params("large", &original).unwrap();
     engine
@@ -178,6 +180,7 @@ fn committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads() {
         .unwrap();
     drop(engine);
     assert_eq!(control.memory().used(), retained);
+    drop(registry);
     assert_eq!(saved.get().unwrap().len(), 2);
     assert_eq!(saved.get().unwrap().get("large"), Some(&original));
     assert_eq!(

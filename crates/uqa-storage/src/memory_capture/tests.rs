@@ -114,6 +114,32 @@ fn memory_capture_keys_preserve_retired_sources_without_retaining_live_owners() 
 }
 
 #[test]
+fn registry_retirement_releases_registration_without_releasing_captured_values() {
+    let registry = MemoryCaptureRegistry::new();
+    let cell = scalar(&registry, 7);
+    let key = cell.key().unwrap();
+    let control = StorageReadControl::with_limit(4096);
+    let cut = registry.capture(&control).unwrap();
+    let frozen = cell.captured(&cut).unwrap();
+    let admitted = control.memory().used();
+    drop(cell);
+    assert_eq!(control.memory().used(), admitted);
+    drop(registry);
+    assert!(key.registry.upgrade().is_none());
+    assert_eq!(
+        control.memory().used(),
+        admitted - OwnedMap::<u64, Weak<Capture>>::entry_bytes()
+    );
+    cut.check().unwrap();
+    assert!(Arc::ptr_eq(&frozen, &key.captured(&cut).unwrap()));
+    assert_eq!(**frozen, 7);
+    drop(cut);
+    assert_eq!(control.memory().used(), size_of::<Budgeted<u64>>());
+    drop(frozen);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn memory_capture_source_retirement_observes_original_limits_and_cancellation() {
     let registry = MemoryCaptureRegistry::new();
     let cell = scalar(&registry, 7);

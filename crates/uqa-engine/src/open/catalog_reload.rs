@@ -7,22 +7,27 @@
 //! One publication boundary for the table membership and logical roots of a catalog reload.
 
 use super::{Engine, StorageBackendResult};
-use crate::state::{DurableCatalogSnapshot, TableRegistrySnapshot};
+use crate::state::{DurableCatalogSnapshot, PersistentTableRegistrySnapshot};
 use std::sync::atomic::Ordering;
 
 struct CatalogReload<'a> {
     engine: &'a Engine,
-    tables: TableRegistrySnapshot,
+    tables: Option<PersistentTableRegistrySnapshot<'a>>,
     durable: DurableCatalogSnapshot,
     seen: [u64; 3],
     committed: bool,
 }
 
 impl<'a> CatalogReload<'a> {
-    fn begin(engine: &'a Engine) -> Self {
-        Self {
+    fn begin(engine: &'a Engine) -> StorageBackendResult<Self> {
+        Ok(Self {
             engine,
-            tables: engine.storage.tables.snapshot(),
+            tables: engine
+                .storage
+                .catalog
+                .as_ref()
+                .map(|_| engine.storage.tables.persistent_snapshot())
+                .transpose()?,
             durable: engine.durable.snapshot(),
             seen: [
                 engine.epochs.table_catalog.seen.load(Ordering::Acquire),
@@ -30,7 +35,7 @@ impl<'a> CatalogReload<'a> {
                 engine.epochs.catalog_registry.seen.load(Ordering::Acquire),
             ],
             committed: false,
-        }
+        })
     }
 
     fn commit(mut self) {
@@ -44,7 +49,9 @@ impl Drop for CatalogReload<'_> {
             return;
         }
         let engine = self.engine;
-        engine.storage.tables.restore(&self.tables);
+        if let Some(tables) = &self.tables {
+            tables.restore();
+        }
         engine.durable.restore(&self.durable);
         for (channel, seen) in [
             &engine.epochs.table_catalog,
@@ -72,7 +79,7 @@ impl Engine {
         table_epoch: Option<u64>,
         registry_epoch: Option<u64>,
     ) -> StorageBackendResult<()> {
-        let reload = CatalogReload::begin(self);
+        let reload = CatalogReload::begin(self)?;
         if registry_epoch.is_some() && self.storage.catalog.is_some() {
             self.clear_persistent_table_bindings_for_catalog_reload();
         }

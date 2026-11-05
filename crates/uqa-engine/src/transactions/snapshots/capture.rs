@@ -40,7 +40,7 @@ impl Engine {
                 "persistent storage uses its provider's committed capture".into(),
             ));
         }
-        let (capture, snapshot) = loop {
+        let (capture, sources) = loop {
             control.check()?;
             let Some(frames) = self.session.transactions.try_lock_for(WAIT) else {
                 admission_waited();
@@ -60,23 +60,12 @@ impl Engine {
             }
             // Never wait for the statement gate while holding transaction admission: an operation can own that gate while starting its first frame.
             if let Some(_statement) = self.runtime.statement_gate.try_lock_idle() {
-                let snapshot = self
-                    .snapshot_transaction_data(super::SnapshotBoundary::CommittedOriginal)
-                    .map_err(|error| StorageBackendError::backend("idle memory capture", error))?
-                    .ok_or_else(|| {
-                        StorageBackendError::Other("memory capture has no data generation".into())
-                    })?;
-                let capture = snapshot
-                    .data
-                    .sources
-                    .as_ref()
-                    .ok_or_else(|| {
-                        StorageBackendError::Other(
-                            "memory capture has no registered sources".into(),
-                        )
-                    })?
-                    .capture(self.row_locks.catalog_oids(), control);
-                break (capture, snapshot);
+                let sources = crate::state::SnapshotSources::live(
+                    &self.storage.tables,
+                    &self.durable.snapshot(),
+                )?;
+                let capture = sources.capture(self.row_locks.catalog_oids(), control);
+                break (capture, sources);
             }
             if self.runtime.statement_gate.owns_current_operation() {
                 return Err(StorageBackendError::Other(
@@ -89,7 +78,7 @@ impl Engine {
             std::thread::park_timeout(WAIT);
         };
         // The independently selected sources preserve their admitted values here. No SQL gate or transaction lock is held during retirement, and no undo handle escapes to the returned cut.
-        drop(snapshot);
+        drop(sources);
         let capture = capture?;
         capture.cut.check()?;
         Ok(capture)

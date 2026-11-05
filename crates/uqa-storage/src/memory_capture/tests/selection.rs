@@ -8,6 +8,104 @@ use super::*;
 use uqa_core::memory::MemoryBudget;
 
 #[test]
+fn selected_union_preserves_overlapping_identities_once_and_excludes_other_sources() {
+    let registry = MemoryCaptureRegistry::new();
+    let owner = MemoryBudget::new(1 << 20);
+    let first = scalar(&registry, 10);
+    let second = scalar(&registry, 20);
+    let excluded = registry
+        .cell(Scalar {
+            value: 30,
+            calls: Arc::default(),
+            scratch: usize::MAX,
+        })
+        .unwrap();
+    let left = registry
+        .sources(&owner)
+        .with_source(&first.key().unwrap())
+        .unwrap();
+    let right = left.with_source(&second.key().unwrap()).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = registry
+        .capture_selected_union(&left, &right, &control)
+        .unwrap();
+    let admitted = control.memory().used();
+    excluded.write().value = 31;
+    assert!(excluded.captured(&cut).is_err());
+    assert_eq!(excluded.read().calls.load(Ordering::Relaxed), 0);
+    assert_eq!(control.memory().used(), admitted);
+    first.write().value = 11;
+    second.write().value = 21;
+    assert_eq!(first.read().calls.load(Ordering::Relaxed), 1);
+    assert_eq!(second.read().calls.load(Ordering::Relaxed), 1);
+    let first_key = first.key().unwrap();
+    let second_key = second.key().unwrap();
+    drop((first, second, excluded, left, right, registry));
+    assert_eq!(**first_key.captured(&cut).unwrap(), 10);
+    assert_eq!(**second_key.captured(&cut).unwrap(), 20);
+    drop(cut);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(owner.used(), 0);
+}
+
+#[test]
+fn selected_union_admits_complete_roots_before_registration_and_captures_in_constant_work() {
+    let mut allocations = Vec::new();
+    for count in [1, 4096] {
+        let registry = MemoryCaptureRegistry::new();
+        let owner = MemoryBudget::new(16 << 20);
+        let cells: Vec<_> = (0..count).map(|n| scalar(&registry, n)).collect();
+        let mut left = registry.sources(&owner);
+        for cell in &cells {
+            left = left.with_source(&cell.key().unwrap()).unwrap();
+        }
+        let catalog = scalar(&registry, 99);
+        let right = registry
+            .sources(&owner)
+            .with_source(&catalog.key().unwrap())
+            .unwrap();
+        let control = StorageReadControl::with_limit(16 << 20);
+        let mut cut = None;
+        let measured = allocation_counter::measure(|| {
+            cut = Some(
+                registry
+                    .capture_selected_union(&left, &right, &control)
+                    .unwrap(),
+            );
+        });
+        allocations.push((measured.bytes_total, measured.count_total));
+        let admitted = control.memory().used();
+        assert!(cells
+            .iter()
+            .all(|cell| cell.read().calls.load(Ordering::Relaxed) == 0));
+        assert_eq!(catalog.read().calls.load(Ordering::Relaxed), 0);
+        let denied = StorageReadControl::with_limit(admitted - 1);
+        assert!(matches!(
+            registry.capture_selected_union(&left, &right, &denied),
+            Err(StorageBackendError::Memory(_))
+        ));
+        assert_eq!(denied.memory().used(), 0);
+        let foreign = MemoryCaptureRegistry::new();
+        let foreign_root = foreign.sources(&owner);
+        assert!(registry
+            .capture_selected_union(&left, &foreign_root, &denied)
+            .is_err());
+        assert_eq!(denied.memory().used(), 0);
+        let exact = StorageReadControl::with_limit(admitted);
+        let exact_cut = registry
+            .capture_selected_union(&left, &right, &exact)
+            .unwrap();
+        assert_eq!(exact.memory().used(), admitted);
+        drop((cut, exact_cut, left, right, cells, catalog, registry));
+        assert_eq!(control.memory().used(), 0);
+        assert_eq!(exact.memory().used(), 0);
+        assert_eq!(owner.used(), 0);
+    }
+    assert_eq!(allocations[0], allocations[1]);
+    assert!(allocations[1].0 < 4096, "{allocations:?}");
+}
+
+#[test]
 fn selected_sources_ignore_unselected_writes_retirement_and_failed_reads() {
     let registry = MemoryCaptureRegistry::new();
     let committed = scalar(&registry, 7);

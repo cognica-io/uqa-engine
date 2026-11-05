@@ -42,6 +42,24 @@ impl SnapshotSources {
         tables: &BTreeMap<RelationIdentity, TableDataSnapshot>,
         durable: &DurableCatalogSnapshot,
     ) -> StorageBackendResult<Self> {
+        let tables = SnapshotTableSources::new(registry, tables)?;
+        Self::with_tables(tables, durable)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn live(
+        tables: &super::TableRegistry,
+        durable: &DurableCatalogSnapshot,
+    ) -> StorageBackendResult<Self> {
+        let (_, sources) = tables.snapshot_sources()?;
+        Self::with_tables(sources, durable)
+    }
+
+    fn with_tables(
+        tables: SnapshotTableSources,
+        durable: &DurableCatalogSnapshot,
+    ) -> StorageBackendResult<Self> {
+        let registry = tables.registry();
         let sequences = std::sync::Arc::new(registry.cell(SequenceCaptureSource::new(
             SequenceReadSnapshot {
                 catalog: durable.sequences.clone(),
@@ -51,8 +69,8 @@ impl SnapshotSources {
                 },
             },
         ))?);
-        let catalogs = catalogs::CatalogSources::new(&registry, durable)?;
-        let resources = resources::ResourceSources::new(&registry, durable)?;
+        let catalogs = catalogs::CatalogSources::new(registry, durable)?;
+        let resources = resources::ResourceSources::new(registry, durable)?;
         let foreign = registry.cell(ForeignTableCaptureSource {
             catalog: durable.foreign_catalog.clone(),
         })?;
@@ -62,7 +80,7 @@ impl SnapshotSources {
         ))?;
         let comments = registry.cell(CommentCaptureSource::new(&durable.comments))?;
         let mut sources = Self {
-            tables: SnapshotTableSources::new(registry, tables)?,
+            tables,
             sequences,
             foreign,
             metadata,

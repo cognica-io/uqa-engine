@@ -79,15 +79,7 @@ impl Engine {
         snapshot: &EngineDataSnapshot,
     ) -> Result<(), SQLError> {
         self.clear_bayesian_params_cache();
-        if let Some(membership) = &snapshot.data.memory_membership {
-            self.storage.tables.restore_memory(
-                membership,
-                snapshot
-                    .table_owners
-                    .iter()
-                    .map(|(name, table)| (name.clone(), table.clone())),
-            );
-        } else {
+        if snapshot.data.memory_membership.is_none() {
             let mut tables = self.storage.tables.write();
             tables
                 .retain(|name, table| {
@@ -144,6 +136,20 @@ impl Engine {
                 table_snapshot.doc_count_dirty,
                 std::sync::atomic::Ordering::Release,
             );
+        }
+        if let Some(membership) = &snapshot.data.memory_membership {
+            self.storage
+                .tables
+                .restore_memory(
+                    membership,
+                    snapshot
+                        .table_owners
+                        .iter()
+                        .map(|(name, table)| (name.clone(), table.clone())),
+                )
+                .map_err(|error| {
+                    Self::storage_tx_error("ROLLBACK table source publication", &error)
+                })?;
         }
         self.durable.restore(&snapshot.data.durable);
         self.clear_regtype_output_cache();

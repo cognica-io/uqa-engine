@@ -120,7 +120,22 @@ impl MemoryCaptureRegistry {
         sources: &MemoryCaptureSources,
         control: &StorageReadControl,
     ) -> StorageBackendResult<MemoryCapture> {
-        self.register_capture(sources.admit(self, control)?, control)
+        self.register_capture(
+            SelectedSources::Exact(sources.admit(self, control)?),
+            control,
+        )
+    }
+
+    /// Register the union of two already published roots without merging or enumerating either set. Both roots retain their original independent admission; overlapping identities are preserved only once by the cut.
+    pub fn capture_selected_union(
+        &self,
+        first: &MemoryCaptureSources,
+        second: &MemoryCaptureSources,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<MemoryCapture> {
+        let first = first.admit(self, control)?;
+        let second = second.admit(self, control)?;
+        self.register_capture(SelectedSources::Union([first, second]), control)
     }
 
     fn register_capture(

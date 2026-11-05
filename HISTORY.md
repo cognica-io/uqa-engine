@@ -85,7 +85,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities.
+- Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
 
 - Preserve SQLSTATE `53200` for sequence catalog admission failures through statement-effect classification and failed transaction initialization, including cleanup diagnostics.
 
