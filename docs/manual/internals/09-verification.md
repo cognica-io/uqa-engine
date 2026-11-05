@@ -18,6 +18,8 @@ The `ci` profile emits a slow-test notice after 30 seconds and fails a test afte
 
 The automatic Linux/macOS [deterministic performance inventory](../../../benchmarks/regressions/README.md) selects work, memory and output checks from the existing owning-crate test targets for Rust-affecting ready-for-review batches and main pushes. It includes the independently named temporal concurrency histories, indexed FK probes, routine plan counts, bounded sorting, retrieval resources and native storage work. Compiled selection must contain every reviewed case, with no ignored or missing tests; JSON/Markdown summaries record source hashes and provenance alongside JUnit artifacts. Numeric limits remain in the tests beside their workloads and semantic assertions. Controlled latency/throughput acceptance remains a separate requirement.
 
+Selection compiles one anchored name matcher per package and test harness, using alternation for that group's reviewed names. Factoring out the shared package/harness predicate preserves the original union of selections, including parameter-case suffixes and namespace boundaries. Exact discovery validation still rejects missing, ignored, substituted or overlapping cases and selections outside the inventory. Archive discovery retains its 120-second deadline and process-group cleanup.
+
 ## Verification layers
 
 ```mermaid
