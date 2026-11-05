@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -194,11 +195,12 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(args[-2:], ["--tool-config-file", f"uqa-performance:{self.selection_file.resolve()}"])
 
     def test_large_inventory_is_transported_in_configuration_not_process_arguments(self):
-        checks = [{**self.check, "test": f"bounded_work_{index}"} for index in range(4096)]
+        checks = [{**self.check, "test": f"bounded_work_{index}"} for index in range(16384)]
         config = runner.selection_config(checks)
         self.assertGreater(len(config.encode()), 256 * 1024)
         expression = json.loads(config.split("default-filter = ", 1)[1])
-        self.assertEqual(expression.split(" | "), [runner.selector(check) for check in checks])
+        self.assertEqual(expression.count("package("), 1)
+        self.assertEqual(expression.count("test(/"), 1)
         self.selection_file.write_text(config)
         for archive in (None, self.root / "tests.tar.zst"):
             with self.subTest(archive=archive):
@@ -206,6 +208,26 @@ class PerformanceChecksTest(unittest.TestCase):
                 self.assertLess(sum(len(arg.encode()) + 1 for arg in args), 4096)
                 self.assertEqual(args.count("--tool-config-file"), 1)
                 self.assertNotIn("-E", args)
+
+    def test_grouped_filters_preserve_owner_harness_and_exact_name_boundaries(self):
+        checks = [
+            self.check, {**self.check, "test": "other_work"},
+            {**self.check, "kind": "test", "test": "integration_work"},
+            {**self.check, "package": "uqa-other", "test": "foreign_work"},
+        ]
+        expression = json.loads(runner.selection_config(checks).split("default-filter = ", 1)[1])
+        clauses = expression.split(" | ")
+        self.assertEqual(len(clauses), 3)
+        for clause in clauses:
+            match = re.fullmatch(r"\(package\(=([^)]*)\) & kind\(([^)]*)\) & test\(/(.*)/\)\)", clause)
+            self.assertIsNotNone(match)
+            package, kind, pattern = match.groups()
+            for check in checks:
+                expected = (check["package"], check["kind"]) == (package, kind)
+                for name in (check["test"], "tests::" + check["test"], "tests::" + check["test"] + "::backend_1::COMMIT"):
+                    self.assertEqual(re.search(pattern, name) is not None, expected)
+                for name in ("prefix_" + check["test"], check["test"] + "_suffix"):
+                    self.assertIsNone(re.search(pattern, name))
 
     def test_archive_selection_preserves_inventory_without_cargo_build_flags(self):
         archive = self.root / "tests.tar.zst"

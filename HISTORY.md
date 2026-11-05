@@ -87,6 +87,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
 
+- Group automatic regression selectors by package and test harness so discovery does not evaluate thousands of independent regular expressions for every listed test. Exact case identities, resource assertions and the discovery deadline remain enforced.
+
 - Preserve SQLSTATE `53200` for sequence catalog admission failures through statement-effect classification and failed transaction initialization, including cleanup diagnostics.
 
 - Resolve generated relation row-type arrays through their original element identity, preserving the owning relation's comment lifetime, role authority and type dependency diagnostics.
