@@ -56,6 +56,19 @@ impl GraphStoreHandle {
 }
 
 impl GraphImageSnapshot {
+    /// Borrow a resumable image while preserving both the captured source and invoking cancellation owners. Preparation visits bounded native validation positions before any bytes are returned.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        let GraphStoreHandle::Memory(source) = self.0.source.as_ref() else {
+            unreachable!("only memory graph sources can be captured");
+        };
+        source
+            .image_reader(control)?
+            .with_source_control(Some(&self.0.control), control)
+    }
+
     pub(crate) const fn wrapper_bytes() -> usize {
         size_of::<RetainedGraph>()
     }

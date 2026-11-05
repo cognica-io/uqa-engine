@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::image_io::{ImageRead, ImageReader};
+use crate::image_io::{ImagePreparation, ImageRead, ImageReader};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -192,6 +192,44 @@ struct Source {
 }
 
 impl ImageRead for Source {
+    fn prepare(&mut self, maximum_positions: usize) -> StorageBackendResult<ImagePreparation> {
+        assert!(maximum_positions > 0);
+        match self.mode {
+            5 => Err(StorageBackendError::Other("preparation failed".into())),
+            6 => panic!("preparation unwind"),
+            7 => {
+                self.token.cancel();
+                Ok(ImagePreparation {
+                    positions: 1,
+                    ready: false,
+                })
+            }
+            8 | 12 => Ok(ImagePreparation {
+                positions: 1,
+                ready: false,
+            }),
+            9 => Ok(ImagePreparation {
+                positions: maximum_positions + 1,
+                ready: true,
+            }),
+            10 => Ok(ImagePreparation {
+                positions: 0,
+                ready: false,
+            }),
+            11 => {
+                self.mode = 12;
+                Ok(ImagePreparation {
+                    positions: 1,
+                    ready: true,
+                })
+            }
+            _ => Ok(ImagePreparation {
+                positions: 0,
+                ready: true,
+            }),
+        }
+    }
+
     fn read(&mut self, output: &mut [u8]) -> StorageBackendResult<usize> {
         assert_eq!(self.payload.len(), 4096);
         match self.mode {
@@ -247,5 +285,39 @@ fn admitted_image_readers_release_sources_on_failure_unwind_and_complete_only_no
             assert!(reader.read(&mut [0; 1]).is_err());
         }
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn admitted_image_preparation_retires_failures_and_preserves_pending_ownership() {
+    for mode in 5..12 {
+        let control = StorageReadControl::with_limit(8192);
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let source = Source {
+            payload: Budgeted::new(vec![0; 4096], control.memory().reserve(4096).unwrap()),
+            mode,
+            dropped: dropped.clone(),
+            token: control.cancellation().clone(),
+        };
+        let mut reader = ImageReader::new(source, &control).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.prepare(1)));
+        match mode {
+            6 => assert!(result.is_err()),
+            8 => {
+                assert!(!result.unwrap().unwrap().ready);
+                assert_eq!(dropped.load(Ordering::SeqCst), 0);
+                assert!(control.memory().used() >= 4096);
+                assert!(reader.prepare(0).is_err());
+            }
+            11 => {
+                assert!(result.unwrap().unwrap().ready);
+                assert!(reader.prepare(1).is_err());
+            }
+            _ => assert!(result.unwrap().is_err()),
+        }
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(control.memory().used(), 0);
+        assert!(reader.prepare(1).is_err());
+        assert!(reader.read(&mut [0; 1]).is_err());
     }
 }

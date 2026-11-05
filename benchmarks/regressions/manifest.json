@@ -2,6 +2,110 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_image_readers_preserve_independent_wire_and_allocation_state",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/stream.rs",
+      "capability": "Resumable graph image bytes",
+      "workload": "Read independent graph fixtures with one-byte and larger windows, then import label tombstones and unused allocations.",
+      "invariant": "Every window schedule preserves the existing wire image and fresh graph allocation state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_image_preparation_bounds_primary_derived_and_empty_index_positions",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/stream.rs",
+      "capability": "Bounded graph source validation",
+      "workload": "Retire 500 distinct label memberships and prepare a captured graph one native position at a time.",
+      "invariant": "Each call visits exactly one charged position until readiness, including empty derived buckets, with no heap allocation or byte output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_image_readers_borrow_large_properties_under_constant_admission",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/stream.rs",
+      "capability": "Graph image cursor admission",
+      "workload": "Read a two-MiB borrowed property under the exact cursor allowance; reject one byte less and complete after cancellation.",
+      "invariant": "Cursor admission is independent of payload length; reads allocate no heap storage and EOF releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_image_readers_reject_preparation_errors_before_any_output",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/stream.rs",
+      "capability": "Graph image validation retirement",
+      "workload": "Corrupt primary membership and attempt scheduled preparation and direct synchronous reads.",
+      "invariant": "Both entry points reject before changing output, release the cursor and preserve terminal failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_readers_keep_selected_generations_after_native_replacement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Captured graph image ownership",
+      "workload": "Replace the live native graph, close the source and stream the selected snapshot through small windows.",
+      "invariant": "Exact selected bytes and original source admission survive replacement; completed cursors release only their own allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_graph_readers_keep_both_cancellation_owners_during_preparation_and_output",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Graph image cancellation ownership",
+      "workload": "Cancel original or invoking controls during validation and after payload output.",
+      "invariant": "Every entry point preserves typed cancellation, retires cursor ownership and prevents failed resumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_images_stream_through_protected_full_and_incremental_repositories",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/repository.rs",
+      "capability": "Graph image repository composition",
+      "workload": "Stream a selected graph into protected full and incremental roots with live successor mutations, then remove source and parent and import the verified child.",
+      "invariant": "Per-call validation positions and payload/hash bytes stay bounded; unchanged units reuse exact bytes and the restored graph excludes later mutations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_image_preparation_retires_failures_and_preserves_pending_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/stream.rs",
+      "capability": "Image preparation admission",
+      "workload": "Exercise preparation errors, unwind, cancellation, pending ownership, zero limits, excessive position counts and false pending without work.",
+      "invariant": "The reader owns operation admission and terminal retirement; invalid progress cannot loop or retain failed source allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-api",
       "kind": "lib",
       "test": "api_backup_example_runs_after_engine_retirement",

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add resumable memory graph image reads with bounded pre-output validation and exact progress counts. Readers preserve evaluated properties, memberships, label registries and allocation state while retaining both source and invoking cancellation; synchronous graph output shares the same encoder. Complete memory Engine backup and restore remain under implementation.
+
 - Add public Rust persistent backup jobs through `Engine::begin_backup` and `uqa_api::backup`. Effective-role authorization and transaction admission precede capture; encrypted sources require repository protection or explicit plaintext export. Jobs retain independent provider cuts and expose bounded progress, cancellation, verification and publication. Native SQLite initialization now publishes its independent image source at the successful initialization transition. Memory Engine images and public restore activation remain under implementation.
 
 - Add resumable evaluated-value, memory-document and evaluated text-index image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata, raw token keys, occurrence graph edges and historical field metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Repository capture accepts streams whose length is established at EOF, records exact final lengths and preserves declared-length checks and incremental reuse without pre-encoding source values. Complete Engine backup and restore remain under implementation.

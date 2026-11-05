@@ -126,3 +126,72 @@ fn captured_graph_output_checks_original_and_invoking_cancellation() {
     drop(captured);
     assert_eq!(original.memory().used(), 0);
 }
+
+#[test]
+fn captured_graph_readers_keep_selected_generations_after_native_replacement() {
+    let mut source = source();
+    let original = StorageReadControl::with_limit(4 << 20);
+    let invoking = StorageReadControl::with_limit(256 << 10);
+    let captured = source.capture_image_with_control(&original).unwrap();
+    let expected = encode(&captured);
+    Arc::make_mut(&mut source).remove_vertex(1, "g").unwrap();
+    drop(source);
+    let retained = original.memory().used();
+    let mut actual = vec![0; expected.len()];
+    let mut reader = captured.image_reader(&invoking).unwrap();
+    assert!(invoking.memory().used() < (128 << 10));
+    let allocation = allocation_counter::measure(|| {
+        while !reader.prepare(2).unwrap().ready {}
+        let mut position = 0;
+        while position < actual.len() {
+            let end = (position + 1021).min(actual.len());
+            let count = reader.read(&mut actual[position..end]).unwrap();
+            assert!(count > 0);
+            position += count;
+        }
+        assert_eq!(reader.read(&mut [0; 1]).unwrap(), 0);
+    });
+    assert_eq!(allocation.bytes_total, 0);
+    assert_eq!(actual, expected);
+    assert_eq!(invoking.memory().used(), 0);
+    assert_eq!(original.memory().used(), retained);
+    drop(reader);
+    drop(captured);
+    assert_eq!(original.memory().used(), 0);
+}
+
+#[test]
+fn captured_graph_readers_keep_both_cancellation_owners_during_preparation_and_output() {
+    for cancel_original in [false, true] {
+        for boundary in 0..4 {
+            let source = source();
+            let original = StorageReadControl::with_limit(4 << 20);
+            let invoking = StorageReadControl::with_limit(256 << 10);
+            let captured = source.capture_image_with_control(&original).unwrap();
+            drop(source);
+            let mut reader = captured.image_reader(&invoking).unwrap();
+            if boundary == 0 {
+                assert!(!reader.prepare(1).unwrap().ready);
+            } else {
+                assert_eq!(reader.read(&mut [0; 128]).unwrap(), 128);
+            }
+            if cancel_original {
+                original.cancellation().cancel();
+            } else {
+                invoking.cancellation().cancel();
+            }
+            let result = match boundary {
+                0 | 3 => reader.prepare(1).map(|_| 0),
+                1 => reader.read(&mut [0; 1]),
+                _ => reader.read(&mut []),
+            };
+            assert!(matches!(result, Err(StorageBackendError::Cancelled(_))));
+            assert_eq!(invoking.memory().used(), 0);
+            assert!(reader.read(&mut [0; 1]).is_err());
+            assert!(reader.prepare(1).is_err());
+            drop(reader);
+            drop(captured);
+            assert_eq!(original.memory().used(), 0);
+        }
+    }
+}
