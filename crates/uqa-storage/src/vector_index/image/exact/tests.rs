@@ -217,10 +217,20 @@ fn retained_exact_image_readers_keep_source_control_and_do_not_pin_live_membersh
 
 #[test]
 fn vector_image_readers_reject_unimplemented_codecs_without_buffering_or_leaks() {
-    let index = crate::IVFIndex::with_params(2, 1, 1, 2);
+    struct SynchronousOnly;
+    impl crate::vector_index::image::VectorImageSource for SynchronousOnly {
+        fn write_image(
+            &self,
+            _: &mut dyn std::io::Write,
+            _: &StorageReadControl,
+        ) -> crate::StorageBackendResult<u64> {
+            panic!("resumable output must not buffer the synchronous writer")
+        }
+    }
     let original = StorageReadControl::with_limit(1 << 20);
     let invoking = StorageReadControl::with_limit(128 * 1024);
-    let snapshot = index.capture_image_with_control(&original).unwrap();
+    let snapshot =
+        crate::vector_index::image::VectorImageSnapshot::new(SynchronousOnly, &original).unwrap();
     assert!(snapshot.image_reader(&invoking).is_err());
     assert_eq!(invoking.memory().used(), 0);
     let mut reader = snapshot.into_image_reader(&invoking).unwrap();

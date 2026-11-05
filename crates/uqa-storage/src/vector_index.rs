@@ -63,17 +63,32 @@ pub fn validate_vector_values_controlled(
     if let Some(control) = control {
         control.check()?;
     }
+    validate_vector_dimensions(dimensions, vector.len())?;
+    validate_vector_components_controlled(vector, 0, control)
+}
+
+pub(crate) fn validate_vector_dimensions(
+    dimensions: u32,
+    length: usize,
+) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {
         StorageBackendError::Other(format!(
             "vector dimension {dimensions} exceeds the platform usize range"
         ))
     })?;
-    if vector.len() != dimensions {
+    if length != dimensions {
         return Err(StorageBackendError::Other(format!(
-            "vector dimension mismatch: expected {dimensions}, got {}",
-            vector.len()
+            "vector dimension mismatch: expected {dimensions}, got {length}"
         )));
     }
+    Ok(())
+}
+
+pub(crate) fn validate_vector_components_controlled(
+    vector: &[f32],
+    offset: usize,
+    control: Option<&crate::read_control::StorageReadControl>,
+) -> StorageBackendResult<()> {
     for (index, value) in vector.iter().copied().enumerate() {
         if index.is_multiple_of(1024) {
             if let Some(control) = control {
@@ -81,6 +96,7 @@ pub fn validate_vector_values_controlled(
             }
         }
         if !value.is_finite() {
+            let index = offset + index;
             return Err(StorageBackendError::Other(format!(
                 "vector component {index} must be finite, got {value}"
             )));

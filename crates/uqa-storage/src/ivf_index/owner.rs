@@ -206,6 +206,13 @@ impl IVFIndex {
 }
 
 impl VectorImageSource for Budgeted<IVFData> {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        super::image::reader(self, control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

@@ -4,6 +4,110 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "ivf_image_readers_preserve_independent_stale_state_across_all_window_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Resumable IVF independent image bytes",
+      "workload": "Read a hand-built stale IVF fixture using independent preparation and byte-window sizes.",
+      "invariant": "All schedules preserve exact raw/normalized bits, trained-state metadata and byte order; preparation counts are schedule independent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_image_preparation_bounds_empty_centroids_and_membership_buckets",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Resumable IVF empty-list work bounds",
+      "workload": "Validate and encode 4,096 empty centroid and membership buckets under exhausted spare admission.",
+      "invariant": "Every empty bucket contributes bounded work; preparation and output allocate no heap scratch and EOF releases the cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_image_coordinate_preparation_and_output_remain_bounded_without_heap_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Resumable IVF large-coordinate bounds",
+      "workload": "Prepare and output four MiB of raw/normalized coordinates with one-position preparation steps.",
+      "invariant": "Each coordinate step checks at most 1,024 values, reads emit at most 16 KiB and no read-time allocation or full encoded cache is used.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_image_readers_reject_corrupt_assignments_before_any_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Resumable IVF source corruption rejection",
+      "workload": "Corrupt configuration, coordinate shape, vector identity, norms, assignments and derived membership.",
+      "invariant": "Preparation rejects every invalid source before output, preserves synchronous validation and releases failed cursor allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "ivf_image_preparation_preserves_absolute_coordinate_errors_and_terminal_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Resumable IVF coordinate diagnostics and admission",
+      "workload": "Place NaN at raw coordinate 1,500 and deny the exact cursor allocation.",
+      "invariant": "Resumption preserves the absolute component diagnostic; allocation denial and validation failure leave no retained scratch or resumable failed state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_ivf_image_readers_survive_live_retraining_and_cross_thread_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Owned IVF source retirement",
+      "workload": "Start bounded preparation, retrain and close the live index, then move the selected image reader to another thread.",
+      "invariant": "The image retains the original stale state and exact assignments independently; EOF releases original and invoking allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "live_ivf_image_readers_release_state_admission_before_query_retraining",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Live IVF reader state ownership",
+      "workload": "Open the public reader and trigger shared-query retraining before completing image output.",
+      "invariant": "Reader opening releases live state admission; later training can progress while output retains the preceding frozen state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_ivf_image_readers_retire_both_controls_during_every_preparation_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
+      "capability": "Owned IVF preparation cancellation",
+      "workload": "Cancel source or invoking control before opening, during preparation, after readiness and during output.",
+      "invariant": "Even empty reads observe both controls, retire the owned frozen source and release all allowances; resetting a token cannot resume failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "exact_image_readers_preserve_independent_bytes_at_every_field_boundary",
       "cases": 1,
       "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",

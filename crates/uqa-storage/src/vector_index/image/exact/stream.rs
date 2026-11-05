@@ -51,17 +51,7 @@ impl<'a> ExactImageCursor<'a> {
         self.control.check()?;
         self.position = 0;
         if !self.coordinates.as_slice().is_empty() {
-            let count = self.coordinates.len().min(self.pending.len() / 4);
-            for (bytes, value) in self.pending[..count * 4]
-                .chunks_exact_mut(4)
-                .zip(self.coordinates.by_ref())
-            {
-                if !value.is_finite() {
-                    return Err(invalid());
-                }
-                bytes.copy_from_slice(&value.to_bits().to_le_bytes());
-            }
-            self.length = count * 4;
+            self.length = super::super::coordinate_bytes(&mut self.coordinates, &mut self.pending)?;
         } else if let Some(vector) = self.vectors.next() {
             if u64::try_from(vector.len()).map_err(|_| MemoryError::SizeOverflow)?
                 != u64::from(self.dimensions)

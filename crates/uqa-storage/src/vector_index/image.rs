@@ -113,17 +113,27 @@ pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> Storag
 pub(crate) fn floats(out: &mut ImageOutput<'_>, values: &[f32]) -> StorageBackendResult<()> {
     out.count(values.len())?;
     let mut buffer = [0_u8; 4096];
-    for chunk in values.chunks(buffer.len() / 4) {
+    let mut values = values.iter();
+    while !values.as_slice().is_empty() {
         out.control.check()?;
-        for (value, bytes) in chunk.iter().zip(buffer.chunks_exact_mut(4)) {
-            if !value.is_finite() {
-                return Err(invalid());
-            }
-            bytes.copy_from_slice(&value.to_bits().to_le_bytes());
-        }
-        out.bytes(&buffer[..chunk.len() * 4])?;
+        let count = coordinate_bytes(&mut values, &mut buffer)?;
+        out.bytes(&buffer[..count])?;
     }
     Ok(())
+}
+
+pub(crate) fn coordinate_bytes(
+    values: &mut std::slice::Iter<'_, f32>,
+    output: &mut [u8],
+) -> StorageBackendResult<usize> {
+    let count = values.len().min(output.len() / 4);
+    for (bytes, value) in output[..count * 4].chunks_exact_mut(4).zip(values) {
+        if !value.is_finite() {
+            return Err(invalid());
+        }
+        bytes.copy_from_slice(&value.to_bits().to_le_bytes());
+    }
+    Ok(count * 4)
 }
 
 pub(crate) fn read_floats(

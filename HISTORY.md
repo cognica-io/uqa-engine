@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Add resumable exact-vector image reads over retained tensor coordinates. Borrowed and independently owned readers preserve exact coordinate bits, tensor order and original cancellation with bounded output and admitted fixed scratch; synchronous output uses the same encoder. Other vector methods retain their existing synchronous image codecs, and complete memory Engine backup remains under implementation.
+- Add resumable IVF image validation and output over frozen training generations. Preparation counts coordinate windows and empty membership boundaries, preserves absolute coordinate diagnostics and rejects invalid state before output; captured readers survive live retraining and source retirement without copying complete encoded images.
+
+- Add resumable exact-vector image reads over retained tensor coordinates. Borrowed and independently owned readers preserve exact coordinate bits, tensor order and original cancellation with bounded output and admitted fixed scratch; synchronous output uses the same encoder. Complete memory Engine backup remains under implementation.
 
 - Add resumable memory graph image reads with bounded pre-output validation and exact progress counts. Readers preserve evaluated properties, memberships, label registries and allocation state while retaining both source and invoking cancellation; synchronous graph output shares the same encoder. Captured graphs can transfer their source into an independent movable reader that survives Engine closure and releases retained memory on completion or failure. Complete memory Engine backup and restore remain under implementation.
 
