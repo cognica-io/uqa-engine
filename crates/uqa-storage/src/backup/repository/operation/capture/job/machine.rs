@@ -259,14 +259,17 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         }
         let mut key = BudgetedVec::new(self.control.memory());
         key.extend_from_slice(unit.address.key)?;
-        self.unit = Some(Unit::new(UnitMetadata {
-            namespace: unit.address.namespace,
-            generation: unit.address.generation,
-            family: unit.address.family,
-            key,
-            kind: unit.kind,
-            bytes: unit.decoded_bytes,
-        }));
+        self.unit = Some(Unit::new(
+            UnitMetadata {
+                namespace: unit.address.namespace,
+                generation: unit.address.generation,
+                family: unit.address.family,
+                key,
+                kind: unit.kind,
+                bytes: 0,
+            },
+            unit.decoded_bytes,
+        ));
         self.stage = Stage::Match;
         Ok(())
     }

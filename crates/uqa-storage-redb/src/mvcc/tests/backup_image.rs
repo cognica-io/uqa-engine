@@ -217,7 +217,7 @@ fn verify_export(
         let key = (unit.address.family, unit.address.key.to_vec());
         assert!(previous.as_ref().is_none_or(|last| last < &key));
         previous = Some(key.clone());
-        let length = unit.decoded_bytes as usize;
+        let length = unit.decoded_bytes.expect("record image length") as usize;
         let wanted = match key.0 {
             1 => {
                 let mut bytes = b"UQAKVI01".to_vec();
@@ -378,7 +378,7 @@ fn redb_backup_image_empty_cut_and_split_prefixes_have_stable_terminal_state() {
             }
             let unit = image.current_unit().unwrap();
             let key = (unit.address.family, unit.address.key.to_vec());
-            let len = unit.decoded_bytes as usize;
+            let len = unit.decoded_bytes.expect("record image length") as usize;
             let mut bytes = Vec::new();
             while bytes.len() < len {
                 assert_eq!(image.read_current(&mut []).unwrap(), 0);

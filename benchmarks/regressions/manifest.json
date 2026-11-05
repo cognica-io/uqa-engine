@@ -4,6 +4,58 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "streaming_lengths_preserve_full_and_incremental_inventory_and_reference_equality",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/lengths.rs",
+      "capability": "Full and incremental capture with streamed lengths",
+      "workload": "Mix declared and streamed source lengths through empty, unchanged, same-size changed, growing, shrinking, removed and new units, then remove both ancestor roots.",
+      "invariant": "Actual EOF lengths and complete hashes determine equality; all unchanged ranges are reused, changed ranges differ, known/streamed full roots match the child and 128 KiB capture memory bounds hold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "streaming_lengths_include_empty_units_and_single_byte_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/lengths.rs",
+      "capability": "Empty streamed image units",
+      "workload": "Capture empty and nonempty units with one-byte payload and verification windows.",
+      "invariant": "Both units survive and exact inventory/payload counts match the completed stream; all job memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "streaming_length_failure_and_cancel_release_the_source_without_publishing",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/lengths.rs",
+      "capability": "Streamed source failure retirement",
+      "workload": "Cancel from a payload read, exhaust encrypted comparison workspace after admission, and explicitly cancel a partially read incremental source.",
+      "invariant": "Each failure retires the source once, rejects subsequent advancement and publication, releases memory and leaves no completed root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_document_streams_once_into_full_and_incremental_backups_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/memory_document.rs",
+      "capability": "Actual memory document repository streaming",
+      "workload": "Retain a real memory document with a payload larger than 2 MiB and tuple xmin, delete its live owner, capture full and unchanged incremental images under 128 KiB, remove the ancestor, and decode the retained child.",
+      "invariant": "Source bytes are consumed and hashed exactly once per capture with bounded progress, unchanged content reuses its range, and restored fields and private metadata match without a preliminary encoded copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "owned_provider_image_admits_before_capture_and_retires_with_original_allowance",
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/source/owned/tests.rs",

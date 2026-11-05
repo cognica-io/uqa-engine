@@ -9,6 +9,8 @@ use super::*;
 use std::sync::atomic::Ordering;
 
 mod failures;
+mod lengths;
+mod memory_document;
 
 fn repository(path: &std::path::Path, control: &StorageReadControl) -> LocalRepository {
     LocalRepository::create(path.join("repository"), protected(), limits(), control).unwrap()

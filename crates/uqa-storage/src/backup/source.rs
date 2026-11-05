@@ -12,7 +12,8 @@ pub use owned::OwnedBackupImage;
 pub struct BackupSourceUnit<'a> {
     pub address: UnitAddress<'a>,
     pub kind: UnitKind,
-    pub decoded_bytes: u64,
+    /// Exact encoded length when the owner already knows it. A streaming codec may return `None`; capture establishes the exact inventory length from successful EOF without pre-encoding the unit.
+    pub decoded_bytes: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +32,7 @@ pub struct BackupSourceStatistics {
     pub excluded_units: u64,
 }
 
-/// One provider-owned complete image over a retained cut. Units must have strictly increasing addresses and exact declared lengths. Each call releases source physical reads before returning; dropping the source releases its cut. Implementing this contract does not qualify another provider or mapping.
+/// One provider-owned complete image over a retained cut. Units must have strictly increasing addresses; supplied lengths are exact, and an omitted length is established by draining the unit. A nonempty read returns zero only at successful EOF. Each call releases source physical reads before returning; dropping the source releases its cut. Implementing this contract does not qualify another provider or mapping.
 pub trait BackupImageSource {
     fn cut(&self) -> BackupCut;
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep>;

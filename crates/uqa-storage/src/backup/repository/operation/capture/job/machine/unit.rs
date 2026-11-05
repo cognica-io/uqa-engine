@@ -19,6 +19,7 @@ pub(super) enum Mode {
     Compare {
         digest: ImageDigest,
         span: ObjectSpan,
+        bytes: u64,
         file: TemporaryFile,
     },
     Spooled {
@@ -35,17 +36,19 @@ pub(super) struct Unit {
     pub(super) metadata: UnitMetadata,
     mode: Mode,
     hash: Sha256,
+    expected: Option<u64>,
     read: u64,
     offset: u64,
     frames: u64,
 }
 
 impl Unit {
-    pub(super) fn new(metadata: UnitMetadata) -> Self {
+    pub(super) fn new(metadata: UnitMetadata, expected: Option<u64>) -> Self {
         Self {
             metadata,
             mode: Mode::Current,
             hash: Sha256::new(),
+            expected,
             read: 0,
             offset: 0,
             frames: 0,
@@ -60,8 +63,15 @@ impl Unit {
             .read
             .checked_add(read as u64)
             .ok_or(BackupError::Integrity)?;
-        if self.read > self.metadata.bytes || (read == 0 && self.read != self.metadata.bytes) {
+        if self
+            .expected
+            .is_some_and(|bytes| self.read > bytes || (read == 0 && self.read != bytes))
+        {
             return Err(BackupError::Integrity);
+        }
+        if read == 0 {
+            self.metadata.bytes = self.read;
+            self.expected = Some(self.read);
         }
         Ok(())
     }
@@ -85,11 +95,14 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
             if let Some(entry) = parent.current().filter(|entry| {
                 entry.address() == unit.metadata.address()
                     && entry.kind() == unit.metadata.kind
-                    && entry.decoded_bytes() == unit.metadata.bytes
+                    && unit
+                        .expected
+                        .is_none_or(|bytes| entry.decoded_bytes() == bytes)
             }) {
                 unit.mode = Mode::Compare {
                     digest: entry.digest(),
                     span: entry.object(),
+                    bytes: entry.decoded_bytes(),
                     file: TemporaryFile::with_file_budget(&self.files)?,
                 };
                 self.stage = Stage::Compare;
@@ -139,12 +152,13 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         let Mode::Compare {
             digest: expected,
             span,
+            bytes,
             mut file,
         } = std::mem::replace(&mut unit.mode, Mode::Current)
         else {
             unreachable!()
         };
-        if digest == expected {
+        if digest == expected && unit.metadata.bytes == bytes {
             unit.mode = Mode::Reused { digest, span };
             self.stage = Stage::UnitComplete;
             Ok(())

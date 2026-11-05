@@ -119,7 +119,7 @@ impl BackupImageSource for CopySource<'_, '_> {
         self.reader.current_unit().map(|entry| BackupSourceUnit {
             address: entry.address(),
             kind: entry.kind(),
-            decoded_bytes: entry.decoded_bytes(),
+            decoded_bytes: Some(entry.decoded_bytes()),
         })
     }
 

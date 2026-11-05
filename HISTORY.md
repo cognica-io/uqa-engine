@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Add resumable evaluated-value and memory-document image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Complete Engine backup and restore remain under implementation.
+- Add resumable evaluated-value and memory-document image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Repository capture accepts streams whose length is established at EOF, records exact final lengths and preserves declared-length checks and incremental reuse without pre-encoding source values. Complete Engine backup and restore remain under implementation.
 
 - Add scheduled repository image capture with bounded source, payload, parent-inventory and verification steps. Jobs retain their original cancellation and memory controls, report actual work, release source/workspace ownership on failure and permit publication only after complete verification. Full and incremental preparation share this state machine; public Engine backup and restore remain under implementation.
 
