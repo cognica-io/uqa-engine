@@ -9,6 +9,7 @@ use std::io::{self, Read};
 mod capture;
 mod copy;
 mod pack;
+mod retire;
 pub use capture::{BackupCaptureReport, BackupImageStatistics};
 pub use copy::BackupCopyReport;
 pub use pack::{BackupPack, PackObject, PackRange};
@@ -147,6 +148,7 @@ impl LocalRepository {
             });
         }
         let _admission = self.admission(control)?;
+        self.advance_generation(control)?;
         let name = directory::name(intent.backup.as_bytes());
         directory::create_directory(&self.operations, directory::text(&name))?;
         let directory = directory::child(&self.operations, directory::text(&name).as_ref())?;
@@ -344,9 +346,22 @@ impl BackupOperation<'_> {
             &self.repository.protection,
             BackupRoot::ENCODED_BYTES,
         )?)?;
+        let generation = {
+            let _admission = self.repository.admission(control)?;
+            self.repository.generation(control)?
+        };
         let remaining = FileBudget::new(self.maximum - self.used);
         self.repository
             .verify_root_with_files(root, files.unwrap_or(&remaining), control)?;
+        #[cfg(test)]
+        if let Some(observe) = ON_PREPARED_VERIFIED.with(|slot| slot.borrow_mut().take()) {
+            observe();
+        }
+        let _admission = self.repository.admission(control)?;
+        if self.repository.generation(control)? != generation {
+            return Err(BackupError::Busy);
+        }
+        self.repository.advance_generation(control)?;
         let mut prepared = directory::create_file(&self.directory, "prepared")?;
         write_frame(
             &mut prepared,
@@ -458,4 +473,9 @@ impl BackupOperation<'_> {
             Err(error) => Err(error),
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static ON_PREPARED_VERIFIED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }

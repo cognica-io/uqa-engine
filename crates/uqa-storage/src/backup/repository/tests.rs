@@ -20,6 +20,7 @@ mod image_fixture;
 mod incremental;
 mod integrity;
 mod resources;
+mod retention;
 mod streaming;
 
 fn control() -> StorageReadControl {

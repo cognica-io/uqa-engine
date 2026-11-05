@@ -59,6 +59,7 @@ fn verify_incremental_restore(standalone: bool) {
         let child = operation.publish(&control).unwrap();
         drop((operation, records, store, owner, connection));
         std::fs::remove_dir_all(source_path).unwrap();
+        retire_parent(&repository, parent, &control);
 
         let (repository, child) = if standalone {
             copy_repository(repository, child, directory.path(), &control)
@@ -90,6 +91,23 @@ fn verify_incremental_restore(standalone: bool) {
         owner.store().put(b"after-restore", b"writable").unwrap();
         assert_eq!(control.memory().used(), 0);
     }
+}
+
+fn retire_parent(
+    repository: &uqa_storage::backup::LocalRepository,
+    parent: uqa_storage::backup::BackupRoot,
+    control: &StorageReadControl,
+) {
+    repository.remove_backup(parent.backup(), control).unwrap();
+    for _ in 0..100 {
+        let report = repository.collect_garbage(3, 2 << 20, control).unwrap();
+        assert_eq!(report.completed_backups, 1);
+        assert!(report.removed_objects + report.removed_staging_files <= 3);
+        if report.remaining_files == 0 {
+            return;
+        }
+    }
+    panic!("bounded collection did not finish");
 }
 
 fn copy_repository(

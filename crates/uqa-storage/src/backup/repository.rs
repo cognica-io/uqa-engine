@@ -11,6 +11,7 @@ mod generation;
 mod objects;
 mod operation;
 mod restore;
+mod retention;
 mod verify;
 
 pub use operation::{
@@ -20,6 +21,7 @@ pub use operation::{
 pub use restore::{
     BackupRestoreImporter, BackupRestoreOperation, RestoreDirectory, RestoredDatabase,
 };
+pub use retention::{BackupCollectionReport, BackupListing};
 pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};
 
 use std::io::Read;
@@ -303,6 +305,11 @@ enum Fault {
     RestoreComplete,
     RestoreCancel,
     RestoreRecordSync,
+    RemovalMarker,
+    RemovalRoot,
+    RemovalSync,
+    CollectionUnlink,
+    CollectionSync,
 }
 
 #[cfg(test)]

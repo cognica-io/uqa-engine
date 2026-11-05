@@ -39707,8 +39707,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import/incremental.rs",
       "capability": "Source-independent incremental provider import",
-      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
-      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity. Inherited references remain valid after ancestor retirement and collection.",
       "case_names": [
         ""
       ]
@@ -39720,8 +39720,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import/incremental.rs",
       "capability": "Source-independent incremental provider import",
-      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
-      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity. Inherited references remain valid after ancestor retirement and collection.",
       "case_names": [
         ""
       ]
@@ -39733,8 +39733,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests/incremental.rs",
       "capability": "Source-independent incremental provider import",
-      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes.",
-      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity.",
+      "workload": "Capture a parent, change/delete/insert records and allocator state, capture a child, mutate after its cut and remove the source before fresh import. SQLite exercises all four file modes. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Both inherited and new units restore exact original records and revisions, allocator watermarks and DiskANN observations; restored state is writable and owns a fresh history identity. Inherited references remain valid after ancestor retirement and collection.",
       "case_names": [
         ""
       ]
@@ -41114,8 +41114,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import/incremental.rs",
       "capability": "Independent provider-image key rotation",
-      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
-      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes. Inherited references remain valid after ancestor retirement and collection.",
       "case_names": [
         ""
       ]
@@ -41127,8 +41127,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import/incremental.rs",
       "capability": "Independent provider-image key rotation",
-      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
-      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes. Inherited references remain valid after ancestor retirement and collection.",
       "case_names": [
         ""
       ]
@@ -41140,8 +41140,190 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/native/backup/restore/tests/incremental.rs",
       "capability": "Independent provider-image key rotation",
-      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy.",
-      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes.",
+      "workload": "Create a mixed inherited/changed incremental image, remove the live database, re-encrypt its complete root in another repository, remove the original repository and import the standalone copy. Retire the parent root and collect unreferenced/staging entries in bounded batches before importing or standalone copying the child.",
+      "invariant": "Exact original records/revisions, allocator watermarks and inherited DiskANN artifacts survive source and old-repository loss; the fresh provider has a new history and accepts later writes. SQLite covers all four file modes. Inherited references remain valid after ancestor retirement and collection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "root_listing_is_ordered_bounded_metadata_and_excludes_prepared_operations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Completed backup discovery",
+      "workload": "List 160 completed roots and a private prepared operation with bounded memory and encrypted workspace; retire a root after snapshot discovery and cancel iteration.",
+      "invariant": "Only the original complete ordered descriptors are returned; private preparation stays absent, insufficient workspace fails and terminal iteration retires all admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "root_retirement_is_exclusive_durable_and_cannot_resurrect_prepared_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Durable backup retirement",
+      "workload": "Retire completed and prepared operations through independently opened repository handles, with overlapping readers, retries and an old completion receipt.",
+      "invariant": "Live operation/read leases prevent removal; completed retirement persists across reopen and neither recovery nor an old receipt reinstalls the root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "collection_preserves_branched_children_and_counts_partial_packs_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Independent incremental retention",
+      "workload": "Create two children sharing different ranges in a parent pack in both protection modes, remove each ancestor and collect in batches of at most three files.",
+      "invariant": "Every remaining child verifies without ancestor manifests; partially live packs remain whole, range bytes are deduplicated and final retirement reclaims all objects and staging links.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "prepared_roots_and_active_capture_objects_survive_collection_without_parent_manifests",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Prepared and active backup retention",
+      "workload": "Remove a prepared incremental image's parent, collect, resume and publish; collect again during installed and unfinished active capture.",
+      "invariant": "Recoverable complete inventories and active private object sets survive collection; abandoned capture objects become reclaimable after their lease retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "collection_revalidates_new_publication_removal_and_competing_collection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Concurrent backup collection admission",
+      "workload": "Publish, retire a root or run another collector between reachability discovery and deletion admission.",
+      "invariant": "A changed repository generation rejects the stale plan before deletion and every retained root remains verifiable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "preparation_cannot_publish_references_collected_after_full_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Prepared image publication ownership",
+      "workload": "Collect retired objects after a new manual descriptor fully verifies but before its prepared descriptor installs.",
+      "invariant": "Preparation fails terminally on the changed generation, leaving no discoverable or recoverable dangling root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "root_listing_rejects_a_concurrent_generation_without_partial_metadata",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention.rs",
+      "capability": "Consistent backup root metadata",
+      "workload": "Retire a root between completed-root discovery and generation validation.",
+      "invariant": "No partial metadata listing escapes the changed generation; its charged workspace is released and the next snapshot reflects retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "interrupted_root_removal_keeps_discoverable_content_and_resolves_after_reopen",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Recoverable backup retirement",
+      "workload": "Interrupt cancellation-marker synchronization, root unlink or root-directory synchronization, reopen and run collection before retrying removal.",
+      "invariant": "Every still-discoverable root remains readable; the durable cancellation fence prevents resurrection and retry safely completes removal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "collection_limits_and_cancellation_release_workspace_before_any_deletion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Bounded repository retention",
+      "workload": "Collect an image with 1,100 unit ranges under 128 KiB, exhaust memory or shared ciphertext workspace, cancel and constrain deletion to one file.",
+      "invariant": "Discovery failure changes no objects, successful deletion respects its bound, the shared workspace enforces its exact limit and every path releases charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "corrupt_inventory_or_missing_referenced_objects_prevent_all_collection_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Authenticated collection reachability",
+      "workload": "Corrupt a retained inventory, truncate a referenced object or remove it before collection.",
+      "invariant": "Incomplete reachability prevents every staged and installed-object deletion and releases temporary ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "collection_io_failures_are_retryable_and_never_remove_live_objects",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Idempotent garbage collection",
+      "workload": "Fail unlink and directory synchronization while collecting a mixture of live and retired images, then repeat bounded collection.",
+      "invariant": "Failures cannot remove a live image; retries finish reclaiming dead directory entries and report encoded extents consistently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "collection_rejects_substituted_paths_without_touching_external_files",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Pinned repository collection paths",
+      "workload": "Substitute symlinks into root, object and operation directories before collection.",
+      "invariant": "Discovery rejects substituted entries before deletion, leaves external data unchanged and retains the original image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "interrupted_empty_operation_creation_does_not_block_collection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/failures.rs",
+      "capability": "Interrupted repository creation",
+      "workload": "Leave an empty operation directory without a lease, then add incomplete metadata without ownership.",
+      "invariant": "An empty interrupted creation has no retained objects and does not block collection; missing ownership on a nonempty operation fails closed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independent_process_leases_protect_readers_writers_and_prepared_recovery",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/retention/processes.rs",
+      "capability": "Process-independent repository retention",
+      "workload": "Hold reader, capture and prepared leases in separate processes, collect concurrently and terminate each process without Rust cleanup.",
+      "invariant": "Removal cannot bypass a live OS lease; pending objects survive collection, process exit releases ownership and prepared images remain recoverable.",
       "case_names": [
         ""
       ]
