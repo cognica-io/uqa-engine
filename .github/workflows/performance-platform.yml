@@ -27,6 +27,10 @@ jobs:
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 120 || 60 }}
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
@@ -60,6 +64,10 @@ jobs:
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 25
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
