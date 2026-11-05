@@ -176,6 +176,17 @@ pub trait VectorIndex: Send + Sync {
         image::VectorImageSnapshot::from_index(self.snapshot_with_control(control)?, control)
     }
 
+    /// Borrow a resumable evaluated image. Unsupported owners reject without buffering the synchronous writer or replaying source traversal. A captured owner must preserve its original cancellation throughout the reader's lifetime.
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "resumable vector image output is not supported by this backend".into(),
+        ))
+    }
+
     /// Stream this selected memory index's evaluated image. Unsupported owners reject the capability before output. Committed source capture and complete database activation belong to the enclosing backup lifecycle.
     fn write_image(
         &self,

@@ -28,6 +28,18 @@ impl<T: VectorIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        self.0
+            .image_reader(control)?
+            .with_source_control(self.2.as_ref(), control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

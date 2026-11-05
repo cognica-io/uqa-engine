@@ -146,6 +146,13 @@ impl VectorIndex for MemoryVectorIndex {
         crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry)
     }
 
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        super::image::read_exact(self, control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

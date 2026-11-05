@@ -16,7 +16,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation};
 
 mod exact;
 mod snapshot;
-pub(super) use exact::write as write_exact;
+pub(super) use exact::{reader as read_exact, write as write_exact};
 pub use snapshot::VectorImageSnapshot;
 pub(crate) use snapshot::VectorImageSource;
 

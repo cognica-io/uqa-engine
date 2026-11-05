@@ -660,6 +660,8 @@ Native mapping format 14 adds `_uqa_mvcc_native_sequence_values` (family 62), th
 
 ## Vector storage
 
+`MemoryVectorIndex::image_reader(control)` exposes the exact-vector image codec through bounded reads. `VectorImageSnapshot::image_reader(control)` borrows a selected source; `into_image_reader(control)` consumes it into an independent movable reader that survives live-index and capture retirement. Exact-vector output preserves ordered document identifiers, tensor multiplicity and every finite coordinate bit, emits at most 16 KiB per read and uses a fixed 4 KiB coordinate window. Both original and invoking cancellation remain active. Synchronous exact-vector output uses the same encoder without heap scratch. Resumable IVF, HNSW and DiskANN codecs remain unimplemented and reject this capability; their existing synchronous image codecs remain available. See the [exact-vector argument](../../design/backup-image-format.md#resumable-evaluated-exact-vector-images).
+
 A vector field begins with exact brute-force access. `CREATE INDEX USING ivf`, `USING hnsw` or `USING diskann` installs a distinct physical index identity and durable metadata. Reopen attaches the stored structure; it does not rebuild merely because the process restarted.
 
 Mutation maintains the selected physical index according to its contract. Index creation, replacement, and failure must publish catalog identity only after the physical candidate is durable and validated.

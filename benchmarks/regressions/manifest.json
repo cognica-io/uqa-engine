@@ -4,6 +4,110 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "exact_image_readers_preserve_independent_bytes_at_every_field_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Exact vector image byte preservation",
+      "workload": "Encode an independent tensor fixture through one-byte and arbitrary-sized reads.",
+      "invariant": "Every read schedule preserves exact ordered UQAVEC01 bytes, negative zero and tensor multiplicity; EOF releases the cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_readers_bound_coordinate_work_without_read_time_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Exact vector image bounded coordinate work",
+      "workload": "Read a two-MiB coordinate payload under exhausted remaining cursor admission.",
+      "invariant": "Reads emit at most 16 KiB, retain less than 8 KiB of cursor memory and perform zero read-time heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_readers_admit_before_boxing_and_retire_cancelled_cursors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Exact vector image admission and cancellation",
+      "workload": "Deny exact cursor admission and cancel before or after the first output byte.",
+      "invariant": "Allocation denial and cancellation release every cursor reservation; a cancelled reader cannot resume after token reset.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_exact_images_survive_source_mutation_and_move_without_replaying_coordinates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Owned exact vector image retention",
+      "workload": "Move a started owned tensor reader to another thread after mutating and retiring the live index.",
+      "invariant": "Selected tensor bytes and subsequent decode remain exact after source loss; EOF releases source and invoking allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_exact_images_keep_original_cancellation_after_external_owner_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Owned exact vector original cancellation",
+      "workload": "Cancel the captured source before or after opening its independent reader.",
+      "invariant": "Original cancellation remains active without an external capture handle and retires both ownership and cursor memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_exact_image_readers_keep_source_control_and_do_not_pin_live_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Retained exact vector membership independence",
+      "workload": "Capture a registered exact index, clear its live membership, then read or cancel through the retained source.",
+      "invariant": "Selected bytes survive live source retirement; empty reads observe original cancellation and release cursor allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_image_readers_reject_unimplemented_codecs_without_buffering_or_leaks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Unsupported vector image codec admission",
+      "workload": "Attempt borrowed and owned resumable reads for an unsupported vector codec.",
+      "invariant": "The capability rejects without a full-output buffer and retires the owned source and all invoking allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "exact_image_readers_preserve_empty_zero_dimension_and_invalid_source_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/exact/tests.rs",
+      "capability": "Exact vector empty and invalid source bounds",
+      "workload": "Stream empty and zero-dimensional tensors and encounter an invalid final coordinate in a two-MiB source.",
+      "invariant": "Empty carriers preserve their exact wire form; invalid distant coordinates are not scanned at open and terminal failure releases the cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "owned_image_readers_move_live_borrows_and_release_their_source_at_eof",
       "cases": 1,
       "source": "crates/uqa-storage/src/image_io/owned/tests.rs",
