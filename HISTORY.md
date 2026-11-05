@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.
+
 - Add resumable IVF image validation and output over frozen training generations. Preparation counts coordinate windows and empty membership boundaries, preserves absolute coordinate diagnostics and rejects invalid state before output; captured readers survive live retraining and source retirement without copying complete encoded images.
 
 - Add resumable exact-vector image reads over retained tensor coordinates. Borrowed and independently owned readers preserve exact coordinate bits, tensor order and original cancellation with bounded output and admitted fixed scratch; synchronous output uses the same encoder. Complete memory Engine backup remains under implementation.

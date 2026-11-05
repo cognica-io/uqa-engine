@@ -22,6 +22,7 @@ use crate::{
 };
 
 mod image;
+pub(super) use image::{CanonicalImageCursor, CanonicalImageValidation};
 
 pub(super) struct Tensor {
     origin: DiskANNCanonicalOrigin,

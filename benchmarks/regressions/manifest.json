@@ -4,6 +4,110 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "memory_diskann_image_readers_preserve_predecessor_bytes_across_every_window_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Resumable DiskANN predecessor image compatibility",
+      "workload": "Read the evaluated image captured at bfbbab151 with preparation limits 1 through 128 and output windows 1 byte through 32 KiB.",
+      "invariant": "Every schedule preserves the independent sealed fixture byte for byte, reports the same preparation positions and releases admitted state at stable EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_preparation_bounds_empty_tensors_origin_batches_and_uncovered_gaps",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Resumable DiskANN canonical work bounds",
+      "workload": "Prepare 4,096 empty tensors, 256 sealed origins and 3,840 uncovered changes with both source and invoking spare allowances exhausted.",
+      "invariant": "Every canonical and change entry advances separately; origin decoding uses at most 64 entries per batch and preparation and bounded output allocate no scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_coordinate_output_uses_fixed_scratch_without_copying_the_tensor",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Resumable DiskANN coordinate output bounds",
+      "workload": "Stream four MiB of signed-zero canonical coordinates under an exhausted invoking allowance.",
+      "invariant": "Cursor admission stays below 32 KiB, reads emit at most 16 KiB and allocate no heap scratch or complete tensor copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_memory_diskann_image_readers_preserve_selected_state_after_rebuild_and_thread_transfer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Owned DiskANN selected generation retention",
+      "workload": "Suspend preparation, mutate and rebuild the live index, close it and transfer the captured reader to another thread.",
+      "invariant": "Exact selected physical and canonical bytes survive source retirement; EOF releases source, capture and invoking allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_memory_diskann_image_readers_retire_all_controls_at_every_preparation_and_output_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Owned DiskANN cancellation and retirement",
+      "workload": "Cancel source, capture and invoking controls before opening, during preparation, at readiness and during physical output.",
+      "invariant": "Empty reads observe each cancellation, permanently fail the reader and release all retained source and cursor allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_admission_charges_exact_cursor_and_manifest_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "Resumable DiskANN exact allocation admission",
+      "workload": "Deny zero and one byte less than the measured cursor and manifest requirement, then admit exactly that requirement.",
+      "invariant": "Failed opening releases its partial allocation, exact admission reaches identical bytes and completed readers remain at EOF after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_synchronous_images_preserve_cancellation_during_partial_and_interrupted_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/stream.rs",
+      "capability": "DiskANN synchronous output cancellation",
+      "workload": "Cancel each original, capture and invoking control from a writer that returns one byte or Interrupted.",
+      "invariant": "The next output attempt is prevented, typed cancellation is preserved and all scratch and retained source owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_diskann_image_preparation_rejects_corrupt_origins_counts_and_changes_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/source/image/tests.rs",
+      "capability": "Resumable DiskANN invalid source rejection",
+      "workload": "Corrupt nine canonical generation, population, revision, tensor and covered/uncovered membership invariants.",
+      "invariant": "Bounded preparation and synchronous output reject the same invalid owners before any image bytes and release failed reader allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "ivf_image_readers_preserve_independent_stale_state_across_all_window_boundaries",
       "cases": 1,
       "source": "crates/uqa-storage/src/ivf_index/image/tests/stream.rs",
