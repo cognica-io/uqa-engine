@@ -33048,15 +33048,19 @@
       "test": "native_view_shape_admission_preserves_rejection_order_and_recovers",
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_shapes.rs",
       "kind": "lib",
-      "cases": 4,
+      "cases": 8,
       "case_names": [
-        "case_1_memory",
-        "case_2_sqlite_native",
-        "case_3_sqlite_kv",
-        "case_4_redb"
+        "case_1_memory::explicit_1_false",
+        "case_1_memory::explicit_2_true",
+        "case_2_sqlite_native::explicit_1_false",
+        "case_2_sqlite_native::explicit_2_true",
+        "case_3_sqlite_kv::explicit_1_false",
+        "case_3_sqlite_kv::explicit_2_true",
+        "case_4_redb::explicit_1_false",
+        "case_4_redb::explicit_2_true"
       ],
       "capability": "Automatic view metadata ownership",
-      "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider.",
+      "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider, inside admitted implicit and explicit statement snapshots.",
       "invariant": "Early shape rejection precedes payload production; admitted layer failure releases its owners and native mutations recover with durable results."
     },
     {
