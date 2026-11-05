@@ -2,6 +2,97 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_image_readers_move_live_borrows_and_release_their_source_at_eof",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/owned/tests.rs",
+      "capability": "Movable owned image continuations",
+      "workload": "Open a borrowed codec over an owned MiB payload, move the active reader to another thread and finish bounded reads.",
+      "invariant": "Every payload byte is preserved with zero read-time heap allocation; the borrowed codec retires before its owner and all allowances release at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_image_readers_retire_open_prepare_read_failures_and_unwinds",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/owned/tests.rs",
+      "capability": "Owned image failure retirement",
+      "workload": "Fail and unwind during lazy source opening, preparation and payload output.",
+      "invariant": "The cursor permanently fails, drops its owner exactly once and releases both retained payload and invoking allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_image_readers_preserve_original_cancellation_and_unread_drop",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/owned/tests.rs",
+      "capability": "Owned image cancellation and drop",
+      "workload": "Drop before opening or cancel the original source before opening, during preparation and on empty reads.",
+      "invariant": "Original cancellation stays attached to the selected owner; every terminal path releases the source without reopening or replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_image_reader_admission_covers_every_allocation_before_reading",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/owned/tests.rs",
+      "capability": "Owned image admission boundaries",
+      "workload": "Deny construction and lazy codec opening at exact transfer-window, continuation and reader-header boundaries.",
+      "invariant": "Each allocation is admitted before construction; failure releases the owner and all allowances without exceeding the invoking limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "owned_graph_image_readers_release_retained_sources_without_an_external_snapshot",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Independent graph image reader ownership",
+      "workload": "Consume the only captured snapshot, close the live source, move a started cursor to another thread and read through EOF.",
+      "invariant": "The selected graph image survives external source retirement and is encoded without read-time allocation; EOF retires the source and its allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "owned_graph_image_readers_retire_the_snapshot_on_cancel_and_unread_drop",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/handle/image/tests.rs",
+      "capability": "Owned graph image cancellation",
+      "workload": "Cancel original capture or drop an owned graph reader before and after its first payload byte.",
+      "invariant": "The retained source is released on cancellation or drop, including empty-read cancellation, with no leaked source or cursor allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_graph_image_reader_owns_its_source_after_engine_and_cut_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/graphs.rs",
+      "capability": "Committed graph reader independence",
+      "workload": "Select an actual committed Engine graph, mutate its successor, close Engine and capture, then read and import the selected graph on another thread.",
+      "invariant": "The movable reader alone retains the committed graph; fresh reconstruction excludes later writes and EOF releases all original and invoking memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-graph",
       "kind": "lib",
       "test": "graph_image_readers_preserve_independent_wire_and_allocation_state",

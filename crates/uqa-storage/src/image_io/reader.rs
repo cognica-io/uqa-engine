@@ -90,14 +90,14 @@ impl<'a> ImageReader<'a> {
             }
             State::Failed => Err(StorageBackendError::Other("failed image reader".into())),
             State::Active(source) => {
-                let (mut source, memory) = source.into_parts();
+                let mut source = source.into_parts();
                 self.control.check()?;
                 if maximum_positions == 0 {
                     return Err(StorageBackendError::Other(
                         "image preparation requires a positive position limit".into(),
                     ));
                 }
-                let progress = source.prepare(maximum_positions)?;
+                let progress = source.0.prepare(maximum_positions)?;
                 if progress.positions > maximum_positions
                     || (!progress.ready && progress.positions == 0)
                     || (self.prepared && progress.positions != 0)
@@ -108,7 +108,7 @@ impl<'a> ImageReader<'a> {
                 }
                 self.prepared = progress.ready;
                 self.control.check()?;
-                self.state = State::Active(Budgeted::new(source, memory));
+                self.state = State::Active(Budgeted::new(source.0, source.1));
                 Ok(progress)
             }
         }

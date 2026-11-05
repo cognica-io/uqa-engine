@@ -195,3 +195,71 @@ fn captured_graph_readers_keep_both_cancellation_owners_during_preparation_and_o
         }
     }
 }
+
+#[test]
+fn owned_graph_image_readers_release_retained_sources_without_an_external_snapshot() {
+    let source = source();
+    let weak = Arc::downgrade(&source);
+    let original = StorageReadControl::with_limit(4 << 20);
+    let invoking = StorageReadControl::with_limit(256 << 10);
+    let snapshot = source.capture_image_with_control(&original).unwrap();
+    let expected = encode(&snapshot);
+    let mut reader = snapshot.into_image_reader(&invoking).unwrap();
+    drop(source);
+    assert!(weak.upgrade().is_some());
+    assert!(!reader.prepare(1).unwrap().ready);
+    let mut reader = std::thread::spawn(move || {
+        let mut actual = vec![0; expected.len()];
+        let mut offset = 0;
+        let allocation = allocation_counter::measure(|| {
+            while offset < actual.len() {
+                let end = (offset + 127).min(actual.len());
+                let count = reader.read(&mut actual[offset..end]).unwrap();
+                assert!(count > 0);
+                offset += count;
+            }
+            assert_eq!(reader.read(&mut [0; 1]).unwrap(), 0);
+        });
+        assert_eq!(allocation.bytes_total, 0);
+        assert_eq!(actual, expected);
+        reader
+    })
+    .join()
+    .unwrap();
+    assert!(weak.upgrade().is_none());
+    assert_eq!(original.memory().used(), 0);
+    assert_eq!(invoking.memory().used(), 0);
+    original.cancellation().cancel();
+    invoking.cancellation().cancel();
+    assert_eq!(reader.read(&mut [0; 1]).unwrap(), 0);
+}
+
+#[test]
+fn owned_graph_image_readers_retire_the_snapshot_on_cancel_and_unread_drop() {
+    for start in [false, true] {
+        for cancel in [false, true] {
+            let source = source();
+            let weak = Arc::downgrade(&source);
+            let original = StorageReadControl::with_limit(4 << 20);
+            let invoking = StorageReadControl::with_limit(256 << 10);
+            let snapshot = source.capture_image_with_control(&original).unwrap();
+            drop(source);
+            let mut reader = snapshot.into_image_reader(&invoking).unwrap();
+            if start {
+                assert_eq!(reader.read(&mut [0; 1]).unwrap(), 1);
+            }
+            if cancel {
+                original.cancellation().cancel();
+                assert!(matches!(
+                    reader.read(&mut []),
+                    Err(StorageBackendError::Cancelled(_))
+                ));
+                assert!(weak.upgrade().is_none());
+            }
+            drop(reader);
+            assert!(weak.upgrade().is_none());
+            assert_eq!(original.memory().used(), 0);
+            assert_eq!(invoking.memory().used(), 0);
+        }
+    }
+}

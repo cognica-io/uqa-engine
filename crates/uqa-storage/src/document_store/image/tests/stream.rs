@@ -188,6 +188,8 @@ struct Source {
     payload: Budgeted<Vec<u8>>,
     mode: usize,
     dropped: Arc<AtomicUsize>,
+    retained_at_drop: Arc<AtomicUsize>,
+    memory: uqa_core::memory::MemoryBudget,
     token: uqa_core::CancellationToken,
 }
 
@@ -247,6 +249,8 @@ impl ImageRead for Source {
 
 impl Drop for Source {
     fn drop(&mut self) {
+        self.retained_at_drop
+            .store(self.memory.used(), Ordering::SeqCst);
         self.dropped.fetch_add(1, Ordering::SeqCst);
     }
 }
@@ -257,10 +261,13 @@ fn admitted_image_readers_release_sources_on_failure_unwind_and_complete_only_no
         let control = StorageReadControl::with_limit(8192);
         let memory = control.memory().reserve(4096).unwrap();
         let dropped = Arc::new(AtomicUsize::new(0));
+        let retained_at_drop = Arc::new(AtomicUsize::new(0));
         let source = Source {
             payload: Budgeted::new(vec![0; 4096], memory),
             mode,
             dropped: Arc::clone(&dropped),
+            retained_at_drop: retained_at_drop.clone(),
+            memory: control.memory().clone(),
             token: control.cancellation().clone(),
         };
         let mut reader = ImageReader::new(source, &control).unwrap();
@@ -277,6 +284,10 @@ fn admitted_image_readers_release_sources_on_failure_unwind_and_complete_only_no
             _ => assert!(result.unwrap().is_err()),
         }
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            retained_at_drop.load(Ordering::SeqCst),
+            4096 + size_of::<Source>()
+        );
         assert_eq!(control.memory().used(), 0);
         control.cancellation().cancel();
         if mode == 4 {
@@ -293,10 +304,13 @@ fn admitted_image_preparation_retires_failures_and_preserves_pending_ownership()
     for mode in 5..12 {
         let control = StorageReadControl::with_limit(8192);
         let dropped = Arc::new(AtomicUsize::new(0));
+        let retained_at_drop = Arc::new(AtomicUsize::new(0));
         let source = Source {
             payload: Budgeted::new(vec![0; 4096], control.memory().reserve(4096).unwrap()),
             mode,
             dropped: dropped.clone(),
+            retained_at_drop: retained_at_drop.clone(),
+            memory: control.memory().clone(),
             token: control.cancellation().clone(),
         };
         let mut reader = ImageReader::new(source, &control).unwrap();
@@ -316,6 +330,10 @@ fn admitted_image_preparation_retires_failures_and_preserves_pending_ownership()
             _ => assert!(result.unwrap().is_err()),
         }
         assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            retained_at_drop.load(Ordering::SeqCst),
+            4096 + size_of::<Source>()
+        );
         assert_eq!(control.memory().used(), 0);
         assert!(reader.prepare(1).is_err());
         assert!(reader.read(&mut [0; 1]).is_err());

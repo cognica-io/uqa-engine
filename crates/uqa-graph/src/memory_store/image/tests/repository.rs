@@ -9,15 +9,15 @@ use crate::GraphStoreHandle;
 use std::sync::Arc;
 use uqa_storage::{backup::*, image_io::ImageReader, mvcc::DatabaseId};
 
-struct GraphUnit<'a> {
+struct GraphUnit {
     cut: BackupCut,
-    reader: ImageReader<'a>,
+    reader: ImageReader<'static>,
     selected: bool,
     ended: bool,
     statistics: BackupSourceStatistics,
 }
 
-impl BackupImageSource for GraphUnit<'_> {
+impl BackupImageSource for GraphUnit {
     fn cut(&self) -> BackupCut {
         self.cut
     }
@@ -143,7 +143,7 @@ fn capture(
             format: ImageFormat::new(ImageProvider::Memory, 1).unwrap(),
             sequence: None,
         },
-        reader: snapshot.image_reader(control).unwrap(),
+        reader: snapshot.clone().into_image_reader(control).unwrap(),
         selected: false,
         ended: false,
         statistics: BackupSourceStatistics::default(),
