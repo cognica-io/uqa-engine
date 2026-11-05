@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add resumable stored-model and analyzer image readers. Models retain bounded shape and numeric validation before output; analyzers borrow exact resolved descriptors and dictionary artifacts. Borrowed and independently owned readers preserve source cancellation and bytes after source closure, and synchronous output shares the same encoders. Complete memory Engine backup remains under implementation.
+
 - Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Resumable HNSW preparation and output preserve node/layer order, structural diagnostics and tombstone reachability with bounded work and shared temporary-file admission. Borrowed, independently owned and synchronous readers use the same codec; complete memory Engine backup remains under implementation.
 
 - Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.

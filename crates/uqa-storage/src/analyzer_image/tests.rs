@@ -7,6 +7,8 @@
 use super::*;
 use uqa_analysis::{Analyzer, AnalyzerLimits};
 
+mod stream;
+
 fn encode(source: &CompiledAnalyzer) -> Vec<u8> {
     let mut bytes = Vec::new();
     let written =

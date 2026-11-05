@@ -10,13 +10,14 @@ use crate::{DeepModel, GatingSpec};
 use std::io::{Read, Write};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};
 use uqa_storage::{
-    image_io::{ImageInput, ImageOutput},
+    image_io::{ImageInput, ImageOutput, ImagePreparation, ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
 
 mod capture;
 mod layers;
+mod stream;
 pub(crate) use capture::retained_model_bytes;
 pub use capture::ModelImageSnapshot;
 #[cfg(test)]
@@ -28,41 +29,68 @@ fn invalid() -> StorageBackendError {
     StorageBackendError::Other("invalid evaluated model image".into())
 }
 
-fn validate(model: &DeepModel) -> StorageBackendResult<()> {
-    model
-        .validate()
-        .map_err(|error| StorageBackendError::backend("model image validation", error))
+fn validate(model: &DeepModel, control: &StorageReadControl) -> StorageBackendResult<()> {
+    let mut validation = crate::deep_fusion::ModelValidation::model(&model.layers, model.alpha)
+        .map_err(validation_error)?;
+    loop {
+        control.check()?;
+        if validation.advance().map_err(validation_error)? {
+            break;
+        }
+    }
+    control.check()
 }
 
-/// Stream a valid stored model's exact layer order, scalar bits and owned labels without retraining or constructing another set of weights. The enclosing catalog supplies its immutable captured model.
+fn validation_error(error: crate::MLError) -> StorageBackendError {
+    StorageBackendError::backend("model image validation", error)
+}
+
+/// Borrow one evaluated model with bounded pre-output validation and exact continuation positions.
+pub fn model_image_reader<'a>(
+    model: &'a DeepModel,
+    control: &'a StorageReadControl,
+) -> StorageBackendResult<ImageReader<'a>> {
+    ImageReader::new(
+        stream::ModelImageCursor::new(model, control, None)?,
+        control,
+    )
+}
+
+/// Stream a valid stored model's exact layer order, scalar bits and owned labels without retraining or constructing another set of weights. Synchronous output drains the same bounded codec as suspended reads.
 pub fn write_model_image(
     model: &DeepModel,
     writer: &mut dyn Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    control.check()?;
-    validate(model)?;
+    write_parts(model, writer, control, None)
+}
+
+fn write_parts(
+    model: &DeepModel,
+    writer: &mut dyn Write,
+    control: &StorageReadControl,
+    original: Option<&StorageReadControl>,
+) -> StorageBackendResult<u64> {
+    let mut cursor = stream::ModelImageCursor::new(model, control, original)?;
+    while !cursor.prepare(128)?.ready {}
     let mut output = ImageOutput {
         writer,
         control,
         written: 0,
     };
-    output.bytes(MAGIC)?;
-    output.bytes(&model.alpha.to_bits().to_le_bytes())?;
-    output.bytes(&[match model.gating {
-        GatingSpec::None => 0,
-        GatingSpec::ReLU => 1,
-        GatingSpec::Swish => 2,
-    }])?;
-    output.count(model.layers.len())?;
-    for layer in &model.layers {
-        layers::write(layer, &mut output)?;
+    let mut buffer = [0; 4096];
+    loop {
+        let count = cursor.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.bytes(&buffer[..count])?;
     }
     control.check()?;
     Ok(output.written)
 }
 
-/// Decode one private model under the original input allowance. Complete framing and the same borrowed validator used by ordinary model/runtime construction precede exposure. Model validation runs between cancellation checks; framed payload I/O polls in bounded windows.
+/// Decode one private model under the original input allowance. Complete framing and the same borrowed validator used by ordinary model/runtime construction precede exposure. Model validation polls cancellation at fixed metadata and numeric windows; framed payload I/O also polls in bounded windows.
 pub fn read_model_image(
     reader: &mut dyn Read,
     control: &StorageReadControl,
@@ -100,21 +128,9 @@ pub fn read_model_image(
         input.memory,
     );
     control.check()?;
-    validate(&model)?;
+    validate(&model, control)?;
     control.check()?;
     Ok(model)
-}
-
-fn floats(output: &mut ImageOutput<'_>, values: &[f64]) -> StorageBackendResult<()> {
-    output.count(values.len())?;
-    let mut buffer = [0_u8; 4096];
-    for values in values.chunks(buffer.len() / 8) {
-        for (value, target) in values.iter().zip(buffer.chunks_exact_mut(8)) {
-            target.copy_from_slice(&value.to_bits().to_le_bytes());
-        }
-        output.bytes(&buffer[..values.len() * 8])?;
-    }
-    Ok(())
 }
 
 struct ModelInput<'a> {

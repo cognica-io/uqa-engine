@@ -2,6 +2,123 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "resumable_model_images_preserve_all_layers_and_wire_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/stream.rs",
+      "capability": "Resumable stored-model wire compatibility",
+      "workload": "Read every stored layer and gating mode in one-byte through 32 KiB windows, then reconstruct through the existing decoder.",
+      "invariant": "Every schedule matches synchronous bytes, preserves the complete stored carrier and retires cursor admission at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "resumable_model_validation_and_output_bound_work_and_exact_scratch_admission",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/stream.rs",
+      "capability": "Stored-model preparation and output bounds",
+      "workload": "Validate and emit four MiB of model weights with exactly the cursor allowance and one preparation position per call.",
+      "invariant": "Each position checks fixed metadata or at most 512 values; output emits at most 16 KiB, allocates no heap scratch and preserves exact admission failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "resumable_model_validation_preserves_error_order_and_absolute_positions",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/stream.rs",
+      "capability": "Stored-model validation diagnostic order",
+      "workload": "Reject a nonfinite value beyond two numeric windows, conflicting shape errors and invalid convolution weight sums.",
+      "invariant": "Existing shape/finite/aggregate error order and absolute numeric positions are preserved; invalid models emit no bytes and failed readers cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "owned_model_readers_preserve_selected_source_after_replacement_and_thread_transfer",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/stream.rs",
+      "capability": "Owned stored-model source retention",
+      "workload": "Replace and close a captured model, then move its reader to another thread and consume three-byte windows.",
+      "invariant": "The selected bytes survive source replacement; EOF releases the final source, capture and output allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "owned_model_readers_retire_original_and_invoking_cancellation_during_preparation_and_output",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/stream.rs",
+      "capability": "Stored-model original cancellation ownership",
+      "workload": "Cancel either source or invoking control before preparation, between numeric windows, during output and before an empty read.",
+      "invariant": "Every cancellation retires the source and both allowances; later preparation and reads remain failed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resumable_analyzer_images_match_literal_framing_after_source_loss_and_thread_transfer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/stream.rs",
+      "capability": "Resumable analyzer wire and source retention",
+      "workload": "Read native and copied analyzer captures across one-byte through 32 KiB boundaries and transfer an owned reader after pipeline retirement.",
+      "invariant": "Literal framing and complete restored token observations are unchanged; source and output allowances retire at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resumable_analyzer_output_bounds_large_descriptors_and_exact_cursor_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/stream.rs",
+      "capability": "Analyzer output allocation bounds",
+      "workload": "Read a descriptor containing 4,096 long stop words with exactly the required cursor allowance.",
+      "invariant": "Cursor admission rejects one byte less, reads emit at most 16 KiB without heap allocation, and output preserves every descriptor byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_analyzer_readers_retire_both_cancellation_scopes_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/stream.rs",
+      "capability": "Analyzer original cancellation ownership",
+      "workload": "Exercise copied/native owners, both cancellation controls, empty/nonempty reads and denied owned-reader admission.",
+      "invariant": "Failure retires capture and output state without reviving a failed cursor or changing the live compiled analyzer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "resumable_analyzer_dictionary_images_keep_exact_enabled_artifacts_and_observations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/stream.rs",
+      "capability": "Analyzer resource continuation fidelity",
+      "workload": "Read an ordinary analyzer and each enabled Korean/Japanese dictionary through an owned capture after source closure.",
+      "invariant": "Exact encoded artifacts reconstruct complete token observations under fresh resource owners and release their input allowances; language coverage follows the enabled Cargo features.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "memory_diskann_image_readers_preserve_predecessor_bytes_across_every_window_boundary",

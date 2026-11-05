@@ -6,7 +6,7 @@
 
 //! Immutable stored models retain their actual buffer capacities without duplicating weights.
 
-use super::{write_model_image, DeepModel, StorageBackendResult, StorageReadControl};
+use super::{write_parts, DeepModel, ImageReader, StorageBackendResult, StorageReadControl};
 use crate::DeepLayerSpec;
 use std::sync::Arc;
 use uqa_core::memory::{MemoryError, MemoryReservation};
@@ -40,6 +40,26 @@ impl DeepModel {
 }
 
 impl ModelImageSnapshot {
+    /// Borrow this exact model's bounded validator and output continuation.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.0.control.check()?;
+        ImageReader::new(
+            super::stream::ModelImageCursor::new(&self.0.source, control, Some(&self.0.control))?,
+            control,
+        )
+    }
+
+    /// Transfer the retained model into an independent movable reader without copying its weights.
+    pub fn into_image_reader(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'static>> {
+        ImageReader::from_owner(self, control)
+    }
+
     pub(crate) fn wrapper_bytes() -> usize {
         size_of::<RetainedModel>()
     }
@@ -62,8 +82,17 @@ impl ModelImageSnapshot {
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
         uqa_storage::image_io::with_retained_control(output, Some(&self.0.control), |output| {
-            write_model_image(&self.0.source, output, control)
+            write_parts(&self.0.source, output, control, Some(&self.0.control))
         })
+    }
+}
+
+impl uqa_storage::image_io::ImageOwner for ModelImageSnapshot {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.image_reader(control)
     }
 }
 

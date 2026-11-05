@@ -6,8 +6,12 @@
 
 //! Immutable analyzer images keep detached encoded resources and original capture controls.
 
-use super::write_parts;
-use crate::{read_control::StorageReadControl, StorageBackendResult};
+use super::{reader_parts, write_parts};
+use crate::{
+    image_io::{ImageOwner, ImageReader},
+    read_control::StorageReadControl,
+    StorageBackendResult,
+};
 use std::{io::Write, sync::Arc};
 use uqa_analysis::{AnalyzerImageSource, CapturedAnalyzer, CompiledAnalyzer};
 use uqa_core::memory::{Budgeted, MemoryReservation, ProductionControl};
@@ -27,6 +31,37 @@ enum Source {
 pub struct AnalyzerImageSnapshot(Arc<RetainedAnalyzer>);
 
 impl AnalyzerImageSnapshot {
+    /// Borrow the selected descriptor and dictionary bytes without copying or reopening resources.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.0.control.check()?;
+        let reader = match &self.0.source {
+            Source::Copied(source) => reader_parts(
+                source.canonical_json(),
+                source.dictionary_resources().len(),
+                source.dictionary_resources(),
+                control,
+            ),
+            Source::Native(source) => reader_parts(
+                source.canonical_json(),
+                source.dictionary_resources().len(),
+                source.dictionary_resources(),
+                control,
+            ),
+        }?;
+        reader.with_source_control(Some(&self.0.control), control)
+    }
+
+    /// Transfer this selected revision into a movable reader with its original source admission.
+    pub fn into_image_reader(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'static>> {
+        ImageReader::from_owner(self, control)
+    }
+
     pub fn capture(
         source: &CompiledAnalyzer,
         control: &StorageReadControl,
@@ -103,6 +138,15 @@ impl AnalyzerImageSnapshot {
                 control,
             ),
         })
+    }
+}
+
+impl ImageOwner for AnalyzerImageSnapshot {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.image_reader(control)
     }
 }
 
