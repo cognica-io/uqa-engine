@@ -202,9 +202,9 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(expression.count("package("), 1)
         self.assertEqual(expression.count("test(/"), 1)
         self.selection_file.write_text(config)
-        for archive in (None, self.root / "tests.tar.zst"):
-            with self.subTest(archive=archive):
-                args = runner.arguments(checks, self.selection_file, archive)
+        for prepared_build in (None, self.root / "target/nextest"):
+            with self.subTest(prepared_build=prepared_build):
+                args = runner.arguments(checks, self.selection_file, prepared_build)
                 self.assertLess(sum(len(arg.encode()) + 1 for arg in args), 4096)
                 self.assertEqual(args.count("--tool-config-file"), 1)
                 self.assertNotIn("-E", args)
@@ -230,13 +230,15 @@ class PerformanceChecksTest(unittest.TestCase):
                     self.assertIsNone(re.search(pattern, name))
 
     def test_archive_selection_preserves_inventory_without_cargo_build_flags(self):
-        archive = self.root / "tests.tar.zst"
-        args = runner.arguments([self.check], self.selection_file, archive)
+        prepared_build = self.root / "target/nextest"
+        args = runner.arguments([self.check], self.selection_file, prepared_build)
         self.assertEqual(args[:2], ["--profile", "ci"])
-        self.assertEqual(args[args.index("--archive-file") + 1], str(archive.resolve()))
+        self.assertEqual(args[args.index("--binaries-metadata") + 1], str((prepared_build / "binaries-metadata.json").resolve()))
+        self.assertEqual(args[args.index("--cargo-metadata") + 1], str((prepared_build / "cargo-metadata.json").resolve()))
         self.assertEqual(args[args.index("--workspace-remap") + 1], str(self.root))
+        self.assertEqual(args[args.index("--target-dir-remap") + 1], str(self.root / "target"))
         self.assertEqual(args[-2:], runner.arguments([self.check], self.selection_file)[-2:])
-        for flag in ("--locked", "--lib", "--tests", "-p"):
+        for flag in ("--locked", "--lib", "--tests", "-p", "--archive-file", "--extract-overwrite"):
             self.assertNotIn(flag, args)
 
     def test_archive_build_compiles_every_inventory_owner_without_executing_tests(self):
@@ -283,7 +285,7 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertIn("**failed**", (output / "summary.md").read_text())
         self.assertIn("missing provider case", (self.root / "step.md").read_text())
 
-    def run_main(self, *, listing=None, listing_failure=None, failure=None, archive=None):
+    def run_main(self, *, listing=None, listing_failure=None, failure=None, archive=None, extraction_failure=None):
         self.write_inventory()
         output = self.root / "run-output"
         output.mkdir(parents=True, exist_ok=True)
@@ -294,7 +296,9 @@ class PerformanceChecksTest(unittest.TestCase):
         with (
             mock.patch.object(runner, "MANIFEST", self.manifest),
             mock.patch.object(runner, "inventory", return_value=[self.check]),
-            mock.patch.object(runner, "capture", side_effect=["a" * 40, "rustc", "nextest", listing_failure or json.dumps(self.listing if listing is None else listing)]) as capture,
+            mock.patch.object(runner, "capture", side_effect=["a" * 40, "rustc", "nextest"] + (
+                [extraction_failure or "binary metadata"] if archive is not None else []
+            ) + [listing_failure or json.dumps(self.listing if listing is None else listing)]) as capture,
             mock.patch.object(runner.subprocess, "run", side_effect=failure) as run,
             mock.patch("sys.argv", ["run-performance-checks", "--output", str(output)] + (
                 ["--archive-file", str(archive)] if archive is not None else []
@@ -334,10 +338,39 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertEqual(result["checks"][0]["selected_cases"], 2)
         selection_file = self.root / "run-output/selection.toml"
         self.assertEqual(selection_file.read_text(), runner.selection_config([self.check]))
-        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], selection_file, archive))
-        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], selection_file, archive))
+        prepared_build = self.root / "target/nextest"
+        self.assertEqual(list(capture.call_args.args[5:]), runner.arguments([self.check], selection_file, prepared_build))
+        self.assertEqual(run.call_args.args[0][3:], runner.arguments([self.check], selection_file, prepared_build))
         self.assertIn("100", result["error"])
         self.assertEqual(capture.call_args.kwargs["timeout"], 120)
+
+    def test_archive_extraction_has_its_own_deadline_and_does_not_discover_cases(self):
+        archive = self.root / "tests.tar.zst"
+        status, result, capture, run = self.run_main(archive=archive)
+        self.assertEqual(status, 0)
+        extraction = capture.call_args_list[3]
+        self.assertEqual(extraction.args, (
+            "cargo", "nextest", "list", "--list-type", "binaries-only", "--message-format", "json",
+            "--archive-file", str(archive.resolve()), "--extract-to", str(self.root),
+            "--extract-overwrite", "--workspace-remap", str(self.root),
+        ))
+        self.assertEqual(extraction.kwargs["timeout"], 600)
+        self.assertEqual(capture.call_args_list[4].kwargs["timeout"], 120)
+        self.assertNotIn("--archive-file", capture.call_args_list[4].args)
+        self.assertNotIn("--archive-file", run.call_args.args[0])
+        self.assertEqual(result["stage"], "completed")
+
+    def test_archive_extraction_failure_cannot_discover_or_execute_stale_binaries(self):
+        for failure in [subprocess.TimeoutExpired(["cargo", "nextest", "list"], 600), subprocess.CalledProcessError(2, ["cargo", "nextest", "list"])]:
+            with self.subTest(failure=type(failure).__name__):
+                status, result, capture, run = self.run_main(
+                    archive=self.root / "tests.tar.zst", extraction_failure=failure,
+                )
+                self.assertEqual(status, 1)
+                self.assertEqual(result["stage"], "extraction")
+                self.assertEqual(capture.call_count, 4)
+                self.assertFalse((self.root / "run-output/test-inventory.json").exists())
+                run.assert_not_called()
 
     def test_archived_run_rejects_missing_provider_cases_before_execution(self):
         status, result, _, run = self.run_main(
