@@ -13,9 +13,10 @@ use uqa_graph::GraphStore;
 use uqa_sql::result::ResultRow;
 use uqa_storage::{
     backup::{
-        BackupCaptureReport, BackupCut, BackupImageSource, BackupKey, BackupLimits, BackupResult,
-        BackupRoot, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, ImageProvider,
-        LocalRepository, OwnedBackupImage, Protection, ProtectionId, UnitKind,
+        BackupCaptureReport, BackupCaptureStep, BackupCut, BackupImageSource, BackupKey,
+        BackupLimits, BackupResult, BackupRoot, BackupSourceStatistics, BackupSourceStep,
+        BackupSourceUnit, ImageProvider, LocalRepository, OwnedBackupImage, Protection,
+        ProtectionId, UnitKind,
     },
     read_control::StorageReadControl,
     PersistentStorageProvider,
@@ -218,15 +219,17 @@ fn publish(
     control: &StorageReadControl,
 ) -> (BackupRoot, BackupCaptureReport) {
     let mut operation = repository
-        .begin_backup(
-            source.cut(),
+        .begin_image_backup(
+            source,
             parent.map(BackupRoot::backup),
             32 << 20,
+            16 << 20,
             control,
         )
         .unwrap();
-    let report = operation.prepare_image(source, 16 << 20, control).unwrap();
-    let root = operation.publish(control).unwrap();
+    while operation.advance(7, 1024).unwrap() == BackupCaptureStep::Pending {}
+    let report = operation.report().unwrap();
+    let root = operation.publish().unwrap();
     (root, report)
 }
 

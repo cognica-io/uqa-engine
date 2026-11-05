@@ -7,7 +7,11 @@
 //! Incremental verification shares the repository's complete object/range ledger.
 
 use super::{
-    super::{directory, objects::SpanReader, LocalRepository},
+    super::{
+        directory,
+        objects::{ObjectVerification, SpanReader},
+        LocalRepository,
+    },
     Ledger,
 };
 use crate::{
@@ -19,7 +23,7 @@ use crate::{
     temporary_file::FileBudget,
 };
 use sha2::{Digest, Sha256};
-use std::{fs::File, io::Read};
+use std::io::Read;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackupReadStep {
@@ -48,13 +52,6 @@ struct Unit<'a> {
     complete: bool,
 }
 
-struct Object {
-    file: File,
-    expected: ImageDigest,
-    remaining: u64,
-    hash: Sha256,
-}
-
 enum Stage {
     Inventory,
     Objects {
@@ -76,7 +73,7 @@ pub struct BackupImageReader<'a> {
     ledger: Option<Ledger>,
     inventory: Option<InventoryReader<SpanReader<'a>>>,
     unit: Option<Unit<'a>>,
-    object: Option<Object>,
+    object: Option<ObjectVerification>,
     stage: Stage,
     object_bytes: u64,
 }
@@ -229,41 +226,17 @@ impl<'a> BackupImageReader<'a> {
             let name = directory::name(id.to_be_bytes());
             let file =
                 directory::open_file(&self.repository.objects, directory::text(&name), false)?;
-            if file.metadata()?.len() != object.bytes {
-                return Err(BackupError::Integrity);
-            }
-            self.object = Some(Object {
-                file,
-                expected: object.digest,
-                remaining: object.bytes,
-                hash: Sha256::new(),
-            });
+            self.object = Some(ObjectVerification::new(file, object.digest, object.bytes)?);
             self.stage = Stage::Objects { after: Some(id) };
         }
         let object = self.object.as_mut().expect("selected object");
-        let mut buffer = [0; 16 * 1024];
-        let size = object.remaining.min(buffer.len().min(maximum) as u64) as usize;
-        let read = match object.file.read(&mut buffer[..size]) {
-            Ok(read) => read,
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                return Ok(BackupReadStep::Pending)
-            }
-            Err(error) => return Err(error.into()),
-        };
-        if read == 0 && object.remaining != 0 {
-            return Err(BackupError::Integrity);
-        }
-        object.hash.update(&buffer[..read]);
-        object.remaining -= read as u64;
+        let before = object.bytes();
+        let complete = object.advance(maximum, &self.control)?;
         self.object_bytes = self
             .object_bytes
-            .checked_add(read as u64)
+            .checked_add(object.bytes() - before)
             .ok_or(BackupError::Invalid("object byte count overflow"))?;
-        if object.remaining == 0 {
-            super::super::super::frame::require_end(&mut object.file, &self.control)?;
-            if ImageDigest::from_bytes(object.hash.clone().finalize().into()) != object.expected {
-                return Err(BackupError::Integrity);
-            }
+        if complete {
             self.object = None;
         }
         Ok(BackupReadStep::Pending)

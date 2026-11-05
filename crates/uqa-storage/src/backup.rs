@@ -26,7 +26,8 @@ mod types;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
-    BackupCaptureReport, BackupCollectionReport, BackupCopyReport, BackupImageReader,
+    BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
+    BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
     BackupImageStatistics, BackupLease, BackupListing, BackupOperation, BackupPack, BackupReadStep,
     BackupRestoreImporter, BackupRestoreOperation, LocalRepository, PackObject, PackRange,
     RestoreDirectory, RestoredDatabase, VerifiedBackupImage,

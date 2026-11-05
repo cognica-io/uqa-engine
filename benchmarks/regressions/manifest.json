@@ -42185,6 +42185,110 @@
         "case_3",
         "case_4"
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_bounds_full_and_incremental_work_and_keeps_exact_images",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Bounded image scheduling",
+      "workload": "Capture 257 entries and a 64-KiB unit in 257-byte steps, then compare sparse and changed child membership in 127-byte steps.",
+      "invariant": "Each call visits at most one source/parent position and copies, hashes or verifies at most its byte window; exact child images and reused ranges survive parent removal within 128 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_handles_empty_images_and_single_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Segmented image preservation",
+      "workload": "Capture empty images, empty units and nonempty units with one-byte windows.",
+      "invariant": "Each finite image completes with its exact ordered units and bytes, and retires all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_cancels_at_capture_verification_and_prepared_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Capture cancellation ownership",
+      "workload": "Cancel the original token while capturing, verifying and after preparation.",
+      "invariant": "No unpublished root is discoverable; source/workspace ownership retires, cancellation persists and neither advance nor publication can revive the operation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_resolves_uncertain_publication_before_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Capture publication recovery",
+      "workload": "Interrupt root synchronization after installation, cancel the original token, then publish and cancel again.",
+      "invariant": "The exact installed root remains completed and verified; late cancellation cannot reverse publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_rechecks_repository_generation_after_incremental_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled.rs",
+      "capability": "Prepared image generation isolation",
+      "workload": "Change repository generation while a scheduled job verifies its complete candidate.",
+      "invariant": "Preparation reports Busy, retires its source/workspace and cannot publish the stale candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_preserves_pending_positions_short_reads_and_dropped_sources",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/failures.rs",
+      "capability": "Source scheduling and retirement",
+      "workload": "Stream through pending source positions and one-byte payload reads; drop a separate job after writing its first private frame.",
+      "invariant": "Pending/short reads preserve complete images and exact work counts; drop releases the source and operation lease so unreferenced staging can be collected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_unwind_retires_the_source_and_permanently_fails_the_job",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/failures.rs",
+      "capability": "Capture unwind ownership",
+      "workload": "Unwind from a source payload call, then attempt continuation, publication and cancellation.",
+      "invariant": "The owning step retires source/workspace immediately and admits only cancellation after failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_capture_admission_and_step_failures_release_every_partial_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/scheduled/failures.rs",
+      "capability": "Capture failure isolation",
+      "workload": "Inject invalid source lengths, denied header memory, exhausted encoded/workspace limits, object/prepared synchronization errors and zero work windows.",
+      "invariant": "No partial image is published; failed jobs remain terminal, cancellation persists and all source and memory owners retire.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

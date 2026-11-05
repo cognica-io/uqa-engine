@@ -123,6 +123,7 @@ impl LocalRepository {
         control: &StorageReadControl,
     ) -> BackupResult<()> {
         self.verify_root_with_files(root, &FileBudget::new(maximum_workspace_bytes), control)
+            .map(|_| ())
     }
 
     pub(super) fn verify_root_with_files(
@@ -130,12 +131,12 @@ impl LocalRepository {
         root: BackupRoot,
         files: &FileBudget,
         control: &StorageReadControl,
-    ) -> BackupResult<()> {
+    ) -> BackupResult<VerifiedBackupImage> {
         let mut input = BackupImageReader::with_file_budget(self, root, files, control)?;
         let mut buffer = [0; 16 * 1024];
         loop {
             match input.advance(buffer.len())? {
-                BackupReadStep::Complete => return Ok(()),
+                BackupReadStep::Complete => return input.verified().ok_or(BackupError::Integrity),
                 BackupReadStep::Pending => (),
                 BackupReadStep::Unit => while input.read_current(&mut buffer)? != 0 {},
             }

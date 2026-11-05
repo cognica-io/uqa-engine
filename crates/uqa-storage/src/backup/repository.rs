@@ -15,7 +15,8 @@ mod retention;
 mod verify;
 
 pub use operation::{
-    BackupCaptureReport, BackupCopyReport, BackupImageStatistics, BackupOperation, BackupPack,
+    BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
+    BackupCopyReport, BackupImageCapture, BackupImageStatistics, BackupOperation, BackupPack,
     PackObject, PackRange,
 };
 pub use restore::{
