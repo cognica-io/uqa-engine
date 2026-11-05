@@ -56,12 +56,12 @@ jobs:
     needs: scope
     if: needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'
     name: FDW ${{ matrix.configuration }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'macos-15' && 120 || 60 }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'macos-26-arm64' && 120 || 60 }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
         configuration: [memory, arrow, duckdb]
     env:
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-D warnings -C linker-features=-lld"

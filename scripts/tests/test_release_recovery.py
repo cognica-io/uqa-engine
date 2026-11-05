@@ -23,7 +23,7 @@ SPEC = importlib.util.spec_from_file_location("release_recovery", ROOT / "script
 RECOVERY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RECOVERY)
 REPOSITORY = "cognica-io/uqa-engine"
-TAG = "v0.5.1"
+TAG = "v0.6.4"
 COMMIT = "a" * 40
 
 
@@ -40,6 +40,29 @@ def fixture():
 
 
 class RecoverySourceTest(unittest.TestCase):
+    def test_historical_release_still_requires_its_original_macos_intel_inventory(self):
+        run, jobs, artifacts = fixture()
+        tag = "v0.6.3"
+        run["head_branch"] = tag
+        for artifact in artifacts:
+            artifact["name"] = artifact["name"].replace(TAG, tag)
+        with self.assertRaisesRegex(ValueError, "must have passed"):
+            RECOVERY.validate(run, tag, COMMIT, REPOSITORY, jobs, artifacts)
+        jobs += [{"name": name, "conclusion": "success"} for name in
+                 ("python / macos x86_64", "javascript packages / node macos x86_64")]
+        for name in ("python-wheel-x86_64-apple-darwin", "node-addon-x86_64-apple-darwin"):
+            with self.assertRaisesRegex(ValueError, "missing"):
+                RECOVERY.validate(run, tag, COMMIT, REPOSITORY, jobs, artifacts)
+            artifacts.append({"name": name, "expired": False,
+                              "workflow_run": {"id": 123, "head_sha": COMMIT}})
+        RECOVERY.validate(run, tag, COMMIT, REPOSITORY, jobs, artifacts)
+        jobs[-2].update(conclusion="failure", steps=[
+            *({"name": name, "conclusion": "success"} for name in RECOVERY.WHEEL_CHECKS),
+            {"name": "Run actions/upload-artifact@v4", "conclusion": "failure"},
+        ])
+        with self.assertRaisesRegex(ValueError, "must have passed"):
+            RECOVERY.validate(run, tag, COMMIT, REPOSITORY, jobs, artifacts, allow_python_repair=True)
+
     def test_c_release_requires_every_successful_target_and_original_artifact(self):
         run, jobs, artifacts = fixture()
         c_jobs = [{"name": name, "conclusion": "success"} for name in sorted(RECOVERY.C_BUILD_JOBS)]
@@ -64,7 +87,7 @@ class RecoverySourceTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     RECOVERY.validate(run, TAG, COMMIT, REPOSITORY, jobs + c_jobs, artifacts + changed)
 
-    def test_cli_enabled_release_requires_all_six_unexpired_original_archives(self):
+    def test_cli_enabled_release_requires_all_supported_unexpired_original_archives(self):
         run, jobs, artifacts = fixture()
         jobs[0]["steps"] = [{"name": "Build and verify usql release archive", "conclusion": "success"}]
         with self.assertRaisesRegex(ValueError, "missing"):
@@ -131,7 +154,7 @@ class RecoverySourceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = pathlib.Path(temporary) / "output"
             with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_OUTPUT": str(output)}), \
-                 mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.5.1"\n'), \
+                 mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.6.4"\n'), \
                  mock.patch.object(RECOVERY, "publication_complete", return_value=False), \
                  mock.patch.object(RECOVERY, "pages", side_effect=[jobs, artifacts]), \
                  mock.patch.object(RECOVERY, "api", side_effect=[
@@ -149,7 +172,7 @@ class RecoverySourceTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temporary:
                 output = pathlib.Path(temporary) / "output"
                 with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_OUTPUT": str(output)}), \
-                     mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.5.1"\n'), \
+                     mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.6.4"\n'), \
                      mock.patch.object(RECOVERY, "api", return_value={"workflow_runs": runs}) as api, \
                      mock.patch.object(RECOVERY, "publication_complete", return_value=completed):
                     RECOVERY.main()
@@ -160,8 +183,8 @@ class RecoverySourceTest(unittest.TestCase):
 class PythonArtifactRecoveryTest(unittest.TestCase):
     def fixture(self):
         run, jobs, artifacts = fixture()
-        target = "x86_64-apple-darwin"
-        job = next(job for job in jobs if job["name"] == "python / macos x86_64")
+        target = "aarch64-apple-darwin"
+        job = next(job for job in jobs if job["name"] == "python / macos aarch64")
         job.update(conclusion="failure", steps=[
             *({"name": name, "conclusion": "success"} for name in RECOVERY.WHEEL_CHECKS),
             {"name": "Retain native Nori diagnostic evidence", "conclusion": "failure"},
@@ -179,14 +202,14 @@ class PythonArtifactRecoveryTest(unittest.TestCase):
                                  allow_python_repair=True)
 
     def test_failed_diagnostic_transport_rebuilds_only_the_missing_verified_wheel(self):
-        self.assertEqual(self.validate(), [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]])
+        self.assertEqual(self.validate(), [RECOVERY.WHEEL_MATRIX["python / macos aarch64"]])
         _, _, complete = fixture()
         # The already-retained original wheel is never replaced; only minimum-Python validation remains.
         self.assertEqual(self.validate(artifacts=complete), [])
 
     def test_failed_skipped_or_missing_product_validation_never_qualifies(self):
         _, jobs, _ = self.fixture()
-        original = next(job for job in jobs if job["name"] == "python / macos x86_64")
+        original = next(job for job in jobs if job["name"] == "python / macos aarch64")
         for name in RECOVERY.WHEEL_CHECKS:
             for conclusion in ("failure", "cancelled", "skipped", None):
                 changed = copy.deepcopy(jobs)
@@ -202,20 +225,20 @@ class PythonArtifactRecoveryTest(unittest.TestCase):
 
     def test_unrelated_failures_and_missing_artifacts_remain_blocking(self):
         _, jobs, artifacts = self.fixture()
-        for name in ("python / minimum supported python", "python / source distribution", "javascript packages / node macos x86_64"):
+        for name in ("python / minimum supported python", "python / source distribution", "javascript packages / node macos aarch64"):
             changed = copy.deepcopy(jobs)
             next(job for job in changed if job["name"] == name)["conclusion"] = "failure"
             with self.subTest(name=name), self.assertRaises(ValueError):
                 self.validate(jobs=changed)
         with self.assertRaises(ValueError):
             self.validate(jobs=jobs + [{"name": "python / new platform", "conclusion": "failure"}])
-        for name in ("python-wheel-aarch64-apple-darwin", "python-sdist", "node-packages"):
+        for name in ("python-wheel-x86_64-unknown-linux-gnu", "python-sdist", "node-packages"):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "artifacts"):
                 self.validate(artifacts=[item for item in artifacts if item["name"] != name])
 
     def test_unknown_step_failure_is_not_an_upload_failure(self):
         _, jobs, _ = self.fixture()
-        next(job for job in jobs if job["name"] == "python / macos x86_64")["steps"].append(
+        next(job for job in jobs if job["name"] == "python / macos aarch64")["steps"].append(
             {"name": "Additional product check", "conclusion": "failure"})
         with self.assertRaises(ValueError):
             self.validate(jobs=jobs)
@@ -226,14 +249,14 @@ class PythonArtifactRecoveryTest(unittest.TestCase):
             root = pathlib.Path(temporary)
             artifact = root / ("python-wheel-" + matrix[0]["target"])
             artifact.mkdir()
-            wheel = artifact / "uqa-0.5.1-cp38-abi3-macosx_10_12_x86_64.whl"
+            wheel = artifact / "uqa-0.6.4-cp38-abi3-macosx_11_0_arm64.whl"
             wheel.write_bytes(b"independently built wheel")
             provenance = {"commit": COMMIT, "target": matrix[0]["target"], "filename": wheel.name,
                           "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
             record = artifact / "recovery-provenance.json"
             record.write_text(json.dumps(provenance))
             RECOVERY.verify_repaired_artifacts(root, COMMIT, TAG, matrix)
-            for key, value in (("commit", "b" * 40), ("target", "aarch64-apple-darwin"),
+            for key, value in (("commit", "b" * 40), ("target", "x86_64-unknown-linux-gnu"),
                                ("filename", "another.whl"), ("sha256", "0" * 64)):
                 record.write_text(json.dumps({**provenance, key: value}))
                 with self.subTest(key=key), self.assertRaises(ValueError):
@@ -253,17 +276,17 @@ class RetainedRepairTest(unittest.TestCase):
         source, _, _ = fixture()
         run = {**source, "id": 456, "path": ".github/workflows/release-recovery.yml",
                "head_branch": "main", "head_sha": "b" * 40, "created_at": "2026-10-08T14:00:00Z"}
-        matrix = [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]]
+        matrix = [RECOVERY.WHEEL_MATRIX["python / macos aarch64"]]
         jobs = [
             {"name": "resolve", "conclusion": "success"},
             {"name": "repair Python artifacts / minimum supported python", "conclusion": "success"},
-            {"name": "repair Python artifacts / macos x86_64", "conclusion": "success", "steps": [
+            {"name": "repair Python artifacts / macos aarch64", "conclusion": "success", "steps": [
                 {"name": name, "conclusion": "success"}
                 for name in RECOVERY.WHEEL_CHECKS | {"Record recovered wheel provenance", "Retain verified wheel"}
             ]},
             {"name": "verify recovered artifacts", "conclusion": "failure"},
         ]
-        artifacts = [{"name": "python-wheel-x86_64-apple-darwin", "expired": False,
+        artifacts = [{"name": "python-wheel-aarch64-apple-darwin", "expired": False,
                       "workflow_run": {"id": 456, "head_sha": run["head_sha"]}}]
         return run, source, matrix, jobs, artifacts
 
@@ -305,7 +328,7 @@ class RetainedRepairTest(unittest.TestCase):
         for changed in ([], artifacts * 2, [{**artifacts[0], "expired": True}],
                         [{**artifacts[0], "workflow_run": {"id": 789, "head_sha": run["head_sha"]}}],
                         [{**artifacts[0], "workflow_run": {"id": 456, "head_sha": COMMIT}}],
-                        artifacts + [{**artifacts[0], "name": "python-wheel-aarch64-apple-darwin"}]):
+                        artifacts + [{**artifacts[0], "name": "python-wheel-x86_64-unknown-linux-gnu"}]):
             with self.subTest(artifacts=changed):
                 self.assertFalse(RECOVERY.reusable_repair(run, source, REPOSITORY, matrix, jobs, changed))
 
@@ -314,7 +337,7 @@ class RetainedRepairTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = pathlib.Path(temporary) / "output"
             with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_OUTPUT": str(output)}), \
-                 mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.5.1"\n'), \
+                 mock.patch.object(RECOVERY.pathlib.Path, "read_text", return_value='version = "0.6.4"\n'), \
                  mock.patch.object(RECOVERY, "publication_complete", return_value=False), \
                  mock.patch.object(RECOVERY, "previous_repair", return_value=456), \
                  mock.patch.object(RECOVERY, "pages", side_effect=[jobs, artifacts]), \
@@ -325,12 +348,12 @@ class RetainedRepairTest(unittest.TestCase):
             values = dict(line.split("=", 1) for line in output.read_text().splitlines())
             self.assertEqual(values["python_repair"], "false")
             self.assertEqual(values["retained_repair_run_id"], "456")
-            self.assertEqual(values["repair_directory"], "python-wheel-x86_64-apple-darwin")
-            self.assertEqual(json.loads(values["repair_matrix"]), [RECOVERY.WHEEL_MATRIX["python / macos x86_64"]])
+            self.assertEqual(values["repair_directory"], "python-wheel-aarch64-apple-darwin")
+            self.assertEqual(json.loads(values["repair_matrix"]), [RECOVERY.WHEEL_MATRIX["python / macos aarch64"]])
 
     def test_single_and_multiple_download_layouts_preserve_artifact_inventory(self):
         matrices = list(RECOVERY.WHEEL_MATRIX.values())
-        for count in (0, 1, 2, 6):
+        for count in (0, 1, 2, 5):
             matrix = matrices[:count]
             with self.subTest(count=count), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
@@ -339,7 +362,7 @@ class RetainedRepairTest(unittest.TestCase):
                     # v8 creates artifact-named subdirectories only for multiple matches.
                     artifact = download_path if count == 1 else download_path / ("python-wheel-" + item["target"])
                     artifact.mkdir(parents=True, exist_ok=True)
-                    wheel = artifact / f"uqa-0.5.1-cp38-abi3-{item['target']}.whl"
+                    wheel = artifact / f"uqa-0.6.4-cp38-abi3-{item['target']}.whl"
                     wheel.write_bytes(item["target"].encode())
                     (artifact / "recovery-provenance.json").write_text(json.dumps({
                         "commit": COMMIT, "target": item["target"], "filename": wheel.name,

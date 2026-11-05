@@ -224,7 +224,7 @@ class ForeignHandlerWorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}", workflow)
         self.assertIn("needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'", workflow)
         self.assertNotIn("restore-keys:", workflow)
-        self.assertIn("os: [ubuntu-24.04, macos-15]", workflow)
+        self.assertIn("os: [ubuntu-24.04, macos-26-arm64]", workflow)
         self.assertIn("configuration: [memory, arrow, duckdb]", workflow)
         self.assertIn("fail-fast: false", workflow)
         qualify = workflow.split("  qualify:\n", 1)[1]

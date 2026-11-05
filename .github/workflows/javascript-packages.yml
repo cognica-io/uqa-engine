@@ -19,7 +19,7 @@ env:
 jobs:
   node:
     name: node ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -30,11 +30,8 @@ jobs:
           - label: linux aarch64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - label: macos x86_64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
           - label: macos aarch64
-            os: macos-15
+            os: macos-26-arm64
             target: aarch64-apple-darwin
           - label: windows x86_64
             os: windows-latest
