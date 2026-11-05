@@ -79,6 +79,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Group automatic regression selectors by package and test harness so discovery does not evaluate thousands of independent regular expressions for every listed test. Exact case identities, resource assertions and the discovery deadline remain enforced.
+
 - Preserve SQLSTATE `53200` for sequence catalog admission failures through statement-effect classification and failed transaction initialization, including cleanup diagnostics.
 
 - Preserve original catalog roots and table membership when persistent catalog reload runs out of memory, and retain SQLSTATE `53200` through index, table and routine publication errors.
