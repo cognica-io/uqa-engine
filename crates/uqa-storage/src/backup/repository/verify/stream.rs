@@ -16,6 +16,7 @@ use crate::{
         InventoryReader,
     },
     read_control::StorageReadControl,
+    temporary_file::FileBudget,
 };
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read};
@@ -87,11 +88,25 @@ impl<'a> BackupImageReader<'a> {
         maximum_workspace_bytes: u64,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
+        Self::with_file_budget(
+            repository,
+            root,
+            &FileBudget::new(maximum_workspace_bytes),
+            control,
+        )
+    }
+
+    pub(in crate::backup::repository) fn with_file_budget(
+        repository: &'a LocalRepository,
+        root: BackupRoot,
+        files: &FileBudget,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
         control.cancellation().check()?;
         if root.repository() != repository.id {
             return Err(BackupError::Invalid("foreign repository root"));
         }
-        let mut ledger = Ledger::new(maximum_workspace_bytes, control);
+        let mut ledger = Ledger::new(files, control);
         let input = ledger.open(repository, root.inventory(), FrameKind::Inventory, control)?;
         let inventory = InventoryReader::new(input, repository.limits, control)?;
         if inventory.format() != root.cut().format {

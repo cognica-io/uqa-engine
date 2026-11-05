@@ -175,6 +175,28 @@ pub(super) fn text(name: &[u8; 32]) -> &str {
     std::str::from_utf8(name).expect("hexadecimal repository identity")
 }
 
+pub(super) fn identity(name: &std::ffi::OsStr) -> BackupResult<[u8; 16]> {
+    let name = name.as_encoded_bytes();
+    if name.len() != 32 {
+        return Err(BackupError::Invalid("repository identity name"));
+    }
+    let mut bytes = [0; 16];
+    for (output, pair) in bytes.iter_mut().zip(name.chunks_exact(2)) {
+        for digit in pair {
+            let digit = match digit {
+                b'0'..=b'9' => digit - b'0',
+                b'a'..=b'f' => digit - b'a' + 10,
+                _ => return Err(BackupError::Invalid("repository identity name")),
+            };
+            *output = (*output << 4) | digit;
+        }
+    }
+    if bytes == [0; 16] {
+        return Err(BackupError::Invalid("zero repository identity name"));
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
