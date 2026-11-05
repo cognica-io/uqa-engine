@@ -7,6 +7,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .github/actions/setup-python/**
       - .github/workflows/release-recovery.yml
       - .github/workflows/release-assets.yml
       - .github/workflows/python-wheels.yml

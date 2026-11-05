@@ -22,7 +22,7 @@ SHARED = (
     "Cargo.toml", "Cargo.lock", "build.rs", "crates/*/Cargo.toml", "crates/*/build.rs",
     "rust-toolchain", "rust-toolchain.toml",
     ".cargo/*", "crates/uqa-ffi/*", "examples/c/*",
-    ".github/scripts/free-linux-runner-disk.sh",
+    ".github/scripts/free-linux-runner-disk.sh", ".github/actions/setup-python/*",
 )
 BINDINGS = (
     "crates/uqa-core/src/*", "crates/uqa-api/src/*arrow*",

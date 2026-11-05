@@ -52,7 +52,8 @@ class OwnershipTests(unittest.TestCase):
                          "crates/uqa-ffi/src/tests/allocator.rs", "examples/c/transactions.c",
                          "Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml",
                          "crates/uqa-pg-query/build.rs", "crates/uqa-sql/build.rs",
-                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml"):
+                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml",
+                         ".github/actions/setup-python/action.yml"):
                 with self.subTest(kind=kind, path=path):
                     self.assertTrue(SCOPE.affected(kind, path))
 

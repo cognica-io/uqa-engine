@@ -7,6 +7,7 @@ on:
     paths:
       - .gitattributes
       - .github/actions/package-usql/**
+      - .github/actions/setup-python/**
       - .github/workflows/usql-release-checks.yml
       - .github/workflows/javascript-packages.yml
       - .github/workflows/release.yml
@@ -53,7 +54,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - name: Free Linux runner disk
