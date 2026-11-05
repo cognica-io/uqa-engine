@@ -63,7 +63,6 @@ jobs:
           for suffix in (
               "linux-x64-gnu",
               "linux-arm64-gnu",
-              "darwin-x64",
               "darwin-arm64",
               "win32-x64-msvc",
               "win32-arm64-msvc",
@@ -117,11 +116,11 @@ jobs:
 
   clippy:
     name: cargo clippy
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -144,7 +143,7 @@ jobs:
   test-macos:
     uses: ./.github/workflows/workspace-tests.yml
     with:
-      os: macos-15
+      os: macos-26-arm64
 
   test-fdw-linux:
     name: test FDW feature configurations
@@ -182,11 +181,11 @@ jobs:
 
   build-release:
     name: cargo build --release
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

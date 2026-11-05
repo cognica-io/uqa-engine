@@ -20,10 +20,10 @@ import subprocess
 
 TARGETS = (
     "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu",
-    "x86_64-apple-darwin", "aarch64-apple-darwin",
+    "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc",
 )
-PLATFORMS = ("linux x86_64", "linux aarch64", "macos x86_64", "macos aarch64", "windows x86_64", "windows aarch64")
+PLATFORMS = ("linux x86_64", "linux aarch64", "macos aarch64", "windows x86_64", "windows aarch64")
 BUILD_JOBS = {
     "resolve tag", "python / source distribution", "python / Python bindings",
     "python / minimum supported python", "javascript packages / wasm package",
@@ -39,7 +39,7 @@ PACKAGE_ARTIFACTS = {
 C_TARGETS = TARGETS[:-1]
 C_BUILD_JOBS = {f"c packages / C package ({target})" for target in C_TARGETS}
 
-WHEEL_RUNNERS = ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-15", "windows-latest", "windows-11-arm")
+WHEEL_RUNNERS = ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-26-arm64", "windows-latest", "windows-11-arm")
 WHEEL_MATRIX = {
     "python / " + label: {"label": label, "target": target, "os": runner,
                           "manylinux": "2_28" if label.startswith("linux") else "auto"}
@@ -119,6 +119,12 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     statuses = {job["name"]: job["conclusion"] for job in jobs}
     if len(statuses) != len(jobs):
         raise ValueError("duplicate build job identities")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+        raise ValueError("invalid release tag")
+    # Historical inventories stay complete; new builds never schedule Intel macOS.
+    legacy = tuple(map(int, tag[1:].split("."))) <= (0, 6, 3)
+    targets = (*TARGETS[:2], "x86_64-apple-darwin", *TARGETS[2:]) if legacy else TARGETS
+    build_jobs = BUILD_JOBS | ({"python / macos x86_64", "javascript packages / node macos x86_64"} if legacy else set())
     repairable = {
         job["name"]: WHEEL_MATRIX[job["name"]] for job in jobs
         if allow_python_repair and job["name"] in WHEEL_MATRIX and transport_only_wheel_failure(job)
@@ -127,24 +133,27 @@ def validate(run: dict, tag: str, commit: str, repository: str, jobs: list[dict]
     minimum = "python / minimum supported python"
     if repairable and statuses.get(minimum) == "skipped":
         deferred.add(minimum)
-    if any(statuses.get(name) != "success" for name in BUILD_JOBS - deferred):
+    if any(statuses.get(name) != "success" for name in build_jobs - deferred):
         raise ValueError("every package, example and benchmark build must have passed")
     # A future additional build must not be silently omitted by this inventory.
     if any(job["conclusion"] != "success" for job in jobs if job["name"] not in deferred and job["name"].startswith(("python /", "javascript packages /", "release benchmarks /", "c packages /"))):
         raise ValueError("an additional release build did not pass")
     required = PACKAGE_ARTIFACTS | {f"release-benchmarks-{tag}-{run['id']}-{run['run_attempt']}"}
+    if legacy:
+        required |= {"python-wheel-x86_64-apple-darwin", "node-addon-x86_64-apple-darwin"}
     if any(job["name"].startswith("c packages") for job in jobs) or any(
             artifact["name"].startswith("c-bindings-") for artifact in artifacts):
-        if any(statuses.get(name) != "success" for name in C_BUILD_JOBS):
+        c_targets = targets[:-1]
+        if any(statuses.get(f"c packages / C package ({target})") != "success" for target in c_targets):
             raise ValueError("every native C package and installed consumer must have passed")
-        required |= {"c-bindings-" + target for target in C_TARGETS}
+        required |= {"c-bindings-" + target for target in c_targets}
     # Original releases without the CLI remain recoverable. New builds must
     # retain every CLI archive, including when artifact transport later fails.
     cli_steps = {"Build and verify usql release archive", "Build the CLI with bundled analyzers and foreign handlers"}
     if any(step["name"] in cli_steps and step["conclusion"] != "skipped"
            for job in jobs for step in job.get("steps", [])) or any(
                artifact["name"].startswith("usql-") for artifact in artifacts):
-        required |= {"usql-" + target for target in TARGETS}
+        required |= {"usql-" + target for target in targets}
     available = {artifact["name"] for artifact in artifacts if artifact["expired"] is False and artifact["workflow_run"]["head_sha"] == commit and artifact["workflow_run"]["id"] == run["id"]}
     missing = required - available
     rebuild = {"python-wheel-" + item["target"]: item for item in repairable.values()}

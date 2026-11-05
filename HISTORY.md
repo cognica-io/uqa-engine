@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
+
 ### Added
 
 - Retain materialized memory path indexes and their registration catalogs as immutable native generations. Captures admit cached complete footprints without copying label sequences or evaluated pairs; selected children preserve their original memory and cancellation controls after source closure. Failed registration admission preserves prior path definitions and materializations across all storage providers. Complete Engine backup remains under implementation.

@@ -22,7 +22,7 @@ env:
 jobs:
   build:
     name: Build test archive and check documentation
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 60
     outputs:
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
@@ -69,7 +69,7 @@ jobs:
 
   features:
     name: Verify analyzer feature configurations
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +108,7 @@ jobs:
   test:
     name: Test shard ${{ matrix.shard }}/8
     needs: build
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 25
     strategy:
       fail-fast: false

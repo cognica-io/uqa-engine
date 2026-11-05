@@ -52,12 +52,12 @@ jobs:
     needs: scope
     if: needs.scope.outputs.required == 'true'
     name: C and C++ (${{ matrix.os }}, ${{ matrix.features }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
         features:
           - minimal
           - default
@@ -121,12 +121,12 @@ jobs:
     needs: scope
     if: needs.scope.outputs.required == 'true'
     name: Native ASan (${{ matrix.os }}, ${{ matrix.features }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
         features: [minimal, arrow-export]
     env:
       CC: ${{ github.workspace }}/.github/scripts/c-sanitizer-cc.sh

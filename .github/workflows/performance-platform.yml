@@ -23,8 +23,8 @@ env:
 jobs:
   build:
     name: Build regression archive (${{ inputs.os }})
-    runs-on: ${{ inputs.os }}
-    timeout-minutes: ${{ inputs.os == 'macos-15' && 120 || 60 }}
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 120 || 60 }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -56,7 +56,7 @@ jobs:
   deterministic-work:
     name: Deterministic work and memory (${{ inputs.os }})
     needs: build
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7.0.1

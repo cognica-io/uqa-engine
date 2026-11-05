@@ -270,7 +270,7 @@ class NpmPublicationSelectionTest(unittest.TestCase):
         npm = {
             f"cognica-io-uqa{suffix}-{version}.tgz"
             for suffix in ("", "-wasm", "-linux-x64-gnu", "-linux-arm64-gnu",
-                           "-darwin-x64", "-darwin-arm64", "-win32-x64-msvc",
+                           "-darwin-arm64", "-win32-x64-msvc",
                            "-win32-arm64-msvc")
         }
         other = {
@@ -329,7 +329,8 @@ class ReleaseNotesLicensingTest(unittest.TestCase):
                 (root / "HISTORY.md").write_text("## [0.0.1]\n\nOriginal release changes.\n")
                 package = root / "crates/uqa-node"
                 package.mkdir(parents=True)
-                (package / "package.json").write_text(json.dumps({"license": license_identifier}))
+                (package / "package.json").write_text(json.dumps({"license": license_identifier,
+                    "napi": {"targets": ["aarch64-apple-darwin"]}}))
                 result = subprocess.run(
                     ["bash", "-e"], input=script, text=True, capture_output=True,
                     cwd=root, check=False,

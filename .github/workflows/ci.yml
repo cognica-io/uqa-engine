@@ -59,7 +59,7 @@ on:
         options:
           - all
           - ubuntu-24.04
-          - macos-15
+          - macos-26-arm64
           - windows-latest
       transaction_suite:
         description: Select transaction histories, retained resources, or a production owner
@@ -103,12 +103,12 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
-      os: macos-15
+      os: macos-26-arm64
 
   clippy:
     name: clippy ${{ matrix.label }}
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,7 +116,7 @@ jobs:
           - label: Linux
             os: ubuntu-24.04
           - label: macOS
-            os: macos-15
+            os: macos-26-arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -324,7 +324,7 @@ jobs:
   concurrent-transactions:
     name: concurrent transactions ${{ matrix.os }} (${{ inputs.transaction_suite }})
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
       # Optimized test binaries that keep debug assertions, as in the workspace tests.
@@ -334,7 +334,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-15","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
+        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-26-arm64","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
     defaults:
       run:
         shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}

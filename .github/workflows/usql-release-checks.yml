@@ -28,7 +28,7 @@ env:
 jobs:
   cli:
     name: Install usql (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     # Cold native release builds include bundled dependencies and ThinLTO.
     timeout-minutes: 180
     strategy:
@@ -39,9 +39,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-15
+          - os: macos-26-arm64
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
