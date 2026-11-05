@@ -285,6 +285,11 @@ impl PersistentStorageSession {
 pub trait PersistentStorageProvider: Send + Sync {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
 
+    /// Advertise implemented provider image paths without opening a session or capturing source data. Unsupported providers must opt in alongside their concrete image implementation.
+    fn backup_capabilities(&self) -> crate::backup::BackupCapabilities {
+        crate::backup::BackupCapabilities::UNSUPPORTED
+    }
+
     /// Capture the installed provider's complete committed image through this already-open owner. The returned source retains the cut independently, excludes private/session state and releases physical reads between calls. Providers without a qualified image mapping reject capture; a generic record or session interface alone does not establish backup support. Export authorization and repository publication belong to their invoking owners.
     fn capture_backup_image(
         &self,

@@ -29,6 +29,9 @@ use uqa_storage_sqlite::{
 #[path = "backup_provider/restore.rs"]
 mod restore;
 
+#[path = "backup_provider/public.rs"]
+mod public;
+
 const KEY: &str = "engine-image-fixture";
 
 #[derive(Clone, Copy, Debug)]

@@ -194,6 +194,14 @@ impl LocalRepository {
         self.id
     }
 
+    /// The configured authenticated protection domain, without exposing its key. `None` denotes plaintext integrity framing.
+    pub fn protection_domain(&self) -> Option<crate::backup::ProtectionId> {
+        match &self.protection {
+            Protection::Plaintext => None,
+            Protection::Encrypted { domain, .. } => Some(*domain),
+        }
+    }
+
     fn header(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
         bytes[..8].copy_from_slice(b"UQAREP01");

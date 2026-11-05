@@ -111,6 +111,10 @@ fn provider_without_image_mapping_rejects_capture_without_opening_a_session() {
         }
     }
     let provider: &dyn PersistentStorageProvider = &Provider;
+    assert_eq!(
+        provider.backup_capabilities(),
+        crate::backup::BackupCapabilities::UNSUPPORTED
+    );
     let control = StorageReadControl::with_limit(1024);
     assert!(matches!(
         provider.capture_backup_image(&control),

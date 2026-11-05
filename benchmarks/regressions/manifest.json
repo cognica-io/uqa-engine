@@ -2,6 +2,108 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "api_backup_example_runs_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-api/src/backup.rs",
+      "capability": "Public Rust backup adapter",
+      "workload": "Create a real persistent Engine, start a backup through uqa_api, retire the Engine and finish bounded export and complete root verification.",
+      "invariant": "The public re-exported types and entry point retain the same independent provider and repository lifecycle, produce a nonempty image and release their allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_backup_jobs_preserve_committed_images_after_engine_and_source_loss",
+      "cases": 9,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Public persistent backup lifecycle",
+      "workload": "Start full and incremental jobs through actual Engine admission for native SQLite and KV in all four file modes and redb; interleave an independent writer and restore after Engine, source and parent loss.",
+      "invariant": "Public jobs preserve committed SQL/catalog/security/sequence/text/vector/graph observations, exclude private state and retain independent source ownership and completed publication. Follow-up restores preserve later writes.",
+      "case_names": [
+        "case_1_native_plain",
+        "case_2_native_encrypted",
+        "case_3_native_compressed",
+        "case_4_native_compressed_encrypted",
+        "case_5_kv_plain",
+        "case_6_kv_encrypted",
+        "case_7_kv_compressed",
+        "case_8_kv_compressed_encrypted",
+        "case_9_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_backup_admission_preserves_authority_and_failed_transaction_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Backup authority and transaction admission",
+      "workload": "Start under a restricted effective role, a failed explicit transaction, an exhausted allowance and an unsupported memory Engine, then recover through the existing transaction owner.",
+      "invariant": "Denied authority and failed transaction admission create no repository operation; supported capture recovers after rollback, and limits and unsupported images remain typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_backup_requires_explicit_plaintext_export",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Explicit encrypted-source export protection",
+      "workload": "Export encrypted and compressed-encrypted native and KV engines to plaintext repositories with default and explicit options.",
+      "invariant": "Default admission rejects plaintext before creating an operation; explicit export completes a fully verified image after Engine retirement.",
+      "case_names": [
+        "case_1_native_encrypted",
+        "case_2_native_compressed_encrypted",
+        "case_3_kv_encrypted",
+        "case_4_kv_compressed_encrypted"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_backup_retains_job_cancellation_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Independent public backup cancellation",
+      "workload": "Start and partially advance an actual Engine job, retire the Engine and cancel the original job control.",
+      "invariant": "The shared job owner becomes terminal, cannot publish or resume and releases all charged memory on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_initial_commit_publishes_an_independent_image_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/native_restore.rs",
+      "capability": "Native initialization owns committed image publication",
+      "workload": "Roll back initial restoration, commit its next attempt in every file mode, stage and cancel private writes, then retire the original session before capture.",
+      "invariant": "Only committed native initialization exposes an independent source. It excludes private writes, outlives cancellation and closure and does not retain its publication cell.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "failed_native_initial_conversion_does_not_publish_an_image_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/native_restore.rs",
+      "capability": "Failed native initialization cannot expose backup sources",
+      "workload": "Reject the native format conversion during initial commit and then roll back its physical transaction.",
+      "invariant": "No source is published and the original factory session stays unbound; capture never initializes or repairs it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "text_image_reader_preserves_independent_wire_fixtures_across_read_windows",

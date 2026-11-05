@@ -49,11 +49,15 @@ impl SQLiteStorageBackend {
 #[derive(Clone)]
 pub struct SQLiteStorageProvider {
     connection: ManagedConnection,
+    image_source: Arc<std::sync::OnceLock<ManagedConnection>>,
 }
 
 impl SQLiteStorageProvider {
     pub fn new(connection: ManagedConnection) -> Self {
-        Self { connection }
+        Self {
+            connection,
+            image_source: Arc::new(std::sync::OnceLock::new()),
+        }
     }
 
     /// Capture native evaluated records and autonomous watermarks from this provider's initialized native session without retaining a physical read between export calls. An unbound provider reports unsupported instead of initializing or migrating a source during capture. All four file modes use the same image contract; private writes are excluded and the original session transaction is unchanged.
@@ -61,7 +65,10 @@ impl SQLiteStorageProvider {
         &self,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> uqa_storage::backup::BackupResult<crate::SQLiteNativeBackupImage> {
-        crate::SQLiteNativeBackupImage::capture(&self.connection, control)
+        crate::SQLiteNativeBackupImage::capture(
+            self.image_source.get().unwrap_or(&self.connection),
+            control,
+        )
     }
 
     fn native_session(
@@ -77,6 +84,14 @@ impl SQLiteStorageProvider {
 }
 
 impl PersistentStorageProvider for SQLiteStorageProvider {
+    fn backup_capabilities(&self) -> uqa_storage::backup::BackupCapabilities {
+        uqa_storage::backup::BackupCapabilities {
+            export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            snapshot_fingerprints: false,
+        }
+    }
+
     fn capture_backup_image(
         &self,
         control: &uqa_storage::read_control::StorageReadControl,
@@ -91,7 +106,9 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
     }
 
     fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
-        let connection = self.connection.new_session();
+        let connection = self
+            .connection
+            .new_native_initial_session(Arc::downgrade(&self.image_source));
         let catalog: Arc<dyn CatalogFacade> =
             Arc::new(Catalog::for_initial_restore(connection.clone()));
         let backend: Arc<dyn PersistentStorageBackend> = Arc::new(SQLiteStorageBackend {
