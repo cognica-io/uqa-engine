@@ -5,18 +5,20 @@
 //
 
 use super::*;
+use crate::ast::RelationPersistence;
 use crate::catalog::roles::{
     guards::{RoleDefinitionRead, RoleMembershipRead},
     RoleDefinition, RoleReference,
 };
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use crate::catalog::security::BoundSequenceSecurity;
 use std::cell::Cell;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
 struct Catalog {
     roles: RoleDefinitions,
     memberships: RoleMemberships,
-    security: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
+    security: SequenceSecurities,
     lookups: Cell<usize>,
 }
 
@@ -35,8 +37,9 @@ impl Catalog {
             ])
             .unwrap(),
             memberships: RoleMemberships::new(),
-            security: BTreeMap::from([(
+            security: SequenceSecurities::try_from_iter([(
                 RelationIdentity::new("public", "ids"),
+                RelationPersistence::Permanent,
                 BoundSequenceSecurity {
                     role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
                     acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
@@ -46,7 +49,8 @@ impl Catalog {
                         grant_options: SequencePrivileges::default(),
                     }]),
                 },
-            )]),
+            )])
+            .unwrap(),
             lookups: Cell::new(0),
         }
     }
@@ -155,13 +159,11 @@ fn public_and_unknown_role_oids_use_only_public_grants() {
     let mut catalog = Catalog::new();
     catalog
         .security
-        .values_mut()
-        .next()
-        .unwrap()
-        .acl
-        .as_mut()
-        .unwrap()[0]
-        .role = None;
+        .edit(&RelationIdentity::new("public", "ids"), |security| {
+            security.acl.as_mut().unwrap()[0].role = None;
+            Ok(())
+        })
+        .unwrap();
     for subject in [text("public"), Value::Int(0), Value::Int(99_999)] {
         for (privilege, expected) in [
             ("USAGE", true),
@@ -206,14 +208,14 @@ fn a_selected_inquiry_role_never_follows_a_reused_name_or_oid() {
             .unwrap()
             .unwrap();
         let relation = RelationIdentity::new("public", "ids");
+        let reader = catalog.roles["reader"].identity();
         catalog
             .security
-            .get_mut(&relation)
-            .unwrap()
-            .acl
-            .as_mut()
-            .unwrap()[0]
-            .role = Some(catalog.roles["reader"].identity());
+            .edit(&relation, |security| {
+                security.acl.as_mut().unwrap()[0].role = Some(reader);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(
             request.evaluate(&relation, &catalog, &catalog).unwrap(),
             Value::Bool(false)
@@ -227,12 +229,11 @@ fn a_selected_inquiry_role_never_follows_a_reused_name_or_oid() {
         );
         catalog
             .security
-            .get_mut(&relation)
-            .unwrap()
-            .acl
-            .as_mut()
-            .unwrap()[0]
-            .role = None;
+            .edit(&relation, |security| {
+                security.acl.as_mut().unwrap()[0].role = None;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(
             request.evaluate(&relation, &catalog, &catalog).unwrap(),
             Value::Bool(true)

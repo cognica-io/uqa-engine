@@ -130,7 +130,10 @@ impl VertexPropertyIndex {
 
 // Path-index handles retain only definitions for durable stores.
 mod path_index;
-pub use path_index::{CapturedPath, CapturedPathIndex, PathIndex};
+pub use path_index::{
+    CapturedPath, CapturedPathIndex, CapturedPathIndexes, PathIndex, PathIndexCatalog,
+    PathIndexImageSnapshot,
+};
 
 #[cfg(test)]
 mod tests {

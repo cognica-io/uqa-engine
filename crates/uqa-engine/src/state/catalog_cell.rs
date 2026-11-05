@@ -201,6 +201,20 @@ impl
     }
 }
 
+impl
+    CatalogCell<
+        uqa_execution::catalog::sequence::registry::SequenceCatalog,
+        uqa_execution::catalog::sequence::registry::CapturedSequenceCatalog,
+    >
+{
+    pub(crate) fn security(
+        &self,
+    ) -> MappedRwLockReadGuard<'_, uqa_sql::catalog::security::sequence_registry::SequenceSecurities>
+    {
+        MappedRwLockReadGuard::map(self.read(), |catalog| catalog.security())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CatalogCell;

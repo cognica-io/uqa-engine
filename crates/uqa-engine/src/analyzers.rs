@@ -73,6 +73,10 @@ impl Engine {
         )
         .map_err(|error| error.to_string())?;
         let mut analyzers = self.durable.named_analyzers.write();
+        let mut candidate = analyzers.clone();
+        candidate
+            .insert_with_cancellation(name, compiled.clone(), &self.runtime.cancellation)
+            .map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_analyzer_revision(
@@ -82,7 +86,7 @@ impl Engine {
                 )
                 .map_err(|err| format!("persist analyzer `{name}`: {err}"))?;
         }
-        analyzers.insert(name.to_owned(), compiled);
+        *analyzers = candidate;
         drop(analyzers);
         self.note_catalog_registry_changed();
         Ok(())
@@ -131,12 +135,14 @@ impl Engine {
         if !analyzers.contains_key(name) {
             return Ok(false);
         }
+        let mut candidate = analyzers.clone();
+        let removed = candidate.remove(name).map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_analyzer(name)
                 .map_err(|err| format!("drop analyzer `{name}`: {err}"))?;
         }
-        let removed = analyzers.remove(name).is_some();
+        *analyzers = candidate;
         drop(analyzers);
         if removed {
             self.note_catalog_registry_changed();
@@ -236,6 +242,15 @@ impl Engine {
             phase,
             AnalyzerBindingOwner::Field,
         );
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .insert(
+                &(table_name.clone(), field.to_owned()),
+                candidate.clone(),
+                t.persistence == uqa_sql::ast::RelationPersistence::Temporary,
+                &self.runtime.cancellation,
+            )
+            .map_err(|error| storage_error("prepare field analyzer publication", &error))?;
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
@@ -267,10 +282,7 @@ impl Engine {
                 storage_error("persist table analyzer", &error),
             ));
         }
-        self.durable
-            .table_field_analyzers
-            .write()
-            .insert((table_name, field.to_owned()), candidate);
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();

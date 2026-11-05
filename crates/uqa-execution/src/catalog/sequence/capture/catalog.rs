@@ -4,11 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Select complete durable sequence records from one immutable catalog generation.
+//! Borrow complete durable sequence records from independently admitted immutable roots.
 
-use crate::catalog::sequence::{snapshot::SequenceReadSnapshot, SequenceState};
+use crate::catalog::sequence::{
+    registry::CapturedSequenceCatalog,
+    session::{NontransactionalSequenceValue, SequenceValueKey},
+    snapshot::SequenceReadSnapshot,
+    SequenceState,
+};
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionVec},
+    memory::{Produced, ProductionControl, RetainedMapSnapshot},
     RelationIdentity,
 };
 use uqa_sql::{ast::RelationPersistence, catalog::security::BoundSequenceSecurity, SQLError};
@@ -19,81 +24,78 @@ use uqa_storage::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct CapturedSequence {
-    pub relation: RelationIdentity,
+pub struct CapturedSequence<'a> {
+    pub relation: &'a RelationIdentity,
     pub object_id: [u8; 16],
     pub catalog_oid: Option<u32>,
     pub persistence: RelationPersistence,
     pub state: SequenceState,
-    pub security: BoundSequenceSecurity,
+    pub security: &'a BoundSequenceSecurity,
 }
 
-fn persistence(
-    source: &SequenceReadSnapshot,
-    name: &RelationIdentity,
-) -> Result<RelationPersistence, SQLError> {
-    source
-        .persistence
-        .get(name)
-        .copied()
-        .ok_or_else(|| SQLError::Internal("captured sequence has no persistence metadata".into()))
+pub struct CapturedSequences {
+    pub(super) catalog: CapturedSequenceCatalog,
+    pub(super) values: Option<RetainedMapSnapshot<SequenceValueKey, NontransactionalSequenceValue>>,
 }
 
-/// Join selected definitions with their original identity and authority before copying any output. Temporary records contribute neither names nor payload capacity.
+impl CapturedSequences {
+    pub fn len(&self) -> usize {
+        self.catalog.records.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.catalog.records.is_empty()
+    }
+    pub fn iter(&self) -> impl Iterator<Item = CapturedSequence<'_>> {
+        self.catalog.records.iter().map(|(relation, record)| {
+            let mut state = record.state;
+            if let Some(value) = self
+                .values
+                .as_ref()
+                .and_then(|values| values.get(&(record.object_id, state.definition_generation)))
+            {
+                state.current = value.current;
+                state.called = value.called;
+                state.log_count = value.log_count;
+            }
+            CapturedSequence {
+                relation,
+                object_id: record.object_id,
+                catalog_oid: record.catalog_oid,
+                persistence: record.persistence,
+                state,
+                security: self
+                    .catalog
+                    .security
+                    .get(relation)
+                    .expect("captured complete sequence authority")
+                    .security(),
+            }
+        })
+    }
+}
+
+impl std::fmt::Debug for CapturedSequences {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_list().entries(self.iter()).finish()
+    }
+}
+
 pub fn durable_sequences(
     source: &SequenceReadSnapshot,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<CapturedSequence>>, SQLError> {
-    with_values(source, |_, state| state, control)
-}
-
-pub(super) fn with_values(
-    source: &SequenceReadSnapshot,
-    value: impl Fn([u8; 16], SequenceState) -> SequenceState,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<CapturedSequence>>, SQLError> {
-    let mut count = 0;
-    for name in source.sequences.keys() {
-        control.check()?;
-        if persistence(source, name)? != RelationPersistence::Temporary {
-            count += 1;
-        }
-    }
-    let mut output = ProductionVec::new(*control);
-    output.reserve(count)?;
-    for (relation, state) in source.sequences.as_ref() {
-        control.check()?;
-        let persistence = persistence(source, relation)?;
-        if persistence == RelationPersistence::Temporary {
-            continue;
-        }
-        let object_id =
-            source.object_ids.get(relation).copied().ok_or_else(|| {
-                SQLError::Internal("captured sequence has no object identity".into())
-            })?;
-        let security = source.security.get(relation).ok_or_else(|| {
-            SQLError::Internal("captured sequence has no authority metadata".into())
-        })?;
-        let (schema, schema_memory) = control.copy_text(&relation.schema)?.into_parts();
-        let (name, name_memory) = control.copy_text(&relation.name)?.into_parts();
-        let (security, security_memory) = security.capture_security(control)?.into_parts();
-        output.push_produced(control.finish(
-            CapturedSequence {
-                relation: RelationIdentity { schema, name },
-                object_id,
-                catalog_oid: source.catalog_oids.get(&object_id).copied(),
-                persistence,
-                state: value(object_id, *state),
-                security,
-            },
-            control.combine(control.combine(schema_memory, name_memory), security_memory),
-        )?)?;
-    }
-    Ok(output.finish()?)
+) -> Result<Produced<CapturedSequences>, SQLError> {
+    let (catalog, memory) = source.catalog.capture(control)?.into_parts();
+    Ok(control.finish(
+        CapturedSequences {
+            catalog,
+            values: None,
+        },
+        memory,
+    )?)
 }
 
 impl MemoryCaptureSource for SequenceReadSnapshot {
-    type Frozen = CapturedMemoryValue<Vec<CapturedSequence>>;
+    type Frozen = CapturedMemoryValue<CapturedSequences>;
 
     fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
         let production = ProductionControl::new(

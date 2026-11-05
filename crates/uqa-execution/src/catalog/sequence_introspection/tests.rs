@@ -5,12 +5,14 @@
 //
 
 use super::{
-    read_sequence, BTreeMap, RelationIdentity, RelationPersistence, RoleCatalogSnapshot,
-    SequenceDataType, SequenceSecurity, SequenceSnapshotSource, SequenceState,
-    StorageBackendResult,
+    read_sequence, RelationIdentity, RelationPersistence, RoleCatalogSnapshot, SequenceDataType,
+    SequenceSecurity, SequenceSnapshotSource, SequenceState, StorageBackendResult,
 };
 use crate::catalog::projection::legacy_sequence_relation_oid;
-use crate::catalog::sequence::snapshot::SequenceReadSnapshot;
+use crate::catalog::sequence::{
+    registry::{SequenceCatalog, SequenceRecord},
+    snapshot::SequenceReadSnapshot,
+};
 use std::{
     cell::{Cell, RefCell},
     sync::Arc,
@@ -31,7 +33,7 @@ impl SequenceSnapshotSource for TestCatalog {
 }
 
 #[test]
-fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missing_state() {
+fn sequence_introspection_retains_metadata_and_roles_together_across_complete_removal() {
     let relation = RelationIdentity::from_legacy_name("public.counter").unwrap();
     let object_id = [7; 16];
     let state = SequenceState::initial(1, 1, SequenceDataType::BigInt);
@@ -43,17 +45,20 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     };
     let catalog = TestCatalog {
         snapshot: RefCell::new(SequenceReadSnapshot {
-            catalog_oids: std::sync::Arc::default(),
-            sequences: Arc::new(BTreeMap::from([(relation.clone(), state)])),
-            object_ids: Arc::new(BTreeMap::from([(relation.clone(), object_id)])),
-            persistence: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                RelationPersistence::Unlogged,
-            )])),
-            security: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                uqa_sql::catalog::security::BoundSequenceSecurity::bind(&security, &roles).unwrap(),
-            )])),
+            catalog: Arc::new(
+                SequenceCatalog::try_from_iter([(
+                    relation.clone(),
+                    SequenceRecord {
+                        state,
+                        object_id,
+                        persistence: RelationPersistence::Unlogged,
+                        catalog_oid: None,
+                    },
+                    uqa_sql::catalog::security::BoundSequenceSecurity::bind(&security, &roles)
+                        .unwrap(),
+                )])
+                .unwrap(),
+            ),
             roles: RoleCatalogSnapshot {
                 roles: Arc::new(roles),
                 memberships: Arc::new(RoleMemberships::new()),
@@ -67,8 +72,9 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     assert_eq!(catalog.reads.get(), 1);
     {
         let mut current = catalog.snapshot.borrow_mut();
-        Arc::make_mut(&mut current.sequences).clear();
-        Arc::make_mut(&mut current.security).clear();
+        Arc::make_mut(&mut current.catalog)
+            .remove(&relation)
+            .unwrap();
         Arc::make_mut(&mut current.roles.roles).clear();
     }
     assert_eq!(sequence.relation, relation);
@@ -76,10 +82,11 @@ fn sequence_introspection_retains_metadata_and_roles_together_and_rejects_missin
     assert_eq!(sequence.security, security);
     assert_eq!(sequence.persistence, RelationPersistence::Unlogged);
     assert!(sequence.authority.roles.contains_key("uqa"));
-    let error = read_sequence(&catalog, legacy_sequence_relation_oid(object_id))
-        .err()
-        .unwrap();
-    assert!(error.to_string().contains("disappeared"), "{error}");
+    assert!(
+        read_sequence(&catalog, legacy_sequence_relation_oid(object_id))
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(catalog.reads.get(), 2);
     assert!(
         read_sequence(&catalog, legacy_sequence_relation_oid([8; 16]))

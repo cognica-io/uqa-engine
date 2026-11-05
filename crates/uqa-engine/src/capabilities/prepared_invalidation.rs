@@ -21,33 +21,32 @@ impl MutationCoordinator<'_> {
         );
     }
     pub(crate) fn note_prepared_relation_change(&self, relation: &uqa_core::RelationIdentity) {
-        let oid =
-            self.storage
-                .tables
-                .read()
-                .get(relation)
-                .map(|table| table.relation_oids().relation)
-                .or_else(|| {
-                    self.durable
-                        .views
-                        .read()
-                        .get(relation)
-                        .map(|view| view.relation_oids().relation)
-                })
-                .or_else(|| {
-                    self.durable
-                        .foreign_catalog
-                        .tables()
-                        .get(relation)
-                        .map(|table| table.relation_oids().relation)
-                })
-                .or_else(|| {
-                    self.durable.sequence_object_ids.read().get(relation).and_then(|identity| {
-                u32::try_from(uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                    &self.durable.sequence_catalog_oids.read(), identity,
-                )).ok()
+        let oid = self
+            .storage
+            .tables
+            .read()
+            .get(relation)
+            .map(|table| table.relation_oids().relation)
+            .or_else(|| {
+                self.durable
+                    .views
+                    .read()
+                    .get(relation)
+                    .map(|view| view.relation_oids().relation)
             })
-                });
+            .or_else(|| {
+                self.durable
+                    .foreign_catalog
+                    .tables()
+                    .get(relation)
+                    .map(|table| table.relation_oids().relation)
+            })
+            .or_else(|| {
+                let catalog = self.durable.sequences.read();
+                catalog
+                    .object_id(relation)
+                    .and_then(|identity| u32::try_from(catalog.catalog_oid(identity)).ok())
+            });
         if let Some(oid) = oid {
             self.note_prepared_catalog_change(PreparedCatalogChange::Relation(oid));
         }

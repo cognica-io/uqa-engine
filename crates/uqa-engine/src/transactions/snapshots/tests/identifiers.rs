@@ -61,7 +61,17 @@ fn transaction_identifier_cuts_preserve_autonomous_oids_and_original_document_fl
     );
     let sequences = selected.sequences.captured(&selected.cut).unwrap();
     assert_eq!(sequences.get().unwrap().len(), 1);
-    assert_eq!(sequences.get().unwrap()[0].state.current, 13);
+    assert_eq!(
+        sequences
+            .get()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .state
+            .current,
+        13
+    );
     control.cancellation().cancel();
     assert!(selected.catalog_oids.get().is_err());
     assert!(sequences.get().is_err());
@@ -98,7 +108,17 @@ fn transaction_identifier_capture_does_not_wait_for_a_private_callback() {
         [RelationIdentity::new("public", "docs")]
     );
     let sequences = selected.sequences.captured(&selected.cut).unwrap();
-    assert_eq!(sequences.get().unwrap()[0].state.current, 23);
+    assert_eq!(
+        sequences
+            .get()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .state
+            .current,
+        23
+    );
     release.send(()).unwrap();
     worker.join().unwrap().unwrap();
     drop(engine);

@@ -35,27 +35,17 @@ impl DurableCatalogState {
         state.path_indexes = CatalogCell::capture_resource(
             state.path_indexes.snapshot(),
             registry,
-            |values, control| {
-                resources(
-                    values,
-                    control,
-                    uqa_graph::PathIndex::capture_memory_with_control,
-                )
-            },
+            uqa_graph::PathIndexCatalog::capture,
         )?;
         state.named_analyzers = CatalogCell::capture_resource(
             state.named_analyzers.snapshot(),
             registry,
-            |values, control| {
-                resources(values, control, |source, control| {
-                    uqa_storage::analyzer_image::AnalyzerImageSnapshot::capture(source, control)
-                })
-            },
+            uqa_storage::analyzer_catalog::AnalyzerCatalog::capture,
         )?;
         state.table_field_analyzers = CatalogCell::capture_resource(
             state.table_field_analyzers.snapshot(),
             registry,
-            uqa_storage::analyzer_binding::capture::fields,
+            uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog::capture,
         )?;
         Ok(state)
     }

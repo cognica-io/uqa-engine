@@ -153,6 +153,11 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
         }
     }
 
+    /// Observe both immutable membership roots without comparing or copying declarations.
+    pub fn shares_roots(&self, other: &Self) -> bool {
+        self.durable.shares_root(&other.durable) && self.temporary.shares_root(&other.temporary)
+    }
+
     pub fn len(&self) -> usize {
         self.durable.len() + self.temporary.len()
     }

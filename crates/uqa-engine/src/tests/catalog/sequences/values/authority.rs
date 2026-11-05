@@ -215,7 +215,7 @@ fn setval_by_oid_returns_a_committed_value_before_the_live_registry_contains_the
         row.object_id = [31; 16];
         row.definition_generation = [32; 16];
         let oid = uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
-            &engine.durable.sequence_catalog_oids.read(),
+            engine.durable.sequences.read().catalog_oids(),
             &row.object_id,
         );
         // Inspect the value boundary before transaction completion can refresh the live registry.

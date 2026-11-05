@@ -4058,6 +4058,7 @@ dependencies = [
 name = "uqa-graph"
 version = "0.6.3"
 dependencies = [
+ "allocation-counter",
  "criterion",
  "icu_properties",
  "parking_lot",

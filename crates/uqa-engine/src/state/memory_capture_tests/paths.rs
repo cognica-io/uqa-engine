@@ -98,7 +98,8 @@ fn memory_path_capture_preserves_evaluated_pairs_through_rollback_replacement_an
         drop(engine);
         let saved = key.retained(&cut).unwrap().unwrap();
         assert_eq!(saved.get().unwrap().len(), 1);
-        assert_eq!(**saved.get().unwrap().get("g::saved").unwrap(), expected());
+        let image = saved.get().unwrap().image("g::saved").unwrap().unwrap();
+        assert_eq!(*image.get().unwrap(), expected());
         drop(cut);
         assert!(control.memory().used() > 0);
         control.cancellation().cancel();
@@ -106,7 +107,11 @@ fn memory_path_capture_preserves_evaluated_pairs_through_rollback_replacement_an
             saved.get(),
             Err(StorageBackendError::Cancelled(_))
         ));
-        drop(saved);
+        assert!(matches!(
+            image.get(),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        drop((saved, image));
         assert_eq!(control.memory().used(), 0);
     }
 }
@@ -146,11 +151,12 @@ fn denied_path_capture_preserves_ordinary_updates_and_independent_cuts() {
     );
     drop(engine);
     let saved = key.retained(&cut).unwrap().unwrap();
-    let value = saved.get().unwrap().get("g::saved").unwrap();
+    let image = saved.get().unwrap().image("g::saved").unwrap().unwrap();
+    let value = image.get().unwrap();
     assert_eq!(value.paths.len(), 1);
     assert_eq!(value.paths[0].sequence, [label]);
     assert!(value.paths[0].pairs.is_empty());
-    drop((saved, cut, failed));
+    drop((saved, cut, failed, image));
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
 }

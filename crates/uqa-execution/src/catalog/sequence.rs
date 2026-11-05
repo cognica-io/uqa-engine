@@ -120,6 +120,7 @@ pub fn sequence_row(
 
 pub mod catalog_oids;
 pub mod latest_values;
+pub mod registry;
 pub mod restoration;
 
 pub mod session;

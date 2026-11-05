@@ -45,11 +45,7 @@ impl SnapshotSources {
     ) -> StorageBackendResult<Self> {
         let sequences = std::sync::Arc::new(registry.cell(SequenceCaptureSource::new(
             SequenceReadSnapshot {
-                sequences: durable.sequences.clone(),
-                object_ids: durable.sequence_object_ids.clone(),
-                persistence: durable.sequence_persistence.clone(),
-                security: durable.sequence_security.clone(),
-                catalog_oids: durable.sequence_catalog_oids.clone(),
+                catalog: durable.sequences.clone(),
                 roles: RoleCatalogSnapshot {
                     roles: durable.roles.clone(),
                     memberships: durable.role_memberships.clone(),
@@ -62,9 +58,6 @@ impl SnapshotSources {
             catalog: durable.foreign_catalog.clone(),
         })?;
         let metadata = registry.cell(TableMetadataCaptureSource::new(
-            tables
-                .iter()
-                .map(|(name, table)| (name.clone(), table.persistence)),
             durable.catalog_indexes.clone(),
             durable.table_field_analyzers.clone(),
         ))?;
@@ -114,7 +107,7 @@ impl SnapshotSources {
 #[cfg(test)]
 type SequenceKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
-        Vec<uqa_execution::catalog::sequence::capture::CapturedSequence>,
+        uqa_execution::catalog::sequence::capture::CapturedSequences,
     >,
 >;
 

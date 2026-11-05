@@ -5,12 +5,8 @@
 //
 
 //! Borrow live sequence registries, session guards and physical storage inputs.
-use super::super::{
-    session::{
-        NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
-        SessionSequenceValue,
-    },
-    SequenceState,
+use super::super::session::{
+    SessionLastSequenceReference, SessionSequenceCache, SessionSequenceValue,
 };
 use crate::catalog::sequence::snapshot::SequenceSnapshotSource;
 use crate::row_locks::binding::RelationLockSession;
@@ -24,8 +20,12 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::{CatalogFacade, PersistentStorageSession, StorageBackendResult};
-pub type SequenceStatesWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceState>> + 'a>;
+pub type SequenceStatesWrite<'a> = super::super::registry::SequenceCatalogWrite<'a>;
+pub type SequenceHistoryWrite<'a> =
+    Box<dyn DerefMut<Target = super::super::capture::SequenceCaptureSource> + 'a>;
+pub type SequenceHistoryOperation<'a> = Box<
+    dyn FnOnce(&mut [SequenceHistoryWrite<'_>]) -> Result<Option<i64>, SequenceValueError> + 'a,
+>;
 pub type SequenceCachesWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SessionSequenceCache>> + 'a>;
 /// A retained read guard, including when the last-used identity and value are read together.
@@ -51,12 +51,10 @@ pub trait SequenceValueRuntime {
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError>;
     /// The store of exact sequence positions, when persistent sequence values are allocated by independent sessions outside the caller's transaction. A durable record then runs ahead of the values handed out, and the position between two records lives in this store.
     fn sequence_positions(&self) -> Option<&crate::row_locks::RowLockManager>;
-    fn record_nontransactional_sequence_value(
+    fn with_sequence_histories(
         &self,
-        definition_generation: [u8; 16],
-        value: NontransactionalSequenceValue,
-        defines_lastval: bool,
-    );
+        operation: SequenceHistoryOperation<'_>,
+    ) -> Result<Option<i64>, SequenceValueError>;
 }
 
 pub type SequenceValueOperation<'a> = Box<dyn FnOnce() -> Result<i64, SequenceValueError> + 'a>;

@@ -51,6 +51,10 @@ Analysis diagnostics are encoded in `uqa-analysis::CompiledAnalyzer::analyze_dia
 
 Compiled analyzers retain the resolved diagnostic configuration produced during preparation. `CompiledAnalyzer::configuration` borrows that same configuration, so retained Storage field bindings share it through their compiled index/search revisions instead of decoding and allocating another configuration per binding. Index/search assignments remain independent, and binding clones keep the original revisions through later reassignment and source-resource changes. Descriptor wire bytes, fingerprints, feature selection and cache limits are unchanged; descriptor cache statistics continue to count encoded descriptor bytes, while parsed configuration and executable resources belong to the immutable compiled owner.
 
+## Native analyzer catalog ownership
+
+Analysis owns immutable `AnalyzerImageSource` projections of canonical descriptors and exact encoded dictionaries. These projections retain no executable pipeline or decoded dictionary model. Native named publication prepares changed images before installation; live native owners share resource artifacts through weak revision/dictionary caches, while imported payloads obtain an independent encoded owner. Common Storage's `AnalyzerCatalog` publishes matching runtime and image roots, maintains complete retained-footprint bounds and captures only the encoded root. Child images transfer their original capture allowance and keep its cancellation through output and final retirement. Engine supplies transaction, persistence, refresh and retained-resource adapters. Historical field binding capture still preserves its exact index/search revisions through the existing detached producer; complete joint Engine backup remains under implementation.
+
 ## Normalization ownership
 
 `uqa-analysis::normalization` owns the explicit normalization configuration and executable plan independently of the tokenizer. The private scalar conversion owner in `normalization/text.rs` shares reserved UTF-16 encoding, optional CJK width filtering, final scalar conversion and cancellation between native Nori, native Japanese and compiled generic pipelines. `allocation/input.rs` owns the language-independent input conversion; language adapters supply their existing limits, errors and immutable simple-lowercase tables. Shared code imports neither language module. Typed plan dispatch retains exact resolved resource handles at the analysis boundary.
@@ -260,3 +264,5 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 - [Analyzer SQL](../sql/05-analyzers.md)
 - [Analyzer pipeline tutorial](../tutorials/03-analyzer-pipelines.md)
 - [Search and ranking internals](05-search-and-ranking.md)
+
+Historical table-field bindings use Storage’s immutable `FieldAnalyzerCatalog`. Native publication records each resolved relation’s actual persistence and prepares both exact index/search image sides before analyzer effects. Temporary runtime membership remains separate from the durable encoded root; matching index/field capture retains those already selected roots without copying table membership. Selected children keep their original image admission and cancellation after parent and Engine retirement.

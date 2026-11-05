@@ -13,10 +13,10 @@ fn memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure() 
         sql(&engine, "CREATE ROLE reader; CREATE SCHEMA saved; CREATE SEQUENCE saved.ids; GRANT USAGE ON SCHEMA saved TO reader WITH GRANT OPTION; GRANT USAGE ON SEQUENCE saved.ids TO reader; GRANT CREATE ON DATABASE uqa TO reader");
         let database = engine.durable.database_security.snapshot();
         let schemas = engine.durable.schemas.snapshot();
-        let sequences = engine.durable.sequence_security.snapshot();
+        let sequences = engine.durable.sequences.snapshot();
         let database_key = engine.durable.database_security.key().unwrap();
         let schemas_key = engine.durable.schemas.key().unwrap();
-        let sequences_key = engine.durable.sequence_security.key().unwrap();
+        let sequences_key = engine.durable.sequences.key().unwrap();
         let control = StorageReadControl::with_limit(1 << 20);
         let cut = engine
             .storage
@@ -30,7 +30,13 @@ fn memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure() 
             sql(&engine, "BEGIN; REVOKE USAGE ON SCHEMA saved FROM reader; REVOKE USAGE ON SEQUENCE saved.ids FROM reader; REVOKE CREATE ON DATABASE uqa FROM reader; SAVEPOINT changed; DROP SEQUENCE saved.ids; ROLLBACK TO changed; ROLLBACK");
             assert_eq!(*engine.durable.database_security.read(), *database);
             assert_eq!(*engine.durable.schemas.read(), *schemas);
-            assert_eq!(*engine.durable.sequence_security.read(), *sequences);
+            assert!(engine
+                .durable
+                .sequences
+                .read()
+                .security()
+                .iter()
+                .eq(sequences.security().iter()));
             sql(&engine, "REVOKE CREATE ON DATABASE uqa FROM reader; DROP SEQUENCE saved.ids; DROP SCHEMA saved; CREATE SCHEMA later");
         }
         drop(engine);
@@ -46,9 +52,10 @@ fn memory_catalog_authority_preserves_rollback_drop_and_unread_source_closure() 
         assert!(saved_sequences
             .get()
             .unwrap()
+            .security
             .iter()
-            .map(|(k, v)| (k, v))
-            .eq(sequences.iter()));
+            .map(|(key, authority)| (key, authority.security()))
+            .eq(sequences.security().iter()));
         control.cancellation().cancel();
         assert!(saved_schemas.get().is_err());
         drop((saved_database, saved_schemas, saved_sequences));

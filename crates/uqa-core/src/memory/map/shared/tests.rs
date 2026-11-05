@@ -12,6 +12,7 @@ use proptest::prelude::*;
 use super::*;
 
 mod bidirectional;
+mod prepared;
 mod removal;
 
 fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {

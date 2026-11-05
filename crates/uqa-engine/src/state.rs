@@ -38,7 +38,7 @@ mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache, SequenceState,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache,
     TableFieldAnalyzerRegistry, TransactionFrame,
 };
 
@@ -199,45 +199,24 @@ pub(super) struct DurableCatalogState {
         SchemaRegistry,
         uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
     >,
-    pub(super) path_indexes: CatalogCell<
-        BTreeMap<String, uqa_graph::PathIndex>,
-        resource_capture::CapturedResources<
-            uqa_core::memory::Budgeted<uqa_graph::CapturedPathIndex>,
-        >,
-    >,
+    pub(super) path_indexes:
+        CatalogCell<uqa_graph::PathIndexCatalog, uqa_graph::CapturedPathIndexes>,
     pub(super) sequences: CatalogCell<
-        BTreeMap<RelationIdentity, SequenceState>,
-        Vec<(RelationIdentity, SequenceState)>,
-    >,
-    pub(super) sequence_object_ids: CatalogCell<
-        BTreeMap<RelationIdentity, [u8; 16]>,
-        uqa_sql::catalog::definition_capture::identities::CapturedSequenceObjects,
-    >,
-    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub(super) sequence_catalog_oids: CatalogCell<
-        BTreeMap<[u8; 16], u32>,
-        uqa_sql::catalog::definition_capture::identities::CapturedSequenceOids,
+        uqa_execution::catalog::sequence::registry::SequenceCatalog,
+        uqa_execution::catalog::sequence::registry::CapturedSequenceCatalog,
     >,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
     pub(super) graph_catalog_oids: CatalogCell<
         uqa_sql::catalog::graph_oids::GraphOidRegistry,
         uqa_sql::catalog::graph_oids::CapturedGraphOidRegistry,
     >,
-    pub(super) sequence_persistence: CatalogCell<
-        BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
-        Vec<(RelationIdentity, uqa_sql::ast::RelationPersistence)>,
-    >,
-    pub(super) sequence_security: CatalogCell<
-        BTreeMap<RelationIdentity, BoundSequenceSecurity>,
-        Vec<(RelationIdentity, BoundSequenceSecurity)>,
-    >,
     pub(super) named_analyzers: CatalogCell<
-        BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>,
-        resource_capture::CapturedResources<uqa_storage::analyzer_image::AnalyzerImageSnapshot>,
+        uqa_storage::analyzer_catalog::AnalyzerCatalog,
+        uqa_storage::analyzer_catalog::CapturedAnalyzers,
     >,
     pub(super) table_field_analyzers: CatalogCell<
         TableFieldAnalyzerRegistry,
-        uqa_storage::analyzer_binding::capture::CapturedFieldAnalyzerBindings,
+        uqa_storage::analyzer_binding::registry::CapturedFieldAnalyzers,
     >,
     pub(super) foreign_wrappers: CatalogCell<
         uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
@@ -290,15 +269,10 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) catalog_indexes: Arc<uqa_execution::catalog::index::registry::CatalogIndexes>,
     pub(super) database_security: Arc<DatabaseAuthority>,
     pub(super) schemas: Arc<SchemaRegistry>,
-    pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
-    pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
-    pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub(super) path_indexes: Arc<uqa_graph::PathIndexCatalog>,
+    pub(super) sequences: Arc<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
     pub(super) graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
-    pub(super) sequence_persistence:
-        Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
+    pub(super) named_analyzers: Arc<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
     pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
     pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
     pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
@@ -334,17 +308,17 @@ impl DurableCatalogState {
             ),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
-            path_indexes: CatalogCell::new(BTreeMap::new()),
-            sequences: CatalogCell::new(BTreeMap::new()),
-            sequence_object_ids: CatalogCell::new(BTreeMap::new()),
-            sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
+            path_indexes: CatalogCell::new(uqa_graph::PathIndexCatalog::default()),
+            sequences: CatalogCell::new(
+                uqa_execution::catalog::sequence::registry::SequenceCatalog::default(),
+            ),
             graph_catalog_oids: CatalogCell::new(
                 uqa_sql::catalog::graph_oids::GraphOidRegistry::new(),
             ),
-            sequence_persistence: CatalogCell::new(BTreeMap::new()),
-            sequence_security: CatalogCell::new(BTreeMap::new()),
-            named_analyzers: CatalogCell::new(BTreeMap::new()),
-            table_field_analyzers: CatalogCell::new(BTreeMap::new()),
+            named_analyzers: CatalogCell::new(
+                uqa_storage::analyzer_catalog::AnalyzerCatalog::default(),
+            ),
+            table_field_analyzers: CatalogCell::new(TableFieldAnalyzerRegistry::default()),
             foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
             foreign_servers: CatalogCell::new(
                 uqa_sql::catalog::foreign_server::ForeignServers::new(),
@@ -386,11 +360,7 @@ impl DurableCatalogState {
             schemas: self.schemas.snapshot(),
             path_indexes: self.path_indexes.snapshot(),
             sequences: self.sequences.snapshot(),
-            sequence_object_ids: self.sequence_object_ids.snapshot(),
-            sequence_catalog_oids: self.sequence_catalog_oids.snapshot(),
             graph_catalog_oids: self.graph_catalog_oids.snapshot(),
-            sequence_persistence: self.sequence_persistence.snapshot(),
-            sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
             table_field_analyzers: self.table_field_analyzers.snapshot(),
             foreign_wrappers: self.foreign_wrappers.snapshot(),
@@ -417,15 +387,8 @@ impl DurableCatalogState {
         self.schemas.restore(&snapshot.schemas);
         self.path_indexes.restore(&snapshot.path_indexes);
         self.sequences.restore(&snapshot.sequences);
-        self.sequence_object_ids
-            .restore(&snapshot.sequence_object_ids);
-        self.sequence_catalog_oids
-            .restore(&snapshot.sequence_catalog_oids);
         self.graph_catalog_oids
             .restore(&snapshot.graph_catalog_oids);
-        self.sequence_persistence
-            .restore(&snapshot.sequence_persistence);
-        self.sequence_security.restore(&snapshot.sequence_security);
         self.named_analyzers.restore(&snapshot.named_analyzers);
         self.table_field_analyzers
             .restore(&snapshot.table_field_analyzers);

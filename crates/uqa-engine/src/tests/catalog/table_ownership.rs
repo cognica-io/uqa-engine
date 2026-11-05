@@ -35,7 +35,14 @@ fn snapshot(engine: &Engine) -> SecuritySnapshot {
             .security()
             .resolve(&engine.durable.roles.read())
             .unwrap(),
-        sequences: engine.durable.sequence_security.read().clone(),
+        sequences: engine
+            .durable
+            .sequences
+            .read()
+            .security()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
     }
 }
 fn schema(engine: &Engine) -> serde_json::Value {

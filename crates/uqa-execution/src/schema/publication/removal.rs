@@ -60,7 +60,13 @@ pub trait ColumnDropIndexes {
         table: &str,
         key: &uqa_storage::ValueIndexKey,
     ) -> StorageBackendResult<()>;
-    fn remove_field_analyzer(&self, table: &str, column: &str);
+    fn field_analyzers(
+        &self,
+    ) -> std::sync::Arc<uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog>;
+    fn publish_field_analyzers(
+        &self,
+        catalog: uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog,
+    );
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
 }
 pub trait ColumnDropRows {
@@ -131,6 +137,8 @@ pub fn drop_column(
     preflight_dependencies(context, &table_name, column)?;
     let index_removal = prepare_index_removal(context.indexes, &table_name, column)?;
     let prepared_rule_drop = context.rules.prepare(&table_name, column)?;
+    let mut analyzers = context.indexes.field_analyzers().as_ref().clone();
+    analyzers.remove(&(table_name.clone(), column.to_owned()))?;
     crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
     let mut hierarchy = state.hierarchy();
     let dropped = dropped_attribute(context.catalog, state.as_ref(), column, &hierarchy)?;
@@ -162,7 +170,7 @@ pub fn drop_column(
         }
     }
     index_removal.publish(context.indexes, &table_name)?;
-    context.indexes.remove_field_analyzer(&table_name, column);
+    context.indexes.publish_field_analyzers(analyzers);
     for id in state.doc_ids()? {
         let Some(mut document) = state.document(id)? else {
             continue;

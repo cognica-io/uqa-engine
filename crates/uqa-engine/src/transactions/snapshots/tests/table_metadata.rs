@@ -85,14 +85,15 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
     }
     *engine.durable.catalog_indexes.write() = next_indexes;
     drop(original_indexes);
-    engine
-        .durable
-        .table_field_analyzers
-        .write()
-        .get_mut(&(temporary, "body".into()))
-        .unwrap()
-        .index
-        .name = Some("x".repeat(1 << 20));
+    {
+        let mut fields = engine.durable.table_field_analyzers.write();
+        let key = (temporary, "body".into());
+        let mut binding = fields.get(&key).unwrap().clone();
+        binding.index.name = Some("x".repeat(1 << 20));
+        fields
+            .insert(&key, binding, true, &uqa_core::CancellationToken::new())
+            .unwrap();
+    }
     let weak_indexes = Arc::downgrade(&engine.durable.catalog_indexes.snapshot());
     let weak_analyzers = Arc::downgrade(&engine.durable.table_field_analyzers.snapshot());
     sql(&engine, "BEGIN; UPDATE \"Saved.Schema\".\"Docs\" SET body='private'; DROP INDEX \"Saved.Schema\".id_index; CREATE INDEX id_index ON \"Saved.Schema\".\"Docs\"(body)");
@@ -132,7 +133,8 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
         assert_eq!(row.definition_json, expected.definition_json);
     }
     assert_eq!(metadata.analyzers.len(), 1);
-    let (name, binding) = &metadata.analyzers[0];
+    let name = metadata.analyzers.keys().next().unwrap();
+    let binding = metadata.analyzers.binding(name).unwrap().unwrap();
     assert_eq!(name, &(RELATION.into(), "body".into()));
     assert_eq!(
         [bytes(&binding.index.image), bytes(&binding.search.image)],
@@ -153,6 +155,6 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
         .write_image(&mut Vec::new(), &StorageReadControl::with_limit(0))
         .is_err());
     assert!(saved.get().is_err());
-    drop(saved);
+    drop((binding, saved));
     assert_eq!(control.memory().used(), 0);
 }

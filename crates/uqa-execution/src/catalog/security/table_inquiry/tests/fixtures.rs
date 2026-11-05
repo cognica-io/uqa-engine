@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::sequence::registry::{SequenceCatalog, SequenceRecord};
 use crate::catalog::{
     cache::RegtypeOutputCache,
     security::roles::persistence::RoleCatalogSnapshot,
@@ -16,7 +17,6 @@ use crate::catalog::{
     test_support::{empty_catalog, NoRoutines},
     CatalogReadView, RelationLookupMode, RelationNameResolution,
 };
-use std::collections::BTreeMap;
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
@@ -53,31 +53,30 @@ impl Fixture {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
-            catalog_oids: std::sync::Arc::default(),
-            sequences: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                SequenceState::initial(1, 1, SequenceDataType::BigInt),
-            )])),
-            object_ids: Arc::new(BTreeMap::from([(relation.clone(), [7; 16])])),
-            persistence: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                RelationPersistence::Permanent,
-            )])),
-            security: Arc::new(BTreeMap::from([(
-                relation,
-                BoundSequenceSecurity {
-                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
-                        role: Some(reader.identity()),
-                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                        privileges: SequencePrivileges {
-                            update: true,
-                            ..SequencePrivileges::default()
-                        },
-                        grant_options: SequencePrivileges::default(),
-                    }]),
-                },
-            )])),
+            catalog: Arc::new(
+                SequenceCatalog::try_from_iter([(
+                    relation,
+                    SequenceRecord {
+                        state: SequenceState::initial(1, 1, SequenceDataType::BigInt),
+                        object_id: [7; 16],
+                        persistence: RelationPersistence::Permanent,
+                        catalog_oid: None,
+                    },
+                    BoundSequenceSecurity {
+                        role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                        acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                            role: Some(reader.identity()),
+                            grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                            privileges: SequencePrivileges {
+                                update: true,
+                                ..SequencePrivileges::default()
+                            },
+                            grant_options: SequencePrivileges::default(),
+                        }]),
+                    },
+                )])
+                .unwrap(),
+            ),
             roles: RoleCatalogSnapshot {
                 roles: Arc::new(
                     RoleDefinitions::try_from_iter([
@@ -90,10 +89,7 @@ impl Fixture {
             },
         };
         let mut catalog = empty_catalog().snapshot().clone();
-        catalog.definitions.sequences = Arc::clone(&retained.sequences);
-        catalog.definitions.sequence_object_ids = Arc::clone(&retained.object_ids);
-        catalog.definitions.sequence_persistence = Arc::clone(&retained.persistence);
-        catalog.definitions.sequence_security = Arc::clone(&retained.security);
+        catalog.definitions.sequences = Arc::clone(&retained.catalog);
         catalog.definitions.roles = Arc::clone(&retained.roles.roles);
         Self {
             current: RefCell::new(retained.clone()),
@@ -158,7 +154,7 @@ impl RoleReferenceNames for Fixture {
 }
 impl SequenceSecurityCatalog for Fixture {
     fn security_read(&self) -> SequenceSecurityRead<'_> {
-        Box::new(self.retained.security.as_ref())
+        Box::new(self.retained.catalog.security())
     }
 }
 impl SequencePrivilegeResolution for Fixture {

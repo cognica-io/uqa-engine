@@ -100,7 +100,7 @@ pub(super) fn owned_identity_sequence<'a>(
     if identity.qualified_name() != *sequence {
         return Ok(None);
     }
-    Ok(catalog.snapshot().definitions.sequences.get(&identity))
+    Ok(catalog.snapshot().definitions.sequences.state(&identity))
 }
 
 #[cfg(test)]

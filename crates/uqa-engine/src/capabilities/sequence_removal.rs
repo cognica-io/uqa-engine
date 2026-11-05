@@ -33,51 +33,22 @@ impl Engine {
     }
 }
 impl SequenceRemovalPublication for Engine {
-    fn remove_state(&self, name: &str) -> Result<bool, String> {
-        let relation = Self::resolved_relation_identity(name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let object_id = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| format!("Sequence `{name}` has no object identity"))?;
-        let temporary = self
-            .durable
-            .sequence_persistence
-            .read()
-            .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
+    fn remove_state(&self, name: &str) -> Result<bool, uqa_sql::SQLError> {
+        let removed = uqa_execution::catalog::sequence::registry::publication::remove(
+            &mut self.durable.sequences.write(),
+            self.storage.catalog.as_deref(),
+            name,
+        )?;
+        if let Some(record) = removed {
+            let object_id = record.object_id;
+            let oid = record.catalog_oid.unwrap_or_else(|| {
+                uqa_execution::catalog::projection::legacy_sequence_relation_oid(object_id) as u32
             });
-        let removed = if temporary {
-            self.durable.sequences.read().contains_key(&relation)
-        } else if let Some(catalog) = self.storage.catalog.as_ref() {
-            let removed = catalog
-                .drop_sequence_row(name)
-                .map_err(|err| format!("persist sequence catalog: {err}"))?;
-            if removed {
-                uqa_execution::catalog::sequence::catalog_oids::forget(
-                    catalog.as_ref(),
-                    &object_id,
-                )
-                .map_err(|err| format!("persist sequence catalog OID: {err}"))?;
-            }
-            removed
-        } else {
-            self.durable.sequences.read().contains_key(&relation)
-        };
-        if removed {
-            self.note_prepared_relation_change(&relation);
-            self.durable.sequences.write().remove(&relation);
-            self.durable.sequence_object_ids.write().remove(&relation);
-            self.durable
-                .sequence_catalog_oids
-                .write()
-                .remove(&object_id);
-            self.durable.sequence_persistence.write().remove(&relation);
-            self.durable.sequence_security.write().remove(&relation);
+            self.note_prepared_catalog_change(
+                uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+                    oid,
+                ),
+            );
             let mut session = self.session.state.write();
             session
                 .sequence_currvals
@@ -96,6 +67,6 @@ impl SequenceRemovalPublication for Engine {
                 .retain(|_, cache| cache.object_id != object_id);
             self.note_catalog_registry_changed();
         }
-        Ok(removed)
+        Ok(removed.is_some())
     }
 }

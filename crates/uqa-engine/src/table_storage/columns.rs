@@ -218,18 +218,17 @@ impl Engine {
         security.rename_column_acl(from, to);
     }
 
-    fn rename_column_analyzer_assignments(&self, table_name: &str, from: &str, to: &str) {
-        let mut analyzers = self.durable.table_field_analyzers.write();
-        let mut moved = Vec::new();
-        analyzers.retain(|(table, field), value| {
-            if table == table_name && field == from {
-                moved.push(((table_name.to_string(), to.to_string()), value.clone()));
-                false
-            } else {
-                true
-            }
-        });
-        analyzers.extend(moved);
+    fn rename_column_key_metadata(t: &super::TableState, from: &str, to: &str) {
+        uqa_sql::schema::columns::publication::rename_local_column(
+            &mut t.hierarchy.write(),
+            from,
+            to,
+        );
+        uqa_sql::schema::columns::publication::rename_key_columns(
+            &mut t.key_constraints.write(),
+            from,
+            to,
+        );
     }
 
     fn rename_document_fields(
@@ -309,20 +308,16 @@ impl Engine {
             from,
             to,
         )?;
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .with_renamed_field(&table_name, from, to)?;
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
         uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
         Self::rename_column_acl(&t, from, to);
-        uqa_sql::schema::columns::publication::rename_local_column(
-            &mut t.hierarchy.write(),
-            from,
-            to,
-        );
-        uqa_sql::schema::columns::publication::rename_key_columns(
-            &mut t.key_constraints.write(),
-            from,
-            to,
-        );
+        Self::rename_column_key_metadata(&t, from, to);
         {
             let mut fts = t.fts_fields.write();
             for f in fts.iter_mut() {
@@ -335,7 +330,7 @@ impl Engine {
         if let Some(binding) = &analyzer_binding {
             binding.install(to, t.inverted_index.write().as_mut())?;
         }
-        self.rename_column_analyzer_assignments(&table_name, from, to);
+        *self.durable.table_field_analyzers.write() = analyzers;
         let vector_rename = uqa_execution::catalog::index::vectors::detach_for_column_rename(
             &mut t.vector_indexes.write(),
             from,
@@ -460,6 +455,11 @@ impl Engine {
             &from,
             &to,
         )?;
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .with_renamed_table(&from, &to)?;
         self.rewrite_table_rename_dependencies(&from, &to)?;
         if persist_catalog {
             if let Some(catalog) = self.storage.catalog.as_ref() {
@@ -474,19 +474,7 @@ impl Engine {
         *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
         *self.durable.catalog_indexes.write() = indexes;
-        {
-            let mut analyzers = self.durable.table_field_analyzers.write();
-            let mut moved = Vec::new();
-            analyzers.retain(|(table, field), value| {
-                if table == &from {
-                    moved.push(((to.clone(), field.clone()), value.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
-            analyzers.extend(moved);
-        }
+        *self.durable.table_field_analyzers.write() = analyzers;
         if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;
             self.try_save_table_schema(&to, &state)?;

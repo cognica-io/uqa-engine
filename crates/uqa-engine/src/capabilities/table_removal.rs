@@ -60,6 +60,11 @@ impl TableRemovalPublication for Engine {
         let temporary = table
             .as_ref()
             .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .without_table(name)?;
         if !temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.drop_table_and_data(name)?;
@@ -89,10 +94,7 @@ impl TableRemovalPublication for Engine {
         }
         // Sweep every related per-table registry so catalog state
         // does not outlive the table.
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(t, _), _| t != name);
+        *self.durable.table_field_analyzers.write() = analyzers;
         *self.durable.catalog_indexes.write() = indexes;
         Ok(())
     }

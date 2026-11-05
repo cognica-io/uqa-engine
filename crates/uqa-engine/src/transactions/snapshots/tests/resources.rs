@@ -96,7 +96,14 @@ fn same_metadata(selected: &SnapshotCut, original_oids: &GraphOidRegistry) {
         .captured(&selected.cut)
         .unwrap();
     assert_eq!(
-        **paths.get().unwrap().get("g::saved").unwrap(),
+        *paths
+            .get()
+            .unwrap()
+            .image("g::saved")
+            .unwrap()
+            .unwrap()
+            .get()
+            .unwrap(),
         CapturedPathIndex {
             paths: vec![CapturedPath {
                 sequence: vec!["edge".into()],
@@ -201,7 +208,7 @@ fn transaction_resource_sources_preserve_original_images_across_private_mutation
         .unwrap();
     let graph = graphs.get().unwrap().get("g").unwrap().clone();
     let model = models.get().unwrap().image("saved").unwrap().unwrap();
-    let analyzer = analyzers.get().unwrap().get("saved").unwrap().clone();
+    let analyzer = analyzers.get().unwrap().image("saved").unwrap().unwrap();
     assert_eq!(
         [
             graph_image(&graph),

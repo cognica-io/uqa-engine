@@ -6,7 +6,8 @@
 
 use super::*;
 use crate::catalog::security::roles::persistence::RoleCatalogSnapshot;
-use std::{collections::BTreeMap, sync::Arc};
+use crate::catalog::sequence::registry::{SequenceCatalog, SequenceRecord};
+use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken};
 
 fn state() -> SequenceState {
@@ -35,28 +36,41 @@ fn fixture() -> SequenceReadSnapshot {
     let second = RelationIdentity::new("public", "unlogged");
     let mut empty_acl = BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP);
     empty_acl.acl = Some(vec![]);
+    let mut catalog = SequenceCatalog::with_budget(&MemoryBudget::new(16 << 20));
+    for (relation, object_id, persistence, oid, security) in [
+        (
+            first,
+            [2; 16],
+            RelationPersistence::Permanent,
+            31_001,
+            BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP),
+        ),
+        (
+            second,
+            [3; 16],
+            RelationPersistence::Unlogged,
+            31_002,
+            empty_acl,
+        ),
+    ] {
+        catalog
+            .insert(
+                relation,
+                SequenceRecord {
+                    state: state(),
+                    object_id,
+                    persistence,
+                    catalog_oid: Some(oid),
+                },
+                security,
+            )
+            .unwrap();
+    }
+    catalog
+        .replace_catalog_oids([([2; 16], 31_001), ([3; 16], 31_002), ([9; 16], 31_999)])
+        .unwrap();
     SequenceReadSnapshot {
-        sequences: Arc::new(BTreeMap::from([
-            (first.clone(), state()),
-            (second.clone(), state()),
-        ])),
-        object_ids: Arc::new(BTreeMap::from([
-            (first.clone(), [2; 16]),
-            (second.clone(), [3; 16]),
-        ])),
-        persistence: Arc::new(BTreeMap::from([
-            (first.clone(), RelationPersistence::Permanent),
-            (second.clone(), RelationPersistence::Unlogged),
-        ])),
-        security: Arc::new(BTreeMap::from([
-            (first, BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP)),
-            (second, empty_acl),
-        ])),
-        catalog_oids: Arc::new(BTreeMap::from([
-            ([2; 16], 31_001),
-            ([3; 16], 31_002),
-            ([9; 16], 31_999),
-        ])),
+        catalog: Arc::new(catalog),
         roles: RoleCatalogSnapshot {
             roles: Arc::default(),
             memberships: Arc::default(),
@@ -73,54 +87,123 @@ fn durable_sequence_capture_joins_exact_metadata_and_excludes_temporary_capacity
     let original = durable_sequences(&source, &control).unwrap();
     let retained = memory.used();
     let temp = RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20));
-    Arc::make_mut(&mut source.sequences).insert(temp.clone(), state());
-    Arc::make_mut(&mut source.persistence).insert(temp, RelationPersistence::Temporary);
-    // Exclusion precedes both metadata joining and allocation; no private identity/authority is needed.
+    Arc::make_mut(&mut source.catalog)
+        .insert(
+            temp,
+            SequenceRecord {
+                state: state(),
+                object_id: [4; 16],
+                persistence: RelationPersistence::Temporary,
+                catalog_oid: Some(31_003),
+            },
+            BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
+    // Temporary complete records never enter either durable capture root.
     let captured = durable_sequences(&source, &control).unwrap();
-    assert_eq!(&*captured, &*original);
+    assert!(captured.iter().eq(original.iter()));
     assert_eq!(memory.used(), retained * 2);
     assert_eq!(captured.len(), 2);
+    let rows = captured.iter().collect::<Vec<_>>();
     assert_eq!(
-        captured[0].relation,
-        RelationIdentity::new("Quoted.Schema", "Sequence.Name")
+        rows[0].relation,
+        &RelationIdentity::new("Quoted.Schema", "Sequence.Name")
     );
-    assert_eq!(captured[0].object_id, [2; 16]);
-    assert_eq!(captured[0].catalog_oid, Some(31_001));
-    assert_eq!(captured[0].state, state());
-    assert_eq!(captured[0].security.acl, None);
-    assert_eq!(captured[1].persistence, RelationPersistence::Unlogged);
-    assert_eq!(captured[1].security.acl, Some(vec![]));
-    assert_eq!(captured[1].catalog_oid, Some(31_002));
+    assert_eq!(rows[0].object_id, [2; 16]);
+    assert_eq!(rows[0].catalog_oid, Some(31_001));
+    assert_eq!(rows[0].state, state());
+    assert_eq!(rows[0].security.acl, None);
+    assert_eq!(rows[1].persistence, RelationPersistence::Unlogged);
+    assert_eq!(rows[1].security.acl, Some(vec![]));
+    assert_eq!(rows[1].catalog_oid, Some(31_002));
     drop((source, captured, original));
     assert_eq!(memory.used(), 0);
 }
 
 #[test]
-fn durable_sequence_capture_rejects_incomplete_selected_metadata_without_leases() {
-    for missing in ["persistence", "identity", "authority"] {
-        let mut source = fixture();
-        let selected = RelationIdentity::new("public", "unlogged");
-        match missing {
-            "persistence" => {
-                Arc::make_mut(&mut source.persistence).remove(&selected);
-            }
-            "identity" => {
-                Arc::make_mut(&mut source.object_ids).remove(&selected);
-            }
-            "authority" => {
-                Arc::make_mut(&mut source.security).remove(&selected);
-            }
-            _ => unreachable!(),
-        }
-        let memory = MemoryBudget::new(4096);
-        let token = CancellationToken::new();
-        let control = ProductionControl::new(&memory, &token, &token);
-        assert!(matches!(
-            durable_sequences(&source, &control),
-            Err(SQLError::Internal(_))
-        ));
-        assert_eq!(memory.used(), 0);
-    }
+fn durable_sequence_capture_retains_complete_metadata_after_rejected_publication() {
+    let mut source = fixture();
+    let original = source.clone();
+    let selected = RelationIdentity::new("public", "unlogged");
+    let native = source.catalog.budget().clone();
+    let used = native.used();
+    let occupied = native.reserve(native.available()).unwrap();
+    let replacement = SequenceRecord {
+        object_id: [4; 16],
+        catalog_oid: Some(32_000),
+        ..*source.catalog.get(&selected).unwrap()
+    };
+    assert_eq!(
+        Arc::make_mut(&mut source.catalog)
+            .insert(
+                selected.clone(),
+                replacement,
+                BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP)
+            )
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert!(std::ptr::eq(
+        source.catalog.get(&selected).unwrap(),
+        original.catalog.get(&selected).unwrap()
+    ));
+    assert_eq!(
+        source.catalog.security()[&selected],
+        original.catalog.security()[&selected]
+    );
+    assert_eq!(source.catalog.catalog_oids().get(&[4; 16]), None);
+    drop(occupied);
+    assert_eq!(native.used(), used);
+    let control = StorageReadControl::with_limit(4096);
+    let captured = source.freeze(&control).unwrap();
+    assert_eq!(
+        captured.get().unwrap().iter().nth(1).unwrap().object_id,
+        [3; 16]
+    );
+    drop((captured, source, original));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(native.used(), 0);
+}
+
+#[test]
+fn sequence_capture_preserves_extreme_positions_definition_and_owner_identity() {
+    let source = fixture();
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let captured = durable_sequences(&source, &control).unwrap();
+    assert!(captured.iter().all(|row| row.state == state()));
+    drop(source);
+    assert_eq!(captured.iter().next().unwrap().state.current, i64::MAX);
+    assert!(!captured.iter().next().unwrap().state.called);
+    drop(captured);
+    assert_eq!(memory.used(), 0);
+    let mut source = fixture();
+    let catalog = Arc::make_mut(&mut source.catalog);
+    catalog
+        .insert(
+            RelationIdentity::new("s", "x".repeat(32768)),
+            SequenceRecord {
+                state: SequenceState::initial(1, 1, uqa_sql::ast::SequenceDataType::default()),
+                object_id: [4; 16],
+                persistence: RelationPersistence::Permanent,
+                catalog_oid: None,
+            },
+            BoundSequenceSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
+    assert_eq!(
+        durable_sequences(&source, &control).unwrap_err().sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(memory.used(), 0);
+    token.cancel();
+    assert!(matches!(
+        durable_sequences(&source, &control),
+        Err(SQLError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), 0);
 }
 
 #[test]

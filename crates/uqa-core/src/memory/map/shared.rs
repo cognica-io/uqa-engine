@@ -35,6 +35,19 @@ pub struct BudgetedSharedMap<K, V> {
     memory: MemoryBudget,
 }
 
+/// An exclusively borrowed insertion with its key comparisons and structural allowance already complete. Dropping it leaves the original root unchanged; publication supplies the separately owned value without another comparison or admission.
+pub struct PreparedSharedMapInsert<'a, K, V> {
+    map: &'a mut BudgetedSharedMap<K, V>,
+    insertion: tree::PreparedInsert<K, V>,
+}
+
+impl<K, V> PreparedSharedMapInsert<'_, K, V> {
+    pub fn publish(self, value: V) {
+        let added = self.insertion.publish(&mut self.map.root, value);
+        self.map.len += usize::from(added);
+    }
+}
+
 /// An immutable ordered root and its cardinality. Its nodes retain their original allocation leases; an empty root owns no allocations. Cloning does not copy entries or allocate, and restoring into a mutable map requires its original allowance for a nonempty root.
 pub struct BudgetedSharedMapSnapshot<K, V> {
     root: Link<K, V>,
@@ -104,6 +117,15 @@ impl<K, V> BudgetedSharedMap<K, V> {
             root: None,
             len: 0,
             memory: memory.clone(),
+        }
+    }
+
+    /// True when both owners retain the same immutable entry graph. This observes identity without visiting entries or comparing keys and values.
+    pub fn shares_root(&self, other: &Self) -> bool {
+        match (&self.root, &other.root) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+            _ => false,
         }
     }
 
@@ -227,9 +249,20 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
 
     /// Reserve the complete insertion before changing this root, reusing unique nodes and copying only shared paths. Reservation failure preserves this root; existing clones remain unchanged. Matching keys and values are replaced together without requiring `Clone`.
     pub fn try_insert(&mut self, key: K, value: V) -> Result<(), MemoryError> {
-        let added = tree::insert(&mut self.root, key, value, &self.memory)?;
-        self.len += usize::from(added);
+        self.prepare_insert(key)?.publish(value);
         Ok(())
+    }
+
+    /// Admit the complete insertion before an owning operation obtains its final value. The exclusive borrow fixes the selected path until publication or abandonment; separately allocated key/value payloads retain their own admission.
+    pub fn prepare_insert(
+        &mut self,
+        key: K,
+    ) -> Result<PreparedSharedMapInsert<'_, K, V>, MemoryError> {
+        let insertion = tree::prepare(&self.root, key, &self.memory)?;
+        Ok(PreparedSharedMapInsert {
+            map: self,
+            insertion,
+        })
     }
 
     /// Visit keys in order, seeking the lower bound without traversing earlier entries or allocating a traversal buffer.

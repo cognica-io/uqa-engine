@@ -29,10 +29,9 @@ fn relation_ownership_keeps_role_incarnations_and_uses_no_value_snapshot() {
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     let owner = fixture.retained.roles.roles["reader"].identity();
-    Arc::make_mut(&mut fixture.retained.security)
-        .get_mut(&relation)
-        .unwrap()
-        .role_owner = owner;
+    crate::catalog::test_support::edit_sequence_security(&mut fixture.retained, |security| {
+        security.role_owner = owner;
+    });
     fixture
         .context()
         .ensure_relation_owner(&relation, "sequence")
@@ -59,11 +58,10 @@ fn relation_ownership_keeps_role_incarnations_and_uses_no_value_snapshot() {
 fn sequence_oid_binding_and_comma_privileges_keep_one_authority_per_invocation() {
     let fixture = Fixture::new();
     let mut revoked = fixture.retained.clone();
-    Arc::make_mut(&mut revoked.security)
-        .values_mut()
-        .next()
-        .unwrap()
-        .acl = Some(Vec::new());
+    let replacement = Some(Vec::new());
+    crate::catalog::test_support::edit_sequence_security(&mut revoked, |security| {
+        security.acl = replacement;
+    });
     *fixture.after_read.borrow_mut() = Some(revoked);
     let context = fixture.context();
     let arguments = [
@@ -83,7 +81,8 @@ fn sequence_oid_binding_and_comma_privileges_keep_one_authority_per_invocation()
     assert!(
         fixture
             .retained
-            .security
+            .catalog
+            .security()
             .values()
             .next()
             .unwrap()
@@ -106,14 +105,10 @@ fn sequence_name_inquiry_reads_roles_and_acl_after_resolution_without_rebinding_
         })
         .unwrap()
         .unwrap();
-    Arc::make_mut(&mut replaced.security)
-        .values_mut()
-        .next()
-        .unwrap()
-        .acl
-        .as_mut()
-        .unwrap()[0]
-        .role = Some(replaced.roles.roles["reader"].identity());
+    let replacement = Some(replaced.roles.roles["reader"].identity());
+    crate::catalog::test_support::edit_sequence_security(&mut replaced, |security| {
+        security.acl.as_mut().unwrap()[0].role = replacement;
+    });
     *fixture.after_resolution.borrow_mut() = Some(replaced);
     let arguments = [
         Value::Str("reader".into()),
@@ -137,10 +132,9 @@ fn removed_sequences_do_not_reappear_from_the_statement_catalog() {
     let fixture = Fixture::new();
     {
         let mut current = fixture.current.borrow_mut();
-        Arc::make_mut(&mut current.object_ids).clear();
-        Arc::make_mut(&mut current.sequences).clear();
-        Arc::make_mut(&mut current.security).clear();
-        Arc::make_mut(&mut current.persistence).clear();
+        Arc::make_mut(&mut current.catalog)
+            .remove(&RelationIdentity::new("public", "ids"))
+            .unwrap();
     }
     let context = fixture.context();
     assert_eq!(

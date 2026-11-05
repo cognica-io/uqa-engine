@@ -74,7 +74,10 @@ fn path_capture_admits_large_labels_and_pairs_before_copy_and_retires_failures()
         ),
     ] {
         let source = PathIndex {
-            storage: PathStorage::Memory(Arc::new(BTreeMap::from([(sequence, pairs)]))),
+            storage: PathStorage::Memory(Arc::new(
+                super::super::MemoryPaths::from_entries(BTreeMap::from([(sequence, pairs)]))
+                    .unwrap(),
+            )),
         };
         let small = StorageReadControl::with_limit(4096);
         assert!(matches!(

@@ -152,8 +152,8 @@ use uqa_storage::{
     ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    RelationIdentity, StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema,
+    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -213,7 +213,7 @@ pub use uqa_storage::FtsIndexStat;
 
 pub use uqa_scoring::ScoringMode;
 
-type TableFieldAnalyzerRegistry = BTreeMap<(String, String), uqa_storage::FieldAnalyzerBinding>;
+type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
 type SessionPortalViewSnapshots = Arc<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots = Arc<uqa_sql::routines::registry::RoutineRegistry>;
@@ -894,6 +894,5 @@ mod tests;
 mod copy;
 
 use uqa_execution::catalog::sequence::session::{
-    NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
-    SessionSequenceValue,
+    SessionLastSequenceReference, SessionSequenceCache, SessionSequenceValue,
 };

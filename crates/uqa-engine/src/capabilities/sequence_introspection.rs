@@ -7,15 +7,10 @@
 //! Bind sequence inspection to live registry guards and existing catalog resolution.
 
 use crate::Engine;
-use uqa_core::RelationIdentity;
 use uqa_execution::catalog::{
-    sequence::SequenceState,
-    sequence_introspection::{
-        SequenceIntrospectionCatalog, SequenceIntrospectionContext, SequenceObjectIdsRead,
-        SequenceStatesRead,
-    },
+    sequence::registry::SequenceCatalogRead,
+    sequence_introspection::{SequenceIntrospectionCatalog, SequenceIntrospectionContext},
 };
-use uqa_sql::ast::RelationPersistence;
 use uqa_storage::StorageBackendResult;
 
 impl Engine {
@@ -31,20 +26,7 @@ impl SequenceIntrospectionCatalog for Engine {
     fn refresh_sequences(&self) -> StorageBackendResult<()> {
         self.refresh_sequences_from_catalog()
     }
-    fn object_ids(&self) -> SequenceObjectIdsRead<'_> {
-        Box::new(self.durable.sequence_object_ids.read())
-    }
-    fn states(&self) -> SequenceStatesRead<'_> {
+    fn registry(&self) -> SequenceCatalogRead<'_> {
         Box::new(self.durable.sequences.read())
-    }
-    fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
-        self.durable.sequences.read().get(relation).copied()
-    }
-    fn sequence_persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence> {
-        self.durable
-            .sequence_persistence
-            .read()
-            .get(relation)
-            .copied()
     }
 }

@@ -5,10 +5,7 @@
 //
 
 //! Own sequence discard state, transaction history and physical session selection.
-use crate::{
-    Engine, EngineDataSnapshot, NontransactionalSequenceSource, NontransactionalSequenceValue,
-    StorageBackendResult,
-};
+use crate::{Engine, EngineDataSnapshot, NontransactionalSequenceSource, StorageBackendResult};
 impl Engine {
     pub(super) fn transaction_sequence_values(
         snapshot: Option<&EngineDataSnapshot>,
@@ -39,30 +36,6 @@ impl Engine {
                 .nontransactional_sequence_values
                 .write()
                 .discard_session_values();
-        }
-    }
-    pub(super) fn record_nontransactional_sequence_value(
-        &self,
-        definition_generation: [u8; 16],
-        value: NontransactionalSequenceValue,
-        defines_lastval: bool,
-    ) {
-        let session_currval = self
-            .session
-            .state
-            .read()
-            .sequence_currvals
-            .values()
-            .find(|current| current.object_id == value.object_id)
-            .copied();
-        let mut transactions = self.session.transactions.lock();
-        for frame in transactions.iter_mut() {
-            frame.nontransactional_sequence_values.write().record(
-                definition_generation,
-                value,
-                session_currval,
-                defines_lastval,
-            );
         }
     }
     pub(super) fn open_independent_catalog_session(

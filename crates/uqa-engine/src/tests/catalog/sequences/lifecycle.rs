@@ -380,14 +380,23 @@ fn sequence_schema_move_preserves_identity_and_dependencies_through_reopen() {
     for provider in 0..3 {
         let (directory, first, second) = sessions(provider);
         sql(&first, "CREATE SCHEMA s; CREATE SEQUENCE public.child; CREATE TABLE dependent(id bigint DEFAULT nextval('public.child')); CREATE VIEW dependent_view AS SELECT nextval('public.child') AS id");
-        let before =
-            first.durable.sequence_object_ids.read()[&RelationIdentity::new("public", "child")];
+        let before = *first
+            .durable
+            .sequences
+            .read()
+            .object_id(&RelationIdentity::new("public", "child"))
+            .unwrap();
         sql(&second, "SET search_path = s; ALTER SEQUENCE public.child SET SCHEMA s; ALTER SEQUENCE s.child SET SCHEMA public");
         drop(second);
         drop(first);
         let engine = reopen(provider, &directory.path().join("table-locks.db"));
         assert_eq!(
-            engine.durable.sequence_object_ids.read()[&RelationIdentity::new("public", "child")],
+            (*engine
+                .durable
+                .sequences
+                .read()
+                .object_id(&RelationIdentity::new("public", "child"))
+                .unwrap()),
             before
         );
         sql(&engine, "INSERT INTO dependent VALUES (DEFAULT)");

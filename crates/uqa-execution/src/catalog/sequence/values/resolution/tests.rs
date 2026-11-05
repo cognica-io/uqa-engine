@@ -6,19 +6,30 @@
 
 use super::*;
 use crate::catalog::security::roles::persistence::RoleCatalogSnapshot;
-use std::{collections::BTreeMap, sync::Arc};
+use crate::catalog::sequence::{
+    registry::{SequenceCatalog, SequenceRecord},
+    SequenceState,
+};
+use std::sync::Arc;
 use uqa_sql::SQLError;
 
 fn snapshot() -> SequenceReadSnapshot {
     SequenceReadSnapshot {
-        sequences: Arc::default(),
-        object_ids: Arc::new(BTreeMap::from([(
-            RelationIdentity::new("private", "ids"),
-            [1; 16],
-        )])),
-        persistence: Arc::default(),
-        security: Arc::default(),
-        catalog_oids: Arc::new(BTreeMap::from([([1; 16], 16384)])),
+        catalog: Arc::new(
+            SequenceCatalog::try_from_iter([(
+                RelationIdentity::new("private", "ids"),
+                SequenceRecord {
+                    state: SequenceState::initial(1, 1, uqa_sql::ast::SequenceDataType::BigInt),
+                    object_id: [1; 16],
+                    persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                    catalog_oid: Some(16384),
+                },
+                uqa_sql::catalog::security::BoundSequenceSecurity::owner(
+                    uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                ),
+            )])
+            .unwrap(),
+        ),
         roles: RoleCatalogSnapshot {
             roles: Arc::default(),
             memberships: Arc::default(),

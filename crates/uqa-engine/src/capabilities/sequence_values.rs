@@ -5,15 +5,13 @@
 //
 
 //! Bind native sequence values to actual Engine session and catalog guards.
-use crate::{
-    Engine, NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceValue,
-    SessionStateSnapshot,
-};
+use crate::{Engine, SessionLastSequenceReference, SessionSequenceValue, SessionStateSnapshot};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::sequence::values::context::{
-    SequenceCachesWrite, SequenceSessionRead, SequenceSessionWrite, SequenceStatesWrite,
-    SequenceValueContext, SequenceValueOperation, SequenceValueRuntime, SequenceValueTransactions,
+    SequenceCachesWrite, SequenceHistoryOperation, SequenceHistoryWrite, SequenceSessionRead,
+    SequenceSessionWrite, SequenceStatesWrite, SequenceValueContext, SequenceValueOperation,
+    SequenceValueRuntime, SequenceValueTransactions,
 };
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
@@ -79,18 +77,22 @@ impl SequenceValueRuntime for Engine {
         self.shared_sequence_positions()
             .map(|positions| &**positions)
     }
-    fn record_nontransactional_sequence_value(
+    fn with_sequence_histories(
         &self,
-        definition_generation: [u8; 16],
-        value: NontransactionalSequenceValue,
-        defines_lastval: bool,
-    ) {
-        Engine::record_nontransactional_sequence_value(
-            self,
-            definition_generation,
-            value,
-            defines_lastval,
-        );
+        operation: SequenceHistoryOperation<'_>,
+    ) -> Result<Option<i64>, SequenceValueError> {
+        let sources = self
+            .session
+            .transactions
+            .lock()
+            .iter()
+            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .collect::<Vec<_>>();
+        let mut guards = sources
+            .iter()
+            .map(|source| Box::new(source.write()) as SequenceHistoryWrite<'_>)
+            .collect::<Vec<_>>();
+        operation(&mut guards)
     }
 }
 

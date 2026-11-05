@@ -185,7 +185,7 @@ fn select_relations<'a, 'c>(
                 .map(|security| &security.acl_revisions),
         )?;
     }
-    for (relation, object) in snapshot.definitions.sequence_object_ids.iter() {
+    for (relation, object) in snapshot.definitions.sequences.object_ids() {
         include(
             catalog.sequence_catalog_oid(object),
             relation,

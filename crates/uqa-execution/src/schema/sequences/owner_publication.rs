@@ -39,8 +39,8 @@ impl SequenceOwnerPublicationContext<'_> {
                 .map_err(StorageBackendError::Other)?;
             let actual = self
                 .sequences
-                .states()
-                .get(&relation)
+                .registry()
+                .state(&relation)
                 .and_then(|state| state.owner);
             if actual != Some(expected) {
                 return Err(StorageBackendError::Other(format!(

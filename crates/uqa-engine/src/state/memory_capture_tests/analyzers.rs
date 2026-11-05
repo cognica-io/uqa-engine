@@ -96,17 +96,21 @@ fn memory_analyzer_capture_keeps_named_and_historical_field_revisions_through_ro
         let fields = fields.retained(&cut).unwrap().unwrap();
         assert_eq!(names.get().unwrap().len(), 1);
         assert_eq!(fields.get().unwrap().len(), 1);
-        let binding = &fields.get().unwrap()[0].1;
+        let fields_value = fields.get().unwrap();
+        let binding = fields_value
+            .binding(fields_value.keys().next().unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(binding.index.name.as_deref(), Some("saved"));
         assert_eq!(binding.search.name.as_deref(), Some("saved"));
         assert_eq!(binding.owner, uqa_storage::AnalyzerBindingOwner::Field);
         assert_eq!(binding.last_phase, uqa_storage::AnalyzerPhase::Search);
         let children = [
-            names.get().unwrap().get("saved").unwrap().clone(),
+            names.get().unwrap().image("saved").unwrap().unwrap(),
             binding.index.image.clone(),
             binding.search.image.clone(),
         ];
-        drop((cut, names, fields));
+        drop((binding, cut, names, fields));
         for (child, expected) in children.iter().zip(expected) {
             assert_eq!(saved_image(child), expected);
         }
@@ -148,7 +152,7 @@ fn denied_analyzer_capture_preserves_replacement_and_independently_funded_images
     drop(engine);
     let saved = key.retained(&cut).unwrap().unwrap();
     assert_eq!(
-        saved_image(saved.get().unwrap().get(&name).unwrap()),
+        saved_image(&saved.get().unwrap().image(&name).unwrap().unwrap()),
         expected
     );
     drop((saved, cut, failed));

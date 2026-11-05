@@ -66,8 +66,8 @@ pub(in crate::catalog::projection) fn relation_catalog_identities(
     }));
     out.extend(definitions.sequences.keys().map(|name| {
         let object_id = definitions
-            .sequence_object_ids
-            .get(name)
+            .sequences
+            .object_id(name)
             .copied()
             .unwrap_or_default();
         RelationCatalogIdentity::new(catalog.sequence_catalog_oid(&object_id), name, "S")

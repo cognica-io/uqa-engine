@@ -8,7 +8,7 @@
 use super::dependency_lifecycle::SequenceDependencyContext;
 use uqa_sql::catalog::security::sequence_inquiry::SequencePrivilegeInquiry;
 pub trait SequenceRemovalPublication {
-    fn remove_state(&self, name: &str) -> Result<bool, String>;
+    fn remove_state(&self, name: &str) -> Result<bool, uqa_sql::SQLError>;
 }
 /// Borrow the removal services lazily, so a context that contains them does not construct them eagerly.
 pub trait SequenceRemovalInputs {

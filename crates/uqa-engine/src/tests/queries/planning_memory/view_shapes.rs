@@ -16,13 +16,52 @@ use uqa_sql::semantics::view_rewrite::{
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
-fn native_view_shape_admission_preserves_rejection_order_and_recovers(#[case] provider: Provider) {
+fn native_view_shape_admission_preserves_rejection_order_and_recovers(
+    #[case] provider: Provider,
+    #[values(false, true)] explicit: bool,
+) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("view-shape-owners.db");
     let engine = provider.open(&path);
     engine.sql("CREATE TABLE items(id integer, payload text); INSERT INTO items VALUES(1,'initial'); CREATE VIEW writable AS SELECT id, payload FROM items WHERE id > 0 WITH CASCADED CHECK OPTION", &[]).unwrap();
     let large = "x".repeat(4 << 20);
     engine.sql(&format!("CREATE VIEW large_view AS SELECT id, '{large}'::text AS payload FROM items; CREATE VIEW rejected_view AS SELECT DISTINCT id, '{large}'::text AS payload FROM items LIMIT 1"), &[]).unwrap();
+    if explicit {
+        engine.sql("BEGIN", &[]).unwrap();
+    }
+    let (retention, memory) = engine
+        .with_direct_read_snapshot(|engine| Ok(check_shapes(engine, provider)))
+        .unwrap();
+    if explicit {
+        engine.sql("COMMIT", &[]).unwrap();
+    }
+    engine.sql("UPDATE writable SET payload = 'updated' WHERE id = 1; INSERT INTO writable VALUES(2,'inserted'); DELETE FROM writable WHERE id = 1", &[]).unwrap();
+    assert_rows(&engine);
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+    assert_eq!(retention.memory().used(), 0);
+    if !matches!(provider, Provider::Memory) {
+        let reopened = provider.open(&path);
+        assert_rows(&reopened);
+        reopened.close().unwrap();
+    }
+}
+
+fn check_shapes(
+    engine: &Engine,
+    provider: Provider,
+) -> (
+    uqa_storage::read_control::StorageReadControl,
+    uqa_core::memory::MemoryBudget,
+) {
+    // View analysis borrows its caller's admitted statement snapshot. Retain that
+    // boundary while exhausting the producer allowance, including cold storage.
+    assert!(engine
+        .storage
+        .backend
+        .as_ref()
+        .is_none_or(|backend| backend.in_transaction()));
     let retention = engine.query_retention_control().unwrap();
     // Catalog refresh may retire independent session-cache leases. Measure this producer under the same session ceiling with its own child allowance.
     let memory = retention.memory().child(retention.memory().available());
@@ -90,17 +129,7 @@ fn native_view_shape_admission_preserves_rejection_order_and_recovers(#[case] pr
         .expect("cancelled view analysis");
     assert_eq!(error.sqlstate(), Some("57014"));
     assert_eq!(memory.used(), before);
-    engine.sql("UPDATE writable SET payload = 'updated' WHERE id = 1; INSERT INTO writable VALUES(2,'inserted'); DELETE FROM writable WHERE id = 1", &[]).unwrap();
-    assert_rows(&engine);
-    engine.close().unwrap();
-    drop(engine);
-    assert_eq!(memory.used(), 0);
-    assert_eq!(retention.memory().used(), 0);
-    if !matches!(provider, Provider::Memory) {
-        let reopened = provider.open(&path);
-        assert_rows(&reopened);
-        reopened.close().unwrap();
-    }
+    (retention, memory)
 }
 
 fn assert_rows(engine: &Engine) {

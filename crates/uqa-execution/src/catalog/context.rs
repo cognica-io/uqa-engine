@@ -105,8 +105,8 @@ impl CatalogContext<'_> {
             .catalog_read_view()
             .snapshot()
             .definitions
-            .sequence_object_ids
-            .get(&relation)
+            .sequences
+            .object_id(&relation)
             .copied())
     }
     /// Resolve a user-defined type or its generated array name. An unqualified name uses the first search-path schema that defines any type with that name.

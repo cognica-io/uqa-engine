@@ -33048,15 +33048,19 @@
       "test": "native_view_shape_admission_preserves_rejection_order_and_recovers",
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/view_shapes.rs",
       "kind": "lib",
-      "cases": 4,
+      "cases": 8,
       "case_names": [
-        "case_1_memory",
-        "case_2_sqlite_native",
-        "case_3_sqlite_kv",
-        "case_4_redb"
+        "case_1_memory::explicit_1_false",
+        "case_1_memory::explicit_2_true",
+        "case_2_sqlite_native::explicit_1_false",
+        "case_2_sqlite_native::explicit_2_true",
+        "case_3_sqlite_kv::explicit_1_false",
+        "case_3_sqlite_kv::explicit_2_true",
+        "case_4_redb::explicit_1_false",
+        "case_4_redb::explicit_2_true"
       ],
       "capability": "Automatic view metadata ownership",
-      "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider.",
+      "workload": "Four MiB retained view definitions, exhausted request admission and writable-view mutations on every provider, inside admitted implicit and explicit statement snapshots.",
       "invariant": "Early shape rejection precedes payload production; admitted layer failure releases its owners and native mutations recover with durable results."
     },
     {
@@ -37831,7 +37835,7 @@
       "kind": "lib",
       "test": "sequence_capture_preserves_extreme_positions_definition_and_owner_identity",
       "cases": 1,
-      "source": "crates/uqa-execution/src/catalog/sequence/capture.rs",
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Selected sequence state capture",
       "workload": "Retain extreme positions, an uncalled value, cache/log state and immutable owner/definition identities.",
       "invariant": "Exact state survives while denied large names and cancellation release every reservation.",
@@ -38890,7 +38894,7 @@
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Joint durable sequence records",
-      "workload": "Capture permanent and unlogged definitions, exact identities/OIDs, optional ACLs and extreme state beside a one-MiB temporary name with no private authority.",
+      "workload": "Capture permanent and unlogged definitions, exact identities/OIDs, optional ACLs and extreme state beside a complete temporary record with a one-MiB name.",
       "invariant": "Each durable record joins its original object identity and authority; excluded temporary state contributes no output capacity or payload charge and unused OID claims stay absent.",
       "case_names": [
         ""
@@ -38899,12 +38903,12 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
-      "test": "durable_sequence_capture_rejects_incomplete_selected_metadata_without_leases",
+      "test": "durable_sequence_capture_retains_complete_metadata_after_rejected_publication",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/sequence/capture/catalog/tests.rs",
       "capability": "Complete selected sequence metadata",
-      "workload": "Remove persistence, object identity or authority from a selected definition after another complete definition.",
-      "invariant": "No partial catalog escapes and every allocation is released; missing metadata is not replaced with invented defaults.",
+      "workload": "Deny a complete native record, identity, OID and authority replacement, then capture the still-installed generation.",
+      "invariant": "Rejected publication preserves every original root and identity; capture never observes partially installed metadata and releases every allowance.",
       "case_names": [
         ""
       ]
@@ -41014,6 +41018,382 @@
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
         "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "prepared_publication_needs_no_further_comparison_or_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/prepared.rs",
+      "capability": "Prepared ordered publication",
+      "workload": "Admit insertions and replacements with private and shared paths, then disable comparisons and occupy the remaining allowance.",
+      "invariant": "Publication makes no subsequent comparisons or admission and preserves prior retained entries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "abandoned_and_denied_preparation_preserve_the_original_root_and_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests/prepared.rs",
+      "capability": "Prepared publication failure isolation",
+      "workload": "Reject admission, abandon a prepared insertion, and unwind before publication.",
+      "invariant": "Every prior root and lease remains unchanged and final release returns all native charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "prepared_retained_publication_preserves_cached_footprints_and_failed_roots",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Prepared retained footprint",
+      "workload": "Prepare replacements and observe cached retained footprint through successful and failed publication.",
+      "invariant": "Cached capture admission remains equal to the complete selected generation and failures preserve its root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_capture_keeps_complete_pairs_without_cardinality_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence capture work",
+      "workload": "Capture 1, 64 and 4096 native definitions, add a large temporary record, remove a selected live record and close its source.",
+      "invariant": "Capture allocates nothing, retains exact record and authority pointers, excludes temporary capacity and independently admits the cached footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_position_precedes_external_effects_and_needs_no_late_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence position publication",
+      "workload": "Reject and abandon a prepared position, then exhaust the remaining allowance after preparation before publishing the selected position.",
+      "invariant": "Failed admission precedes external effects and successful publication needs no later admission or change to identity, definition or authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_history_prepares_every_successor_before_effects_and_preserves_abandoned_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/capture/history/tests.rs",
+      "capability": "Native sequence history publication",
+      "workload": "Capture original history, reject and abandon preparation, and publish physical/session observations after exhausting the remaining native allowance.",
+      "invariant": "Position and observation admission finishes before effects; unread cuts retain prior positions and final release returns every lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_native_sequence_admission_preserves_values_catalogs_and_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/native.rs",
+      "capability": "Native sequence failure recovery",
+      "workload": "Deny creation, restart, rename, removal, grants, owner changes and cached/uncached nextval or setval on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Memory errors leave original records, authority, OIDs, physical rows, caches and session observations intact; recovery can allocate and change definitions afterward.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_generation_identity_changes_only_with_published_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/tests.rs",
+      "capability": "Native sequence generation identity",
+      "workload": "Abandon a prepared position and independently publish value, authority, OID, rename and membership changes.",
+      "invariant": "Unchanged native roots remain reusable without cardinality work; every published content change invalidates their identity and preserves the retained source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_effect_classification_preserves_catalog_admission_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/effects/routines/tests.rs",
+      "capability": "Sequence effect-analysis admission",
+      "workload": "Reject sequence catalog admission while classifying nextval and setval before execution.",
+      "invariant": "SQLSTATE 53200 survives the typed effect-catalog boundary without executing a sequence value operation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_capture_is_constant_and_retires_the_executable_owner",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer image admission",
+      "workload": "Capture revisions with 1, 64 and 4096 custom words under exact independent allowances.",
+      "invariant": "Capture allocates nothing and preserves exact descriptor bytes after pipeline retirement; every native and capture lease retires with its last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_failure_preserves_source_and_releases_admission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer image failure",
+      "workload": "Deny initial construction, deny an existing native image and cancel repeated selection.",
+      "invariant": "Failure exposes no image or retained lease and leaves ordinary analysis usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_native_image_shares_enabled_dictionary_artifacts_without_retaining_models",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests.rs",
+      "capability": "Native analyzer dictionary ownership",
+      "workload": "Prepare distinct revisions against the same enabled Nori and Kuromoji artifacts.",
+      "invariant": "Images share exact encoded resource pointers and hashes while executable revisions can retire independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_catalog_capture_is_constant_and_keeps_exact_revisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer catalog generations",
+      "workload": "Capture 1, 64 and 4096 names, deny insufficient admission, replace the first revision and close every source owner.",
+      "invariant": "Zero-allocation capture retains exact original images, independently admits its complete closure and releases unrelated names before the selected child.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_catalog_denied_publication_preserves_both_roots_and_footprints",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer publication admission",
+      "workload": "Exhaust native memory before replacing and extending a retained named catalog.",
+      "invariant": "Both native roots and the cached footprint remain unchanged; funded removal and final lease retirement still work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_children_share_original_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer child ownership",
+      "workload": "Deny the first image read, repeat funded reads and cancel output after closing the parent.",
+      "invariant": "Denied reads allocate nothing, repeated reads share one original payload lease and escaped children retain original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_publication_observes_cancellation_before_reusing_a_cached_image",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native analyzer publication cancellation",
+      "workload": "Cancel a publication while the requested revision already has a live encoded image.",
+      "invariant": "Cancellation precedes native publication allocation and preserves both published roots and their exact existing native reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_images_release_import_allowances_and_preserve_enabled_analysis",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/capture/tests.rs",
+      "capability": "Native imported analyzer resources",
+      "workload": "Import enabled Nori and Kuromoji images, prepare native owners, capture and restore complete token observations.",
+      "invariant": "Capture allocates only one fixed wrapper, source import allowances retire independently and restored image bytes and analysis remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_analyzer_admission_precedes_catalog_writes_and_preserves_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Native analyzer failure recovery",
+      "workload": "Deny named creation, replacement and removal inside active transactions on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Failed admission preserves exact runtime revisions and stored definitions; rollback releases native leases and funded changes survive persistent reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_capture_excludes_temporary_roots_without_cardinality_work_or_pipeline_retention",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Native historical field capture",
+      "workload": "Capture 1, 64 and 4096 bindings beside a large temporary binding, then retire executable owners and retain one historical child.",
+      "invariant": "Capture allocates nothing, admits the exact cached durable closure and preserves both historical sides without temporary payload or compiled pipelines.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_publication_rename_and_removal_preserve_all_roots_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Native field publication atomicity",
+      "workload": "Deny field insertion, field/table rename and removal, then fund each transition and clear durable membership.",
+      "invariant": "Every rejected successor preserves all three roots and original leases; successful transitions keep exact revisions and temporary partition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_children_preserve_admission_and_original_cancellation_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Historical field child ownership",
+      "workload": "Deny selection, fund it once, reuse the same child and retire the parent before cancelling its original scope.",
+      "invariant": "No payload reservation is lost on denial or charged twice; escaped sides retain original cancellation and release final admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_field_admission_preserves_bindings_postings_and_schema_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Native field failure recovery",
+      "workload": "Deny analyzer assignment, GIN creation/removal, column/table rename and deletion on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Rollback preserves original bindings, stored definitions, table schema and searchable postings; funded changes and persistent reopen remain usable.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "field_publication_rejects_missing_relations_before_catalog_or_image_membership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/tests/catalog/analyzers.rs",
+      "capability": "Resolved field publication membership",
+      "workload": "Assign a named analyzer to a missing relation beside an existing indexed table.",
+      "invariant": "Resolution rejects the missing relation before native catalog/image publication; existing identities and membership are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_catalog_capture_shares_constant_work_roots_and_original_materializations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path registry capture",
+      "workload": "Capture 1, 64 and 4096 registrations sharing a large materialization, then replace names and retire source roots.",
+      "invariant": "Capture allocates no nodes or payload, exact cached admission is independent per cut, and escaping children retain original evaluated data.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_publication_and_removal_preserve_root_and_capability_on_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path publication admission",
+      "workload": "Exhaust a registry allowance before replacement, selected deletion and graph-prefix deletion; then admit and remove a query view.",
+      "invariant": "Denied publication preserves the complete original root, footprint and non-memory count; unsupported memory capture cannot evaluate a graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_children_keep_original_admission_and_cancellation_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native path child lifetime",
+      "workload": "Deny child construction, fund it, select the same child again and retire independent parents before cancellation.",
+      "invariant": "Failed child construction leaks no allowance, repeat selection allocates nothing, and original cancellation remains independent after parent retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_path_image_admits_actual_immutable_capacity_without_copying_or_replaying_paths",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/snapshot/tests.rs",
+      "capability": "Native path materialization footprint",
+      "workload": "Build exact empty, duplicate, separator-bearing and 32 KiB label sequences over a 129-vertex chain; compare actual live allocations and captured pointers.",
+      "invariant": "Cached footprint covers every owning allocation, denied capture allocates nothing and successful capture shares exact evaluated pairs without a graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_path_registry_admission_preserves_physical_materialization_and_transaction_recovery",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/path_indexes.rs",
+      "capability": "Path registry transaction recovery",
+      "workload": "Deny creation, replacement, deletion, graph mutation and graph deletion on memory, native SQLite, SQLite KV and redb, then roll back, reuse and reopen.",
+      "invariant": "Typed 53200 admission failures preserve original definitions, evaluated pairs and graph membership; funded operations and persistent reopen retain their exact results.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     }
   ]

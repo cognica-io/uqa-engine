@@ -90,58 +90,22 @@ impl SequenceCreationPublication for Engine {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;
         state.definition_generation = object_id;
-        if persistence == RelationPersistence::Temporary {
-            let seqs = self.durable.sequences.read();
-            if seqs.contains_key(relation) {
-                return Ok(false);
-            }
-        } else if let Some(catalog) = self.storage.catalog.as_ref() {
-            let created = catalog
-                .create_sequence_row(
-                    &Self::sequence_row(name, object_id, state, persistence, &security).map_err(
-                        |error| SQLError::Internal(format!("build sequence catalog row: {error}")),
-                    )?,
-                )
-                .map_err(|error| {
-                    SQLError::Internal(format!("persist sequence catalog: {error}"))
-                })?;
-            if !created {
-                return Ok(false);
-            }
-            uqa_execution::catalog::sequence::catalog_oids::record(
-                catalog.as_ref(),
-                &object_id,
-                catalog_oid,
-            )
-            .map_err(|error| {
-                SQLError::Internal(format!("persist sequence catalog OID: {error}"))
-            })?;
-        } else {
-            let seqs = self.durable.sequences.read();
-            if seqs.contains_key(relation) {
-                return Ok(false);
-            }
+        let created = uqa_execution::catalog::sequence::registry::publication::create(
+            &mut self.durable.sequences.write(),
+            self.storage.catalog.as_deref(),
+            name,
+            relation,
+            uqa_execution::catalog::sequence::registry::SequenceRecord {
+                state,
+                object_id,
+                persistence,
+                catalog_oid: Some(catalog_oid),
+            },
+            security,
+        )?;
+        if !created {
+            return Ok(false);
         }
-        self.durable
-            .sequences
-            .write()
-            .insert(relation.clone(), state);
-        self.durable
-            .sequence_object_ids
-            .write()
-            .insert(relation.clone(), object_id);
-        self.durable
-            .sequence_catalog_oids
-            .write()
-            .insert(object_id, catalog_oid);
-        self.durable
-            .sequence_persistence
-            .write()
-            .insert(relation.clone(), persistence);
-        self.durable
-            .sequence_security
-            .write()
-            .insert(relation.clone(), security);
         self.note_catalog_registry_changed();
         self.note_prepared_catalog_change(
             uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
@@ -206,7 +170,7 @@ impl uqa_sql::schema::sequences::lifecycle::SequenceLifecycleCatalog for Engine 
         self.durable
             .sequences
             .read()
-            .get(relation)
+            .state(relation)
             .is_some_and(|state| state.owner.is_some())
     }
     fn relation_kind_at(&self, name: &str) -> Result<Option<&'static str>, String> {
@@ -249,22 +213,13 @@ impl Engine {
 }
 impl uqa_execution::schema::sequences::alteration::SequenceDefinitionCatalog for Engine {
     fn object_id(&self, relation: &RelationIdentity) -> Option<[u8; 16]> {
-        self.durable
-            .sequence_object_ids
-            .read()
-            .get(relation)
-            .copied()
+        self.durable.sequences.read().object_id(relation).copied()
     }
     fn state(&self, relation: &RelationIdentity) -> Result<Option<SequenceState>, SQLError> {
-        let Some(state) = self.durable.sequences.read().get(relation).copied() else {
+        let Some(state) = self.durable.sequences.read().state(relation).copied() else {
             return Ok(None);
         };
-        let object_id = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .get(relation)
-            .copied();
+        let object_id = self.durable.sequences.read().object_id(relation).copied();
         let (Some(positions), Some(object_id)) = (self.shared_sequence_positions(), object_id)
         else {
             return Ok(Some(state));
@@ -316,7 +271,7 @@ impl Engine {
 }
 impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublication for Engine {
     fn security(&self, relation: &RelationIdentity) -> Option<BoundSequenceSecurity> {
-        self.durable.sequence_security.read().get(relation).cloned()
+        self.durable.sequences.security().get(relation).cloned()
     }
     fn persist_security(
         &self,
@@ -326,12 +281,14 @@ impl uqa_execution::schema::sequences::role_ownership::SequenceSecurityPublicati
     ) -> Result<(), SQLError> {
         self.persist_sequence_security(name, relation, security)
     }
-    fn publish_security(&self, relation: &RelationIdentity, security: BoundSequenceSecurity) {
-        self.durable
-            .sequence_security
-            .write()
-            .insert(relation.clone(), security);
-        self.note_prepared_relation_change(relation);
+    fn sequence_catalog(&self) -> uqa_execution::catalog::sequence::registry::SequenceCatalog {
+        self.durable.sequences.read().clone()
+    }
+    fn publish_sequences(
+        &self,
+        catalog: uqa_execution::catalog::sequence::registry::SequenceCatalog,
+    ) {
+        *self.durable.sequences.write() = catalog;
     }
 }
 
@@ -345,7 +302,6 @@ impl Engine {
             schemas: self.schema_dependency_publication_context(),
             views: self.view_sequence_rewrite_context(),
             state: self,
-            catalog: self,
             events: self.event_catalog_context(),
             changes: self,
         }
@@ -389,22 +345,6 @@ impl uqa_execution::schema::sequences::lifecycle::SequenceStateRename for Engine
         Ok(())
     }
 }
-impl uqa_execution::schema::sequences::lifecycle::SequenceRenameCatalog for Engine {
-    fn has_catalog(&self) -> bool {
-        self.storage.catalog.is_some()
-    }
-    fn rename_sequence_row(&self, source: &str, target: &str) -> StorageBackendResult<bool> {
-        let renamed = self.storage.catalog.as_ref().map_or(Ok(false), |catalog| {
-            catalog.rename_sequence_row(source, target)
-        })?;
-        if renamed {
-            let relation = RelationIdentity::from_legacy_name(source)
-                .map_err(uqa_storage::StorageBackendError::Other)?;
-            self.note_prepared_relation_change(&relation);
-        }
-        Ok(renamed)
-    }
-}
 impl uqa_execution::schema::sequences::dispatch::SequenceCommandCatalog for Engine {
     fn resolve_visible_relation(
         &self,
@@ -414,10 +354,9 @@ impl uqa_execution::schema::sequences::dispatch::SequenceCommandCatalog for Engi
     }
     fn sequence_persistence(&self, relation: &RelationIdentity) -> RelationPersistence {
         self.durable
-            .sequence_persistence
+            .sequences
             .read()
-            .get(relation)
-            .copied()
+            .persistence(relation)
             .unwrap_or_default()
     }
 }

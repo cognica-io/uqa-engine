@@ -35,7 +35,7 @@ fn drop_sequences(context: &CatalogRemovalContext<'_>, names: &[&str]) -> Result
 
 struct UnreachablePublication;
 impl SequenceRemovalPublication for UnreachablePublication {
-    fn remove_state(&self, _: &str) -> Result<bool, String> {
+    fn remove_state(&self, _: &str) -> Result<bool, SQLError> {
         panic!("every dependency check must finish before any sequence removal")
     }
 }
@@ -75,7 +75,7 @@ struct FailedPublication<'a> {
     reached: Cell<bool>,
 }
 impl SequenceRemovalPublication for FailedPublication<'_> {
-    fn remove_state(&self, name: &str) -> Result<bool, String> {
+    fn remove_state(&self, name: &str) -> Result<bool, SQLError> {
         assert_eq!(name, "public.ids");
         let table =
             self.engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
@@ -114,7 +114,9 @@ impl SequenceRemovalPublication for FailedPublication<'_> {
             "the cascade notice follows the removal of every object"
         );
         self.reached.set(true);
-        Err("injected sequence removal failure".into())
+        Err(SQLError::Internal(
+            "injected sequence removal failure".into(),
+        ))
     }
 }
 fn assert_restored(engine: &Engine) {
@@ -172,7 +174,12 @@ fn native_sequence_removal_clears_only_matching_registry_and_session_cache_ident
             assert_eq!(engine.nextval("ids").unwrap(), 2);
         }
         let relation = RelationIdentity::new("public", "ids");
-        let object_id = engine.durable.sequence_object_ids.read()[&relation];
+        let object_id = *engine
+            .durable
+            .sequences
+            .read()
+            .object_id(&relation)
+            .unwrap();
         let mut expected_caches = engine.session.sequence_caches.lock().clone();
         expected_caches.retain(|_, cache| cache.object_id != object_id);
         assert!(!expected_caches.is_empty());
@@ -185,21 +192,25 @@ fn native_sequence_removal_clears_only_matching_registry_and_session_cache_ident
         };
         assert!(engine.drop_sequence("ids").unwrap());
         assert!(!engine.durable.sequences.read().contains_key(&relation));
-        assert!(!engine
+        assert!(engine
             .durable
-            .sequence_object_ids
+            .sequences
             .read()
-            .contains_key(&relation));
-        assert!(!engine
+            .object_id(&relation)
+            .is_none());
+        assert!(engine
             .durable
-            .sequence_persistence
+            .sequences
             .read()
-            .contains_key(&relation));
-        assert!(!engine
+            .persistence(&relation)
+            .is_none());
+        assert!(engine
             .durable
-            .sequence_security
+            .sequences
             .read()
-            .contains_key(&relation));
+            .security()
+            .get(&relation)
+            .is_none());
         assert!(*engine.session.sequence_caches.lock() == expected_caches);
         assert!(engine.session.state.read().sequence_currvals == expected_currvals);
         assert!(engine.session.state.read().last_sequence == expected_last);

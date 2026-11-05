@@ -51,11 +51,13 @@ impl Engine {
             .try_table(table)
             .map_err(|error| storage_error("resolve FTS table", &error))?
             .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        let field_key = (table_name.clone(), field);
+        let field = &field_key.1;
         let existing = self
             .durable
             .table_field_analyzers
             .read()
-            .get(&(table_name.clone(), field.clone()))
+            .get(&field_key)
             .cloned();
         let uses_default = analyzer.is_none() && existing.is_none();
         let candidate = if let Some(name) = analyzer {
@@ -66,38 +68,25 @@ impl Engine {
             let previous = existing.unwrap_or_else(|| {
                 uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone())
             });
-            match previous.owner {
-                uqa_storage::AnalyzerBindingOwner::Field
-                    if previous.index.name.is_some() || previous.search.name.is_some() =>
-                {
-                    return Err(SQLError::Unsupported(
-                        "GIN analyzer option competes with an existing field assignment".into(),
-                    ))
-                }
-                uqa_storage::AnalyzerBindingOwner::Gin
-                    if previous.index.name.as_deref() != Some(name)
-                        || previous.index.compiled.descriptor().fingerprint()
-                            != revision.descriptor().fingerprint() =>
-                {
-                    return Err(SQLError::Unsupported(
-                        "GIN analyzer option competes with an existing GIN revision".into(),
-                    ))
-                }
-                _ => {}
-            }
-            previous.assigned(
-                name,
-                revision,
-                AnalyzerPhase::Both,
-                uqa_storage::AnalyzerBindingOwner::Gin,
-            )
+            previous
+                .assigned_gin(name, revision)
+                .map_err(|error| SQLError::Unsupported(error.to_string()))?
         } else {
-            self.current_field_analyzer_binding(&table_name, &t, &field)
+            self.current_field_analyzer_binding(&table_name, &t, field)
                 .map_err(|error| storage_error("resolve FTS analyzer binding", &error))?
         };
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .insert(
+                &field_key,
+                candidate.clone(),
+                t.persistence == uqa_sql::ast::RelationPersistence::Temporary,
+                &self.runtime.cancellation,
+            )
+            .map_err(|error| storage_error("prepare FTS analyzer publication", &error))?;
         {
             let mut fts = t.fts_fields.write();
-            if !fts.contains(&field) {
+            if !fts.contains(field) {
                 fts.push(field.clone());
             }
         }
@@ -111,7 +100,7 @@ impl Engine {
         t.inverted_index
             .write()
             .rebuild_with_analyzer_revision_cancellable(
-                &field,
+                field,
                 candidate.index.compiled.clone(),
                 phase,
                 &mut source,
@@ -119,7 +108,7 @@ impl Engine {
             )
             .map_err(|error| storage_error("add_fts_field", &error))?;
         candidate
-            .install(&field, t.inverted_index.write().as_mut())
+            .install(field, t.inverted_index.write().as_mut())
             .map_err(|error| storage_error("install FTS analyzer", &error))?;
         if uses_default {
             *t.analyzer.write() = candidate
@@ -129,12 +118,9 @@ impl Engine {
                 .configuration()
                 .map_err(|error| storage_error("read FTS analyzer configuration", &error.into()))?;
         }
-        self.persist_field_analyzer_binding(&table_name, &field, &candidate)
+        self.persist_field_analyzer_binding(&table_name, field, &candidate)
             .map_err(|error| storage_error("persist FTS analyzer binding", &error))?;
-        self.durable
-            .table_field_analyzers
-            .write()
-            .insert((table_name.clone(), field), candidate);
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|error| storage_error("persist FTS schema", &error))?;
@@ -171,6 +157,10 @@ impl Engine {
             )));
         }
 
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .remove(&(table_name.clone(), field.to_owned()))
+            .map_err(|error| storage_error("prepare FTS analyzer removal", &error))?;
         t.fts_fields.write().retain(|candidate| candidate != field);
         Self::rebuild_fts_index_cancellable(&t, &self.runtime.cancellation)
             .map_err(|error| storage_error("rebuild FTS index", &error))?;
@@ -184,10 +174,7 @@ impl Engine {
                 .drop_table_field_analyzer_field(&table_name, field)
                 .map_err(|error| storage_error("drop persisted FTS analyzer", &error))?;
         }
-        self.durable
-            .table_field_analyzers
-            .write()
-            .remove(&(table_name.clone(), field.to_string()));
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|error| storage_error("persist FTS schema", &error))?;
@@ -232,6 +219,15 @@ impl Engine {
             .map_err(|error| storage_error("compile FTS analyzer", &error.into()))?;
         let binding =
             uqa_storage::FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone());
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .insert(
+                &(table_name.clone(), field.to_owned()),
+                binding.clone(),
+                t.persistence == uqa_sql::ast::RelationPersistence::Temporary,
+                &self.runtime.cancellation,
+            )
+            .map_err(|error| storage_error("prepare FTS analyzer replacement", &error))?;
         let mut source = Self::fts_source(&t, Some(&self.runtime.cancellation))
             .map_err(|error| storage_error("read FTS rebuild source", &error))?;
         t.inverted_index
@@ -250,10 +246,7 @@ impl Engine {
             .map_err(|error| storage_error("read FTS analyzer configuration", &error.into()))?;
         self.persist_field_analyzer_binding(&table_name, field, &binding)
             .map_err(|error| storage_error("persist FTS analyzer binding", &error))?;
-        self.durable
-            .table_field_analyzers
-            .write()
-            .insert((table_name.clone(), field.to_owned()), binding);
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() && t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(&table_name, &t)
                 .map_err(|error| storage_error("persist FTS schema", &error))?;

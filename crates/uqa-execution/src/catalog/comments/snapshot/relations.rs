@@ -146,14 +146,14 @@ impl Scope<'_, '_> {
         }
         for (relation, _) in self
             .definitions
-            .sequence_persistence
-            .iter()
+            .sequences
+            .persistences()
             .filter(|(_, persistence)| **persistence == RelationPersistence::Temporary)
         {
             let identity = self
                 .definitions
-                .sequence_object_ids
-                .get(relation)
+                .sequences
+                .object_id(relation)
                 .ok_or_else(|| {
                     SQLError::Internal(
                         "temporary sequence comment owner has no original identity".into(),
@@ -162,7 +162,7 @@ impl Scope<'_, '_> {
             source.exclude(
                 RELATION_CLASS,
                 crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                    &self.definitions.sequence_catalog_oids,
+                    self.definitions.sequences.catalog_oids(),
                     identity,
                 ) as u32,
             );

@@ -75,13 +75,6 @@ def inventory(path: pathlib.Path = MANIFEST) -> list[dict]:
     return checks
 
 
-def selector(check: dict) -> str:
-    return (
-        f"(package(={check['package']}) & kind({check['kind']}) & "
-        f"test(/(^|::){check['test']}(::.*)?$/))"
-    )
-
-
 def package_arguments(checks: list[dict]) -> list[str]:
     packages = sorted({check["package"] for check in checks})
     return [
@@ -95,7 +88,18 @@ def build_arguments(checks: list[dict]) -> list[str]:
 
 def selection_config(checks: list[dict]) -> str:
     # nextest's tool config keeps the inventory out of both per-argument and total argv limits.
-    expression = " | ".join(selector(check) for check in checks)
+    # Compile one name matcher per owner/harness instead of evaluating every check's regex for every test.
+    groups: dict[tuple[str, str], list[str]] = {}
+    for check in checks:
+        groups.setdefault((check["package"], check["kind"]), []).append(check["test"])
+    expressions = []
+    for (package, kind), names in sorted(groups.items()):
+        alternatives = "|".join(sorted(names))
+        expressions.append(
+            f"(package(={package}) & kind({kind}) & "
+            f"test(/(^|::)(?:{alternatives})(::.*)?$/))"
+        )
+    expression = " | ".join(expressions)
     return "[profile.ci]\ndefault-filter = " + json.dumps(expression) + "\n"
 
 

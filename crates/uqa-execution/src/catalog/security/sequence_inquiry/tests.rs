@@ -6,10 +6,10 @@
 
 use super::*;
 use crate::catalog::projection::legacy_sequence_relation_oid;
+use crate::catalog::sequence::registry::{SequenceCatalog, SequenceRecord};
 use crate::catalog::{security::roles::persistence::RoleCatalogSnapshot, sequence::SequenceState};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     sync::Arc,
 };
 use uqa_core::{catalog_sequence::SequencePrivileges, RelationIdentity};
@@ -41,28 +41,27 @@ impl Catalog {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
-            catalog_oids: std::sync::Arc::default(),
-            sequences: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                SequenceState::initial(1, 1, SequenceDataType::BigInt),
-            )])),
-            object_ids: Arc::new(BTreeMap::from([(relation.clone(), [7; 16])])),
-            persistence: Arc::new(BTreeMap::from([(
-                relation.clone(),
-                RelationPersistence::Permanent,
-            )])),
-            security: Arc::new(BTreeMap::from([(
-                relation,
-                BoundSequenceSecurity {
-                    role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                    acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
-                        role: Some(reader.identity()),
-                        grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-                        privileges: SequencePrivileges::ALL,
-                        grant_options: SequencePrivileges::default(),
-                    }]),
-                },
-            )])),
+            catalog: Arc::new(
+                SequenceCatalog::try_from_iter([(
+                    relation,
+                    SequenceRecord {
+                        state: SequenceState::initial(1, 1, SequenceDataType::BigInt),
+                        object_id: [7; 16],
+                        persistence: RelationPersistence::Permanent,
+                        catalog_oid: None,
+                    },
+                    BoundSequenceSecurity {
+                        role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                        acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                            role: Some(reader.identity()),
+                            grantor: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                            privileges: SequencePrivileges::ALL,
+                            grant_options: SequencePrivileges::default(),
+                        }]),
+                    },
+                )])
+                .unwrap(),
+            ),
             roles: RoleCatalogSnapshot {
                 roles: Arc::new(
                     RoleDefinitions::try_from_iter([
@@ -151,14 +150,10 @@ fn inquiry_refresh_keeps_selected_role_identity_across_name_resolution() {
             })
             .unwrap()
             .unwrap();
-        Arc::make_mut(&mut replaced.security)
-            .values_mut()
-            .next()
-            .unwrap()
-            .acl
-            .as_mut()
-            .unwrap()[0]
-            .role = Some(replaced.roles.roles["reader"].identity());
+        let replacement = Some(replaced.roles.roles["reader"].identity());
+        crate::catalog::test_support::edit_sequence_security(&mut replaced, |security| {
+            security.acl.as_mut().unwrap()[0].role = replacement;
+        });
         *catalog.after_resolution.borrow_mut() = Some(replaced);
         let mut arguments = subject.into_iter().collect::<Vec<_>>();
         arguments.extend([Value::Str("ids".into()), Value::Str("USAGE".into())]);
@@ -171,11 +166,13 @@ fn inquiry_refresh_keeps_selected_role_identity_across_name_resolution() {
 #[test]
 fn inquiry_oid_authority_is_current_without_touching_live_resolution() {
     let catalog = Catalog::new();
-    Arc::make_mut(&mut catalog.current.borrow_mut().security)
-        .values_mut()
-        .next()
-        .unwrap()
-        .acl = Some(Vec::new());
+    let replacement = Some(Vec::new());
+    crate::catalog::test_support::edit_sequence_security(
+        &mut catalog.current.borrow_mut(),
+        |security| {
+            security.acl = replacement;
+        },
+    );
     let oid = legacy_sequence_relation_oid([7; 16]);
     for subject in [
         None,
@@ -190,7 +187,8 @@ fn inquiry_oid_authority_is_current_without_touching_live_resolution() {
     assert_ne!(
         catalog
             .retained
-            .security
+            .catalog
+            .security()
             .values()
             .next()
             .unwrap()
@@ -236,14 +234,10 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
         Arc::make_mut(&mut snapshot.roles.roles)
             .insert(role.name.clone(), role)
             .unwrap();
-        Arc::make_mut(&mut snapshot.security)
-            .values_mut()
-            .next()
-            .unwrap()
-            .acl
-            .as_mut()
-            .unwrap()[0]
-            .role = Some(new_reader);
+        let replacement = Some(new_reader);
+        crate::catalog::test_support::edit_sequence_security(&mut snapshot, |security| {
+            security.acl.as_mut().unwrap()[0].role = replacement;
+        });
     }
     for subject in [Value::Str("new_reader".into()), Value::Int(20_001)] {
         for target in [
@@ -264,7 +258,9 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
 #[test]
 fn removed_sequence_authority_does_not_reappear_from_a_retained_statement_catalog() {
     let catalog = Catalog::new();
-    Arc::make_mut(&mut catalog.current.borrow_mut().object_ids).clear();
+    Arc::make_mut(&mut catalog.current.borrow_mut().catalog)
+        .remove(&RelationIdentity::new("public", "ids"))
+        .unwrap();
     let oid = legacy_sequence_relation_oid([7; 16]);
     let arguments = [Value::Int(oid), Value::Str("USAGE".into())];
     let inquiry = SequencePrivilegeInquiry {

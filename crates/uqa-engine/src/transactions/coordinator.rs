@@ -480,22 +480,24 @@ impl Engine {
         session_snapshot: &SessionStateSnapshot,
         refresh_error: SQLError,
     ) -> SQLError {
-        let mut cleanup_errors = Vec::new();
-        if let Err(error) = backend.rollback_transaction() {
-            cleanup_errors.push(format!("storage rollback: {error}"));
+        let cleanup = if let Err(error) = backend.rollback_transaction() {
+            Some(Self::storage_tx_error("BEGIN refresh rollback", &error))
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
             self.drop_persistent_value_indexes();
+            let mut cleanup_errors = Vec::new();
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
-        }
+            (!cleanup_errors.is_empty()).then(|| SQLError::Internal(cleanup_errors.join("; ")))
+        };
         self.restore_session_state(session_snapshot);
-        if cleanup_errors.is_empty() {
-            refresh_error
-        } else {
-            SQLError::Internal(format!(
-                "{refresh_error}; failed BEGIN refresh cleanup: {}",
-                cleanup_errors.join("; ")
-            ))
+        match cleanup {
+            Some(cleanup) => super::error::attach(
+                refresh_error,
+                cleanup,
+                "failed BEGIN refresh cleanup",
+                std::convert::identity,
+            ),
+            None => refresh_error,
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {

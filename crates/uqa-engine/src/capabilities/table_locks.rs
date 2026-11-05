@@ -207,7 +207,7 @@ impl RelationLockCatalog for Engine {
         if let Some(view) = self.durable.views.read().get(&relation) {
             return Ok(Some(view.object_id));
         }
-        if let Some(object_id) = self.durable.sequence_object_ids.read().get(&relation) {
+        if let Some(object_id) = self.durable.sequences.read().object_id(&relation) {
             return Ok(Some(*object_id));
         }
         if let Some(index) = self.durable.catalog_indexes.read().get(&relation) {
@@ -271,9 +271,9 @@ impl RelationLockCatalog for Engine {
             })
             .or_else(|| {
                 self.durable
-                    .sequence_object_ids
+                    .sequences
                     .read()
-                    .iter()
+                    .object_ids()
                     .find_map(|(name, id)| (*id == object_id).then(|| name.qualified_name()))
             })
             .or_else(|| {

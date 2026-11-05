@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain materialized memory path indexes and their registration catalogs as immutable native generations. Captures admit cached complete footprints without copying label sequences or evaluated pairs; selected children preserve their original memory and cancellation controls after source closure. Failed registration admission preserves prior path definitions and materializations across all storage providers. Complete Engine backup remains under implementation.
+
+- Retain named and historical field analyzer catalogs as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors, dictionaries or table membership, and does not retain executable pipelines or decoded models. Temporary field bindings remain outside the durable encoded root; failed native publication preserves previous catalogs and stored definitions. Complete Engine backup integration remains in progress.
+
 - Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
 
 - Retain native domain, enum, composite, range, shell, schema-authority, role, membership, graph identity, foreign-wrapper, foreign-server, paired foreign-table definition/authority, index metadata, view, user routine, trigger, rewrite-rule, database authority, built-in routine authority and system relation authority catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and preserve exact definitions, namespace and role identities, revisions and grants through native DDL, rollback and closure without copying complete catalogs. Complete Engine backup remains under implementation.
@@ -15,7 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Add complete incremental repository inventories that reuse unchanged immutable unit ranges, preserve changed/new/tombstone units and omit deleted units. Bounded comparison reports actual source reads and hashes separately from reused and newly stored bytes; fingerprint acceleration, retention/GC and public Engine backup jobs remain in progress.
 - Retain the absolute memory catalog OID counter position with the selected transaction data and sequence cut, including reservations consumed by rolled-back definitions. Fresh counter construction preserves uninitialized state, wrapping and exhaustion; memory document counters retain their original transactional semantics. Complete Engine backup remains under implementation.
-- Capture nontransactional memory sequence values from native rollback history, matching the original object and definition generations. Captures preserve reserved cache endpoints and exact `setval` positions through private definition changes, rollback and closure; complete Engine backup remains under implementation.
+- Retain complete sequence records and authority together with immutable native value history. Captures admit cached durable roots and match original object/definition generations without copying the catalog or rollback history. Sequence value operations admit native position and history successors before consuming cached values or changing persistent positions; failed admission preserves catalog, cache and session observations. Reserved cache endpoints, exact `setval` positions, private definition changes, rollback and closure retain their existing behavior; complete Engine backup remains under implementation.
 - Register immutable transaction table, sequence, type, schema, view, routine, role, authority, foreign-table and event sources separately from private live state, together with their original graph/model/path/analyzer resources, scoring settings, index records, historical field-analyzer bindings and object-addressed comments. Selected captures exclude temporary data and definitions before output admission, retaining original identities, matching authority, syntax, table metadata and text/vector/value indexes through transaction completion and Engine closure under independent memory and cancellation controls. Complete committed Engine backup remains under implementation.
 - Select immutable memory capture source sets under independent admission. Unselected source writes and retirement consume no capture payload allowance; replacement selections preserve earlier cuts. Complete committed Engine backup remains under implementation.
 - Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
@@ -74,6 +78,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Group automatic regression selectors by package and test harness so discovery does not evaluate thousands of independent regular expressions for every listed test. Exact case identities, resource assertions and the discovery deadline remain enforced.
+
+- Preserve SQLSTATE `53200` for sequence catalog admission failures through statement-effect classification and failed transaction initialization, including cleanup diagnostics.
 
 - Preserve original catalog roots and table membership when persistent catalog reload runs out of memory, and retain SQLSTATE `53200` through index, table and routine publication errors.
 - Avoid premature stack-depth errors for valid recursive PL/pgSQL calls in unoptimized builds, including `fact(11)`. Interpreter activations retain their own heap storage while native stack and configured nesting limits remain enforced.

@@ -407,12 +407,7 @@ impl Engine {
             return Ok(None);
         };
         let relation = Self::resolved_relation_identity(&name)?;
-        Ok(self
-            .durable
-            .sequence_persistence
-            .read()
-            .get(&relation)
-            .copied())
+        Ok(self.durable.sequences.read().persistence(&relation))
     }
 }
 

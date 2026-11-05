@@ -182,3 +182,39 @@ fn retained_map_both_ends_share_original_values_and_exact_footprint() {
     assert_eq!(capture.used(), 0);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn prepared_retained_publication_preserves_cached_footprints_and_failed_roots() {
+    let memory = MemoryBudget::new(1 << 20);
+    let capture = MemoryBudget::new(1 << 20);
+    let mut source = RetainedMap::new(&memory);
+    source.insert(1, 10, 100).unwrap();
+    source.insert(2, 20, 200).unwrap();
+    let old = source.capture(&capture).unwrap();
+    let footprint = source.retained_bytes().unwrap();
+    let used = memory.used();
+    drop(source.prepare_insert(1, 500).unwrap());
+    assert_eq!(source.retained_bytes().unwrap(), footprint);
+    assert_eq!(memory.used(), used);
+    assert!(matches!(
+        source.prepare_insert(3, usize::MAX),
+        Err(MemoryError::SizeOverflow)
+    ));
+    let occupied = memory.reserve(memory.available()).unwrap();
+    assert!(source.prepare_insert(1, 500).is_err());
+    drop(occupied);
+    assert_eq!(source.retained_bytes().unwrap(), footprint);
+    assert_eq!(memory.used(), used);
+    let prepared = source.prepare_insert(1, 500).unwrap();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    prepared.publish(99);
+    drop(occupied);
+    assert_eq!(source.retained_bytes().unwrap(), footprint + 400);
+    assert_eq!(source.get(&1), Some(&99));
+    assert_eq!(old.get(&1), Some(&10));
+    let current = source.capture(&capture).unwrap();
+    assert_eq!(current.reserved_bytes(), footprint + 400);
+    drop((source, old, current));
+    assert_eq!(capture.used(), 0);
+    assert_eq!(memory.used(), 0);
+}

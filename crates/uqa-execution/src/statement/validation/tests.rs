@@ -143,7 +143,7 @@ impl QueryEffectCatalog for Inputs {
     fn domain_by_oid(&self, _: u32) -> Option<StoredDomain> {
         None
     }
-    fn sequence_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, String> {
+    fn sequence_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, SQLError> {
         Ok(None)
     }
     fn table_persistence(&self, _: &str) -> Result<Option<RelationPersistence>, String> {

@@ -15,6 +15,7 @@ use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
 use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendResult};
 
 pub mod capture;
+pub mod registry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +97,39 @@ impl FieldAnalyzerBinding {
         result.owner = owner;
         result.last_phase = phase;
         result
+    }
+
+    /// GIN ownership can extend the same exact revision but cannot replace a field assignment or another installed GIN revision.
+    pub fn assigned_gin(
+        &self,
+        name: &str,
+        revision: Arc<CompiledAnalyzer>,
+    ) -> StorageBackendResult<Self> {
+        match self.owner {
+            AnalyzerBindingOwner::Field
+                if self.index.name.is_some() || self.search.name.is_some() =>
+            {
+                return Err(StorageBackendError::Other(
+                    "GIN analyzer option competes with an existing field assignment".into(),
+                ));
+            }
+            AnalyzerBindingOwner::Gin
+                if self.index.name.as_deref() != Some(name)
+                    || self.index.compiled.descriptor().fingerprint()
+                        != revision.descriptor().fingerprint() =>
+            {
+                return Err(StorageBackendError::Other(
+                    "GIN analyzer option competes with an existing GIN revision".into(),
+                ));
+            }
+            _ => {}
+        }
+        Ok(self.assigned(
+            name,
+            revision,
+            AnalyzerPhase::Both,
+            AnalyzerBindingOwner::Gin,
+        ))
     }
 
     pub fn uses_name(&self, name: &str) -> bool {

@@ -168,13 +168,7 @@ fn remove_relation(
                 .dependencies
                 .detach_sequence_provenance(&name)
                 .map_err(|error| storage_error("DROP SEQUENCE", &error))?;
-            if context
-                .tables
-                .sequences
-                .publication
-                .remove_state(&name)
-                .map_err(SQLError::Internal)?
-            {
+            if context.tables.sequences.publication.remove_state(&name)? {
                 Ok(())
             } else {
                 Err(disappeared("sequence", &name))

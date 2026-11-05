@@ -88,7 +88,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let resources = AnalyzerResources::default();
         let names = load_named_revisions(catalog, &resources, mode)?;
-        self.durable.named_analyzers.write().extend(names.current);
+        self.durable.named_analyzers.write().extend(names.current)?;
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
         let mut saved = load_field_bindings(catalog, &resources, &gin_owners)?;
         let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
@@ -173,11 +173,15 @@ impl Engine {
                         }
                     }
                 }
+                let mut bindings = self.durable.table_field_analyzers.read().clone();
+                bindings.insert(
+                    &(table_name.clone(), field.clone()),
+                    binding.clone(),
+                    table.persistence == RelationPersistence::Temporary,
+                    &uqa_core::CancellationToken::new(),
+                )?;
                 binding.install(&field, table.inverted_index.write().as_mut())?;
-                self.durable
-                    .table_field_analyzers
-                    .write()
-                    .insert((table_name.clone(), field), binding);
+                *self.durable.table_field_analyzers.write() = bindings;
             }
             if table.inverted_index.read().source_rebuild_required()? {
                 if !mode.allows_migration() {
@@ -265,10 +269,16 @@ impl Engine {
         table: &TableState,
         default_revision: Option<Arc<CompiledAnalyzer>>,
     ) -> StorageBackendResult<crate::TableFieldAnalyzerRegistry> {
-        let mut bindings = BTreeMap::new();
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
         if let Some(revision) = default_revision {
             for field in table.fts_fields() {
                 let binding = FieldAnalyzerBinding::unassigned(revision.clone(), revision.clone());
+                bindings.insert(
+                    &(name.to_owned(), field.clone()),
+                    binding.clone(),
+                    table.persistence == RelationPersistence::Temporary,
+                    &self.runtime.cancellation,
+                )?;
                 binding.install(&field, table.inverted_index.write().as_mut())?;
                 if table.persistence != RelationPersistence::Temporary {
                     if let Some(catalog) = &self.storage.catalog {
@@ -281,7 +291,6 @@ impl Engine {
                         )?;
                     }
                 }
-                bindings.insert((name.to_owned(), field), binding);
             }
         }
         Ok(bindings)

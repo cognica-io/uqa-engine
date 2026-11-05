@@ -168,7 +168,7 @@ impl uqa_sql::semantics::effects::QueryEffectCatalog for Catalog {
     fn sequence_persistence(
         &self,
         _: &str,
-    ) -> Result<Option<uqa_sql::ast::RelationPersistence>, String> {
+    ) -> Result<Option<uqa_sql::ast::RelationPersistence>, SQLError> {
         Ok(None)
     }
     fn table_persistence(

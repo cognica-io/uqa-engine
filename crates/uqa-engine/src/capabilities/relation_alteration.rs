@@ -80,7 +80,7 @@ impl OwnedSequenceSecurityCatalog for Engine {
         self.durable
             .sequences
             .read()
-            .iter()
+            .states()
             .filter_map(|(relation, state)| {
                 state
                     .owner
@@ -90,6 +90,6 @@ impl OwnedSequenceSecurityCatalog for Engine {
             .collect()
     }
     fn security_registry(&self) -> OwnedSequenceSecurityRead<'_> {
-        Box::new(self.durable.sequence_security.read())
+        Box::new(self.durable.sequences.security())
     }
 }

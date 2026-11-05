@@ -11,7 +11,6 @@ use super::*;
 use crate::row_locks::shared_objects::SharedCatalogLock;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
-    collections::BTreeMap,
     ops::{Deref, DerefMut},
 };
 use uqa_core::RelationIdentity;
@@ -29,7 +28,7 @@ use uqa_sql::{
             guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
             RoleDefinition, RoleMembership, RoleReferenceNames,
         },
-        security::{database::BoundDatabaseSecurity, BoundSequenceSecurity},
+        security::database::BoundDatabaseSecurity,
     },
 };
 
@@ -52,7 +51,7 @@ pub(super) struct Catalog {
     views: uqa_sql::catalog::stored_view::ViewDefinitions,
     foreign_tables: uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities,
     system_relations: uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
-    sequences: BTreeMap<RelationIdentity, BoundSequenceSecurity>,
+    sequences: uqa_sql::catalog::security::sequence_registry::SequenceSecurities,
     routines: uqa_sql::routines::registry::RoutineRegistry,
     domains:
         uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
@@ -83,7 +82,7 @@ impl Catalog {
                 uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities::default(),
             system_relations:
                 uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
-            sequences: BTreeMap::new(),
+            sequences: uqa_sql::catalog::security::sequence_registry::SequenceSecurities::default(),
             routines: uqa_sql::routines::registry::RoutineRegistry::new(),
             domains: crate::catalog::domain::DomainRegistry::new(),
         }
@@ -362,7 +361,8 @@ impl RoleDependencyCatalog for Catalog {
     }
     fn sequences(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
+    ) -> RoleDependencyRead<'_, uqa_sql::catalog::security::sequence_registry::SequenceSecurities>
+    {
         self.event("sequences");
         Box::new(&self.sequences)
     }

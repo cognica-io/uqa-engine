@@ -19,8 +19,10 @@ use crate::tokenizer::Tokenizer;
 
 mod compiled;
 mod diagnostics;
+pub(crate) mod image_source;
 mod resources;
 pub use compiled::CompiledAnalyzer;
+pub use image_source::AnalyzerImageSource;
 pub use resources::{AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

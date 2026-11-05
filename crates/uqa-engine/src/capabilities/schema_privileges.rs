@@ -118,6 +118,14 @@ impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRela
         self.0.contains_key(relation)
     }
 }
+struct SequenceCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::sequence::registry::SequenceCatalog>>
+    CreationRelationNames for SequenceCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
 struct ViewCreationNamesGuard<G>(G);
 impl<G: std::ops::Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions>>
     CreationRelationNames for ViewCreationNamesGuard<G>
@@ -192,7 +200,7 @@ impl CreationRelationGuards for Engine {
         Box::new(ViewCreationNamesGuard(self.durable.views.read()))
     }
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.sequences.read()))
+        Box::new(SequenceCreationNamesGuard(self.durable.sequences.read()))
     }
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(ForeignCreationNamesGuard(

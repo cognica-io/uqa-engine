@@ -155,3 +155,64 @@ fn analyzer_capture_image_releases_imported_dictionary_owners_before_snapshot_re
         assert_eq!(restored_control.memory().used(), 0);
     }
 }
+
+#[test]
+fn native_analyzer_images_release_import_allowances_and_preserve_enabled_analysis() {
+    for (kind, tokenizer, query) in [
+        (
+            AnalyzerResourceKind::Nori,
+            "nori_tokenizer",
+            "서울에서 학교에 갔다",
+        ),
+        (
+            AnalyzerResourceKind::Kuromoji,
+            "kuromoji_tokenizer",
+            "東京都で食べた",
+        ),
+    ] {
+        let owner = AnalyzerResources::new(AnalyzerLimits::default());
+        if owner.image_resource_byte_limit(kind).is_err() {
+            continue;
+        }
+        let configuration: Analyzer = serde_json::from_value(serde_json::json!({
+            "tokenizer": {"type": tokenizer}, "normalization": {"type": "unavailable"}
+        }))
+        .unwrap();
+        let compiled = owner.compile(&configuration).unwrap();
+        let expected = compiled.analyze_tokens(query).unwrap();
+        let bytes = encode(&compiled);
+        drop((compiled, owner));
+        let owner = AnalyzerResources::new(AnalyzerLimits::default());
+        let imported = StorageReadControl::with_limit(128 << 20);
+        let compiled = read_analyzer_image(&mut bytes.as_slice(), &owner, &imported).unwrap();
+        assert!(imported.memory().used() > 0);
+        let native_memory = uqa_core::memory::MemoryBudget::new(128 << 20);
+        let cancellation = uqa_core::CancellationToken::new();
+        let production = ProductionControl::new(&native_memory, &cancellation, &cancellation);
+        let source = compiled.image_source_with_control(&production).unwrap();
+        let capture = StorageReadControl::with_limit(128 << 20);
+        let mut image = None;
+        let measured = allocation_counter::measure(|| {
+            image = Some(AnalyzerImageSnapshot::capture_source(&source, &capture).unwrap());
+        });
+        assert_eq!(measured.count_total, 1);
+        let image = image.unwrap();
+        drop((compiled, owner, source));
+        assert_eq!(imported.memory().used(), 0);
+        assert_eq!(saved_bytes(&image), bytes);
+        assert!(native_memory.used() > 0);
+        let restored_control = StorageReadControl::with_limit(128 << 20);
+        let restored_owner = AnalyzerResources::new(AnalyzerLimits::default());
+        let restored = read_analyzer_image(
+            &mut saved_bytes(&image).as_slice(),
+            &restored_owner,
+            &restored_control,
+        )
+        .unwrap();
+        assert_eq!(restored.analyze_tokens(query).unwrap(), expected);
+        drop((restored, restored_owner, image));
+        assert_eq!(restored_control.memory().used(), 0);
+        assert_eq!(capture.memory().used(), 0);
+        assert_eq!(native_memory.used(), 0);
+    }
+}
