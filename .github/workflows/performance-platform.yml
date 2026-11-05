@@ -42,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
       - name: Verify the regression inventory and failure detection
         run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py

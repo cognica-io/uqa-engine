@@ -70,6 +70,7 @@ jobs:
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: false
       - name: Check packaging and installer failures
