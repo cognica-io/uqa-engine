@@ -40728,7 +40728,7 @@
       "cases": 3,
       "source": "crates/uqa-engine/src/tests/catalog/events/restoration/native.rs",
       "capability": "Admitted native event restoration",
-      "workload": "Exhaust native trigger/rule admission while restoring real persistent catalogs, then restore and execute with the allowance available.",
+      "workload": "Exhaust native trigger/rule admission while restoring real persistent catalogs inside the initial-open transaction boundary, then restore and execute with the allowance available.",
       "invariant": "Each failure reports 53200 without replacing either native authority or stored metadata; funded restoration remains usable and all native allowances release.",
       "case_names": [
         "case_1_sqlite_native",
@@ -40743,8 +40743,8 @@
       "cases": 3,
       "source": "crates/uqa-engine/src/tests/catalog/events/restoration/native.rs",
       "capability": "Event migration publication order",
-      "workload": "Restore legacy trigger object identity and rule catalog OID records from an independent provider input into the existing native namespace while injecting failed migration persistence.",
-      "invariant": "Persistence observers see both original registry identities; the failure retains those roots, original native metadata and unchanged legacy input bytes, and subsequent native execution succeeds.",
+      "workload": "Leave a committed registry revision unobserved, then restore legacy trigger object identity and rule catalog OID records from an independent provider input inside the initial-open transaction boundary while injecting failed migration persistence.",
+      "invariant": "Persistence observers retain the migration transaction and both original registry identities; failure and rollback retain those roots, original native metadata and unchanged legacy input bytes, and subsequent native execution succeeds.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
