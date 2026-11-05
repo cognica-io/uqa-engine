@@ -70,6 +70,10 @@ jobs:
           - arrow-export,duckdb
           - arrow-export,arrow,duckdb
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -142,6 +146,10 @@ jobs:
       ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
