@@ -7,6 +7,7 @@ on:
     paths:
       - .gitattributes
       - .github/actions/package-usql/**
+      - .github/actions/setup-python/**
       - .github/workflows/usql-release-checks.yml
       - .github/workflows/javascript-packages.yml
       - .github/workflows/release.yml
@@ -22,13 +23,14 @@ permissions:
   contents: read
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
 
 jobs:
   cli:
     name: Install usql (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     # Cold native release builds include bundled dependencies and ThinLTO.
     timeout-minutes: 180
     strategy:
@@ -39,22 +41,28 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-15
+          - os: macos-26-arm64
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - name: Free Linux runner disk
@@ -62,6 +70,7 @@ jobs:
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: false
       - name: Check packaging and installer failures

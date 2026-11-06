@@ -22,13 +22,15 @@ SHARED = (
     "Cargo.toml", "Cargo.lock", "build.rs", "crates/*/Cargo.toml", "crates/*/build.rs",
     "rust-toolchain", "rust-toolchain.toml",
     ".cargo/*", "crates/uqa-ffi/*", "examples/c/*",
-    ".github/scripts/free-linux-runner-disk.sh",
+    ".github/scripts/free-linux-runner-disk.sh", ".github/actions/setup-python/*",
 )
 BINDINGS = (
     "crates/uqa-core/src/*", "crates/uqa-api/src/*arrow*",
     "crates/*/src/test_support*",
     "scripts/verify-c-examples.py", "scripts/verify-c-clients.py",
     "scripts/verify-c-xml-isolation.py", "scripts/verify-c-sanitizer-link.py",
+    "scripts/verify-c-configurations.py", "scripts/tests/test_c_configurations.py",
+    "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
     ".github/scripts/c-sanitizer-cc.sh",
 )
 PACKAGES = (

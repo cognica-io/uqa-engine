@@ -25,7 +25,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::path::{Component, Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use argon2::{Argon2, Block};
@@ -86,10 +86,17 @@ use record_scan::scan_committed_records;
 use registration::{normalize_path, options_for_path};
 use vfs_callbacks::{
     vfs_access, vfs_current_time, vfs_delete, vfs_full_pathname, vfs_get_last_error, vfs_open,
-    vfs_randomness, vfs_sleep,
+    vfs_open_pool, vfs_randomness, vfs_sleep,
 };
 
 pub const VFS_NAME: &str = "uqa_compressed";
+pub(crate) const POOL_VFS_NAME: &str = "uqa_compressed_pool";
+
+#[derive(Clone, Copy)]
+enum OpenScope {
+    Registration,
+    Pool,
+}
 
 /// Authenticated identity, generation, and exact committed-state tag for one
 /// encrypted compressed container.
@@ -123,6 +130,7 @@ pub fn read_authenticated_anchor(
 }
 
 const VFS_NAME_C: &[u8] = b"uqa_compressed\0";
+const POOL_VFS_NAME_C: &[u8] = b"uqa_compressed_pool\0";
 pub(crate) const MAGIC: &[u8; 8] = b"UQACDB2\0";
 pub(crate) const LEGACY_MAGIC: &[u8; 8] = b"UQACDB1\0";
 const VERSION: u32 = 2;
@@ -159,6 +167,8 @@ struct OpenOptionsEntry {
     compression: SQLiteCompressionOptions,
     key: Option<String>,
     trusted_anchor: Option<SQLiteCompressedContainerAnchor>,
+    // Physical connections share authenticated local commits; registration still checks the external anchor.
+    live_anchor: Arc<Mutex<Option<SQLiteCompressedContainerAnchor>>>,
 }
 
 #[derive(Debug)]
@@ -220,6 +230,7 @@ struct AuthenticatedChunkRecord {
 struct ContainerFile {
     path: PathBuf,
     committed_file: Option<File>,
+    live_anchor: Option<Arc<Mutex<Option<SQLiteCompressedContainerAnchor>>>>,
     logical_len: usize,
     append_offset: u64,
     chunks: BTreeMap<u64, ChunkEntry>,

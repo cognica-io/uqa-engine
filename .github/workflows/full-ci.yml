@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   # Full debuginfo for every workspace test binary exhausts the Ubuntu runner's
@@ -63,7 +64,6 @@ jobs:
           for suffix in (
               "linux-x64-gnu",
               "linux-arm64-gnu",
-              "darwin-x64",
               "darwin-arm64",
               "win32-x64-msvc",
               "win32-arm64-msvc",
@@ -117,12 +117,20 @@ jobs:
 
   clippy:
     name: cargo clippy
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -132,6 +140,7 @@ jobs:
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -144,7 +153,7 @@ jobs:
   test-macos:
     uses: ./.github/workflows/workspace-tests.yml
     with:
-      os: macos-15
+      os: macos-26-arm64
 
   test-fdw-linux:
     name: test FDW feature configurations
@@ -182,12 +191,20 @@ jobs:
 
   build-release:
     name: cargo build --release
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
@@ -195,6 +212,7 @@ jobs:
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo build --workspace --release --locked

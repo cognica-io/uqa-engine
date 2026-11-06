@@ -74,14 +74,29 @@ class Platform:
 PLATFORMS = (
     Platform("x86_64-unknown-linux-gnu", "linux-x64-gnu", "linux", "x64", "glibc"),
     Platform("aarch64-unknown-linux-gnu", "linux-arm64-gnu", "linux", "arm64", "glibc"),
-    Platform("x86_64-apple-darwin", "darwin-x64", "darwin", "x64"),
     Platform("aarch64-apple-darwin", "darwin-arm64", "darwin", "arm64"),
     Platform("x86_64-pc-windows-msvc", "win32-x64-msvc", "win32", "x64"),
     Platform("aarch64-pc-windows-msvc", "win32-arm64-msvc", "win32", "arm64"),
 )
+LEGACY_PLATFORMS = (*PLATFORMS[:2],
+                    Platform("x86_64-apple-darwin", "darwin-x64", "darwin", "x64"),
+                    *PLATFORMS[2:])
 PLATFORM_BY_PACKAGE = {platform.package_name: platform for platform in PLATFORMS}
 NODE_PACKAGE_NAMES = (*PLATFORM_BY_PACKAGE, ROOT_PACKAGE)
 ALL_PACKAGE_NAMES = (*NODE_PACKAGE_NAMES, WASM_PACKAGE)
+
+
+def source_platforms(manifest: dict) -> tuple[Platform, ...]:
+    """Preserve the immutable platform inventory of releases through 0.6.3."""
+    targets = manifest.get("napi", {}).get("targets")
+    if targets == [platform.triple for platform in PLATFORMS]:
+        return PLATFORMS
+    version = manifest.get("version", "")
+    if (re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
+            and tuple(map(int, version.split("."))) <= (0, 6, 3)
+            and targets == [platform.triple for platform in LEGACY_PLATFORMS]):
+        return LEGACY_PLATFORMS
+    raise ReleaseError("napi targets differ from the supported release platforms")
 
 
 def load_json(path: pathlib.Path) -> dict[str, object]:
@@ -140,10 +155,10 @@ def require_equal(actual: object, expected: object, label: str) -> None:
         raise ReleaseError(f"{label} mismatch: expected {expected!r}, got {actual!r}")
 
 
-def validate_loader(loader: str, version: str, label: str) -> None:
+def validate_loader(loader: str, version: str, label: str, platforms: tuple[Platform, ...] = PLATFORMS) -> None:
     if re.search(r"require\(['\"]uqa-[^'\"]+['\"]\)", loader):
         raise ReleaseError(f"{label} still references unscoped platform packages")
-    for platform in PLATFORMS:
+    for platform in platforms:
         if platform.package_name not in loader:
             raise ReleaseError(f"{label} omits {platform.package_name}")
     loader_versions = set(re.findall(r"bindingPackageVersion !== '([^']+)'", loader))
@@ -201,15 +216,13 @@ def validate_node_source(
         raise ReleaseError("Node.js root package has no napi configuration")
     require_equal(napi.get("binaryName"), "uqa", "napi binaryName")
     require_equal(napi.get("packageName"), PLATFORM_PACKAGE_BASE, "napi packageName")
-    require_equal(
-        napi.get("targets"), [platform.triple for platform in PLATFORMS], "napi targets"
-    )
+    platforms = source_platforms(manifest)
 
     try:
         loader = (source_root / "index.js").read_text(encoding="utf-8")
     except OSError as error:
         raise ReleaseError(f"cannot read generated Node.js loader: {error}") from error
-    validate_loader(loader, version, "generated Node.js loader")
+    validate_loader(loader, version, "generated Node.js loader", platforms)
     return version
 
 
@@ -232,7 +245,7 @@ def stage_root_package(
         copy_file(source_root, destination, relative)
     staged = dict(manifest)
     staged["optionalDependencies"] = {
-        platform.package_name: manifest["version"] for platform in PLATFORMS
+        platform.package_name: manifest["version"] for platform in source_platforms(manifest)
     }
     write_json(destination / "package.json", staged)
 
@@ -478,9 +491,12 @@ def validate_root_package(
     manifest: dict[str, object],
     members: dict[str, bytes],
     version: str,
+    platforms: tuple[Platform, ...] | None = None,
 ) -> None:
     require_equal(manifest.get("main"), "api.js", "uqa main")
-    optional = {platform.package_name: version for platform in PLATFORMS}
+    if platforms is None:
+        platforms = source_platforms(manifest)
+    optional = {platform.package_name: version for platform in platforms}
     require_equal(
         manifest.get("optionalDependencies"), optional, "uqa optionalDependencies"
     )
@@ -499,7 +515,7 @@ def validate_root_package(
         raise ReleaseError(
             f"root uqa package has a non-UTF-8 loader: {path}"
         ) from error
-    validate_loader(loader, version, "packed Node.js loader")
+    validate_loader(loader, version, "packed Node.js loader", platforms)
 
 
 def validate_platform_package(
@@ -537,11 +553,14 @@ def validate_wasm_package(
 def validate_archives(
     archives: list[pathlib.Path],
     version: str,
-    expected_names: tuple[str, ...] = ALL_PACKAGE_NAMES,
+    expected_names: tuple[str, ...] | None = None,
     source_root: pathlib.Path = NODE_ROOT,
 ) -> dict[str, pathlib.Path]:
     source_manifest = load_json(source_root / "package.json")
     require_equal(source_manifest.get("version"), version, "npm source version")
+    platform_by_package = {platform.package_name: platform for platform in source_platforms(source_manifest)}
+    if expected_names is None:
+        expected_names = (*platform_by_package, ROOT_PACKAGE, WASM_PACKAGE)
     source_license = source_manifest.get("license")
     if not isinstance(source_license, str) or not source_license:
         raise ReleaseError("npm source has no valid license")
@@ -561,12 +580,12 @@ def validate_archives(
         validate_legal_members(path, members, source_root)
         validate_declared_files(path, manifest, members)
         if name == ROOT_PACKAGE:
-            validate_root_package(path, manifest, members, version)
+            validate_root_package(path, manifest, members, version, tuple(platform_by_package.values()))
         elif name == WASM_PACKAGE:
             validate_wasm_package(path, manifest, members)
         else:
             validate_platform_package(
-                path, manifest, members, PLATFORM_BY_PACKAGE[name]
+                path, manifest, members, platform_by_package[name]
             )
         by_name[name] = path
     missing = sorted(expected - set(by_name))
@@ -632,7 +651,8 @@ def registry_pending(
     by_name: dict[str, pathlib.Path], version: str
 ) -> list[pathlib.Path]:
     pending: list[pathlib.Path] = []
-    for name in ALL_PACKAGE_NAMES:
+    names = tuple(name for name in by_name if name not in {ROOT_PACKAGE, WASM_PACKAGE})
+    for name in (*names, ROOT_PACKAGE, WASM_PACKAGE):
         path = by_name[name]
         remote = registry_package(name, version)
         if remote is None:
@@ -709,7 +729,7 @@ def repair_root_archive(args: argparse.Namespace) -> int:
                   "npm repair package")
     expected_manifest = dict(source_manifest)
     expected_manifest["optionalDependencies"] = {
-        platform.package_name: version for platform in PLATFORMS
+        platform.package_name: version for platform in source_platforms(source_manifest)
     }
     require_equal(manifest, expected_manifest, "npm repair tagged manifest")
     files = set(declared_package_files(source_manifest))

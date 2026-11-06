@@ -107,7 +107,7 @@ impl ConnectionPool {
 
     pub(super) fn open_connection(&self) -> Result<Connection> {
         self.check_source()?;
-        let connection = self.spec.open(false);
+        let connection = self.spec.open(super::ConnectionOpen::Pooled);
         self.check_source()?;
         let connection = connection?;
         if let Some(source) = &self.source {

@@ -17,6 +17,8 @@ import shlex
 import subprocess
 import tempfile
 
+from c_consumer_execution import run_cases
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "crates/uqa-ffi/tests/native"
@@ -31,7 +33,11 @@ def main() -> None:
     parser.add_argument("--link-args", default="", help="Native dependencies for static linkage")
     parser.add_argument("--sanitize", action="store_true", help="Instrument C/C++ with ASan/UBSan")
     parser.add_argument("--fixture", action="append", help="Select a fixture filename; default: all")
+    parser.add_argument("--jobs", type=int, default=os.environ.get("RUST_TEST_THREADS", "1"),
+                        help="Concurrent consumers; defaults to RUST_TEST_THREADS or one")
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
     library = args.library.resolve(strict=True)
     fixtures = sorted(FIXTURES.glob("*.c"))
     if args.fixture:
@@ -40,7 +46,7 @@ def main() -> None:
         if selected - known:
             parser.error(f"Unknown fixtures: {sorted(selected - known)}")
         fixtures = [path for path in fixtures if path.name in selected]
-    executions = 0
+    cases = []
     with tempfile.TemporaryDirectory(prefix="uqa-c-clients-") as temporary:
         output = Path(temporary)
         for language, standard, compiler in (
@@ -68,9 +74,8 @@ def main() -> None:
                     env = dict(os.environ, UQA_TEST_STORAGE=backend,
                                UQA_TEST_DATABASE_DIR=str(directory), TMPDIR=str(directory),
                                TMP=str(directory), TEMP=str(directory), SQLITE_TMPDIR=str(directory))
-                    subprocess.run([str(executable)], env=env, check=True)
-                    executions += 1
-                    print(f"Passed {fixture.name}: {standard}, {backend}", flush=True)
+                    cases.append((f"{fixture.name}: {standard}, {backend}", [str(executable)], env))
+        executions = run_cases(cases, args.jobs)
     with library.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     print(f"Passed {executions} native client executions; {library.name} sha256={digest}")
