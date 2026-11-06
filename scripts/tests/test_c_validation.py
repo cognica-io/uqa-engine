@@ -52,7 +52,8 @@ class OwnershipTests(unittest.TestCase):
                          "crates/uqa-ffi/src/tests/allocator.rs", "examples/c/transactions.c",
                          "Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml",
                          "crates/uqa-pg-query/build.rs", "crates/uqa-sql/build.rs",
-                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml"):
+                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml",
+                         ".github/actions/setup-python/action.yml"):
                 with self.subTest(kind=kind, path=path):
                     self.assertTrue(SCOPE.affected(kind, path))
 
@@ -61,7 +62,9 @@ class OwnershipTests(unittest.TestCase):
                      "crates/uqa-storage/src/test_support/fixtures.rs",
                      "crates/uqa-storage/src/test_support/tests.rs",
                      "crates/uqa-storage/src/test_support/tests/fixtures.rs",
-                     "scripts/verify-c-clients.py", ".github/scripts/c-sanitizer-cc.sh"):
+                     "scripts/verify-c-clients.py", "scripts/verify-c-configurations.py",
+                     "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
+                     "scripts/tests/test_c_configurations.py", ".github/scripts/c-sanitizer-cc.sh"):
             with self.subTest(path=path):
                 self.assertTrue(SCOPE.affected("bindings", path))
                 self.assertFalse(SCOPE.affected("packages", path))
@@ -87,7 +90,7 @@ class OwnershipTests(unittest.TestCase):
             for before, after in ((b"cargo test --locked", b"cargo test --release --locked"),
                                   (b"[minimal, default]", b"[minimal, arrow]"),
                                   (b"CARGO_INCREMENTAL: '0'", b"CARGO_INCREMENTAL: '1'"),
-                                  (b"ubuntu-24.04", b"macos-15")):
+                                  (b"ubuntu-24.04", b"macos-26-arm64")):
                 with self.subTest(kind=kind, change=after):
                     self.assertNotEqual(expected, SCOPE.execution_definition(kind, original.replace(before, after)))
 

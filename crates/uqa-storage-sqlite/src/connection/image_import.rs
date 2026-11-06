@@ -96,7 +96,12 @@ impl ImageConnection {
         } else {
             ConnectionSpec::File { path, key }
         };
-        let connection = spec.open(fresh)?;
+        let mode = if fresh {
+            super::ConnectionOpen::Initial
+        } else {
+            super::ConnectionOpen::Restored
+        };
+        let connection = spec.open(mode)?;
         let source = DatabaseSource::capture(&mut spec, &connection)?;
         Ok(Self {
             connection,

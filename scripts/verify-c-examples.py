@@ -13,6 +13,8 @@ import shlex
 import subprocess
 import tempfile
 
+from c_consumer_execution import run_cases
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = (
@@ -28,11 +30,15 @@ def main() -> None:
     parser.add_argument("--static", action="store_true")
     parser.add_argument("--link-args", default="", help="Native dependencies for static linkage")
     parser.add_argument("--sanitize", action="store_true", help="Instrument C/C++ consumers with ASan/UBSan")
+    parser.add_argument("--jobs", type=int, default=os.environ.get("RUST_TEST_THREADS", "1"),
+                        help="Concurrent consumers; defaults to RUST_TEST_THREADS or one")
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
     library = args.library.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="uqa-c-examples-") as temporary:
         output = Path(temporary)
-        executions = 0
+        cases = []
         for language, standard, compiler in (
             ("c", "c11", os.environ.get("CC", "cc")),
             ("c++", "c++17", os.environ.get("CXX", "c++")),
@@ -61,9 +67,8 @@ def main() -> None:
                         command += [backend, str(directory / "database.uqa")]
                     env = dict(os.environ, TMPDIR=str(directory), TMP=str(directory),
                                TEMP=str(directory), SQLITE_TMPDIR=str(directory))
-                    subprocess.run(command, env=env, check=True)
-                    executions += 1
-                    print(f"Passed {scenario}: {standard}, {backend}", flush=True)
+                    cases.append((f"{scenario}: {standard}, {backend}", command, env))
+        executions = run_cases(cases, args.jobs)
     with library.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     print(f"Passed {executions} example executions; {library.name} sha256={digest}")

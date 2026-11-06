@@ -27,6 +27,8 @@ fn native_event_restore_admission_preserves_both_originals_and_stored_metadata(
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("event-admission.db"));
     fixture(&engine);
+    let backend = engine.storage.backend.as_ref().unwrap();
+    backend.begin_upgradeable_transaction().unwrap();
     let catalog = engine.storage.catalog.as_ref().unwrap();
     let stored_triggers = catalog.get_metadata(TRIGGERS_METADATA_KEY).unwrap();
     let stored_rules = catalog.get_metadata(RULES_METADATA_KEY).unwrap();
@@ -88,6 +90,7 @@ fn native_event_restore_admission_preserves_both_originals_and_stored_metadata(
         catalog.get_metadata(RULES_METADATA_KEY).unwrap(),
         stored_rules
     );
+    backend.rollback_transaction().unwrap();
     engine
         .sql(
             "INSERT INTO items VALUES (1); DELETE FROM items; SELECT id FROM items",
@@ -106,6 +109,15 @@ struct RejectMigration<'a> {
 }
 impl RejectMigration<'_> {
     fn reject(&self) -> Result<(), SQLError> {
+        assert!(
+            self.engine
+                .storage
+                .backend
+                .as_ref()
+                .unwrap()
+                .in_transaction(),
+            "event restoration must retain its migration transaction"
+        );
         assert!(Arc::ptr_eq(
             &self.triggers,
             &self.engine.durable.triggers.snapshot()
@@ -143,6 +155,13 @@ fn failed_native_event_migration_write_preserves_original_authority(#[case] prov
     let input = provider.open(&directory.path().join("event-migration-input.db"));
     let catalog = input.storage.catalog.as_ref().unwrap();
     let native = engine.storage.catalog.as_ref().unwrap();
+    // Leave a committed registry revision unobserved so nested lookup would refresh without the initial-open transaction boundary.
+    let stored_triggers = native.get_metadata(TRIGGERS_METADATA_KEY).unwrap().unwrap();
+    native
+        .set_metadata(TRIGGERS_METADATA_KEY, &stored_triggers)
+        .unwrap();
+    let backend = engine.storage.backend.as_ref().unwrap();
+    backend.begin_upgradeable_transaction().unwrap();
     let observer = RejectMigration {
         engine: &engine,
         triggers: engine.durable.triggers.snapshot(),
@@ -187,6 +206,15 @@ fn failed_native_event_migration_write_preserves_original_authority(#[case] prov
         assert_eq!(native.get_metadata(key).unwrap(), Some(original));
     }
     assert_eq!(observer.writes.get(), 2);
+    backend.rollback_transaction().unwrap();
+    assert!(Arc::ptr_eq(
+        &observer.triggers,
+        &engine.durable.triggers.snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &observer.rules,
+        &engine.durable.rules.snapshot()
+    ));
     drop(observer);
     engine.sql("INSERT INTO items VALUES (1)", &[]).unwrap();
 }

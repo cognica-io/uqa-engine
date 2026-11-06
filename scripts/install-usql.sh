@@ -35,6 +35,10 @@ case "$(uname -m)" in
     aarch64|arm64) arch=aarch64 ;;
     *) echo 'Supported architectures: x86_64 and ARM64.' >&2; exit 1 ;;
 esac
+if [ "$platform" = apple-darwin ] && [ "$arch" != aarch64 ]; then
+    echo 'macOS requires ARM64 (Apple Silicon).' >&2
+    exit 1
+fi
 asset="uqa-cli-${version}-${arch}-${platform}.tgz"
 temp_dir=$(mktemp -d)
 staged=''

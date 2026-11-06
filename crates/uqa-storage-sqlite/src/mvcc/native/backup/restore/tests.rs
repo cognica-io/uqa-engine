@@ -103,86 +103,85 @@ fn complete(import: &mut SQLiteNativeBackupImport<'_>) {
     panic!("native image import did not finish");
 }
 
-#[test]
-fn native_backup_import_preserves_projection_history_artifacts_and_allocators() {
-    for combination in 0..16 {
-        let mode = combination % 4;
-        let source_mode = combination / 4;
-        let directory = tempfile::tempdir().unwrap();
-        let source = directory.path().join("source");
-        std::fs::create_dir(&source).unwrap();
-        let control = StorageReadControl::with_limit(8 << 20);
-        let connection = open(&source.join("database"), source_mode).unwrap();
-        let mut graph = crate::SQLiteGraphStore::open(connection.clone(), Some("image")).unwrap();
-        graph.create_graph("g").unwrap();
-        graph
-            .add_vertex(uqa_core::Vertex::new(1, "restored"), "g")
+#[rstest::rstest]
+fn native_backup_import_preserves_projection_history_artifacts_and_allocators(
+    #[values(0, 1, 2, 3)] source_mode: usize,
+    #[values(0, 1, 2, 3)] mode: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let connection = open(&source.join("database"), source_mode).unwrap();
+    let mut graph = crate::SQLiteGraphStore::open(connection.clone(), Some("image")).unwrap();
+    graph.create_graph("g").unwrap();
+    graph
+        .add_vertex(uqa_core::Vertex::new(1, "restored"), "g")
+        .unwrap();
+    drop(graph);
+    let provider = SQLiteStorageProvider::new(connection.clone());
+    let session = provider.open_session().unwrap();
+    let generation = verify_diskann_restore_source(&*session.backend).unwrap();
+    sequence(&connection);
+    session
+        .catalog
+        .set_metadata("large", &"n".repeat((512 << 10) + 17))
+        .unwrap();
+    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    records
+        .allocate_identifiers(
+            b"native-image-ids",
+            IdentifierRequest::Observe(77),
+            &control,
+        )
+        .unwrap();
+    let namespace = records.native_namespace().unwrap();
+    let expected = rows(&records, &control);
+    let (repository, root) = capture(&provider, &directory.path().join("backup"), &control);
+    session.catalog.set_metadata("large", "later").unwrap();
+    drop((records, session, provider, connection));
+    std::fs::remove_dir_all(source).unwrap();
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let request = DatabaseRestore::new(root.cut().source).unwrap();
+    let destination = directory.path().join("destination");
+    empty(&destination);
+    let mut import =
+        SQLiteNativeBackupImport::new(&destination, &lease, request, options(mode), &control)
             .unwrap();
-        drop(graph);
-        let provider = SQLiteStorageProvider::new(connection.clone());
-        let session = provider.open_session().unwrap();
-        let generation = verify_diskann_restore_source(&*session.backend).unwrap();
-        sequence(&connection);
-        session
-            .catalog
-            .set_metadata("large", &"n".repeat((512 << 10) + 17))
-            .unwrap();
-        let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    complete(&mut import);
+    assert_eq!(import.imported_records(), expected.len() as u64);
+    assert_eq!(control.memory().used(), 0);
+    let restored = open(&destination, mode).unwrap();
+    let records = SQLiteRecordStore::for_native(&restored, &control).unwrap();
+    assert_eq!(records.database_id(), request.target());
+    assert_eq!(records.native_namespace(), Some(namespace));
+    assert_eq!(rows(&records, &control), expected);
+    assert_eq!(
         records
-            .allocate_identifiers(
-                b"native-image-ids",
-                IdentifierRequest::Observe(77),
-                &control,
-            )
-            .unwrap();
-        let namespace = records.native_namespace().unwrap();
-        let expected = rows(&records, &control);
-        let (repository, root) = capture(&provider, &directory.path().join("backup"), &control);
-        session.catalog.set_metadata("large", "later").unwrap();
-        drop((records, session, provider, connection));
-        std::fs::remove_dir_all(source).unwrap();
-        let lease = repository.open_backup(root.backup(), &control).unwrap();
-        let request = DatabaseRestore::new(root.cut().source).unwrap();
-        let destination = directory.path().join("destination");
-        empty(&destination);
-        let mut import =
-            SQLiteNativeBackupImport::new(&destination, &lease, request, options(mode), &control)
-                .unwrap();
-        complete(&mut import);
-        assert_eq!(import.imported_records(), expected.len() as u64);
-        assert_eq!(control.memory().used(), 0);
-        let restored = open(&destination, mode).unwrap();
-        let records = SQLiteRecordStore::for_native(&restored, &control).unwrap();
-        assert_eq!(records.database_id(), request.target());
-        assert_eq!(records.native_namespace(), Some(namespace));
-        assert_eq!(rows(&records, &control), expected);
-        assert_eq!(
-            records
-                .identifier_watermark(b"native-image-ids", &control)
-                .unwrap(),
-            Some(77)
-        );
-        let provider = SQLiteStorageProvider::new(restored.clone());
-        let session = provider.open_session().unwrap();
-        let graph = crate::SQLiteGraphStore::open(restored.clone(), Some("image")).unwrap();
-        assert_eq!(graph.get_vertex(1).unwrap().unwrap().label, "restored");
-        drop(graph);
-        verify_diskann_restored(&*session.backend, generation).unwrap();
-        verify_diskann_restored_writes(&*session.backend, generation).unwrap();
-        session
-            .catalog
-            .set_metadata("after-restore", "keep")
-            .unwrap();
-        let later = rows(&records, &control);
-        drop((session, provider, records, restored));
-        SQLiteNativeBackupImport::recover(&destination, root, request, options(mode), &control)
-            .unwrap();
-        let restored = open(&destination, mode).unwrap();
-        let records = SQLiteRecordStore::for_native(&restored, &control).unwrap();
-        assert_eq!(rows(&records, &control), later);
-        control.cancellation().cancel();
-        assert_eq!(import.advance().unwrap(), SQLiteBackupImportStep::Complete);
-    }
+            .identifier_watermark(b"native-image-ids", &control)
+            .unwrap(),
+        Some(77)
+    );
+    let provider = SQLiteStorageProvider::new(restored.clone());
+    let session = provider.open_session().unwrap();
+    let graph = crate::SQLiteGraphStore::open(restored.clone(), Some("image")).unwrap();
+    assert_eq!(graph.get_vertex(1).unwrap().unwrap().label, "restored");
+    drop(graph);
+    verify_diskann_restored(&*session.backend, generation).unwrap();
+    verify_diskann_restored_writes(&*session.backend, generation).unwrap();
+    session
+        .catalog
+        .set_metadata("after-restore", "keep")
+        .unwrap();
+    let later = rows(&records, &control);
+    drop((session, provider, records, restored));
+    SQLiteNativeBackupImport::recover(&destination, root, request, options(mode), &control)
+        .unwrap();
+    let restored = open(&destination, mode).unwrap();
+    let records = SQLiteRecordStore::for_native(&restored, &control).unwrap();
+    assert_eq!(rows(&records, &control), later);
+    control.cancellation().cancel();
+    assert_eq!(import.advance().unwrap(), SQLiteBackupImportStep::Complete);
 }
 
 #[test]
