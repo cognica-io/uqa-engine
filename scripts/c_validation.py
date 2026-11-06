@@ -30,6 +30,7 @@ BINDINGS = (
     "scripts/verify-c-examples.py", "scripts/verify-c-clients.py",
     "scripts/verify-c-xml-isolation.py", "scripts/verify-c-sanitizer-link.py",
     "scripts/verify-c-configurations.py", "scripts/tests/test_c_configurations.py",
+    "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
     ".github/scripts/c-sanitizer-cc.sh",
 )
 PACKAGES = (

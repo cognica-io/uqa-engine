@@ -45,6 +45,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p test_c_validation.py
           python3 -m unittest discover -s scripts/tests -p test_c_configurations.py
+          python3 -m unittest discover -s scripts/tests -p test_c_consumer_execution.py
       - name: Inspect C validation inputs
         id: select
         env:

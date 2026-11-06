@@ -63,6 +63,7 @@ class OwnershipTests(unittest.TestCase):
                      "crates/uqa-storage/src/test_support/tests.rs",
                      "crates/uqa-storage/src/test_support/tests/fixtures.rs",
                      "scripts/verify-c-clients.py", "scripts/verify-c-configurations.py",
+                     "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
                      "scripts/tests/test_c_configurations.py", ".github/scripts/c-sanitizer-cc.sh"):
             with self.subTest(path=path):
                 self.assertTrue(SCOPE.affected("bindings", path))
