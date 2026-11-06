@@ -7,6 +7,9 @@
 //! Versioned native catalog images retain identities and evaluated authority without executing SQL.
 
 use super::{
+    enum_type::StoredEnum,
+    foreign_server::{CapturedForeignServers, ForeignServers},
+    graph_oids::{CapturedGraphOidRegistry, GraphOidRegistry},
     roles::{CapturedRoleDefinitions, CapturedRoleMemberships, RoleDefinitions, RoleMemberships},
     security::{
         builtin_routines::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities},
@@ -14,6 +17,8 @@ use super::{
         schema_registry::{CapturedSchemaRegistry, SchemaRegistry},
         system_relations::{CapturedSystemRelationSecurities, SystemRelationSecurities},
     },
+    shell_type::StoredShellType,
+    type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
 };
 use crate::SQLError;
 use std::io::{Read, Write};
@@ -31,6 +36,10 @@ const SCHEMAS: [u8; 8] = *b"UQASCH01";
 const DATABASE: [u8; 8] = *b"UQADBA01";
 const BUILTIN_ROUTINES: [u8; 8] = *b"UQABRA01";
 const SYSTEM_RELATIONS: [u8; 8] = *b"UQASRA01";
+const ENUMS: [u8; 8] = *b"UQAENU01";
+const SHELLS: [u8; 8] = *b"UQASHL01";
+const FOREIGN_SERVERS: [u8; 8] = *b"UQAFSR01";
+const GRAPH_OIDS: [u8; 8] = *b"UQAGOI01";
 
 fn invalid(message: &'static str) -> SQLError {
     SQLError::Routine {
@@ -110,6 +119,34 @@ catalog_image!(
     SystemRelations,
     SYSTEM_RELATIONS,
     system_relations
+);
+catalog_image!(
+    CapturedTypeDefinitions<StoredEnum>,
+    TypeDefinitions<StoredEnum>,
+    Enums,
+    ENUMS,
+    enums
+);
+catalog_image!(
+    CapturedTypeDefinitions<StoredShellType>,
+    TypeDefinitions<StoredShellType>,
+    Shells,
+    SHELLS,
+    shells
+);
+catalog_image!(
+    CapturedForeignServers,
+    ForeignServers,
+    ForeignServers,
+    FOREIGN_SERVERS,
+    foreign_servers
+);
+catalog_image!(
+    CapturedGraphOidRegistry,
+    GraphOidRegistry,
+    GraphOids,
+    GRAPH_OIDS,
+    graph_oids
 );
 
 impl CapturedDatabaseAuthority {

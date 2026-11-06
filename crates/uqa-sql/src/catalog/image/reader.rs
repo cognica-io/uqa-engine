@@ -4,12 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! One bounded cursor covers native security catalog images.
+//! One bounded cursor covers native catalog images.
 
 use super::fields::{Field, Fields};
 use crate::{
     ast::ObjectAclEntry,
     catalog::{
+        enum_type::StoredEnum,
+        foreign_server::ForeignServerDefinition,
+        graph_oids::GraphCatalogOids,
         named_definitions::CapturedDefinitionIter,
         roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
         security::{
@@ -18,9 +21,13 @@ use crate::{
             system_relations::{SystemAcl, SystemRelationSecurity},
             BoundSchemaSecurity,
         },
+        shell_type::StoredShellType,
     },
     SQLError,
 };
+
+mod metadata;
+use metadata::Tail;
 use std::{io::Write, slice::Iter};
 use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
@@ -34,6 +41,10 @@ pub(super) enum Entries<'a> {
     Database(Option<&'a BoundDatabaseSecurity>),
     BuiltinRoutines(CapturedDefinitionIter<'a, u32, BuiltinRoutineSecurity>),
     SystemRelations(CapturedDefinitionIter<'a, RelationIdentity, SystemRelationSecurity>),
+    Enums(CapturedDefinitionIter<'a, String, StoredEnum>),
+    Shells(CapturedDefinitionIter<'a, String, StoredShellType>),
+    ForeignServers(CapturedDefinitionIter<'a, String, ForeignServerDefinition>),
+    GraphOids(CapturedDefinitionIter<'a, String, GraphCatalogOids>),
 }
 enum Acl<'a> {
     None,
@@ -41,6 +52,11 @@ enum Acl<'a> {
     Database(Iter<'a, BoundAclEntry<DatabasePrivileges>>),
     Object(Iter<'a, ObjectAclEntry>),
     Table(Iter<'a, BoundAclEntry<TablePrivileges>>),
+}
+enum Columns<'a> {
+    None,
+    System(BudgetedMapIter<'a, String, SystemAcl>),
+    Graph(BudgetedMapIter<'a, String, u32>),
 }
 
 enum State {
@@ -53,7 +69,8 @@ enum State {
 pub struct CatalogImageReader<'a> {
     entries: Entries<'a>,
     acl: Acl<'a>,
-    columns: Option<BudgetedMapIter<'a, String, SystemAcl>>,
+    columns: Columns<'a>,
+    tail: Tail<'a>,
     fields: Fields<'a>,
     field: Field<'a>,
     offset: usize,
@@ -75,7 +92,8 @@ impl<'a> CatalogImageReader<'a> {
         Ok(Self {
             entries,
             acl: Acl::None,
-            columns: None,
+            columns: Columns::None,
+            tail: Tail::None,
             fields,
             field: Field::Bytes(&[]),
             offset: 0,
@@ -120,17 +138,38 @@ impl<'a> CatalogImageReader<'a> {
         self.fields.count(acl.len());
         self.acl = Acl::Table(acl.iter());
     }
+    fn next_column(&mut self) -> bool {
+        match &mut self.columns {
+            Columns::System(columns) => {
+                if let Some((name, value)) = columns.next() {
+                    self.fields.text(name);
+                    self.system_acl(value);
+                    return true;
+                }
+            }
+            Columns::Graph(columns) => {
+                if let Some((name, oid)) = columns.next() {
+                    self.fields.text(name);
+                    self.fields.scalar(oid.to_le_bytes());
+                    return true;
+                }
+            }
+            Columns::None => {}
+        }
+        self.columns = Columns::None;
+        false
+    }
     fn next_record(&mut self) -> bool {
         self.fields = Fields::new();
         if self.next_acl() {
             return true;
         }
-        if let Some((name, value)) = self.columns.as_mut().and_then(Iterator::next) {
-            self.fields.text(name);
-            self.system_acl(value);
+        if self.next_column() {
             return true;
         }
-        self.columns = None;
+        if self.tail.next_fields(&mut self.fields, &mut self.columns) {
+            return true;
+        }
         match &mut self.entries {
             Entries::Roles(entries) => {
                 let Some((key, role)) = entries.next() else {
@@ -207,11 +246,15 @@ impl<'a> CatalogImageReader<'a> {
                 self.fields.text(name);
                 self.fields.count(columns.len());
                 self.fields.flag(table.is_some());
-                self.columns = Some(columns.iter());
+                self.columns = Columns::System(columns.iter());
                 if let Some(table) = table {
                     self.system_acl(table);
                 }
             }
+            Entries::Enums(_)
+            | Entries::Shells(_)
+            | Entries::ForeignServers(_)
+            | Entries::GraphOids(_) => return self.next_metadata(),
         }
         true
     }

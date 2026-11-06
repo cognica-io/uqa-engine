@@ -19,6 +19,8 @@ use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
 };
 
+mod metadata;
+
 #[derive(Clone, Copy)]
 pub(super) enum Field<'a> {
     Bytes(&'a [u8]),
@@ -62,8 +64,23 @@ impl<'a> Fields<'a> {
         self.scalar([u8::from(value)]);
     }
     pub fn text(&mut self, value: &'a str) {
+        self.blob(value.as_bytes());
+    }
+    pub fn blob(&mut self, value: &'a [u8]) {
         self.count(value.len());
-        self.push(Field::Bytes(value.as_bytes()));
+        self.push(Field::Bytes(value));
+    }
+    pub fn optional_text(&mut self, value: Option<&'a str>) {
+        self.flag(value.is_some());
+        if let Some(value) = value {
+            self.text(value);
+        }
+    }
+    pub fn optional_u32(&mut self, value: Option<u32>) {
+        self.flag(value.is_some());
+        if let Some(value) = value {
+            self.scalar(value.to_le_bytes());
+        }
     }
     pub fn identity(&mut self, value: RoleIdentity) {
         self.scalar(value.oid.to_le_bytes());

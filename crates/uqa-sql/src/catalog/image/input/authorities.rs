@@ -8,7 +8,6 @@
 
 use super::{invalid, Input};
 use crate::{
-    ast::ObjectAclEntry,
     catalog::{
         security::{
             builtin_routines::{BuiltinRoutineSecurities, BuiltinRoutineSecurity},
@@ -20,7 +19,7 @@ use crate::{
 };
 use std::{cmp::Ordering, io::Read, ops::Bound};
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, OwnedMap, ProductionControl},
+    memory::{Budgeted, MemoryBudget, OwnedMap, ProductionControl},
     CancellationToken, RelationIdentity,
 };
 
@@ -31,27 +30,6 @@ impl Input<'_> {
             return Err(invalid("authority tuple revision"));
         }
         Ok(revision)
-    }
-
-    fn routine_acl(&mut self) -> Result<Budgeted<Vec<ObjectAclEntry>>, SQLError> {
-        let count = self.binary.count()?;
-        let mut entries = BudgetedVec::new(self.binary.memory);
-        entries.reserve(count)?;
-        for _ in 0..count {
-            self.binary.cancellation.check()?;
-            let role = if self.flag()? {
-                Some(self.identity()?)
-            } else {
-                None
-            };
-            entries.push(ObjectAclEntry {
-                role,
-                grantor: self.identity()?,
-                grant_option: self.flag()?,
-            })?;
-        }
-        let (entries, reservation) = entries.into_parts();
-        Ok(Budgeted::new(entries, reservation))
     }
 
     fn system_acl(&mut self) -> Result<Budgeted<SystemAcl>, SQLError> {
@@ -149,7 +127,7 @@ pub(in super::super) fn builtin_routines(
             return Err(invalid("builtin routine key order"));
         }
         let revision = input.revision()?;
-        let (execute_acl, reservation) = input.routine_acl()?.into_parts();
+        let (execute_acl, reservation) = input.object_acl()?.into_parts();
         result.insert_image_entry(
             Budgeted::new(oid, memory.empty_reservation()),
             Budgeted::new(
