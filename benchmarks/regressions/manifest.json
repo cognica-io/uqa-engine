@@ -45651,6 +45651,175 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_reject_all_truncations_bad_counts_and_duplicate_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_images_reject_invalid_identity_attribute_order_and_unresolved_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_images_reject_identity_aliases_support_errors_and_companion_name_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_image_matches_literal_type_and_attribute_number_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_image_matches_literal_support_and_independent_multirange_identity_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_structured_type_images_are_complete_empty_native_registries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_images_preserve_every_native_type_modifier_reference_and_dropped_attribute",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_images_preserve_moved_multiranges_selected_support_and_acl_paths",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_retain_exact_native_admission_after_clone_and_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_image_readers_bound_nested_types_and_large_attributes_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_structured_type_import_retires_partial_boxed_types_and_attributes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_composite_and_range_images_preserve_native_definitions_after_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Committed native type images",
+      "workload": "Capture native type roots, roll back and replace live definitions, close Engine, transfer the retained roots to another thread and reconstruct their images.",
+      "invariant": "Captured identities, attribute numbers, bound types, support OIDs and authority remain original after live-state retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_reject_invalid_nested_tags_options_and_field_masks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

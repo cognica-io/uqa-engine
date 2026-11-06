@@ -21,12 +21,14 @@ use uqa_core::{
 };
 
 mod authorities;
+mod column_types;
 mod foreign_servers;
 mod graph_oids;
 mod memberships;
 mod metadata;
 mod roles;
 mod security;
+mod structured_types;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use foreign_servers::foreign_servers;
@@ -34,6 +36,7 @@ pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
 pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
+pub(super) use structured_types::{composites, ranges};
 pub(super) use types::{enums, shells};
 
 struct Input<'a> {

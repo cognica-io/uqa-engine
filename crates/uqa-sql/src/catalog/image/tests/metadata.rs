@@ -20,6 +20,7 @@ use crate::{
 use uqa_core::{memory::Produced, EnumLabelKey, RelationIdentity};
 
 mod retention;
+mod structured_types;
 mod validation;
 mod wire;
 
@@ -50,7 +51,9 @@ image_definition!(
     StoredEnum,
     StoredShellType,
     ForeignServerDefinition,
-    GraphCatalogOids
+    GraphCatalogOids,
+    crate::catalog::composite_type::StoredComposite,
+    crate::catalog::range_type::StoredRange
 );
 
 fn capture<T: StoredDefinition>(

@@ -18,7 +18,7 @@ use crate::catalog::{
 use uqa_core::RelationIdentity;
 
 impl<'a> Fields<'a> {
-    fn relation_identity(&mut self, identity: &'a RelationIdentity) {
+    pub(super) fn relation_identity(&mut self, identity: &'a RelationIdentity) {
         let RelationIdentity { schema, name } = identity;
         self.text(schema);
         self.text(name);

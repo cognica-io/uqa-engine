@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn retained<T: ImageDefinition>(values: &NamedDefinitions<T>) {
+pub(super) fn retained<T: ImageDefinition>(values: &NamedDefinitions<T>) {
     let bytes = encode(values);
     let token = CancellationToken::new();
     let memory = MemoryBudget::new(8 << 20);
@@ -54,7 +54,7 @@ fn metadata_import_admits_exact_native_payload_and_retains_shared_generations() 
     retained(&singleton("g", graph_value()));
 }
 
-fn cancellation<T: ImageDefinition>(values: &NamedDefinitions<T>) {
+pub(super) fn cancellation<T: ImageDefinition>(values: &NamedDefinitions<T>) {
     struct Source<'a> {
         bytes: &'a [u8],
         token: &'a CancellationToken,
@@ -102,7 +102,7 @@ fn cancelled_metadata_import_retires_partial_vectors_maps_and_validation_state()
     cancellation(&singleton("g", graph_value()));
 }
 
-fn bounded<T: ImageDefinition>(values: &NamedDefinitions<T>) {
+pub(super) fn bounded<T: ImageDefinition>(values: &NamedDefinitions<T>) {
     let memory = MemoryBudget::new(16 << 20);
     let token = CancellationToken::new();
     let saved = capture(values, &memory, &token);

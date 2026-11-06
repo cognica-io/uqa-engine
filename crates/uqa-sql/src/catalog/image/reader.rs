@@ -8,12 +8,14 @@
 
 use super::fields::{Field, Fields};
 use crate::{
-    ast::ObjectAclEntry,
+    ast::{ColumnType, ObjectAclEntry},
     catalog::{
+        composite_type::StoredComposite,
         enum_type::StoredEnum,
         foreign_server::ForeignServerDefinition,
         graph_oids::GraphCatalogOids,
         named_definitions::CapturedDefinitionIter,
+        range_type::StoredRange,
         roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
         security::{
             builtin_routines::BuiltinRoutineSecurity,
@@ -41,6 +43,8 @@ pub(super) enum Entries<'a> {
     Database(Option<&'a BoundDatabaseSecurity>),
     BuiltinRoutines(CapturedDefinitionIter<'a, u32, BuiltinRoutineSecurity>),
     SystemRelations(CapturedDefinitionIter<'a, RelationIdentity, SystemRelationSecurity>),
+    Composites(CapturedDefinitionIter<'a, String, StoredComposite>),
+    Ranges(CapturedDefinitionIter<'a, String, StoredRange>),
     Enums(CapturedDefinitionIter<'a, String, StoredEnum>),
     Shells(CapturedDefinitionIter<'a, String, StoredShellType>),
     ForeignServers(CapturedDefinitionIter<'a, String, ForeignServerDefinition>),
@@ -71,6 +75,7 @@ pub struct CatalogImageReader<'a> {
     acl: Acl<'a>,
     columns: Columns<'a>,
     tail: Tail<'a>,
+    column_type: Option<&'a ColumnType>,
     fields: Fields<'a>,
     field: Field<'a>,
     offset: usize,
@@ -94,6 +99,7 @@ impl<'a> CatalogImageReader<'a> {
             acl: Acl::None,
             columns: Columns::None,
             tail: Tail::None,
+            column_type: None,
             fields,
             field: Field::Bytes(&[]),
             offset: 0,
@@ -159,15 +165,28 @@ impl<'a> CatalogImageReader<'a> {
         self.columns = Columns::None;
         false
     }
-    fn next_record(&mut self) -> bool {
-        self.fields = Fields::new();
+    fn next_child(&mut self) -> bool {
         if self.next_acl() {
+            return true;
+        }
+        if let Some(value) = self.column_type.take() {
+            self.column_type = self.fields.column_type(value);
             return true;
         }
         if self.next_column() {
             return true;
         }
-        if self.tail.next_fields(&mut self.fields, &mut self.columns) {
+        if self
+            .tail
+            .next_fields(&mut self.fields, &mut self.columns, &mut self.column_type)
+        {
+            return true;
+        }
+        false
+    }
+    fn next_record(&mut self) -> bool {
+        self.fields = Fields::new();
+        if self.next_child() {
             return true;
         }
         match &mut self.entries {
@@ -251,7 +270,9 @@ impl<'a> CatalogImageReader<'a> {
                     self.system_acl(table);
                 }
             }
-            Entries::Enums(_)
+            Entries::Composites(_)
+            | Entries::Ranges(_)
+            | Entries::Enums(_)
             | Entries::Shells(_)
             | Entries::ForeignServers(_)
             | Entries::GraphOids(_) => return self.next_metadata(),

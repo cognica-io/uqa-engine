@@ -189,7 +189,7 @@ pub fn validate_range_registry(
     Ok(())
 }
 
-fn resolved_subtype(ty: &ColumnType) -> bool {
+pub(super) fn resolved_subtype(ty: &ColumnType) -> bool {
     match ty {
         ColumnType::Named(_) => false,
         ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {

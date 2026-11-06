@@ -19,7 +19,9 @@ use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
 };
 
+mod column_types;
 mod metadata;
+mod structured_types;
 
 #[derive(Clone, Copy)]
 pub(super) enum Field<'a> {

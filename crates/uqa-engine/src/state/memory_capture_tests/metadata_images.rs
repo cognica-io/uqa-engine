@@ -165,3 +165,99 @@ fn captured_server_and_graph_images_preserve_bound_metadata_after_replacement_an
         assert_eq!(memory.used(), 0);
     }
 }
+
+#[test]
+fn captured_composite_and_range_images_preserve_native_definitions_after_engine_closure() {
+    use uqa_sql::catalog::{
+        composite_type::{validate_composite_registry, StoredComposite},
+        range_type::{validate_range_registry, StoredRange},
+    };
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        super::types::fixture(&engine);
+        sql(&engine,"CREATE ROLE reader; ALTER TYPE retained_composite ADD ATTRIBUTE typed retained_domain; ALTER TYPE retained_composite ADD ATTRIBUTE enum_array retained_enum[]; GRANT USAGE ON TYPE retained_composite TO reader WITH GRANT OPTION");
+        let roles = engine.durable.roles.snapshot();
+        let composites = engine.durable.composites.snapshot();
+        let ranges = engine.durable.ranges.snapshot();
+        let composite_key = engine.durable.composites.key().unwrap();
+        let range_key = engine.durable.ranges.key().unwrap();
+        let control = StorageReadControl::with_limit(2 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine,"BEGIN; ALTER TYPE retained_composite ADD ATTRIBUTE private integer; SAVEPOINT changed; ALTER TYPE retained_composite DROP ATTRIBUTE kept; ROLLBACK TO changed; ROLLBACK");
+            assert_eq!(
+                serde_json::to_value(&*engine.durable.composites.read()).unwrap(),
+                serde_json::to_value(&*composites).unwrap()
+            );
+            sql(&engine,"DROP TYPE retained_composite; CREATE TYPE retained_composite AS (replacement boolean)");
+            engine.durable.ranges.write().clear();
+            assert_ne!(
+                engine.durable.composites.read()["public.retained_composite"].object_id,
+                composites["public.retained_composite"].object_id
+            );
+        }
+        drop(engine);
+        let saved_composites = composite_key.retained(&cut).unwrap().unwrap();
+        let saved_ranges = range_key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let (composite_image, range_image) = std::thread::spawn(move || {
+            let token = CancellationToken::new();
+            let mut composite_image = vec![];
+            let mut range_image = vec![];
+            saved_composites
+                .get()
+                .unwrap()
+                .write_image(&mut composite_image, &token)
+                .unwrap();
+            saved_ranges
+                .get()
+                .unwrap()
+                .write_image(&mut range_image, &token)
+                .unwrap();
+            (composite_image, range_image)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let token = CancellationToken::new();
+        let memory = MemoryBudget::new(2 << 20);
+        let restored_composites = TypeDefinitions::<StoredComposite>::read_image(
+            &mut composite_image.as_slice(),
+            &memory,
+            &token,
+        )
+        .unwrap();
+        let restored_ranges = TypeDefinitions::<StoredRange>::read_image(
+            &mut range_image.as_slice(),
+            &memory,
+            &token,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored_composites).unwrap(),
+            serde_json::to_value(&*composites).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&restored_ranges).unwrap(),
+            serde_json::to_value(&*ranges).unwrap()
+        );
+        validate_composite_registry(&restored_composites, &roles).unwrap();
+        validate_range_registry(&restored_ranges, &roles).unwrap();
+        let attributes = &restored_composites["public.retained_composite"].attributes;
+        assert!(attributes[0].dropped);
+        assert_eq!(attributes[0].number, 1);
+        assert_eq!(attributes[1].number, 2);
+        assert_eq!(
+            restored_ranges["public.retained_range"].subtype_operator_class,
+            1978
+        );
+        drop((restored_composites, restored_ranges));
+        assert_eq!(memory.used(), 0);
+    }
+}

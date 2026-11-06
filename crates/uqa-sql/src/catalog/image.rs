@@ -7,9 +7,11 @@
 //! Versioned native catalog images retain identities and evaluated authority without executing SQL.
 
 use super::{
+    composite_type::StoredComposite,
     enum_type::StoredEnum,
     foreign_server::{CapturedForeignServers, ForeignServers},
     graph_oids::{CapturedGraphOidRegistry, GraphOidRegistry},
+    range_type::StoredRange,
     roles::{CapturedRoleDefinitions, CapturedRoleMemberships, RoleDefinitions, RoleMemberships},
     security::{
         builtin_routines::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities},
@@ -24,6 +26,7 @@ use crate::SQLError;
 use std::io::{Read, Write};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod column_types;
 mod fields;
 mod input;
 mod reader;
@@ -36,6 +39,8 @@ const SCHEMAS: [u8; 8] = *b"UQASCH01";
 const DATABASE: [u8; 8] = *b"UQADBA01";
 const BUILTIN_ROUTINES: [u8; 8] = *b"UQABRA01";
 const SYSTEM_RELATIONS: [u8; 8] = *b"UQASRA01";
+const COMPOSITES: [u8; 8] = *b"UQACMP01";
+const RANGES: [u8; 8] = *b"UQARNG01";
 const ENUMS: [u8; 8] = *b"UQAENU01";
 const SHELLS: [u8; 8] = *b"UQASHL01";
 const FOREIGN_SERVERS: [u8; 8] = *b"UQAFSR01";
@@ -147,6 +152,21 @@ catalog_image!(
     GraphOids,
     GRAPH_OIDS,
     graph_oids
+);
+
+catalog_image!(
+    CapturedTypeDefinitions<StoredComposite>,
+    TypeDefinitions<StoredComposite>,
+    Composites,
+    COMPOSITES,
+    composites
+);
+catalog_image!(
+    CapturedTypeDefinitions<StoredRange>,
+    TypeDefinitions<StoredRange>,
+    Ranges,
+    RANGES,
+    ranges
 );
 
 impl CapturedDatabaseAuthority {

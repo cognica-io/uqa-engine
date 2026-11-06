@@ -6,13 +6,13 @@
 
 use super::*;
 
-fn rejects<T: ImageDefinition>(bytes: &[u8]) {
+pub(super) fn rejects<T: ImageDefinition>(bytes: &[u8]) {
     let memory = MemoryBudget::new(8 << 20);
     let token = CancellationToken::new();
     assert!(T::decode(&mut &*bytes, &memory, &token).is_err());
     assert_eq!(memory.used(), 0);
 }
-fn malformed<T: ImageDefinition>(values: &NamedDefinitions<T>) {
+pub(super) fn malformed<T: ImageDefinition>(values: &NamedDefinitions<T>) {
     let bytes = encode(values);
     for cut in 0..bytes.len() {
         rejects::<T>(&bytes[..cut]);

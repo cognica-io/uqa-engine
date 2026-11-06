@@ -89,6 +89,19 @@ impl Input<'_> {
         &mut self,
         key: &str,
     ) -> Result<Budgeted<RelationIdentity>, SQLError> {
+        let identity = self.durable_type_identity()?;
+        let control = ProductionControl::new(
+            self.binary.memory,
+            self.binary.cancellation,
+            self.binary.cancellation,
+        );
+        let canonical = identity.qualified_name_with_control(&control)?;
+        if self.compare_text(&canonical, key)? != std::cmp::Ordering::Equal {
+            return Err(invalid("type catalog key"));
+        }
+        Ok(identity)
+    }
+    pub(super) fn durable_type_identity(&mut self) -> Result<Budgeted<RelationIdentity>, SQLError> {
         let schema = self.binary.text()?;
         let name = self.binary.text()?;
         if schema.is_empty()
@@ -100,16 +113,9 @@ impl Input<'_> {
         let (schema, mut reservation) = schema.into_parts();
         let (name, name_memory) = name.into_parts();
         reservation.absorb(name_memory);
-        let identity = Budgeted::new(RelationIdentity { schema, name }, reservation);
-        let control = ProductionControl::new(
-            self.binary.memory,
-            self.binary.cancellation,
-            self.binary.cancellation,
-        );
-        let canonical = identity.qualified_name_with_control(&control)?;
-        if self.compare_text(&canonical, key)? != std::cmp::Ordering::Equal {
-            return Err(invalid("type catalog key"));
-        }
-        Ok(identity)
+        Ok(Budgeted::new(
+            RelationIdentity { schema, name },
+            reservation,
+        ))
     }
 }

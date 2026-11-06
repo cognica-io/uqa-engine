@@ -8,14 +8,19 @@
 
 use super::{Acl, CatalogImageReader, Columns, Entries, Fields};
 use crate::{
-    ast::ObjectAclEntry,
-    catalog::{enum_type::StoredEnumLabel, graph_oids::LabelCatalogOids},
+    ast::{ColumnType, ObjectAclEntry},
+    catalog::{
+        composite_type::StoredCompositeAttribute, enum_type::StoredEnumLabel,
+        graph_oids::LabelCatalogOids, range_type::StoredMultirange,
+    },
 };
 use std::slice::Iter;
 use uqa_core::memory::BudgetedMapIter;
 
 pub(super) enum Tail<'a> {
     None,
+    Composite(Iter<'a, StoredCompositeAttribute>),
+    Multirange(Option<&'a StoredMultirange>),
     Enum(Iter<'a, StoredEnumLabel>),
     Server {
         options: BudgetedMapIter<'a, String, String>,
@@ -29,9 +34,23 @@ impl<'a> Tail<'a> {
         &mut self,
         fields: &mut Fields<'a>,
         columns: &mut Columns<'a>,
+        column_type: &mut Option<&'a ColumnType>,
     ) -> bool {
         match self {
             Self::None => {}
+            Self::Composite(attributes) => {
+                if let Some(attribute) = attributes.next() {
+                    fields.composite_attribute(attribute);
+                    *column_type = Some(&attribute.ty);
+                    return true;
+                }
+            }
+            Self::Multirange(value) => {
+                if let Some(value) = value.take() {
+                    fields.multirange(value);
+                    return true;
+                }
+            }
             Self::Enum(labels) => {
                 if let Some(label) = labels.next() {
                     fields.enum_label(label);
@@ -73,6 +92,23 @@ impl<'a> CatalogImageReader<'a> {
 
     pub(super) fn next_metadata(&mut self) -> bool {
         match &mut self.entries {
+            Entries::Composites(entries) => {
+                let Some((key, value)) = entries.next() else {
+                    return false;
+                };
+                self.fields.composite(key, value);
+                self.tail = Tail::Composite(value.attributes.iter());
+                self.optional_object_acl(value.usage_acl.as_deref());
+            }
+            Entries::Ranges(entries) => {
+                let Some((key, value)) = entries.next() else {
+                    return false;
+                };
+                self.fields.range(key, value);
+                self.tail = Tail::Multirange(Some(&value.multirange));
+                self.column_type = Some(&value.subtype);
+                self.optional_object_acl(value.usage_acl.as_deref());
+            }
             Entries::Enums(entries) => {
                 let Some((key, value)) = entries.next() else {
                     return false;
