@@ -8,12 +8,14 @@
 
 use super::{CapturedPath, CapturedPathIndex, Pairs};
 use std::collections::BTreeMap;
-use uqa_core::memory::{MemoryError, ProductionControl, ProductionVec};
+use uqa_core::memory::{MemoryError, MemoryReservation, ProductionControl, ProductionVec};
 use uqa_storage::StorageBackendResult;
 
 pub(super) struct MemoryPaths {
     pub(super) image: CapturedPathIndex,
     bytes: usize,
+    // Imported native payloads retain admission through every shared generation.
+    _memory: Option<MemoryReservation>,
 }
 
 impl Default for MemoryPaths {
@@ -21,6 +23,7 @@ impl Default for MemoryPaths {
         Self {
             image: CapturedPathIndex { paths: Vec::new() },
             bytes: size_of::<Self>(),
+            _memory: None,
         }
     }
 }
@@ -54,7 +57,16 @@ impl MemoryPaths {
         Ok(Self {
             image: CapturedPathIndex { paths },
             bytes,
+            _memory: None,
         })
+    }
+
+    pub(super) fn from_admitted(image: CapturedPathIndex, memory: MemoryReservation) -> Self {
+        Self {
+            image,
+            bytes: memory.bytes(),
+            _memory: Some(memory),
+        }
     }
 
     pub(super) fn get(&self, sequence: &[String]) -> Option<&[(u64, u64)]> {

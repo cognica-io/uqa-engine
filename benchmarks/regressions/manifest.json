@@ -2,6 +2,175 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_path_image_reader_survives_replacement_and_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Engine retained path image ownership",
+      "workload": "Capture an actual memory Engine path registration, mutate its graph and replace the index, then close Engine/capture before streaming and restoring.",
+      "invariant": "The reader retains the original evaluated pairs and releases capture/scratch admission at EOF; the restored native owner retains its import allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "imported_path_generations_retain_exact_capacity_through_clones_and_captures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Native path import ownership",
+      "workload": "Import a large label and 20,000 pairs, compare actual allocation and capacity accounting, then clone and capture the native generation.",
+      "invariant": "All decoded capacity remains admitted through native sharing and independent image ownership until final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_preparation_and_output_use_constant_state_without_payload_copies",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Bounded path image streaming",
+      "workload": "Open owned readers over 1, 64 and 4,096 paths plus a large label and 20,000 pairs, then read the complete independent image oracle.",
+      "invariant": "Preparation visits zero immutable payload positions, cursor admission is constant below 32 KiB, reads stay bounded and output allocates no payload copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_children_cross_threads_after_registry_replacement_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Independent path image children",
+      "workload": "Capture a registry child, replace and remove its registration, close the registry and move a partially consumed reader across threads.",
+      "invariant": "The complete output retains the original literal relation and both allowances retire at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_cancellation_errors_and_unwinds_retire_owned_continuations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Path image terminal ownership",
+      "workload": "Cancel original or invoking controls before and after output and inject denied construction, denied lazy opening, invalid preparation and unwinding.",
+      "invariant": "Typed failures terminate the reader, no failure can resume and all source/scratch allowances release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_path_writes_preserve_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Captured path output cancellation",
+      "workload": "Cancel the source or invoking control from the first write of a large captured materialization.",
+      "invariant": "Synchronous output preserves typed cancellation and makes no further output attempt.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_restore_standalone_full_and_incremental_protected_backups",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/repository.rs",
+      "capability": "Path image repository composition",
+      "workload": "Capture protected full, equal incremental and changed incremental path images during live replacement, remove sources/ancestors and import both children.",
+      "invariant": "Per-call work and bytes stay bounded; exact reuse and changed units retain independently verifiable original pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_import_rejects_noncanonical_corrupt_and_incomplete_inputs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Strict path image validation",
+      "workload": "Import all truncated prefixes, invalid framing/UTF-8, excessive counts, trailing data, duplicate or unordered paths/pairs and long common prefixes.",
+      "invariant": "Only canonical complete images publish; failures retire all admission without sorting or deduplicating input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_import_admits_declared_capacity_before_consuming_payloads",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Path image allocation admission",
+      "workload": "Attempt large label, sequence, pair and path counts under a 4 KiB allowance.",
+      "invariant": "Memory denial occurs before payload consumption and releases every private allocation lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_handle_partial_interrupted_io_and_cancelled_imports",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Controlled path image I/O",
+      "workload": "Use partial/interrupted input and output and inject cancellation, zero writes, I/O failure and invalid write counts.",
+      "invariant": "Bounded I/O preserves exact bytes, typed cancellation and terminal errors without leaking decoded state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_preserve_literal_reachability_after_graph_and_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Materialized path image identity",
+      "workload": "Encode a real graph materialization against literal path results and independent image bytes, close the graph/source and restore it.",
+      "invariant": "Exact sequences, evaluated pairs, absent paths and complete bytes survive source loss without path evaluation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_framing_distinguishes_empty_labels_sequences_and_all_pair_bits",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Path image framing",
+      "workload": "Read empty and nonempty materializations in one-byte through 64 KiB buffers, including empty labels, NUL, non-ASCII labels, separators and extreme identifiers.",
+      "invariant": "Literal format bytes and complete images are identical across windows; reads stay at most 16 KiB and terminal EOF retires scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_readers_reject_query_views_without_visiting_graphs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Materialized path capability",
+      "workload": "Attempt memory image readers and writes against a graph query view whose graph does not exist.",
+      "invariant": "The unsupported representation fails before output or image allocation and never evaluates the graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-ml",
       "kind": "lib",
       "test": "resumable_model_images_preserve_all_layers_and_wire_boundaries",
@@ -20598,7 +20767,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]

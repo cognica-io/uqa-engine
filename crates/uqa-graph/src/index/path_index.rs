@@ -16,6 +16,7 @@ type Pairs = BTreeSet<(u64, u64)>;
 
 mod memory;
 use memory::MemoryPaths;
+mod image;
 
 mod catalog;
 mod snapshot;
