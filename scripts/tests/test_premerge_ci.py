@@ -165,7 +165,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         build = workspace.split("  build:\n", 1)[1].split("  features:\n", 1)[0]
         run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
         self.assertIn("if: runner.os == 'macOS'", run)
-        self.assertIn('NEXTEST_TEST_THREADS: "8"', run)
+        self.assertIn('NEXTEST_TEST_THREADS: "16"', run)
         self.assertIn("cargo nextest run --profile ci", run)
         self.assertIn('--archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"', run)
         self.assertIn("--extract-overwrite", run)
