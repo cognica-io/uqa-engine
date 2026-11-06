@@ -156,6 +156,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         profile = (ROOT / ".config/nextest.toml").read_text(encoding="utf-8")
         self.assertIn("retries = 0", profile)
         self.assertIn("terminate-after = 10", profile)
+        schedule = profile.split("test-group = 'native-session-schedules'", 1)[1]
+        self.assertIn('threads-required = "num-test-threads"', schedule)
         self.assertNotIn('on-timeout = "pass"', profile)
 
     def test_macos_runs_complete_local_archives_before_reporting_success(self) -> None:
@@ -163,6 +165,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         build = workspace.split("  build:\n", 1)[1].split("  features:\n", 1)[0]
         run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
         self.assertIn("if: runner.os == 'macOS'", run)
+        self.assertIn('NEXTEST_TEST_THREADS: "8"', run)
         self.assertIn("cargo nextest run --profile ci", run)
         self.assertIn('--archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"', run)
         self.assertIn("--extract-overwrite", run)
