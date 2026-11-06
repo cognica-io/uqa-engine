@@ -8,7 +8,7 @@
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use std::io::{Read, Write};
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
+use uqa_core::memory::{Budgeted, MemoryError};
 
 mod owned;
 mod reader;
@@ -16,16 +16,6 @@ mod retained;
 pub use owned::ImageOwner;
 pub use reader::{ImagePreparation, ImageRead, ImageReader};
 pub use retained::with_retained_control;
-
-const CHUNK: usize = 4096;
-
-fn invalid() -> StorageBackendError {
-    StorageBackendError::Other("invalid owner image stream".into())
-}
-
-fn io_error(error: std::io::Error) -> StorageBackendError {
-    StorageBackendError::backend("owner image I/O", error)
-}
 
 /// Bounded binary output for an owning image codec. Failed output belongs to the enclosing unpublished artifact.
 pub struct ImageOutput<'a> {
@@ -54,25 +44,14 @@ impl ImageOutput<'_> {
         Ok(())
     }
 
-    pub fn bytes(&mut self, mut bytes: &[u8]) -> StorageBackendResult<()> {
-        while !bytes.is_empty() {
-            self.control.check()?;
-            let length = bytes.len().min(CHUNK);
-            match self.writer.write(&bytes[..length]) {
-                Ok(0) => return Err(io_error(std::io::ErrorKind::WriteZero.into())),
-                Ok(count) if count <= length => {
-                    self.written = self
-                        .written
-                        .checked_add(count as u64)
-                        .ok_or(MemoryError::SizeOverflow)?;
-                    bytes = &bytes[count..];
-                }
-                Ok(_) => return Err(invalid()),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(error) => return Err(io_error(error)),
-            }
-        }
-        self.control.check()
+    pub fn bytes(&mut self, bytes: &[u8]) -> StorageBackendResult<()> {
+        uqa_core::image_io::write_bytes(
+            self.writer,
+            self.control.cancellation(),
+            &mut self.written,
+            bytes,
+        )
+        .map_err(io_error)
     }
 
     pub fn count(&mut self, count: usize) -> StorageBackendResult<()> {
@@ -105,68 +84,45 @@ impl ImageInput<'_> {
         .map_err(value_error)
     }
 
-    pub fn text(&mut self) -> StorageBackendResult<Budgeted<String>> {
-        let (bytes, memory) = self.bytes()?.into_parts();
-        let text = String::from_utf8(bytes).map_err(|_| invalid())?;
-        Ok(Budgeted::new(text, memory))
-    }
-
-    pub fn exact(&mut self, mut bytes: &mut [u8]) -> StorageBackendResult<()> {
-        while !bytes.is_empty() {
-            self.control.check()?;
-            let length = bytes.len().min(CHUNK);
-            match self.reader.read(&mut bytes[..length]) {
-                Ok(0) => return Err(io_error(std::io::ErrorKind::UnexpectedEof.into())),
-                Ok(count) if count <= length => bytes = &mut bytes[count..],
-                Ok(_) => return Err(invalid()),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(error) => return Err(io_error(error)),
-            }
+    fn input(&mut self) -> uqa_core::image_io::ImageInput<'_> {
+        uqa_core::image_io::ImageInput {
+            reader: self.reader,
+            memory: self.control.memory(),
+            cancellation: self.control.cancellation(),
         }
-        self.control.check()
     }
 
+    pub fn text(&mut self) -> StorageBackendResult<Budgeted<String>> {
+        self.input().text().map_err(io_error)
+    }
+    pub fn exact(&mut self, bytes: &mut [u8]) -> StorageBackendResult<()> {
+        self.input().exact(bytes).map_err(io_error)
+    }
     pub fn array<const N: usize>(&mut self) -> StorageBackendResult<[u8; N]> {
-        let mut bytes = [0; N];
-        self.exact(&mut bytes)?;
-        Ok(bytes)
+        self.input().array().map_err(io_error)
     }
-
     pub fn count(&mut self) -> StorageBackendResult<usize> {
-        usize::try_from(u64::from_le_bytes(self.array()?))
-            .map_err(|_| MemoryError::SizeOverflow.into())
+        self.input().count().map_err(io_error)
     }
-
     pub fn bytes(&mut self) -> StorageBackendResult<Budgeted<Vec<u8>>> {
-        self.bytes_with_limit(usize::MAX)
+        self.input().bytes().map_err(io_error)
     }
-
     /// Reject a declared payload beyond the owning format's ceiling before allocating it.
     pub fn bytes_with_limit(&mut self, maximum: usize) -> StorageBackendResult<Budgeted<Vec<u8>>> {
-        let length = self.count()?;
-        self.control.check_value_size(length, maximum)?;
-        let mut bytes = BudgetedVec::new(self.control.memory());
-        bytes.reserve(length)?;
-        let mut buffer = [0; CHUNK];
-        while bytes.len() < length {
-            let count = (length - bytes.len()).min(CHUNK);
-            self.exact(&mut buffer[..count])?;
-            bytes.extend_from_slice(&buffer[..count])?;
-        }
-        let (bytes, memory) = bytes.into_parts();
-        Ok(Budgeted::new(bytes, memory))
+        self.input().bytes_with_limit(maximum).map_err(io_error)
     }
-
     pub fn end(&mut self) -> StorageBackendResult<()> {
-        loop {
-            self.control.check()?;
-            match self.reader.read(&mut [0]) {
-                Ok(0) => return self.control.check(),
-                Ok(_) => return Err(invalid()),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(error) => return Err(io_error(error)),
-            }
-        }
+        self.input().end().map_err(io_error)
+    }
+}
+
+fn io_error(error: uqa_core::image_io::ImageIoError) -> StorageBackendError {
+    use uqa_core::image_io::ImageIoError;
+    match error {
+        ImageIoError::Invalid => StorageBackendError::Other("invalid owner image stream".into()),
+        ImageIoError::Memory(error) => error.into(),
+        ImageIoError::Cancelled(error) => error.into(),
+        ImageIoError::Io(error) => StorageBackendError::backend("owner image I/O", error),
     }
 }
 
@@ -175,5 +131,37 @@ fn value_error(error: uqa_core::value_image::ValueImageError) -> StorageBackendE
         uqa_core::value_image::ValueImageError::Memory(error) => error.into(),
         uqa_core::value_image::ValueImageError::Cancelled(error) => error.into(),
         other => StorageBackendError::backend("owner image value", other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_output_preserves_partial_progress_after_writer_unwind() {
+        struct Writer(bool);
+        impl Write for Writer {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                assert!(!self.0, "injected writer unwind");
+                self.0 = true;
+                Ok(2)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let control = StorageReadControl::with_limit(1024);
+        let mut writer = Writer(false);
+        let mut output = ImageOutput {
+            writer: &mut writer,
+            control: &control,
+            written: 7,
+        };
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            output.bytes(&[1, 2, 3, 4])
+        }))
+        .is_err());
+        assert_eq!(output.written, 9);
     }
 }

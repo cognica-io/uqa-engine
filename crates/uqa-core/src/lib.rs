@@ -15,6 +15,7 @@ pub mod atomic;
 pub mod cancel;
 pub mod doc_set;
 mod float_text;
+pub mod image_io;
 pub mod io_usage;
 pub mod json;
 pub mod memory;

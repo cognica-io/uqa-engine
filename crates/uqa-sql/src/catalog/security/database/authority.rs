@@ -44,6 +44,17 @@ impl DatabaseAuthority {
         })
     }
 
+    /// Install an already decoded and admitted tuple without allocating a second ACL.
+    pub(crate) fn from_image_value(
+        value: uqa_core::memory::Budgeted<BoundDatabaseSecurity>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        let memory = value.budget().clone();
+        let control = ProductionControl::new(&memory, cancellation, cancellation);
+        let value = Produced::from(value).into_shared(&control)?;
+        Ok(Self { value, memory })
+    }
+
     /// Unchanged authority shares its generation; a changed successor is fully funded before the caller can install it.
     pub fn successor(&self, value: &BoundDatabaseSecurity) -> Result<Self, SQLError> {
         if self.as_ref() == value {

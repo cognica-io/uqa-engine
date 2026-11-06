@@ -258,8 +258,33 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
 }
 
 impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
+    /// Move decoded payloads into their native tree without copying or releasing their admission. The image owner has already validated keys and definitions.
+    pub(crate) fn insert_image_entry(
+        &mut self,
+        name: Budgeted<K>,
+        value: Budgeted<T>,
+    ) -> Result<(), SQLError> {
+        assert!(self.budget().shares_allowance(name.budget()));
+        assert!(self.budget().shares_allowance(value.budget()));
+        let children = value.retained_children_bytes()?;
+        let bytes = name
+            .payload_bytes()
+            .checked_add(value.reserved_bytes())
+            .and_then(|bytes| bytes.checked_add(children))
+            .ok_or(MemoryError::SizeOverflow)?;
+        let (name, key_memory) = name.into_parts();
+        let (value, mut memory) = value.into_parts();
+        memory.absorb(key_memory);
+        self.publish_entry(name, Budgeted::new(value, memory), bytes)
+    }
+
+    pub(crate) fn last_durable_key(&self) -> Option<&K> {
+        self.durable
+            .last_before::<K>(std::ops::Bound::Unbounded)
+            .map(|(key, _)| key)
+    }
+
     pub fn insert(&mut self, name: K, value: T) -> Result<(), SQLError> {
-        let temporary = value.is_temporary(name.borrow());
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(self.durable.budget(), &cancellation, &cancellation);
         let value = value
@@ -272,13 +297,22 @@ impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
             .checked_add(value.reserved_bytes())
             .and_then(|bytes| bytes.checked_add(children))
             .ok_or(MemoryError::SizeOverflow)?;
+        self.publish_entry(name, value, bytes)
+    }
+
+    fn publish_entry(&mut self, name: K, value: Budgeted<T>, bytes: usize) -> Result<(), SQLError> {
+        // The tuple retires the key before the value's lease, including imported key payloads.
+        let entry = (name, value);
+        let temporary = entry.1.is_temporary(entry.0.borrow());
         let mut durable = self.durable.clone();
         let mut session = self.temporary.clone();
         if temporary {
-            durable.remove(name.borrow())?;
+            durable.remove(entry.0.borrow())?;
+            let (name, value) = entry;
             session.insert(name, value, bytes)?;
         } else {
-            session.remove(name.borrow())?;
+            session.remove(entry.0.borrow())?;
+            let (name, value) = entry;
             durable.insert(name, value, bytes)?;
         }
         self.durable = durable;
@@ -361,7 +395,29 @@ impl<K: Ord, T> CapturedDefinitions<K, T> {
     {
         self.root.get(name).map(|value| &**value)
     }
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &T)> {
-        self.root.iter().map(|(name, value)| (name, &**value))
+    pub fn iter(&self) -> CapturedDefinitionIter<'_, K, T> {
+        CapturedDefinitionIter {
+            inner: self.root.iter(),
+        }
+    }
+}
+
+/// Allocation-free ordered access to captured native definitions.
+pub struct CapturedDefinitionIter<'a, K, T> {
+    inner: RetainedMapIter<'a, K, Budgeted<T>>,
+}
+
+impl<'a, K, T> Iterator for CapturedDefinitionIter<'a, K, T> {
+    type Item = (&'a K, &'a T);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(key, value)| (key, &**value))
+    }
+}
+
+impl<'a, K: Ord, T> IntoIterator for &'a CapturedDefinitions<K, T> {
+    type Item = (&'a K, &'a T);
+    type IntoIter = CapturedDefinitionIter<'a, K, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }

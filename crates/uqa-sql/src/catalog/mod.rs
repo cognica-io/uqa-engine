@@ -15,6 +15,7 @@ pub mod collations;
 pub mod definition_capture;
 pub mod expression_text;
 pub mod foreign_relations;
+pub mod image;
 pub mod languages;
 pub mod named_definitions;
 pub mod node_tree;

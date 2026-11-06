@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native role, membership, schema and database authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Whole-Engine memory backup and restore remain under implementation.
+
 - Add exact materialized path-index images for memory backups. Borrowed and owned readers stream original label sequences and evaluated vertex pairs with fixed state, preserving selected data after graph changes and source closure. Import validates complete framing and canonical order before publication and retains decoded memory admission through native clones and captures. Complete memory Engine backup and restore remain under implementation.
 
 - Add resumable stored-model and analyzer image readers. Models retain bounded shape and numeric validation before output; analyzers borrow exact resolved descriptors and dictionary artifacts. Borrowed and independently owned readers preserve source cancellation and bytes after source closure, and synchronous output shares the same encoders. Complete memory Engine backup remains under implementation.

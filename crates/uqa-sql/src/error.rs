@@ -380,6 +380,21 @@ impl From<uqa_core::memory::MemoryError> for SQLError {
     }
 }
 
+impl From<uqa_core::image_io::ImageIoError> for SQLError {
+    fn from(error: uqa_core::image_io::ImageIoError) -> Self {
+        use uqa_core::image_io::ImageIoError;
+        match error {
+            ImageIoError::Memory(error) => error.into(),
+            ImageIoError::Cancelled(error) => error.into(),
+            ImageIoError::Invalid => Self::Routine {
+                sqlstate: "XX001".into(),
+                message: "invalid catalog image framing".into(),
+            },
+            ImageIoError::Io(error) => Self::Host(std::sync::Arc::new(error)),
+        }
+    }
+}
+
 impl From<uqa_core::ValueRetentionError> for SQLError {
     fn from(error: uqa_core::ValueRetentionError) -> Self {
         match error {
