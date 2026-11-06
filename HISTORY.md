@@ -117,6 +117,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
+
 - Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
 
 - Preserve encrypted compressed SQLite connection-pool growth after trusted-anchor admission and subsequent writes. Physical connections share authenticated publication state, including compaction and later synchronization failures, while explicit reopen retains exact external-anchor validation.
