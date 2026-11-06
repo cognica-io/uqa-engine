@@ -7,6 +7,8 @@
 use super::*;
 use std::io::{Read, Seek, SeekFrom, Write};
 
+mod owned;
+
 #[test]
 fn backup_image_reader_streams_exact_units_and_bounds_global_verification() {
     let directory = tempfile::tempdir().unwrap();

@@ -22,7 +22,7 @@ use std::path::Path;
 use uqa_core::memory::MemoryReservation;
 use uqa_storage::{
     backup::{
-        BackupError, BackupLease, BackupResult, BackupRoot, BackupSourceStep, ImageProvider,
+        BackupError, BackupLeaseInput, BackupResult, BackupRoot, BackupSourceStep, ImageProvider,
         RecordImageImportUnit,
     },
     mvcc::{BackupCursorKey, DatabaseId, DatabaseRestore},
@@ -62,12 +62,13 @@ enum State<'a> {
 impl<'a> SQLiteNativeBackupImport<'a> {
     pub fn new(
         path: &Path,
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         request: DatabaseRestore,
         options: SQLiteBackupImportOptions,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
         control.check()?;
+        let lease = lease.into();
         let root = lease.root();
         if options.maximum_value_bytes == 0
             || request.source() != root.cut().source

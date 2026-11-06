@@ -9,9 +9,9 @@
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     backup::{
-        BackupCut, BackupError, BackupLease, BackupRecordImportMapping, BackupResult, BackupRoot,
-        BackupSourceStep, ImageFormat, ImageProvider, MappedRecordImageImportReader, NamespaceId,
-        RecordImageImportUnit,
+        BackupCut, BackupError, BackupLeaseInput, BackupRecordImportMapping, BackupResult,
+        BackupRoot, BackupSourceStep, ImageFormat, ImageProvider, MappedRecordImageImportReader,
+        NamespaceId, RecordImageImportUnit,
     },
     mvcc::{DatabaseId, NotificationRecordLayout},
     read_control::StorageReadControl,
@@ -77,7 +77,7 @@ pub struct SQLiteNativeImageImportReader<'a>(MappedRecordImageImportReader<'a, M
 
 impl<'a> SQLiteNativeImageImportReader<'a> {
     pub fn new(
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         maximum_workspace_bytes: u64,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {

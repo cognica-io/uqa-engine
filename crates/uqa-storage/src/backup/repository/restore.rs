@@ -7,7 +7,13 @@
 //! Durable restore identities and exclusive directory publication. Importers own physical import, logical validation and the new transaction-history transition.
 
 mod record;
+mod scheduled;
 mod target;
+
+pub use scheduled::{
+    BackupRestoreFactory, BackupRestoreJob, BackupRestoreStep, BackupRestoreWork,
+    BackupRestoreWorkStep, RestoreFileWork,
+};
 
 use std::fs::File;
 use std::io;
@@ -493,8 +499,22 @@ impl BackupRestoreOperation<'_> {
 
     /// Complete import under the original allowance. The provider supplies its existing restore state machine; an uncertain call is routed to recovery by the durable started record.
     pub fn prepare(&mut self, importer: impl BackupRestoreImporter) -> BackupResult<()> {
-        if matches!(self.state, State::Prepared | State::Complete) {
+        let Some((image, fresh)) = self.admit_import()? else {
             return Ok(());
+        };
+        let directory = RestoreDirectory { directory: &image };
+        let backup = self.backup.as_ref().ok_or(BackupError::Finished)?;
+        if fresh {
+            importer.import(&directory, backup, self.request(), &self.control)?;
+        } else {
+            importer.recover(&directory, backup, self.request(), &self.control)?;
+        }
+        self.finish_import(&image)
+    }
+
+    fn admit_import(&mut self) -> BackupResult<Option<(Dir, bool)>> {
+        if matches!(self.state, State::Prepared | State::Complete) {
+            return Ok(None);
         }
         if matches!(self.state, State::Cancelling | State::Cancelled) {
             return Err(BackupError::Finished);
@@ -506,24 +526,21 @@ impl BackupRestoreOperation<'_> {
             self.install_record("prepared", FrameKind::RestorePrepared, &self.completion)?;
             self.state = State::Prepared;
             self.backup.take();
-            return Ok(());
+            return Ok(None);
         }
         let fresh = self.state == State::New;
         self.install_record("started", FrameKind::RestoreStarted, &self.control)?;
         self.state = State::Started;
         #[cfg(test)]
         self.repository.before(super::Fault::RestoreStarted)?;
-        let directory = RestoreDirectory { directory: &image };
-        let backup = self.backup.as_ref().ok_or(BackupError::Finished)?;
-        if fresh {
-            importer.import(&directory, backup, self.request(), &self.control)?;
-        } else {
-            importer.recover(&directory, backup, self.request(), &self.control)?;
-        }
-        directory::synchronize(&image)?;
+        Ok(Some((image, fresh)))
+    }
+
+    fn finish_import(&mut self, image: &Dir) -> BackupResult<()> {
+        directory::synchronize(image)?;
         record::install(
             self.repository,
-            &image,
+            image,
             self.id(),
             MARKER,
             FrameKind::RestorePrepared,

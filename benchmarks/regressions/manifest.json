@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -44751,6 +44751,149 @@
       "capability": "Process-independent repository retention",
       "workload": "Hold reader, capture and prepared leases in separate processes, collect concurrently and terminate each process without Rust cleanup.",
       "invariant": "Removal cannot bypass a live OS lease; pending objects survive collection, process exit releases ownership and prepared images remain recoverable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_backup_reader_releases_the_root_only_after_complete_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/streaming/owned.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Stream plaintext and encrypted literal units with seven-byte windows while repeatedly attempting root removal.",
+      "invariant": "Root removal remains busy through every verification stage, then succeeds with the completed reader still alive; payloads, verification identity, work bounds and terminal results are exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_backup_reader_drop_and_failure_preserve_independent_root_leases",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/streaming/owned.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Open two independently owned readers, drop one, then drop, cancel or invalidate the remaining reader.",
+      "invariant": "One reader never unlocks the other; the final owner retires its root and all image memory on drop or terminal failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "owned_backup_reader_construction_errors_release_the_moved_root_lease",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/streaming/owned.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Move root leases into readers with zero memory, cancelled controls and incompatible provider mappings.",
+      "invariant": "Rejected construction releases the moved root lease and every charged resource, permitting immediate root retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_owns_admission_and_closes_files_before_preparation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Advance a protected private import across independent calls, probe operation/root admission, publish and mutate the target.",
+      "invariant": "Root and restore admission remain exclusive until complete validation; provider files close before preparation, charges retire at their owning boundaries, and late cancellation preserves completed receipts and later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_failure_unwinding_and_drop_enter_recovery_without_reimport",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Drop, fail and unwind active provider steps, then reopen the exact durable request and complete recovery.",
+      "invariant": "Active owners close once, failed work cannot resume in place, recovery preserves the original history request and fresh import executes only once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_cancellation_retires_active_work_and_persists_the_terminal_intent",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Cancel the original control between independently scheduled steps and durably cancel the operation.",
+      "invariant": "The first cancelled step retires active input and provider handles; cancellation releases remaining admission and cannot later admit import, recovery or publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_constructor_failure_preserves_recovery_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Fail the factory after creating a private image, then resume its stored request through recovery.",
+      "invariant": "The final destination remains absent, constructor resources retire, and the started intent permits recovery without a second fresh import.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_resolves_prepared_and_published_markers_after_lost_replies",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Inject preparation, directory synchronization and completion-record faults, delete the archive after closing the job, then resolve.",
+      "invariant": "Prepared and published outcomes recover without provider reexecution or source archives; published target writes survive resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_path_rejects_unadmitted_names_and_releases_completed_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Try invalid, missing, reserved and symbolic names plus cancelled and underfunded path construction, then complete admitted work.",
+      "invariant": "No invalid constructor reaches the provider; pathname storage is charged, completed provider state closes immediately and repeated completion performs no more work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_path_retires_before_reusing_a_moved_directory",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Move and replace the pinned directory before a step and during a step.",
+      "invariant": "Observed movement is terminal, prevents further provider calls, leaves unrelated replacement contents untouched and releases charged pathname ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_path_checks_nonregular_completion_and_closes_on_constructor_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths/scheduled.rs",
+      "capability": "Scheduled private restore ownership",
+      "workload": "Fail a filename-based constructor and replace its file with either a regular image or a directory during work.",
+      "invariant": "Constructor failure retires path resources; regular provider replacement remains valid while nonregular completion retires work and prevents reuse.",
       "case_names": [
         ""
       ]
