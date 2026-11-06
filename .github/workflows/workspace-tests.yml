@@ -67,8 +67,8 @@ jobs:
         if: runner.os == 'macOS'
         timeout-minutes: 90
         env:
-          # Durable storage cases wait for I/O; the complete workspace needs more execution slots than compiler jobs.
-          NEXTEST_TEST_THREADS: "16"
+          # Bound durable test concurrency independently of the other workers sharing this host.
+          NEXTEST_TEST_THREADS: "8"
         run: >-
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
