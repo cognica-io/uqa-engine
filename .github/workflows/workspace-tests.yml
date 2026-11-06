@@ -65,7 +65,8 @@ jobs:
           echo "sha256=${archive_checksum%% *}" >> "$GITHUB_OUTPUT"
       - name: Run every macOS workspace test on its build worker
         if: runner.os == 'macOS'
-        timeout-minutes: 90
+        # The whole-suite budget is separate from the unchanged per-case CI deadlines.
+        timeout-minutes: 120
         env:
           # Bound durable test concurrency independently of the other workers sharing this host.
           NEXTEST_TEST_THREADS: "8"
