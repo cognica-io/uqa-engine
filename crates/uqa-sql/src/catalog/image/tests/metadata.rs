@@ -19,6 +19,7 @@ use crate::{
 };
 use uqa_core::{memory::Produced, EnumLabelKey, RelationIdentity};
 
+mod foreign_wrappers;
 mod retention;
 mod structured_types;
 mod validation;
@@ -52,6 +53,7 @@ image_definition!(
     StoredShellType,
     ForeignServerDefinition,
     GraphCatalogOids,
+    crate::catalog::foreign_wrapper::ForeignWrapperDefinition,
     crate::catalog::composite_type::StoredComposite,
     crate::catalog::range_type::StoredRange
 );

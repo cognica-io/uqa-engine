@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native foreign-wrapper images that preserve original handler and validator identities, complete invocation and value bindings, and option order without executing callbacks. Bounded streaming and admitted reconstruction survive callback removal, name reuse and source closure; complete memory Engine restore remains under implementation.
+
 - Add native composite and range catalog images that preserve dropped attributes, complete type modifiers and bindings, selected support OIDs and independently named multiranges. Bounded streaming and admitted private reconstruction retain original metadata after source closure without SQL replay; complete memory Engine restore remains under implementation.
 
 - Add native enum, shell-type, foreign-server and graph catalog OID image codecs. Bounded readers preserve original identities, enum order keys and sort bits, ordered options, ACL paths and optional metadata; private import validates local structure and retains decoded memory through native clones and captures. Complete memory Engine backup and restore remain under implementation.

@@ -20,6 +20,7 @@ use uqa_core::{
 };
 
 mod column_types;
+mod foreign_wrappers;
 mod metadata;
 mod structured_types;
 

@@ -45820,6 +45820,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_reject_truncation_trailing_bytes_duplicate_keys_and_invalid_native_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_reject_corrupt_callback_identities_flags_collations_and_contract_tags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invalid_native_callback_sources_fail_and_retire_the_shared_image_cursor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_match_literal_none_and_native_handler_tags_with_ordered_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_callback_image_matches_literal_original_function_identity_and_contract_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_callback_contract_and_assignment_match_literal_fields_and_slice_masks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_preserve_complete_invocation_value_bindings_and_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_import_retains_exact_callback_option_and_box_admission_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_readers_bound_large_options_and_empty_contract_sequences_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_or_unwound_wrapper_import_retires_partial_callback_and_option_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "wrapper_images_keep_self_removed_callback_identity_after_name_reuse_and_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Committed memory catalog images",
+      "workload": "Capture a self-removing validator, reuse its name, roll back and replace its wrapper, close Engine and encode on another thread.",
+      "invariant": "The captured image preserves the original missing callback and wrapper identities without invoking or rebinding the replacement function.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

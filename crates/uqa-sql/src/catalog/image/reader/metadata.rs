@@ -6,7 +6,9 @@
 
 //! Native child iterators resume without a catalog prewalk or output allocation.
 
+use super::foreign_wrappers::Wrapper;
 use super::{Acl, CatalogImageReader, Columns, Entries, Fields};
+use crate::SQLError;
 use crate::{
     ast::{ColumnType, ObjectAclEntry},
     catalog::{
@@ -19,6 +21,7 @@ use uqa_core::memory::BudgetedMapIter;
 
 pub(super) enum Tail<'a> {
     None,
+    Wrapper(Wrapper<'a>),
     Composite(Iter<'a, StoredCompositeAttribute>),
     Multirange(Option<&'a StoredMultirange>),
     Enum(Iter<'a, StoredEnumLabel>),
@@ -35,49 +38,54 @@ impl<'a> Tail<'a> {
         fields: &mut Fields<'a>,
         columns: &mut Columns<'a>,
         column_type: &mut Option<&'a ColumnType>,
-    ) -> bool {
+    ) -> Result<bool, SQLError> {
         match self {
             Self::None => {}
+            Self::Wrapper(value) => {
+                if value.next(fields, column_type)? {
+                    return Ok(true);
+                }
+            }
             Self::Composite(attributes) => {
                 if let Some(attribute) = attributes.next() {
                     fields.composite_attribute(attribute);
                     *column_type = Some(&attribute.ty);
-                    return true;
+                    return Ok(true);
                 }
             }
             Self::Multirange(value) => {
                 if let Some(value) = value.take() {
                     fields.multirange(value);
-                    return true;
+                    return Ok(true);
                 }
             }
             Self::Enum(labels) => {
                 if let Some(label) = labels.next() {
                     fields.enum_label(label);
-                    return true;
+                    return Ok(true);
                 }
             }
             Self::Server { options, order } => {
                 if let Some((key, value)) = options.next() {
                     fields.text(key);
                     fields.text(value);
-                    return true;
+                    return Ok(true);
                 }
                 if let Some(name) = order.as_mut().and_then(Iterator::next) {
                     fields.text(name);
-                    return true;
+                    return Ok(true);
                 }
             }
             Self::Graph(labels) => {
                 if let Some((key, label)) = labels.next() {
                     fields.graph_label(*key, label);
                     *columns = Columns::Graph(label.not_null.iter());
-                    return true;
+                    return Ok(true);
                 }
             }
         }
         *self = Self::None;
-        false
+        Ok(false)
     }
 }
 
@@ -123,6 +131,13 @@ impl<'a> CatalogImageReader<'a> {
                 };
                 self.fields.shell(key, value);
                 self.optional_object_acl(value.usage_acl.as_deref());
+            }
+            Entries::ForeignWrappers(entries) => {
+                let Some((key, value)) = entries.next() else {
+                    return false;
+                };
+                self.fields.foreign_wrapper(key, value);
+                self.tail = Tail::Wrapper(Wrapper::new(value));
             }
             Entries::ForeignServers(entries) => {
                 let Some((key, value)) = entries.next() else {

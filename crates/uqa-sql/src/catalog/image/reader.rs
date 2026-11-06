@@ -13,6 +13,7 @@ use crate::{
         composite_type::StoredComposite,
         enum_type::StoredEnum,
         foreign_server::ForeignServerDefinition,
+        foreign_wrapper::ForeignWrapperDefinition,
         graph_oids::GraphCatalogOids,
         named_definitions::CapturedDefinitionIter,
         range_type::StoredRange,
@@ -28,6 +29,7 @@ use crate::{
     SQLError,
 };
 
+mod foreign_wrappers;
 mod metadata;
 use metadata::Tail;
 use std::{io::Write, slice::Iter};
@@ -48,6 +50,7 @@ pub(super) enum Entries<'a> {
     Enums(CapturedDefinitionIter<'a, String, StoredEnum>),
     Shells(CapturedDefinitionIter<'a, String, StoredShellType>),
     ForeignServers(CapturedDefinitionIter<'a, String, ForeignServerDefinition>),
+    ForeignWrappers(CapturedDefinitionIter<'a, String, ForeignWrapperDefinition>),
     GraphOids(CapturedDefinitionIter<'a, String, GraphCatalogOids>),
 }
 enum Acl<'a> {
@@ -165,46 +168,46 @@ impl<'a> CatalogImageReader<'a> {
         self.columns = Columns::None;
         false
     }
-    fn next_child(&mut self) -> bool {
+    fn next_child(&mut self) -> Result<bool, SQLError> {
         if self.next_acl() {
-            return true;
+            return Ok(true);
         }
         if let Some(value) = self.column_type.take() {
             self.column_type = self.fields.column_type(value);
-            return true;
+            return Ok(true);
         }
         if self.next_column() {
-            return true;
+            return Ok(true);
         }
         if self
             .tail
-            .next_fields(&mut self.fields, &mut self.columns, &mut self.column_type)
+            .next_fields(&mut self.fields, &mut self.columns, &mut self.column_type)?
         {
-            return true;
+            return Ok(true);
         }
-        false
+        Ok(false)
     }
-    fn next_record(&mut self) -> bool {
+    fn next_record(&mut self) -> Result<bool, SQLError> {
         self.fields = Fields::new();
-        if self.next_child() {
-            return true;
+        if self.next_child()? {
+            return Ok(true);
         }
         match &mut self.entries {
             Entries::Roles(entries) => {
                 let Some((key, role)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 self.fields.role(key, role);
             }
             Entries::Memberships(entries) => {
                 let Some((key, membership)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 self.fields.membership(key, membership);
             }
             Entries::Schemas(entries) => {
                 let Some((key, schema)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 let BoundSchemaSecurity {
                     tuple,
@@ -232,7 +235,7 @@ impl<'a> CatalogImageReader<'a> {
             }
             Entries::Database(entry) => {
                 let Some(database) = entry.take() else {
-                    return false;
+                    return Ok(false);
                 };
                 let BoundDatabaseSecurity { role_owner, acl } = database;
                 self.fields.identity(*role_owner);
@@ -244,7 +247,7 @@ impl<'a> CatalogImageReader<'a> {
             }
             Entries::BuiltinRoutines(entries) => {
                 let Some((oid, value)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 let BuiltinRoutineSecurity {
                     revision,
@@ -257,7 +260,7 @@ impl<'a> CatalogImageReader<'a> {
             }
             Entries::SystemRelations(entries) => {
                 let Some((key, value)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 let RelationIdentity { schema, name } = key;
                 let SystemRelationSecurity { table, columns } = value;
@@ -274,10 +277,11 @@ impl<'a> CatalogImageReader<'a> {
             | Entries::Ranges(_)
             | Entries::Enums(_)
             | Entries::Shells(_)
+            | Entries::ForeignWrappers(_)
             | Entries::ForeignServers(_)
-            | Entries::GraphOids(_) => return self.next_metadata(),
+            | Entries::GraphOids(_) => return Ok(self.next_metadata()),
         }
-        true
+        Ok(true)
     }
     /// Empty output consumes no fields. Errors permanently retire this cursor; partially written artifacts must be discarded.
     pub fn read(&mut self, output: &mut [u8]) -> Result<usize, SQLError> {
@@ -314,7 +318,7 @@ impl<'a> CatalogImageReader<'a> {
             } else if let Some(field) = self.fields.next() {
                 self.field = field;
                 self.offset = 0;
-            } else if !self.next_record() {
+            } else if !self.next_record()? {
                 break;
             }
         }

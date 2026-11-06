@@ -10,6 +10,7 @@ use super::{
     composite_type::StoredComposite,
     enum_type::StoredEnum,
     foreign_server::{CapturedForeignServers, ForeignServers},
+    foreign_wrapper::{CapturedForeignWrappers, ForeignWrappers},
     graph_oids::{CapturedGraphOidRegistry, GraphOidRegistry},
     range_type::StoredRange,
     roles::{CapturedRoleDefinitions, CapturedRoleMemberships, RoleDefinitions, RoleMemberships},
@@ -43,6 +44,7 @@ const COMPOSITES: [u8; 8] = *b"UQACMP01";
 const RANGES: [u8; 8] = *b"UQARNG01";
 const ENUMS: [u8; 8] = *b"UQAENU01";
 const SHELLS: [u8; 8] = *b"UQASHL01";
+const FOREIGN_WRAPPERS: [u8; 8] = *b"UQAFWR01";
 const FOREIGN_SERVERS: [u8; 8] = *b"UQAFSR01";
 const GRAPH_OIDS: [u8; 8] = *b"UQAGOI01";
 
@@ -167,6 +169,14 @@ catalog_image!(
     Ranges,
     RANGES,
     ranges
+);
+
+catalog_image!(
+    CapturedForeignWrappers,
+    ForeignWrappers,
+    ForeignWrappers,
+    FOREIGN_WRAPPERS,
+    foreign_wrappers
 );
 
 impl CapturedDatabaseAuthority {

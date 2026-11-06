@@ -21,8 +21,10 @@ use uqa_core::{
 };
 
 mod authorities;
+mod callbacks;
 mod column_types;
 mod foreign_servers;
+mod foreign_wrappers;
 mod graph_oids;
 mod memberships;
 mod metadata;
@@ -32,6 +34,7 @@ mod structured_types;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use foreign_servers::foreign_servers;
+pub(super) use foreign_wrappers::foreign_wrappers;
 pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
 pub(super) use roles::roles;
