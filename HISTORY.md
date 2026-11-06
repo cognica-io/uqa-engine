@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Add repository-owned restore jobs that advance provider import and validation before publishing a new destination. Owned image readers retain archive leases across steps; failure, cancellation and unwinding close active work, and recovery uses the original durable request. Complete public Engine restore remains under implementation.
 
-- Add native role, membership, schema and database authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Whole-Engine memory backup and restore remain under implementation.
+- Add native role, membership, schema, database, built-in routine and system relation authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Whole-Engine memory backup and restore remain under implementation.
 
 - Add exact materialized path-index images for memory backups. Borrowed and owned readers stream original label sequences and evaluated vertex pairs with fixed state, preserving selected data after graph changes and source closure. Import validates complete framing and canonical order before publication and retains decoded memory admission through native clones and captures. Complete memory Engine backup and restore remain under implementation.
 

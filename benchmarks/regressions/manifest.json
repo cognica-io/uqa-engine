@@ -45339,6 +45339,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_image_matches_literal_frame_and_retains_acl_paths",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities.rs",
+      "capability": "Native security catalog images",
+      "workload": "Decode an independent literal routine frame and stream PUBLIC, bound, repeated and empty EXECUTE ACLs through multiple window sizes.",
+      "invariant": "OID and revision bytes, grantee/grantor incarnations, order, multiplicity and grant options survive native image reconstruction exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "system_authority_image_matches_literal_frame_and_retains_column_revisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities.rs",
+      "capability": "Native security catalog images",
+      "workload": "Decode an independent relation frame and import table/column authority with absent, empty and repeated paths.",
+      "invariant": "Table presence, ordered attribute keys, independent revisions and all table privilege fields are preserved by every output window size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_image_readers_preserve_bounded_output_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities.rs",
+      "capability": "Native security catalog images",
+      "workload": "Stream large routine and system-column ACL vectors through a measured fixed-buffer reader.",
+      "invariant": "Construction and output allocate no heap workspace, each read emits at most 16 KiB and the exact original byte sequence is retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_image_import_rejects_corrupt_framing_and_native_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Truncate every byte, append data and corrupt OIDs, revisions, tags, counts, system names and key order.",
+      "invariant": "Invalid input never returns a native registry; all partially allocated payloads and map nodes release their admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_image_import_retains_admission_through_shared_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Measure native retained footprints and construction peaks, reject allowances below owned payloads, then clear/drop registries and clones while retaining captures.",
+      "invariant": "Imported and captured footprints agree; complete images remain available until the final owner releases every retained allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_image_input_cancellation_releases_partial_native_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Cancel bounded partial reads at headers, ACLs and late column reconstruction.",
+      "invariant": "Cancellation returns the original SQLSTATE and releases all partially constructed authority state without publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_builtin_and_system_images_restore_authority_after_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/security_images.rs",
+      "capability": "Native security catalog images",
+      "workload": "Capture actual SQL grants, roll changes back, revoke and replace a role, close the Engine and decode the original authority images.",
+      "invariant": "Original tuple revisions and role incarnations remain exact and valid; source/capture/import resources retire independently.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

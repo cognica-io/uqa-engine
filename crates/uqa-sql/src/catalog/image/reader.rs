@@ -4,15 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! One bounded cursor covers native role, membership, schema and database authority images.
+//! One bounded cursor covers native security catalog images.
 
-use super::fields::{attribute_bit, Field, Fields};
+use super::fields::{Field, Fields};
 use crate::{
+    ast::ObjectAclEntry,
     catalog::{
         named_definitions::CapturedDefinitionIter,
         roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
         security::{
+            builtin_routines::BuiltinRoutineSecurity,
             database::{BoundDatabaseSecurity, DatabasePrivileges},
+            system_relations::{SystemAcl, SystemRelationSecurity},
             BoundSchemaSecurity,
         },
     },
@@ -20,8 +23,8 @@ use crate::{
 };
 use std::{io::Write, slice::Iter};
 use uqa_core::{
-    catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges, image_io::ImageOutput,
-    CancellationToken,
+    catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
+    image_io::ImageOutput, memory::BudgetedMapIter, CancellationToken, RelationIdentity,
 };
 
 pub(super) enum Entries<'a> {
@@ -29,11 +32,15 @@ pub(super) enum Entries<'a> {
     Memberships(CapturedDefinitionIter<'a, RoleMembershipKey, RoleMembership>),
     Schemas(CapturedDefinitionIter<'a, String, BoundSchemaSecurity>),
     Database(Option<&'a BoundDatabaseSecurity>),
+    BuiltinRoutines(CapturedDefinitionIter<'a, u32, BuiltinRoutineSecurity>),
+    SystemRelations(CapturedDefinitionIter<'a, RelationIdentity, SystemRelationSecurity>),
 }
 enum Acl<'a> {
     None,
     Schema(Iter<'a, BoundAclEntry<SchemaPrivileges>>),
     Database(Iter<'a, BoundAclEntry<DatabasePrivileges>>),
+    Object(Iter<'a, ObjectAclEntry>),
+    Table(Iter<'a, BoundAclEntry<TablePrivileges>>),
 }
 
 enum State {
@@ -46,6 +53,7 @@ enum State {
 pub struct CatalogImageReader<'a> {
     entries: Entries<'a>,
     acl: Acl<'a>,
+    columns: Option<BudgetedMapIter<'a, String, SystemAcl>>,
     fields: Fields<'a>,
     field: Field<'a>,
     offset: usize,
@@ -67,6 +75,7 @@ impl<'a> CatalogImageReader<'a> {
         Ok(Self {
             entries,
             acl: Acl::None,
+            columns: None,
             fields,
             field: Field::Bytes(&[]),
             offset: 0,
@@ -88,68 +97,52 @@ impl<'a> CatalogImageReader<'a> {
                     return true;
                 }
             }
+            Acl::Object(acl) => {
+                if let Some(entry) = acl.next() {
+                    self.fields.object_acl(entry);
+                    return true;
+                }
+            }
+            Acl::Table(acl) => {
+                if let Some(entry) = acl.next() {
+                    self.fields.acl(entry);
+                    return true;
+                }
+            }
             Acl::None => {}
         }
         self.acl = Acl::None;
         false
+    }
+    fn system_acl(&mut self, value: &'a SystemAcl) {
+        let SystemAcl { revision, acl } = value;
+        self.fields.scalar(*revision);
+        self.fields.count(acl.len());
+        self.acl = Acl::Table(acl.iter());
     }
     fn next_record(&mut self) -> bool {
         self.fields = Fields::new();
         if self.next_acl() {
             return true;
         }
+        if let Some((name, value)) = self.columns.as_mut().and_then(Iterator::next) {
+            self.fields.text(name);
+            self.system_acl(value);
+            return true;
+        }
+        self.columns = None;
         match &mut self.entries {
             Entries::Roles(entries) => {
                 let Some((key, role)) = entries.next() else {
                     return false;
                 };
-                let RoleDefinition {
-                    oid,
-                    object_id,
-                    revision,
-                    name,
-                    attributes,
-                    connection_limit,
-                } = role;
-                self.fields.text(key);
-                self.fields.scalar(oid.to_le_bytes());
-                self.fields.scalar(*object_id);
-                self.fields.scalar(revision.to_le_bytes());
-                self.fields.text(name);
-                let bits = attributes
-                    .iter()
-                    .fold(0, |bits, attribute| bits | attribute_bit(*attribute));
-                self.fields.scalar([bits]);
-                self.fields.scalar(connection_limit.to_le_bytes());
+                self.fields.role(key, role);
             }
             Entries::Memberships(entries) => {
                 let Some((key, membership)) = entries.next() else {
                     return false;
                 };
-                let RoleMembershipKey {
-                    role,
-                    member,
-                    grantor,
-                } = key;
-                for identity in [role, member, grantor] {
-                    self.fields.identity(*identity);
-                }
-                let RoleMembership {
-                    oid,
-                    role,
-                    member,
-                    grantor,
-                    admin_option,
-                    inherit_option,
-                    set_option,
-                } = membership;
-                self.fields.scalar(oid.to_le_bytes());
-                for binding in [role, member, grantor] {
-                    self.fields.binding(binding);
-                }
-                self.fields.scalar([u8::from(*admin_option)
-                    | (u8::from(*inherit_option) << 1)
-                    | (u8::from(*set_option) << 2)]);
+                self.fields.membership(key, membership);
             }
             Entries::Schemas(entries) => {
                 let Some((key, schema)) = entries.next() else {
@@ -189,6 +182,34 @@ impl<'a> CatalogImageReader<'a> {
                 if let Some(acl) = acl {
                     self.fields.count(acl.len());
                     self.acl = Acl::Database(acl.iter());
+                }
+            }
+            Entries::BuiltinRoutines(entries) => {
+                let Some((oid, value)) = entries.next() else {
+                    return false;
+                };
+                let BuiltinRoutineSecurity {
+                    revision,
+                    execute_acl,
+                } = value;
+                self.fields.scalar(oid.to_le_bytes());
+                self.fields.scalar(*revision);
+                self.fields.count(execute_acl.len());
+                self.acl = Acl::Object(execute_acl.iter());
+            }
+            Entries::SystemRelations(entries) => {
+                let Some((key, value)) = entries.next() else {
+                    return false;
+                };
+                let RelationIdentity { schema, name } = key;
+                let SystemRelationSecurity { table, columns } = value;
+                self.fields.text(schema);
+                self.fields.text(name);
+                self.fields.count(columns.len());
+                self.fields.flag(table.is_some());
+                self.columns = Some(columns.iter());
+                if let Some(table) = table {
+                    self.system_acl(table);
                 }
             }
         }

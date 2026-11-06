@@ -9,8 +9,10 @@
 use super::{
     roles::{CapturedRoleDefinitions, CapturedRoleMemberships, RoleDefinitions, RoleMemberships},
     security::{
+        builtin_routines::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities},
         database::{CapturedDatabaseAuthority, DatabaseAuthority},
         schema_registry::{CapturedSchemaRegistry, SchemaRegistry},
+        system_relations::{CapturedSystemRelationSecurities, SystemRelationSecurities},
     },
 };
 use crate::SQLError;
@@ -27,6 +29,8 @@ const ROLES: [u8; 8] = *b"UQAROL01";
 const MEMBERSHIPS: [u8; 8] = *b"UQARMB01";
 const SCHEMAS: [u8; 8] = *b"UQASCH01";
 const DATABASE: [u8; 8] = *b"UQADBA01";
+const BUILTIN_ROUTINES: [u8; 8] = *b"UQABRA01";
+const SYSTEM_RELATIONS: [u8; 8] = *b"UQASRA01";
 
 fn invalid(message: &'static str) -> SQLError {
     SQLError::Routine {
@@ -92,6 +96,20 @@ catalog_image!(
     Schemas,
     SCHEMAS,
     schemas
+);
+catalog_image!(
+    CapturedBuiltinRoutineSecurities,
+    BuiltinRoutineSecurities,
+    BuiltinRoutines,
+    BUILTIN_ROUTINES,
+    builtin_routines
+);
+catalog_image!(
+    CapturedSystemRelationSecurities,
+    SystemRelationSecurities,
+    SystemRelations,
+    SYSTEM_RELATIONS,
+    system_relations
 );
 
 impl CapturedDatabaseAuthority {

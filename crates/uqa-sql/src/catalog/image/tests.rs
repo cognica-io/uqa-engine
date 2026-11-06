@@ -24,6 +24,7 @@ use uqa_core::{
     memory::{OwnedSet, ProductionControl},
 };
 
+mod authorities;
 mod retention;
 mod validation;
 

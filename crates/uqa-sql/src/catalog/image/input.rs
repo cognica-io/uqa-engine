@@ -19,9 +19,11 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod authorities;
 mod memberships;
 mod roles;
 mod security;
+pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use memberships::memberships;
 pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
@@ -122,6 +124,11 @@ impl<'a> Input<'a> {
         if !self.flag()? {
             return Ok(Budgeted::new(None, memory.empty_reservation()));
         }
+        let (entries, reservation) = self.acl_entries()?.into_parts();
+        Ok(Budgeted::new(Some(entries), reservation))
+    }
+    fn acl_entries<P: Privileges>(&mut self) -> Result<Budgeted<Vec<BoundAclEntry<P>>>, SQLError> {
+        let memory = self.binary.memory;
         let count = self.binary.count()?;
         let mut entries = BudgetedVec::new(memory);
         entries.reserve(count)?;
@@ -143,7 +150,7 @@ impl<'a> Input<'a> {
             })?;
         }
         let (entries, memory) = entries.into_parts();
-        Ok(Budgeted::new(Some(entries), memory))
+        Ok(Budgeted::new(entries, memory))
     }
 }
 

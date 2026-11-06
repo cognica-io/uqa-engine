@@ -8,7 +8,10 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::{
     roles::{RoleDefinitions, RoleMemberships},
-    security::{database::DatabaseAuthority, schema_registry::SchemaRegistry},
+    security::{
+        builtin_routines::BuiltinRoutineSecurities, database::DatabaseAuthority,
+        schema_registry::SchemaRegistry, system_relations::SystemRelationSecurities,
+    },
 };
 
 #[test]
@@ -104,5 +107,72 @@ fn captured_security_images_restore_original_authority_after_replacement_and_eng
         restored_schemas,
         restored_database,
     ));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn captured_builtin_and_system_images_restore_authority_after_engine_closure() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE ROLE reader; GRANT UPDATE ON pg_class TO reader WITH GRANT OPTION; GRANT SELECT(relname,relnamespace) ON pg_class TO reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM PUBLIC; GRANT EXECUTE ON FUNCTION lower(text) TO reader WITH GRANT OPTION");
+    let roles = engine.durable.roles.snapshot();
+    let routines = engine.durable.builtin_routine_security.snapshot();
+    let system = engine.durable.system_relation_security.snapshot();
+    let routine_key = engine.durable.builtin_routine_security.key().unwrap();
+    let system_key = engine.durable.system_relation_security.key().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; REVOKE SELECT(relname) ON pg_class FROM reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM reader; SAVEPOINT changed; GRANT EXECUTE ON FUNCTION lower(text) TO PUBLIC; ROLLBACK TO changed; ROLLBACK");
+    assert!(*engine.durable.builtin_routine_security.read() == *routines);
+    assert!(*engine.durable.system_relation_security.read() == *system);
+    sql(&engine, "REVOKE UPDATE ON pg_class FROM reader; REVOKE SELECT(relname,relnamespace) ON pg_class FROM reader; REVOKE EXECUTE ON FUNCTION lower(text) FROM reader; DROP ROLE reader; CREATE ROLE reader; GRANT EXECUTE ON FUNCTION lower(text) TO PUBLIC");
+    assert_ne!(
+        engine.durable.roles.read()["reader"].object_id,
+        roles["reader"].object_id
+    );
+    drop(engine);
+    let saved_routines = routine_key.retained(&cut).unwrap().unwrap();
+    let saved_system = system_key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let token = CancellationToken::new();
+    let mut routine_image = vec![];
+    let mut system_image = vec![];
+    saved_routines
+        .get()
+        .unwrap()
+        .write_image(&mut routine_image, &token)
+        .unwrap();
+    saved_system
+        .get()
+        .unwrap()
+        .write_image(&mut system_image, &token)
+        .unwrap();
+    drop((saved_routines, saved_system));
+    assert_eq!(control.memory().used(), 0);
+    let memory = MemoryBudget::new(1 << 20);
+    let restored_routines =
+        BuiltinRoutineSecurities::read_image(&mut routine_image.as_slice(), &memory, &token)
+            .unwrap();
+    let restored_system =
+        SystemRelationSecurities::read_image(&mut system_image.as_slice(), &memory, &token)
+            .unwrap();
+    assert!(restored_routines == *routines);
+    assert!(restored_system == *system);
+    for (_, security) in &restored_routines {
+        uqa_sql::catalog::security::builtin_routines::validate(security, &roles).unwrap();
+    }
+    for (key, security) in &restored_system {
+        let relation = uqa_sql::catalog::SystemRelation::at(&key.schema, &key.name).unwrap();
+        security
+            .security(relation)
+            .validate(Some(&relation.column_names()), &roles)
+            .unwrap();
+    }
+    drop((restored_routines, restored_system));
     assert_eq!(memory.used(), 0);
 }

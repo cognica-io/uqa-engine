@@ -7,13 +7,17 @@
 //! Fixed field descriptors borrow original text and encode scalar identities explicitly.
 
 use crate::{
-    ast::RoleAttribute,
+    ast::{ObjectAclEntry, RoleAttribute},
     catalog::{
-        roles::{identity::RoleBinding, RoleIdentity},
+        roles::{
+            identity::RoleBinding, RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey,
+        },
         security::database::DatabasePrivileges,
     },
 };
-use uqa_core::{catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges};
+use uqa_core::{
+    catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum Field<'a> {
@@ -90,6 +94,65 @@ impl<'a> Fields<'a> {
         self.identity(*grantor);
         self.scalar([privileges.bits(), grant_options.bits()]);
     }
+    pub fn object_acl(&mut self, value: &ObjectAclEntry) {
+        let ObjectAclEntry {
+            role,
+            grantor,
+            grant_option,
+        } = value;
+        self.flag(role.is_some());
+        if let Some(role) = role {
+            self.identity(*role);
+        }
+        self.identity(*grantor);
+        self.flag(*grant_option);
+    }
+    pub fn role(&mut self, key: &'a str, role: &'a RoleDefinition) {
+        let RoleDefinition {
+            oid,
+            object_id,
+            revision,
+            name,
+            attributes,
+            connection_limit,
+        } = role;
+        self.text(key);
+        self.scalar(oid.to_le_bytes());
+        self.scalar(*object_id);
+        self.scalar(revision.to_le_bytes());
+        self.text(name);
+        let bits = attributes
+            .iter()
+            .fold(0, |bits, attribute| bits | attribute_bit(*attribute));
+        self.scalar([bits]);
+        self.scalar(connection_limit.to_le_bytes());
+    }
+    pub fn membership(&mut self, key: &RoleMembershipKey, membership: &'a RoleMembership) {
+        let RoleMembershipKey {
+            role,
+            member,
+            grantor,
+        } = key;
+        for identity in [role, member, grantor] {
+            self.identity(*identity);
+        }
+        let RoleMembership {
+            oid,
+            role,
+            member,
+            grantor,
+            admin_option,
+            inherit_option,
+            set_option,
+        } = membership;
+        self.scalar(oid.to_le_bytes());
+        for binding in [role, member, grantor] {
+            self.binding(binding);
+        }
+        self.scalar([u8::from(*admin_option)
+            | (u8::from(*inherit_option) << 1)
+            | (u8::from(*set_option) << 2)]);
+    }
     pub fn next(&mut self) -> Option<Field<'a>> {
         if self.position == self.count {
             return None;
@@ -142,6 +205,41 @@ impl Privileges for DatabasePrivileges {
             connect: bits & 1 != 0,
             create: bits & 2 != 0,
             temporary: bits & 4 != 0,
+        })
+    }
+}
+
+impl Privileges for TablePrivileges {
+    fn bits(&self) -> u8 {
+        let Self {
+            select,
+            insert,
+            update,
+            delete,
+            truncate,
+            references,
+            trigger,
+            maintain,
+        } = self;
+        u8::from(*select)
+            | (u8::from(*insert) << 1)
+            | (u8::from(*update) << 2)
+            | (u8::from(*delete) << 3)
+            | (u8::from(*truncate) << 4)
+            | (u8::from(*references) << 5)
+            | (u8::from(*trigger) << 6)
+            | (u8::from(*maintain) << 7)
+    }
+    fn from_bits(bits: u8) -> Option<Self> {
+        Some(Self {
+            select: bits & 1 != 0,
+            insert: bits & 2 != 0,
+            update: bits & 4 != 0,
+            delete: bits & 8 != 0,
+            truncate: bits & 16 != 0,
+            references: bits & 32 != 0,
+            trigger: bits & 64 != 0,
+            maintain: bits & 128 != 0,
         })
     }
 }
