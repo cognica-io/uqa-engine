@@ -17,5 +17,6 @@ filter = 'package(=uqa-engine) & test(native_session_groups_preserve_metadata_un
 test-group = 'native-session-schedules'
 # Each round already runs simultaneous one-thread and sixteen-thread child suites.
 threads-required = "num-test-threads"
-# The round contains 138 durable fixture executions, including its full serial schedule.
-slow-timeout = { period = "30s", terminate-after = 30, grace-period = "10s" }
+# Each child requires a new, distinct passing fixture within five minutes and owns process cleanup.
+# The round retains all 138 executions; its deadline follows fixture progress instead of their sum.
+slow-timeout = "30s"

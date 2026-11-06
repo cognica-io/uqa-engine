@@ -4317,7 +4317,7 @@
       "cases": 2,
       "source": "crates/uqa-engine/tests/sessions/ivf_publication.rs",
       "capability": "Concurrent native session metadata correctness",
-      "workload": "Two required round cases each run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes; CI serializes the round cases, reserves every outer execution slot for their child suites and retains child progress; each aggregate round has a 900-second operational deadline for its 138 nested fixture executions.",
+      "workload": "Two required round cases each run the original 69 native session tests in serial and with sixteen threads in separate simultaneous processes, including all four SQLite file modes. Each child requires a new distinct passing fixture within 300 seconds and successful process exit with all 69 fixtures and the complete summary; duplicate, failed or incomplete results fail. Stalled children are terminated and reaped. CI serializes the rounds and reserves every outer execution slot without charging the cumulative 138-fixture runtime to one test deadline.",
       "invariant": "Every original fixture passes in every round and schedule; no retry, skipped fixture or isolated-test scheduling can hide the within-process metadata inconsistency.",
       "case_names": [
         "case_1_first",
