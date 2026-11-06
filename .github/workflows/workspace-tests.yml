@@ -24,7 +24,8 @@ jobs:
   build:
     name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
-    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 90 || 60 }}
+    # macOS builds and executes the full suite here; execution has its own deadline.
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 60 }}
     outputs:
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
@@ -50,6 +51,7 @@ jobs:
           save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
       - name: Build workspace tests once
+        timeout-minutes: 60
         shell: bash
         run: |
           args=(--workspace --locked)
@@ -63,9 +65,10 @@ jobs:
           echo "sha256=${archive_checksum%% *}" >> "$GITHUB_OUTPUT"
       - name: Run every macOS workspace test on its build worker
         if: runner.os == 'macOS'
+        timeout-minutes: 90
         env:
           # Durable storage cases wait for I/O; the complete workspace needs more execution slots than compiler jobs.
-          NEXTEST_TEST_THREADS: "8"
+          NEXTEST_TEST_THREADS: "16"
         run: >-
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
