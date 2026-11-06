@@ -8,8 +8,8 @@
 
 use crate::{
     backup::{
-        BackupCut, BackupError, BackupLease, BackupRecordImportMapping, BackupResult, BackupRoot,
-        ImageFormat, ImageProvider, MappedRecordImageImportReader, NamespaceId,
+        BackupCut, BackupError, BackupLeaseInput, BackupRecordImportMapping, BackupResult,
+        BackupRoot, ImageFormat, ImageProvider, MappedRecordImageImportReader, NamespaceId,
     },
     mvcc::{BackupCursorKey, NotificationRecordLayout},
     read_control::StorageReadControl,
@@ -65,7 +65,7 @@ pub struct KeyValueImageImportReader<'a>(MappedRecordImageImportReader<'a, Mappi
 
 impl<'a> KeyValueImageImportReader<'a> {
     pub fn new(
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         provider: ImageProvider,
         maximum_workspace_bytes: u64,
         control: &StorageReadControl,

@@ -28,9 +28,11 @@ mod types;
 pub use repository::{
     BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
     BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
-    BackupImageStatistics, BackupLease, BackupListing, BackupOperation, BackupPack, BackupReadStep,
-    BackupRestoreImporter, BackupRestoreOperation, LocalRepository, PackObject, PackRange,
-    RestoreDirectory, RestoredDatabase, VerifiedBackupImage,
+    BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing, BackupOperation,
+    BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob,
+    BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep,
+    LocalRepository, PackObject, PackRange, RestoreDirectory, RestoreFileWork, RestoredDatabase,
+    VerifiedBackupImage,
 };
 
 pub use error::{BackupError, BackupResult};

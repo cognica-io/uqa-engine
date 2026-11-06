@@ -111,23 +111,24 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
     let lease = repository.open_backup(root.backup(), &control).unwrap();
     let mut import = RedbBackupImport::new(
         file(&target_path),
-        &lease,
+        lease,
         request,
         256 << 10,
         2 << 20,
         &control,
     )
     .unwrap();
+    assert!(matches!(
+        repository.remove_backup(root.backup(), &setup),
+        Err(BackupError::Busy)
+    ));
     assert!(
         RedbStorage::open(&target_path).is_err(),
         "import owns the exclusive file"
     );
     complete_import(&mut import);
-    assert_eq!(import.imported_records(), expected.len() as u64);
-    assert_eq!(control.memory().used(), 0);
-    assert!(control.memory().peak() <= 384 << 10);
-    control.cancellation().cancel();
-    assert_eq!(import.advance().unwrap(), RedbBackupImportStep::Complete);
+    repository.remove_backup(root.backup(), &setup).unwrap();
+    verify_completed_import(&mut import, expected.len() as u64, &control);
 
     // Successful import closes every physical handle before returning Complete.
     let restored = RedbStorage::open(&target_path).unwrap();
@@ -175,6 +176,18 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
         super::backup_image::expected_records(&retry, b"\xffunused", &notification),
         after
     );
+}
+
+fn verify_completed_import(
+    import: &mut RedbBackupImport<'_>,
+    expected_records: u64,
+    control: &StorageReadControl,
+) {
+    assert_eq!(import.imported_records(), expected_records);
+    assert_eq!(control.memory().used(), 0);
+    assert!(control.memory().peak() <= 384 << 10);
+    control.cancellation().cancel();
+    assert_eq!(import.advance().unwrap(), RedbBackupImportStep::Complete);
 }
 
 fn complete_import(import: &mut RedbBackupImport<'_>) {

@@ -10,7 +10,7 @@ use std::fs::File;
 
 use redb::{Database, ReadableTable};
 use uqa_storage::{
-    backup::{BackupError, BackupLease, BackupResult, BackupRoot, ImageProvider},
+    backup::{BackupError, BackupLeaseInput, BackupResult, BackupRoot, ImageProvider},
     key_value::{KeyValueImageImportReader, KeyValueImageStep, KeyValueImportUnit},
     mvcc::{BackupCursorKey, DatabaseRestore, DEFAULT_RECEIPT_RETENTION_LIMIT},
     read_control::StorageReadControl,
@@ -48,7 +48,7 @@ pub struct RedbBackupImport<'a> {
 impl<'a> RedbBackupImport<'a> {
     pub fn new(
         file: File,
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         request: DatabaseRestore,
         maximum_value_bytes: usize,
         maximum_workspace_bytes: u64,
@@ -58,6 +58,7 @@ impl<'a> RedbBackupImport<'a> {
         if maximum_value_bytes == 0 {
             return Err(BackupError::Invalid("zero redb import value limit"));
         }
+        let lease = lease.into();
         let root = lease.root();
         if request.source() != root.cut().source {
             return Err(BackupError::Invalid(

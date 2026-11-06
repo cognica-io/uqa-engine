@@ -20,7 +20,9 @@ pub use operation::{
     PackObject, PackRange,
 };
 pub use restore::{
-    BackupRestoreImporter, BackupRestoreOperation, RestoreDirectory, RestoredDatabase,
+    BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob, BackupRestoreOperation,
+    BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep, RestoreDirectory, RestoreFileWork,
+    RestoredDatabase,
 };
 pub use retention::{BackupCollectionReport, BackupListing};
 pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};
@@ -57,10 +59,10 @@ pub struct LocalRepository {
 pub struct BackupLease<'a> {
     repository: &'a LocalRepository,
     root: BackupRoot,
-    _lease: directory::Lease,
+    lease: directory::Lease,
 }
 
-impl BackupLease<'_> {
+impl<'a> BackupLease<'a> {
     pub const fn root(&self) -> BackupRoot {
         self.root
     }
@@ -74,6 +76,15 @@ impl BackupLease<'_> {
         verify::reader(self.repository, self.root, maximum_workspace_bytes, control)
     }
 
+    /// Transfer the root lease to a resumable reader. Root removal remains excluded until that reader completes, fails or is dropped; no borrowed lease handle must remain beside it.
+    pub fn into_image_reader(
+        self,
+        maximum_workspace_bytes: u64,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupImageReader<'a>> {
+        BackupImageReader::from_owned_lease(self, maximum_workspace_bytes, control)
+    }
+
     /// Authenticate every referenced frame and unit and compare the complete inventory. Provider-specific image validation remains the importing owner's responsibility.
     pub fn verify(
         &self,
@@ -82,6 +93,63 @@ impl BackupLease<'_> {
     ) -> BackupResult<()> {
         self.repository
             .verify_root(self.root, maximum_workspace_bytes, control)
+    }
+}
+
+/// A provider import can borrow an existing root lease or own it across independently scheduled steps. Both forms use the same image verifier and retain the same root identity.
+pub struct BackupLeaseInput<'a> {
+    root: BackupRoot,
+    ownership: LeaseOwnership<'a>,
+}
+
+enum LeaseOwnership<'a> {
+    Borrowed(&'a BackupLease<'a>),
+    Owned {
+        repository: &'a LocalRepository,
+        lease: directory::Lease,
+    },
+}
+
+impl<'a, 'repository: 'a> From<&'a BackupLease<'repository>> for BackupLeaseInput<'a> {
+    fn from(lease: &'a BackupLease<'repository>) -> Self {
+        Self {
+            root: lease.root,
+            ownership: LeaseOwnership::Borrowed(lease),
+        }
+    }
+}
+
+impl<'a> From<BackupLease<'a>> for BackupLeaseInput<'a> {
+    fn from(lease: BackupLease<'a>) -> Self {
+        Self {
+            root: lease.root,
+            ownership: LeaseOwnership::Owned {
+                repository: lease.repository,
+                lease: lease.lease,
+            },
+        }
+    }
+}
+
+impl<'a> BackupLeaseInput<'a> {
+    pub const fn root(&self) -> BackupRoot {
+        self.root
+    }
+
+    pub(super) fn read_image(
+        self,
+        maximum_workspace_bytes: u64,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupImageReader<'a>> {
+        match self.ownership {
+            LeaseOwnership::Borrowed(lease) => lease.read_image(maximum_workspace_bytes, control),
+            LeaseOwnership::Owned { repository, lease } => BackupLease {
+                repository,
+                root: self.root,
+                lease,
+            }
+            .into_image_reader(maximum_workspace_bytes, control),
+        }
     }
 }
 
@@ -284,7 +352,7 @@ impl LocalRepository {
         Ok(BackupLease {
             repository: self,
             root,
-            _lease: lease,
+            lease,
         })
     }
 }

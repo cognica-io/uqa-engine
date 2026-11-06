@@ -10,7 +10,7 @@ use super::{
     super::{
         directory,
         objects::{ObjectVerification, SpanReader},
-        LocalRepository,
+        BackupLease, LocalRepository,
     },
     Ledger,
 };
@@ -76,9 +76,26 @@ pub struct BackupImageReader<'a> {
     object: Option<ObjectVerification>,
     stage: Stage,
     object_bytes: u64,
+    // Retire the root only after every active object and verification file has closed.
+    lease: Option<directory::Lease>,
 }
 
 impl<'a> BackupImageReader<'a> {
+    pub(in crate::backup::repository) fn from_owned_lease(
+        lease: BackupLease<'a>,
+        maximum_workspace_bytes: u64,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        let mut reader = Self::new(
+            lease.repository,
+            lease.root,
+            maximum_workspace_bytes,
+            control,
+        )?;
+        reader.lease = Some(lease.lease);
+        Ok(reader)
+    }
+
     pub(super) fn new(
         repository: &'a LocalRepository,
         root: BackupRoot,
@@ -121,6 +138,7 @@ impl<'a> BackupImageReader<'a> {
             object: None,
             stage: Stage::Inventory,
             object_bytes: 0,
+            lease: None,
         })
     }
 
@@ -291,5 +309,6 @@ impl<'a> BackupImageReader<'a> {
         self.object = None;
         self.inventory = None;
         self.ledger = None;
+        self.lease = None;
     }
 }

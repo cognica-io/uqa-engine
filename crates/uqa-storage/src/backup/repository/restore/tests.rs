@@ -16,6 +16,7 @@ use super::super::Fault;
 use super::*;
 
 mod paths;
+mod scheduled;
 
 struct Fixture {
     directory: tempfile::TempDir,

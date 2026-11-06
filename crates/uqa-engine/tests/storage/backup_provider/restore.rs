@@ -8,7 +8,10 @@
 
 use super::*;
 use uqa_storage::{
-    backup::{BackupLease, BackupRestoreImporter, RestoreDirectory},
+    backup::{
+        BackupLease, BackupRestoreFactory, BackupRestoreStep, BackupRestoreWork,
+        BackupRestoreWorkStep, RestoreDirectory, RestoreFileWork,
+    },
     mvcc::DatabaseRestore,
     StorageEncryptionKey, StorageTransactionModel,
 };
@@ -57,62 +60,112 @@ impl Importer<'_> {
     }
 }
 
-impl BackupRestoreImporter for Importer<'_> {
+enum Input<'a> {
+    Native(Box<SQLiteNativeBackupImport<'a>>),
+    KV(Box<SQLiteKeyValueBackupImport<'a>>),
+    Redb(Box<RedbBackupImport<'a>>),
+}
+
+impl Input<'_> {
+    fn records(&self) -> u64 {
+        match self {
+            Self::Native(input) => input.imported_records() + input.imported_identifiers(),
+            Self::KV(input) => input.imported_records() + input.imported_identifiers(),
+            Self::Redb(input) => input.imported_records() + input.imported_identifiers(),
+        }
+    }
+
+    fn advance(&mut self) -> BackupResult<bool> {
+        let before = self.records();
+        let complete = match self {
+            Self::Native(input) => input.advance()? == SQLiteBackupImportStep::Complete,
+            Self::KV(input) => input.advance()? == SQLiteBackupImportStep::Complete,
+            Self::Redb(input) => input.advance()? == RedbBackupImportStep::Complete,
+        };
+        assert!(self.records() - before <= 1);
+        Ok(complete)
+    }
+}
+
+struct Work<'a, 'expected> {
+    input: Option<Input<'a>>,
+    validator: Importer<'expected>,
+    path: std::path::PathBuf,
+    request: DatabaseRestore,
+}
+
+impl BackupRestoreWork for Work<'_, '_> {
+    fn advance(&mut self) -> BackupResult<BackupRestoreWorkStep> {
+        if let Some(input) = &mut self.input {
+            if input.advance()? {
+                self.input = None;
+            }
+            return Ok(BackupRestoreWorkStep::Pending);
+        }
+        // This fixed-fixture observer is not the production logical-image validator.
+        self.validator.validate(&self.path, self.request);
+        Ok(BackupRestoreWorkStep::Complete)
+    }
+}
+
+impl<'a, 'expected> BackupRestoreFactory<'a> for Importer<'expected> {
+    type Work = RestoreFileWork<Work<'a, 'expected>>;
+
     fn import(
         self,
         directory: &RestoreDirectory<'_>,
-        backup: &BackupLease<'_>,
+        backup: BackupLease<'a>,
         request: DatabaseRestore,
         control: &StorageReadControl,
-    ) -> BackupResult<()> {
+    ) -> BackupResult<Self::Work> {
         let file = directory.create_file("database")?;
-        if matches!(self.kind, Provider::Redb) {
-            let mut import =
-                RedbBackupImport::new(file, backup, request, 4 << 20, 16 << 20, control)?;
-            while import.advance()? != RedbBackupImportStep::Complete {}
-            drop(import);
-        } else {
-            drop(file);
-            directory.with_file_path("database", control, |path| {
-                match self.kind {
-                    Provider::Native => {
-                        let mut import = SQLiteNativeBackupImport::new(
-                            path,
-                            backup,
-                            request,
-                            self.options(),
-                            control,
-                        )?;
-                        while import.advance()? != SQLiteBackupImportStep::Complete {}
-                    }
-                    Provider::KV => {
-                        let mut import = SQLiteKeyValueBackupImport::new(
-                            path,
-                            backup,
-                            request,
-                            self.options(),
-                            control,
-                        )?;
-                        while import.advance()? != SQLiteBackupImportStep::Complete {}
-                    }
-                    Provider::Redb => unreachable!(),
+        directory.begin_file_work("database", control, |path| {
+            let input = match self.kind {
+                Provider::Redb => Input::Redb(Box::new(RedbBackupImport::new(
+                    file,
+                    backup,
+                    request,
+                    4 << 20,
+                    16 << 20,
+                    control,
+                )?)),
+                Provider::Native => {
+                    drop(file);
+                    Input::Native(Box::new(SQLiteNativeBackupImport::new(
+                        path,
+                        backup,
+                        request,
+                        self.options(),
+                        control,
+                    )?))
                 }
-                Ok(())
-            })?;
-        }
-        directory.with_file_path("database", control, |path| {
-            self.validate(path, request);
-            Ok(())
+                Provider::KV => {
+                    drop(file);
+                    Input::KV(Box::new(SQLiteKeyValueBackupImport::new(
+                        path,
+                        backup,
+                        request,
+                        self.options(),
+                        control,
+                    )?))
+                }
+            };
+            Ok(Work {
+                input: Some(input),
+                validator: self,
+                path: path.to_owned(),
+                request,
+            })
         })
     }
 
     fn recover(
         self,
         _: &RestoreDirectory<'_>,
-        _: &BackupLease<'_>,
+        _: BackupLease<'a>,
         _: DatabaseRestore,
         _: &StorageReadControl,
-    ) -> BackupResult<()> {
+    ) -> BackupResult<Self::Work> {
         panic!("fresh-target drill does not resume an interrupted import")
     }
 }
@@ -126,20 +179,27 @@ pub(super) fn verify(
     expected: &Observed,
     control: &StorageReadControl,
 ) {
-    let mut operation = repository
+    let operation = repository
         .begin_restore(root.backup(), target, control)
         .unwrap();
     let request = operation.request();
     assert_ne!(request.source(), request.target());
-    operation
-        .prepare(Importer {
+    let mut job = operation
+        .into_job(Importer {
             kind,
             mode,
             expected,
         })
         .unwrap();
+    let mut steps = 0;
+    while job.advance().unwrap() != BackupRestoreStep::Prepared {
+        steps += 1;
+        assert!(steps < 100_000);
+        assert!(!target.exists(), "partial import remains private");
+    }
+    assert!(steps > 1);
     assert!(!target.exists(), "validation precedes target publication");
-    let receipt = operation.publish().unwrap();
+    let receipt = job.publish().unwrap();
     assert_eq!(receipt.database, request.target());
     let path = target.join("database");
     {
@@ -167,8 +227,9 @@ pub(super) fn verify(
         );
         sql(&engine, "INSERT INTO archive.after_restore VALUES (23)");
     }
-    assert_eq!(operation.publish().unwrap(), receipt);
-    drop(operation);
+    assert_eq!(job.advance().unwrap(), BackupRestoreStep::Complete);
+    assert_eq!(job.publish().unwrap(), receipt);
+    drop(job);
     let reopened = Engine::from_persistent_provider(kind.open(&path, mode)).unwrap();
     assert_eq!(
         sql(&reopened, "SELECT title FROM archive.docs WHERE id = 99")[0]["title"],
