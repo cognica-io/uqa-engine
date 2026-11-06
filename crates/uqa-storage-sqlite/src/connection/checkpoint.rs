@@ -86,7 +86,7 @@ impl Checkpoint {
                     let result = (|| -> Result<bool> {
                         source.check()?;
                         if connection.is_none() {
-                            let opened = spec.open(false)?;
+                            let opened = spec.open(super::ConnectionOpen::Pooled)?;
                             source.check_connection(&opened)?;
                             opened.busy_timeout(Duration::ZERO)?;
                             connection = Some(opened);

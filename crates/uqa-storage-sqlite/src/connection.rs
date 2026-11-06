@@ -13,11 +13,11 @@
 //! transactions operations check out independent connections, allowing WAL
 //! readers to make real concurrent progress.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use parking_lot::{Mutex, RwLock};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore, StorageEncryptionKey};
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
@@ -30,6 +30,8 @@ pub(crate) mod image_import;
 mod logical;
 mod native;
 mod native_restore;
+mod opening;
+use opening::{ConnectionOpen, ConnectionSpec};
 pub(crate) mod ownership;
 mod pool;
 mod restore;
@@ -120,87 +122,6 @@ const MAX_POOL_CONNECTIONS: usize = 32;
 
 /// Prepared statements each connection retains. Statements are built from record layouts and work-queue conditions, so one commit runs more distinct statements than a small cache holds, and preparing a projection upsert compiles every trigger of its table; a cache that evicts them prepares them again in each transaction.
 pub(crate) const PREPARED_STATEMENT_CACHE_CAPACITY: usize = 256;
-
-#[derive(Clone)]
-enum ConnectionSpec {
-    File {
-        path: PathBuf,
-        key: Option<StorageEncryptionKey>,
-    },
-    Auxiliary {
-        path: PathBuf,
-        key: Option<StorageEncryptionKey>,
-    },
-    Compressed {
-        path: PathBuf,
-        compression: SQLiteCompressionOptions,
-        key: Option<StorageEncryptionKey>,
-    },
-    Memory,
-}
-
-impl ConnectionSpec {
-    fn open(&self, initialize_database: bool) -> Result<Connection> {
-        let conn = self.open_configured(initialize_database)?;
-        conn.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
-        Ok(conn)
-    }
-
-    fn open_configured(&self, initialize_database: bool) -> Result<Connection> {
-        let mut flags = OpenFlags::default();
-        if !initialize_database && matches!(self, Self::File { .. } | Self::Auxiliary { .. }) {
-            flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
-        }
-        match self {
-            Self::File { path, key } | Self::Auxiliary { path, key } => {
-                let conn = Connection::open_with_flags(path, flags)?;
-                if let Some(key) = key {
-                    ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
-                }
-                crate::btree_index::equality::register(&conn)?;
-                if matches!(self, Self::Auxiliary { .. }) {
-                    // Registry writers already serialize their transactions.
-                    // Retain the original journal mode instead of racing to
-                    // promote a new registry to WAL during concurrent opens.
-                    let mode: String =
-                        conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-                    if mode != "delete" {
-                        return Err(SQLiteError::AuxiliaryJournalMode(mode));
-                    }
-                    ManagedConnection::configure_rollback_connection(&conn)?;
-                } else {
-                    if initialize_database {
-                        ManagedConnection::enable_wal(&conn)?;
-                    }
-                    ManagedConnection::configure_wal_connection(&conn)?;
-                }
-                Ok(conn)
-            }
-            Self::Compressed {
-                path, compression, ..
-            } => {
-                let conn =
-                    Connection::open_with_flags_and_vfs(path, flags, compressed_vfs::VFS_NAME)?;
-                crate::btree_index::equality::register(&conn)?;
-                if initialize_database {
-                    conn.pragma_update(None, "page_size", compression.page_size)?;
-                    ManagedConnection::enable_compressed_journal(&conn)?;
-                }
-                ManagedConnection::configure_rollback_connection(&conn)?;
-                Ok(conn)
-            }
-            Self::Memory => {
-                let conn = Connection::open_in_memory()?;
-                crate::btree_index::equality::register(&conn)?;
-                if initialize_database {
-                    ManagedConnection::enable_wal(&conn)?;
-                }
-                ManagedConnection::configure_wal_connection(&conn)?;
-                Ok(conn)
-            }
-        }
-    }
-}
 
 struct SessionState {
     write_cancellation: uqa_core::CancellationToken,
@@ -421,7 +342,7 @@ impl ManagedConnection {
         max_connections: usize,
         owner: Option<Arc<ownership::DatabaseOwner>>,
     ) -> Result<Self> {
-        let initial = spec.open(true)?;
+        let initial = spec.open(ConnectionOpen::Initial)?;
         crate::mvcc::restore::reject_pending(&initial)?;
         Ok(Self {
             pool: ConnectionPool::new(spec, initial, max_connections, owner)?,

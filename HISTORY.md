@@ -91,6 +91,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve encrypted compressed SQLite connection-pool growth after trusted-anchor admission and subsequent writes. Physical connections share authenticated publication state, including compaction and later synchronization failures, while explicit reopen retains exact external-anchor validation.
+
 - Preserve backup preparation across unrelated repository publications while still rejecting concurrent removal of verified references. Retried retirement now synchronizes its cancellation marker before acknowledging success, including operations that never published a root.
 
 - Group automatic regression selectors by package and test harness so discovery does not evaluate thousands of independent regular expressions for every listed test. Exact case identities, resource assertions and the discovery deadline remain enforced.

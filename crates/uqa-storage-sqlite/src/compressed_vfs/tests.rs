@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod anchors;
 mod compatibility;
 mod initialization;
 mod read_generation;
@@ -341,6 +342,7 @@ fn legacy_v1_container_is_rejected_by_the_open_path() {
             compression: SQLiteCompressionOptions::default(),
             key: Some("legacy-key".to_string()),
             trusted_anchor: None,
+            live_anchor: Arc::default(),
         },
     )
     .unwrap_err();
@@ -365,6 +367,7 @@ fn persisted_oversized_stored_length_is_rejected_before_allocation() {
         compression,
         key: None,
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
     let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
     container.write_at(0, &[b'a'; 512]).unwrap();
@@ -416,6 +419,7 @@ fn flush_appends_only_dirty_chunk_records() {
         compression,
         key: None,
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
     let chunk_size = compression.chunk_size().unwrap();
 
@@ -461,6 +465,7 @@ fn unchanged_refresh_retains_the_decompressed_chunk_cache() {
         },
         key: None,
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
     let mut writer = ContainerFile::open(path.clone(), options.clone()).unwrap();
     writer.write_at(0, &[b'a'; 512]).unwrap();
@@ -492,6 +497,7 @@ fn repeated_autocommit_updates_trigger_stale_record_compaction() {
         compression,
         key: None,
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
 
     let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
@@ -515,8 +521,10 @@ fn repeated_autocommit_updates_trigger_stale_record_compaction() {
 }
 
 #[cfg(unix)]
-#[test]
-fn compaction_state_survives_parent_directory_sync_failure() {
+#[rstest::rstest]
+#[case(None)]
+#[case(Some("compaction publication credential"))]
+fn compaction_state_survives_parent_directory_sync_failure(#[case] key: Option<&str>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sync-failure.uqac.sqlite3");
     let compression = SQLiteCompressionOptions {
@@ -527,8 +535,9 @@ fn compaction_state_survives_parent_directory_sync_failure() {
     };
     let options = OpenOptionsEntry {
         compression,
-        key: None,
+        key: key.map(str::to_owned),
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
 
     let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
@@ -536,6 +545,10 @@ fn compaction_state_survives_parent_directory_sync_failure() {
         .write_at(0, &vec![b'a'; compression.chunk_size().unwrap()])
         .unwrap();
     container.flush().unwrap();
+    if key.is_some() {
+        *options.live_anchor.lock().unwrap() = Some(container.authenticated_anchor());
+        container.live_anchor = Some(options.live_anchor.clone());
+    }
     super::directory_sync::FAIL_NEXT_PARENT_SYNC.with(|flag| flag.set(true));
     let mut injected_failures = 0;
     for i in 0..300_u16 {
@@ -543,10 +556,21 @@ fn compaction_state_survives_parent_directory_sync_failure() {
         if let Err(error) = container.flush() {
             assert_eq!(error.to_string(), "injected parent directory sync failure");
             injected_failures += 1;
+            let published = ContainerFile::load(path.clone(), key).unwrap();
+            assert_eq!(
+                published.authenticated_anchor(),
+                container.authenticated_anchor()
+            );
             container.cache.clear();
             let mut committed = [0; 2];
             container.read_at(17, &mut committed).unwrap();
             assert_eq!(committed, i.to_le_bytes());
+        }
+        if key.is_some() {
+            assert_eq!(
+                *options.live_anchor.lock().unwrap(),
+                Some(container.authenticated_anchor())
+            );
         }
     }
     assert_eq!(injected_failures, 1);
@@ -590,10 +614,11 @@ fn sqlite_journal_files_are_not_compressed_containers() {
         compression: SQLiteCompressionOptions::default(),
         key: None,
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
     let flags =
         ffi::SQLITE_OPEN_MAIN_JOURNAL | ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE;
-    let file = VfsFile::open(path, options, flags, false).unwrap();
+    let file = VfsFile::open(path, options, flags, false, OpenScope::Registration).unwrap();
     assert!(matches!(file, VfsFile::Plain(_)));
 }
 
@@ -605,10 +630,11 @@ fn encrypted_sqlite_journal_files_stay_encrypted_containers() {
         compression: SQLiteCompressionOptions::default(),
         key: Some("correct horse battery staple".to_string()),
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     };
     let flags =
         ffi::SQLITE_OPEN_MAIN_JOURNAL | ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE;
-    let file = VfsFile::open(path, options, flags, false).unwrap();
+    let file = VfsFile::open(path, options, flags, false, OpenScope::Registration).unwrap();
     assert!(matches!(file, VfsFile::Compressed(_)));
 }
 
@@ -787,37 +813,6 @@ fn commit_chain_rejects_same_file_fork_splicing() {
 }
 
 #[test]
-fn trusted_anchor_rejects_a_divergent_same_generation_fork() {
-    let dir = tempfile::tempdir().unwrap();
-    let original_path = dir.path().join("anchor-original.uqac.sqlite3");
-    let fork_path = dir.path().join("anchor-fork.uqac.sqlite3");
-    let options = encrypted_options();
-
-    let mut base = ContainerFile::open(original_path.clone(), options.clone()).unwrap();
-    base.write_at(0, &[b'a'; 512]).unwrap();
-    base.flush().unwrap();
-    drop(base);
-    std::fs::copy(&original_path, &fork_path).unwrap();
-
-    let mut original = ContainerFile::open(original_path, options.clone()).unwrap();
-    original.write_at(0, &[b'b'; 512]).unwrap();
-    original.flush().unwrap();
-    let trusted = original.authenticated_anchor();
-
-    let mut fork = ContainerFile::open(fork_path, options).unwrap();
-    fork.write_at(0, &[b'c'; 512]).unwrap();
-    fork.flush().unwrap();
-    let divergent = fork.authenticated_anchor();
-    assert_eq!(trusted.database_id, divergent.database_id);
-    assert_eq!(trusted.generation, divergent.generation);
-    assert_ne!(trusted.state_tag, divergent.state_tag);
-    let error = fork.require_trusted_anchor(trusted).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("does not match the trusted anchor"));
-}
-
-#[test]
 fn encrypted_chunk_cannot_be_replayed_across_files() {
     let dir = tempfile::tempdir().unwrap();
     let first_path = dir.path().join("first.uqac.sqlite3");
@@ -887,6 +882,7 @@ fn encrypted_options() -> OpenOptionsEntry {
         },
         key: Some("correct horse battery staple".to_string()),
         trusted_anchor: None,
+        live_anchor: Arc::default(),
     }
 }
 

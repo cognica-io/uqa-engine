@@ -38,6 +38,7 @@ impl ContainerFile {
         Ok(Self {
             path,
             committed_file: None,
+            live_anchor: None,
             logical_len: 0,
             append_offset: usize_to_u64(HEADER_SIZE, "container header size")?,
             chunks: BTreeMap::new(),
@@ -74,6 +75,7 @@ impl ContainerFile {
         Ok(Self {
             path,
             committed_file: Some(file),
+            live_anchor: None,
             logical_len: committed.logical_len,
             append_offset: committed.end_offset,
             chunks: committed.chunks,
@@ -125,6 +127,27 @@ impl ContainerFile {
 
     /// Reload the latest committed container map after acquiring the main-file lock. Each `SQLite` connection owns its own VFS handle, so an unlocked handle must discard cached chunks and observe commits appended by another connection before `SQLite` reads the database header again.
     pub(super) fn refresh_committed_state(&mut self) -> std::io::Result<()> {
+        let live_anchor = self.live_anchor.clone();
+        let mut current = live_anchor
+            .as_ref()
+            .map(|anchor| anchor.lock())
+            .transpose()
+            .map_err(|_| invalid_data("compressed container anchor poisoned"))?;
+        self.refresh_committed_state_inner()?;
+        if let Some(Some(trusted)) = current.as_deref_mut() {
+            let observed = self.authenticated_anchor();
+            if observed.database_id != trusted.database_id
+                || observed.generation <= trusted.generation
+            {
+                self.require_trusted_anchor(*trusted)?;
+            }
+            // Existing handles authenticate forward progress under the SQLite shared lock. Further physical connections inherit that admitted state.
+            *trusted = observed;
+        }
+        Ok(())
+    }
+
+    fn refresh_committed_state_inner(&mut self) -> std::io::Result<()> {
         if !self.dirty_chunks.is_empty() || self.dirty_header {
             return Err(invalid_data(
                 "cannot refresh a compressed container with unflushed changes",
@@ -142,12 +165,13 @@ impl ContainerFile {
         }
         if self.committed_file_len == 0 {
             // An opener of a missing/empty file has no durable identity yet. The first publisher chooses the identity and salt; authenticate its complete state with this handle's original credential before adopting it.
-            let committed = Self::load(
+            let mut committed = Self::load(
                 self.path.clone(),
                 self.initial_key
                     .as_ref()
                     .map(uqa_storage::StorageEncryptionKey::expose_secret),
             )?;
+            committed.live_anchor.clone_from(&self.live_anchor);
             *self = committed;
             return Ok(());
         }
@@ -211,6 +235,24 @@ impl ContainerFile {
         if self.dirty_chunks.is_empty() && !self.dirty_header {
             return Ok(());
         }
+        let live_anchor = self.live_anchor.clone();
+        let mut current = live_anchor
+            .as_ref()
+            .map(|anchor| anchor.lock())
+            .transpose()
+            .map_err(|_| invalid_data("compressed container anchor poisoned"))?;
+        if let Some(Some(trusted)) = current.as_deref() {
+            self.require_trusted_anchor(*trusted)?;
+        }
+        let result = self.flush_inner();
+        // Durable publication can precede a header or directory-sync error. Retain the same adopted state as the file owner on every return path.
+        if let Some(Some(trusted)) = current.as_deref_mut() {
+            *trusted = self.authenticated_anchor();
+        }
+        result
+    }
+
+    fn flush_inner(&mut self) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
