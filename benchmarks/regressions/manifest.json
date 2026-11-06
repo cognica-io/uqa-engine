@@ -2,6 +2,60 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "compaction_state_survives_parent_directory_sync_failure",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests.rs",
+      "capability": "Durable compaction state after synchronization failure",
+      "workload": "Inject one parent-directory synchronization failure after compaction replacement for plain and encrypted containers, then complete 300 updates and reopen.",
+      "invariant": "Exactly one injected failure is observed; retained state and the live encrypted anchor match the durable replacement, and all final bytes survive reopening.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "live_anchor_rejects_rollback_and_forks_when_opening_another_physical_file",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/anchors.rs",
+      "capability": "Exact live physical-file admission",
+      "workload": "Publish an authenticated local successor, then open the current file, an older snapshot and a divergent same-generation fork.",
+      "invariant": "Only the exact admitted live state opens; old and forked files fail without changing the retained anchor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "compressed_encrypted_anchor_rejects_whole_file_rollback",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/tests/anchors.rs",
+      "capability": "Exact external anchor admission",
+      "workload": "Advance a container and its external anchor, then request an older anchor, replace the file with an old snapshot and attempt unanchored registration.",
+      "invariant": "All stale admissions fail, including an older supplied anchor after a newer registered anchor; current exact admission succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "compressed_encrypted_anchor_allows_pool_growth_after_a_committed_write",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/connection/tests/anchors.rs",
+      "capability": "Authenticated pool growth",
+      "workload": "For LZ4 and Zstd, reopen with an exact anchor, commit writes, retain concurrent physical leases and grow the pool again.",
+      "invariant": "Every connection reads both committed generations; explicit reopen with the original external anchor remains rejected.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
       "package": "uqa-graph",
       "kind": "lib",
       "test": "cloned_graph_errors_retain_the_original_typed_provider_cause",
@@ -18932,7 +18986,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
