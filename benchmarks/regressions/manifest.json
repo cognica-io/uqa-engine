@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -44894,6 +44894,448 @@
       "capability": "Scheduled private restore ownership",
       "workload": "Fail a filename-based constructor and replace its file with either a regular image or a directory during work.",
       "invariant": "Constructor failure retires path resources; regular provider replacement remains valid while nonregular completion retires work and prevents reuse.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_path_image_reader_survives_replacement_and_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/paths.rs",
+      "capability": "Engine retained path image ownership",
+      "workload": "Capture an actual memory Engine path registration, mutate its graph and replace the index, then close Engine/capture before streaming and restoring.",
+      "invariant": "The reader retains the original evaluated pairs and releases capture/scratch admission at EOF; the restored native owner retains its import allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "imported_path_generations_retain_exact_capacity_through_clones_and_captures",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Native path import ownership",
+      "workload": "Import a large label and 20,000 pairs, compare actual allocation and capacity accounting, then clone and capture the native generation.",
+      "invariant": "All decoded capacity remains admitted through native sharing and independent image ownership until final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_preparation_and_output_use_constant_state_without_payload_copies",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Bounded path image streaming",
+      "workload": "Open owned readers over 1, 64 and 4,096 paths plus a large label and 20,000 pairs, then read the complete independent image oracle.",
+      "invariant": "Preparation visits zero immutable payload positions, cursor admission is constant below 32 KiB, reads stay bounded and output allocates no payload copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_children_cross_threads_after_registry_replacement_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Independent path image children",
+      "workload": "Capture a registry child, replace and remove its registration, close the registry and move a partially consumed reader across threads.",
+      "invariant": "The complete output retains the original literal relation and both allowances retire at EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_cancellation_errors_and_unwinds_retire_owned_continuations",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Path image terminal ownership",
+      "workload": "Cancel original or invoking controls before and after output and inject denied construction, denied lazy opening, invalid preparation and unwinding.",
+      "invariant": "Typed failures terminate the reader, no failure can resume and all source/scratch allowances release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "captured_path_writes_preserve_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/lifetime.rs",
+      "capability": "Captured path output cancellation",
+      "workload": "Cancel the source or invoking control from the first write of a large captured materialization.",
+      "invariant": "Synchronous output preserves typed cancellation and makes no further output attempt.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_restore_standalone_full_and_incremental_protected_backups",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/repository.rs",
+      "capability": "Path image repository composition",
+      "workload": "Capture protected full, equal incremental and changed incremental path images during live replacement, remove sources/ancestors and import both children.",
+      "invariant": "Per-call work and bytes stay bounded; exact reuse and changed units retain independently verifiable original pairs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_import_rejects_noncanonical_corrupt_and_incomplete_inputs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Strict path image validation",
+      "workload": "Import all truncated prefixes, invalid framing/UTF-8, excessive counts, trailing data, duplicate or unordered paths/pairs and long common prefixes.",
+      "invariant": "Only canonical complete images publish; failures retire all admission without sorting or deduplicating input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_import_admits_declared_capacity_before_consuming_payloads",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Path image allocation admission",
+      "workload": "Attempt large label, sequence, pair and path counts under a 4 KiB allowance.",
+      "invariant": "Memory denial occurs before payload consumption and releases every private allocation lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_handle_partial_interrupted_io_and_cancelled_imports",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/validation.rs",
+      "capability": "Controlled path image I/O",
+      "workload": "Use partial/interrupted input and output and inject cancellation, zero writes, I/O failure and invalid write counts.",
+      "invariant": "Bounded I/O preserves exact bytes, typed cancellation and terminal errors without leaking decoded state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_images_preserve_literal_reachability_after_graph_and_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Materialized path image identity",
+      "workload": "Encode a real graph materialization against literal path results and independent image bytes, close the graph/source and restore it.",
+      "invariant": "Exact sequences, evaluated pairs, absent paths and complete bytes survive source loss without path evaluation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_framing_distinguishes_empty_labels_sequences_and_all_pair_bits",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Path image framing",
+      "workload": "Read empty and nonempty materializations in one-byte through 64 KiB buffers, including empty labels, NUL, non-ASCII labels, separators and extreme identifiers.",
+      "invariant": "Literal format bytes and complete images are identical across windows; reads stay at most 16 KiB and terminal EOF retires scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_image_readers_reject_query_views_without_visiting_graphs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests.rs",
+      "capability": "Materialized path capability",
+      "workload": "Attempt memory image readers and writes against a graph query view whose graph does not exist.",
+      "invariant": "The unsupported representation fails before output or image allocation and never evaluates the graph.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "partial_and_interrupted_io_preserves_bytes_and_bounded_attempts",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/tests.rs",
+      "capability": "Controlled image framing",
+      "workload": "Interrupt and fragment large binary reads and writes.",
+      "invariant": "Exact bytes survive partial attempts; each attempt is at most 4 KiB and decoded admission is retained until release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "framing_rejects_truncation_trailing_bytes_and_unadmitted_lengths",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/tests.rs",
+      "capability": "Controlled image framing",
+      "workload": "Decode truncated, invalid UTF-8, trailing and over-limit payloads.",
+      "invariant": "Invalid framing fails and declared payloads are rejected before reading or allocating unavailable bytes; all memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "interrupted_io_observes_cancellation_and_keeps_partial_write_count",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/tests.rs",
+      "capability": "Controlled image framing",
+      "workload": "Cancel interrupted reads/writes and fail after a partial write.",
+      "invariant": "Cancellation is checked between attempts, and successful partial bytes remain in the counter.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "invalid_writer_progress_and_count_overflow_are_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/tests.rs",
+      "capability": "Controlled image framing",
+      "workload": "Inject zero, oversized and overflowing writer progress.",
+      "invariant": "Invalid writer counts and arithmetic overflow fail instead of accepting malformed image output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_export_borrows_large_original_names_without_allocation_or_scan",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/retention.rs",
+      "capability": "Native security catalog images",
+      "workload": "Retire the live catalog and stream a large retained UTF-8 role name.",
+      "invariant": "Cursor construction and output allocate nothing, emit no more than 16 KiB per call and match the complete original bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_catalogs_keep_exact_admission_through_clone_capture_and_mutation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/retention.rs",
+      "capability": "Native security catalog images",
+      "workload": "Import with exact and insufficient allowances, clone and capture the native role root, then clear its live registry.",
+      "invariant": "Rejected candidates release every allocation; complete cached footprints count keys once and native leases survive until the last retained root drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_io_checks_partial_attempts_cancellation_and_retires_failed_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/retention.rs",
+      "capability": "Native security catalog images",
+      "workload": "Interrupt a writer and cancel fragmented decoding at several partial boundaries.",
+      "invariant": "Cancellation remains visible and retires output; failed imports release all decoded payload and tree memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_reader_retires_on_writer_unwind_and_keeps_completed_eof",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/retention.rs",
+      "capability": "Native security catalog images",
+      "workload": "Panic in an image writer and cancel a separately completed cursor.",
+      "invariant": "Unwound readers cannot resume; a completed reader remains at EOF after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_and_database_import_require_and_retain_the_complete_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/retention.rs",
+      "capability": "Native security catalog images",
+      "workload": "Import schema and large database ACL images with exact and insufficient allowances, then clone and capture them.",
+      "invariant": "Both native owners retain all decoded allocations through clones and captures; failures and final retirement release all memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_images_reject_every_truncation_and_trailing_byte",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Truncate each of four catalog images at every byte and append a trailing byte.",
+      "invariant": "Every incomplete or overlong artifact is rejected without leaking decoded admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_image_rejects_invalid_identity_flags_keys_and_duplicates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Corrupt role keys, text, OIDs, identities, revisions, flags and connection limits; duplicate native identities.",
+      "invariant": "Malformed or noncanonical roles fail before any private registry can escape, and temporary allocations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "security_images_reject_unknown_privilege_bits_and_temporary_schemas",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Inject unknown schema privilege bits and a temporary schema into an image.",
+      "invariant": "Malformed authority and nondurable membership are rejected without leaking admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_images_reject_key_mismatch_oid_and_option_corruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Change an encoded membership key, tuple OID and option byte.",
+      "invariant": "Mismatched bindings, invalid identities and unknown option bits are rejected before returning a registry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_catalog_images_and_single_database_count_are_canonical",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/validation.rs",
+      "capability": "Native security catalog images",
+      "workload": "Encode empty catalogs and corrupt the database authority entry count.",
+      "invariant": "Empty catalog images have the literal zero-count header, while database authority requires exactly one tuple.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_catalog_image_matches_independent_wire_fixture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests.rs",
+      "capability": "Native security catalog images",
+      "workload": "Encode and import a role against a literal version-one byte fixture.",
+      "invariant": "Key, OID, incarnation, revision, name, attributes and connection limit exactly match the independently specified layout.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_image_retains_original_bindings_and_all_option_bits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests.rs",
+      "capability": "Native security catalog images",
+      "workload": "Stream a membership through varied output windows after a role name changes.",
+      "invariant": "Original bound names, incarnations and options survive import while role resolution still uses the selected incarnation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_image_preserves_tuple_and_acl_option_order_and_excludes_temporary_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests.rs",
+      "capability": "Native security catalog images",
+      "workload": "Capture default, empty and grant-path schema ACLs with a temporary namespace.",
+      "invariant": "Tuple identities and ACL presence/order survive; temporary membership is excluded from the durable image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_image_preserves_default_empty_and_ordered_acl_paths",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests.rs",
+      "capability": "Native security catalog images",
+      "workload": "Round-trip absent, empty and ordered database ACLs.",
+      "invariant": "PUBLIC, explicit roles, grantors, privilege bits and grant options retain their original meaning and memory is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_image_preserves_every_attribute_bit",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests.rs",
+      "capability": "Native security catalog images",
+      "workload": "Encode and import all seven role attributes.",
+      "invariant": "The literal attribute byte is 127 and each original attribute survives native import.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_security_images_restore_original_authority_after_replacement_and_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/security_images.rs",
+      "capability": "Native security catalog images",
+      "workload": "Capture actual Engine role/schema/database grants, execute rollback and same-name replacement, close the Engine and import all four images.",
+      "invariant": "Original identities, revisions, membership reachability and complete authority survive source retirement; captured and imported memory is fully released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_output_preserves_partial_progress_after_writer_unwind",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io.rs",
+      "capability": "Controlled image framing",
+      "workload": "Panic in an output callback after two successfully written bytes.",
+      "invariant": "The existing owner counter retains the successful partial write through unwinding; refactored framing does not hide progress in temporary state.",
       "case_names": [
         ""
       ]

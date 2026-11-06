@@ -22,6 +22,7 @@ mod resources;
 mod roles;
 mod routines;
 mod rules;
+mod security_images;
 mod triggers;
 mod types;
 mod views;

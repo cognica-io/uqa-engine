@@ -1,0 +1,158 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Admitted field decoding leaves native publication to the owning catalog.
+
+use super::{fields::Privileges, invalid};
+use crate::{
+    catalog::roles::{identity::RoleBinding, RoleIdentity},
+    SQLError,
+};
+use std::{cmp::Ordering, io::Read};
+use uqa_core::{
+    catalog_role::BoundAclEntry,
+    image_io::ImageInput,
+    memory::{Budgeted, BudgetedVec, MemoryBudget},
+    CancellationToken,
+};
+
+mod memberships;
+mod roles;
+mod security;
+pub(super) use memberships::memberships;
+pub(super) use roles::roles;
+pub(super) use security::{database, schemas};
+
+struct Input<'a> {
+    binary: ImageInput<'a>,
+}
+impl<'a> Input<'a> {
+    fn new(
+        reader: &'a mut dyn Read,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+    ) -> Self {
+        Self {
+            binary: ImageInput {
+                reader,
+                memory,
+                cancellation,
+            },
+        }
+    }
+    fn header(&mut self, magic: [u8; 8]) -> Result<usize, SQLError> {
+        if self.binary.array::<8>()? != magic {
+            return Err(invalid("version header"));
+        }
+        Ok(self.binary.count()?)
+    }
+    fn flag(&mut self) -> Result<bool, SQLError> {
+        match self.binary.array::<1>()?[0] {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid("boolean tag")),
+        }
+    }
+    fn oid(&mut self) -> Result<i64, SQLError> {
+        let oid = i64::from_le_bytes(self.binary.array()?);
+        if oid <= 0 || oid > i64::from(u32::MAX) {
+            return Err(invalid("object identifier"));
+        }
+        Ok(oid)
+    }
+    fn identity(&mut self) -> Result<RoleIdentity, SQLError> {
+        let identity = RoleIdentity {
+            oid: self.oid()?,
+            object_id: self.binary.array()?,
+        };
+        validate_identity(identity)?;
+        Ok(identity)
+    }
+    fn binding(&mut self) -> Result<Budgeted<RoleBinding>, SQLError> {
+        let name = self.binary.text()?;
+        if name.is_empty() {
+            return Err(invalid("empty role binding name"));
+        }
+        let oid = u32::from_le_bytes(self.binary.array()?);
+        let object_id = self.binary.array()?;
+        validate_identity(RoleIdentity {
+            oid: i64::from(oid),
+            object_id,
+        })?;
+        let (name, memory) = name.into_parts();
+        Ok(Budgeted::new(
+            RoleBinding::new(name, oid, object_id),
+            memory,
+        ))
+    }
+    fn compare_text(&self, left: &str, right: &str) -> Result<Ordering, SQLError> {
+        for (left, right) in left
+            .as_bytes()
+            .chunks(4096)
+            .zip(right.as_bytes().chunks(4096))
+        {
+            self.binary.cancellation.check()?;
+            let ordering = left.cmp(right);
+            if ordering != Ordering::Equal {
+                return Ok(ordering);
+            }
+        }
+        self.binary.cancellation.check()?;
+        Ok(left.len().cmp(&right.len()))
+    }
+    fn ordered_name(&mut self, previous: Option<&String>) -> Result<Budgeted<String>, SQLError> {
+        let name = self.binary.text()?;
+        if name.is_empty()
+            || matches!(
+                previous
+                    .map(|key| self.compare_text(key, &name))
+                    .transpose()?,
+                Some(Ordering::Equal | Ordering::Greater)
+            )
+        {
+            return Err(invalid("name order"));
+        }
+        Ok(name)
+    }
+    fn acl<P: Privileges>(&mut self) -> Result<Budgeted<Option<Vec<BoundAclEntry<P>>>>, SQLError> {
+        let memory = self.binary.memory;
+        if !self.flag()? {
+            return Ok(Budgeted::new(None, memory.empty_reservation()));
+        }
+        let count = self.binary.count()?;
+        let mut entries = BudgetedVec::new(memory);
+        entries.reserve(count)?;
+        for _ in 0..count {
+            self.binary.cancellation.check()?;
+            let role = if self.flag()? {
+                Some(self.identity()?)
+            } else {
+                None
+            };
+            let grantor = self.identity()?;
+            let [privileges, grant_options] = self.binary.array()?;
+            entries.push(BoundAclEntry {
+                role,
+                grantor,
+                privileges: P::from_bits(privileges).ok_or_else(|| invalid("privilege bits"))?,
+                grant_options: P::from_bits(grant_options)
+                    .ok_or_else(|| invalid("grant-option bits"))?,
+            })?;
+        }
+        let (entries, memory) = entries.into_parts();
+        Ok(Budgeted::new(Some(entries), memory))
+    }
+}
+
+fn validate_identity(identity: RoleIdentity) -> Result<(), SQLError> {
+    if !identity.is_valid()
+        || ((identity.oid == RoleIdentity::BOOTSTRAP.oid)
+            != (identity.object_id == RoleIdentity::BOOTSTRAP.object_id))
+    {
+        return Err(invalid("role identity"));
+    }
+    Ok(())
+}

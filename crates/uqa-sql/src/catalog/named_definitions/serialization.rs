@@ -38,7 +38,7 @@ impl<K: Ord + std::fmt::Debug, T: std::fmt::Debug> std::fmt::Debug for Definitio
 impl<K: Ord + Serialize, T: Serialize> Serialize for CapturedDefinitions<K, T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut values = serializer.serialize_seq(Some(self.len()))?;
-        for entry in self.iter() {
+        for entry in self {
             values.serialize_element(&entry)?;
         }
         values.end()

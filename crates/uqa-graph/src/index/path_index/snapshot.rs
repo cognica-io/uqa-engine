@@ -21,6 +21,34 @@ struct RetainedPathIndex {
 pub struct PathIndexImageSnapshot(Arc<RetainedPathIndex>);
 
 impl PathIndexImageSnapshot {
+    /// Transfer the selected generation into a movable image reader independent of the source registry and Engine. Both capture and invoking cancellation remain active until completion or retirement.
+    pub fn into_image_reader(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'static>> {
+        uqa_storage::image_io::ImageReader::from_owner(self, control)
+    }
+
+    /// Borrow bounded output from the original admitted native materialization.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        super::image::reader(self.get()?, control)?
+            .with_source_control(Some(&self.0.control), control)
+    }
+
+    pub fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        let image = self.get()?;
+        uqa_storage::image_io::with_retained_control(output, Some(&self.0.control), |output| {
+            super::image::write(image, output, control)
+        })
+    }
+
     /// Borrow exact ordered sequences and evaluated pairs under the original capture's cancellation scope.
     pub fn get(&self) -> StorageBackendResult<&CapturedPathIndex> {
         self.0.control.check()?;
@@ -41,6 +69,15 @@ impl PathIndexImageSnapshot {
             control: control.clone(),
             _memory: memory,
         }))
+    }
+}
+
+impl uqa_storage::image_io::ImageOwner for PathIndexImageSnapshot {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        Self::image_reader(self, control)
     }
 }
 
