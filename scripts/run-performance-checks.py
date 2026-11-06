@@ -103,12 +103,24 @@ def selection_config(checks: list[dict]) -> str:
     return "[profile.ci]\ndefault-filter = " + json.dumps(expression) + "\n"
 
 
-def arguments(checks: list[dict], selection_file: pathlib.Path, archive: pathlib.Path | None = None) -> list[str]:
-    source = build_arguments(checks) if archive is None else [
-        "--archive-file", str(archive.resolve()), "--extract-to", str(ROOT),
-        "--extract-overwrite", "--workspace-remap", str(ROOT),
+def arguments(checks: list[dict], selection_file: pathlib.Path, prepared_build: pathlib.Path | None = None) -> list[str]:
+    source = build_arguments(checks) if prepared_build is None else [
+        "--binaries-metadata", str((prepared_build / "binaries-metadata.json").resolve()),
+        "--cargo-metadata", str((prepared_build / "cargo-metadata.json").resolve()),
+        "--workspace-remap", str(ROOT), "--target-dir-remap", str(ROOT / "target"),
     ]
     return ["--profile", "ci", *source, "--tool-config-file", f"uqa-performance:{selection_file.resolve()}"]
+
+
+def extract_archive(archive: pathlib.Path) -> pathlib.Path:
+    # Binary-only listing extracts and validates the archive without starting test executables.
+    # Discovery and execution then reuse exactly those files without a second extraction.
+    capture(
+        "cargo", "nextest", "list", "--list-type", "binaries-only", "--message-format", "json",
+        "--archive-file", str(archive.resolve()), "--extract-to", str(ROOT),
+        "--extract-overwrite", "--workspace-remap", str(ROOT), timeout=600,
+    )
+    return ROOT / "target/nextest"
 
 
 def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
@@ -311,7 +323,13 @@ def main() -> int:
         args.output.mkdir(parents=True, exist_ok=True)
         selection_file = args.output / "selection.toml"
         selection_file.write_text(selection_config(checks), encoding="utf-8")
-        selection = arguments(checks, selection_file, args.archive_file)
+        prepared_build = None
+        if args.archive_file is not None:
+            result["stage"] = "extraction"
+            print("Extracting the compiled regression archive", file=sys.stderr, flush=True)
+            prepared_build = extract_archive(args.archive_file)
+        result["stage"] = "discovery"
+        selection = arguments(checks, selection_file, prepared_build)
         print("Discovering the exact regression inventory", file=sys.stderr, flush=True)
         listing_text = capture(
             "cargo", "nextest", "list", "--message-format", "json", *selection,

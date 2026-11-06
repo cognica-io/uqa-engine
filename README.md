@@ -237,7 +237,7 @@ The memory foreign-data wrapper is included by default. Enable `arrow` for nativ
 | Platform | Architectures | Interfaces |
 | --- | --- | --- |
 | Linux (glibc) | x86_64, ARM64 | Rust, C/C++, Python, Node.js, `usql` |
-| macOS | Intel x86_64, Apple Silicon ARM64 | Rust, C/C++, Python, Node.js, `usql` |
+| macOS | Apple Silicon ARM64 | Rust, C/C++, Python, Node.js, `usql` |
 | Windows (MSVC) | x86_64 | Rust, C/C++, Python, Node.js, `usql` |
 | Windows (MSVC) | ARM64 | Rust, Python, Node.js, `usql` |
 | iOS / iPadOS | ARM64 | Embedded Rust crate or C/C++ library, built from source |
@@ -265,7 +265,7 @@ The CLI is written to `target/release/usql` (`usql.exe` on Windows). Add `--feat
 
 ### Native C/C++ libraries
 
-Select the host target: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, or `x86_64-pc-windows-msvc`. For example, on Linux x86_64:
+Select the host target: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, or `x86_64-pc-windows-msvc`. For example, on Linux x86_64:
 
 ```sh
 python3 scripts/build-c-bindings.py \

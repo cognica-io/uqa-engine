@@ -22,6 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
@@ -37,11 +38,14 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - name: Verify C validation selection
-        run: python3 -m unittest discover -s scripts/tests -p test_c_validation.py
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_c_validation.py
+          python3 -m unittest discover -s scripts/tests -p test_c_configurations.py
+          python3 -m unittest discover -s scripts/tests -p test_c_consumer_execution.py
       - name: Inspect C validation inputs
         id: select
         env:
@@ -51,28 +55,27 @@ jobs:
   consumers:
     needs: scope
     if: needs.scope.outputs.required == 'true'
-    name: C and C++ (${{ matrix.os }}, ${{ matrix.features }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    name: C and C++ (${{ matrix.os }}, ${{ matrix.group }})
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
-        features:
-          - minimal
-          - default
-          - arrow
-          - duckdb
-          - arrow,duckdb
-          - arrow-export
-          - arrow-export,arrow
-          - arrow-export,duckdb
-          - arrow-export,arrow,duckdb
+        os: [ubuntu-24.04, macos-26-arm64]
+        group: [core, duckdb]
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
@@ -81,53 +84,22 @@ jobs:
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: c-${{ matrix.features }}
+          shared-key: c-${{ matrix.group }}
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Execute C ABI clients on all four storage providers
-        shell: bash
-        run: |
-          args=(--features test-support)
-          if [[ '${{ matrix.features }}' != default ]]; then
-            args+=(--no-default-features)
-          fi
-          if [[ '${{ matrix.features }}' != minimal && '${{ matrix.features }}' != default ]]; then
-            args+=(--features '${{ matrix.features }}')
-          fi
-          cargo build -p uqa-ffi --locked --profile test "${args[@]}"
-          cargo test -p uqa-ffi --locked --lib "${args[@]}"
-          if [[ '${{ matrix.features }}' == minimal ]]; then
-            cargo test -p uqa-storage --locked --features test-support --lib test_support::tests
-          fi
-          suffix=so
-          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
-          python3 scripts/verify-c-clients.py --library "target/debug/libuqa.$suffix"
-      - name: Execute five public examples as C11 and C++17
-        shell: bash
-        run: |
-          suffix=so
-          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
-          python3 scripts/verify-c-examples.py --library "target/debug/libuqa.$suffix"
-          python3 scripts/verify-c-xml-isolation.py --library "target/debug/libuqa.$suffix"
-      - name: Instrument the example consumers with ASan and UBSan
-        shell: bash
-        run: |
-          suffix=so
-          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
-          python3 scripts/verify-c-examples.py --sanitize --library "target/debug/libuqa.$suffix"
-          python3 scripts/verify-c-clients.py --sanitize --library "target/debug/libuqa.$suffix"
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
+      - name: Execute every grouped configuration on all four storage providers
+        run: python3 scripts/verify-c-configurations.py --group '${{ matrix.group }}'
 
   native-sanitizers:
     needs: scope
     if: needs.scope.outputs.required == 'true'
-    name: Native ASan (${{ matrix.os }}, ${{ matrix.features }})
-    runs-on: ${{ matrix.os }}
+    name: Native ASan (${{ matrix.os }})
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
-        features: [minimal, arrow-export]
+        os: [ubuntu-24.04, macos-26-arm64]
     env:
       CC: ${{ github.workspace }}/.github/scripts/c-sanitizer-cc.sh
       CXX: clang++
@@ -141,10 +113,18 @@ jobs:
       ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@nightly
@@ -168,17 +148,4 @@ jobs:
       - name: Verify shared Rust and native sanitizer linkage and diagnostics
         run: python3 scripts/verify-c-sanitizer-link.py
       - name: Instrument Rust, its standard library and native dependencies
-        shell: bash
-        run: |
-          target=$(rustc +nightly -vV | sed -n 's/^host: //p')
-          args=(--no-default-features --features test-support)
-          if [[ '${{ matrix.features }}' != minimal ]]; then
-            args+=(--features '${{ matrix.features }}')
-          fi
-          cargo +nightly build --locked -Zbuild-std --target "$target" --profile test -p uqa-ffi "${args[@]}"
-          cargo +nightly test --locked -Zbuild-std --target "$target" -p uqa-ffi --lib "${args[@]}"
-          suffix=so
-          if [[ "$RUNNER_OS" == macOS ]]; then suffix=dylib; fi
-          python3 scripts/verify-c-clients.py --sanitize --library "target/$target/debug/libuqa.$suffix"
-          python3 scripts/verify-c-examples.py --sanitize --library "target/$target/debug/libuqa.$suffix"
-          python3 scripts/verify-c-xml-isolation.py --sanitize --library "target/$target/debug/libuqa.$suffix"
+        run: python3 scripts/verify-c-configurations.py --group sanitizers

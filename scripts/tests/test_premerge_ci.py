@@ -144,6 +144,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("shard: [1, 2, 3, 4, 5, 6, 7, 8]", workspace)
         shard = workspace.split("  test:\n", 1)[1]
         self.assertIn("needs: build", shard)
+        self.assertIn("if: inputs.os != 'macos-26-arm64'", shard)
         self.assertIn("--archive-file", shard)
         self.assertNotIn("cargo test", shard)
         self.assertIn("--workspace --locked --doc --exclude uqa-node --exclude uqa-ffi", workspace)
@@ -155,7 +156,99 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         profile = (ROOT / ".config/nextest.toml").read_text(encoding="utf-8")
         self.assertIn("retries = 0", profile)
         self.assertIn("terminate-after = 10", profile)
+        schedule = profile.split("test-group = 'native-session-schedules'", 1)[1]
+        self.assertIn('threads-required = "num-test-threads"', schedule)
         self.assertNotIn('on-timeout = "pass"', profile)
+
+    def test_macos_runs_complete_local_archives_before_reporting_success(self) -> None:
+        workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
+        build = workspace.split("  build:\n", 1)[1].split("  features:\n", 1)[0]
+        run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: runner.os == 'macOS'", run)
+        self.assertIn('NEXTEST_TEST_THREADS: "8"', run)
+        self.assertIn("cargo nextest run --profile ci", run)
+        self.assertIn('--archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"', run)
+        self.assertIn("--extract-overwrite", run)
+        for option in ("--partition", "--filter", "--skip", "continue-on-error"):
+            self.assertNotIn(option, run)
+        self.assertIn("workspace-results-${{ inputs.os }}", build)
+        self.assertIn("target/nextest/ci/junit.xml", build)
+        self.assertNotIn("actions/download-artifact", build)
+        performance = (ROOT / ".github/workflows/performance-platform.yml").read_text(encoding="utf-8")
+        build, downstream = performance.split("  deterministic-work:\n", 1)
+        self.assertIn("if: inputs.os != 'macos-26-arm64'", downstream)
+        self.assertIn('scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"', build)
+        self.assertIn("row_claim_contention --verify > target/performance-checks/claim-contention.json", build)
+        self.assertIn("performance-checks-${{ inputs.os }}", build)
+        self.assertNotIn("actions/download-artifact", build)
+
+    def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
+        main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
+                     "performance-platform.yml", "workspace-tests.yml"}
+        checked = 0
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            source = path.read_text(encoding="utf-8")
+            if "jobs:\n" not in source:
+                continue
+            for job in re.split(r"(?m)(?=^  [A-Za-z0-9_-]+:\n)", source.split("jobs:\n", 1)[1]):
+                if "name: Limit shared macOS worker parallelism" not in job:
+                    continue
+                cache = re.search(r"(?m)^      - uses: Swatinem/rust-cache@v2\n((?:        .*\n|\n)*)", job)
+                if cache is None:
+                    continue
+                condition = re.search(r"(?m)^          save-if: \$\{\{ (.*) \}\}$", cache[1])
+                self.assertIsNotNone(condition, f"{path.name}: cache saving invokes sudo on macOS")
+                checked += 1
+                for operating_system in ("Linux", "Windows", "macOS"):
+                    for environment in ("github-hosted", "self-hosted"):
+                        for ref in ("refs/heads/main", "refs/pull/42/merge", "refs/tags/v1.2.3"):
+                            expression = condition[1]
+                            for key, value in (("runner.os", operating_system),
+                                               ("runner.environment", environment), ("github.ref", ref)):
+                                expression = expression.replace(key, repr(value))
+                            expression = expression.replace("&&", "and").replace("||", "or")
+                            allowed = eval(expression, {"__builtins__": {}}, {})
+                            expected = not (operating_system == "macOS" and environment == "self-hosted")
+                            if path.name in main_only:
+                                expected = expected and ref == "refs/heads/main"
+                            with self.subTest(workflow=path.name, job=job.splitlines()[0],
+                                              os=operating_system, environment=environment, ref=ref):
+                                self.assertIs(allowed, expected)
+        self.assertEqual(checked, 13)
+
+    def test_self_hosted_workers_use_distinct_toolchains_and_cargo_homes(self) -> None:
+        scripts = []
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            source = path.read_text(encoding="utf-8")
+            for block in re.findall(r"(?m)^      - name: Limit shared macOS worker parallelism\n((?:        .*\n|\n)*)", source):
+                self.assertIn("if: runner.os == 'macOS' && runner.environment == 'self-hosted'", block)
+                script = block.split("        run: |\n", 1)[1]
+                scripts.append(textwrap.dedent(script))
+        self.assertEqual(len(scripts), 16)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            for index, script in enumerate(scripts):
+                installations = []
+                for worker in ("worker one", "worker two"):
+                    output = directory / f"{index}-{worker}.env"
+                    paths = directory / f"{index}-{worker}.path"
+                    tools = directory / worker / "tools"
+                    environment = dict(os.environ, RUNNER_TOOL_CACHE=str(tools),
+                                       GITHUB_ENV=str(output), GITHUB_PATH=str(paths),
+                                       RUSTUP_HOME="/host/toolchains", CARGO_HOME="/host/cargo")
+                    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script],
+                                            env=environment, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                    self.assertEqual(values["RUSTUP_HOME"], str(tools / "rustup"))
+                    self.assertEqual(values["CARGO_HOME"], str(tools / "cargo"))
+                    self.assertEqual(paths.read_text().splitlines(), [str(tools / "cargo/bin")])
+                    self.assertTrue((tools / "cargo/bin").is_dir())
+                    self.assertEqual(values["CARGO_BUILD_JOBS"], "4")
+                    self.assertEqual(values["RUST_TEST_THREADS"], "4")
+                    self.assertEqual(values["NEXTEST_TEST_THREADS"], "4")
+                    installations.append((values["RUSTUP_HOME"], values["CARGO_HOME"]))
+                self.assertNotEqual(*installations)
 
     def test_downloaded_archive_must_match_the_original_builder_bytes(self) -> None:
         workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
@@ -225,7 +318,12 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
 
         cache_count = self.workflow.count("      - uses: Swatinem/rust-cache@v2\n")
         self.assertGreater(cache_count, 0)
-        self.assertEqual(self.workflow.count(cache_step), cache_count)
+        hosted_cache_step = cache_step.replace(
+            "github.ref == 'refs/heads/main'",
+            "(runner.os != 'macOS' || runner.environment != 'self-hosted') && "
+            "github.ref == 'refs/heads/main'",
+        )
+        self.assertEqual(self.workflow.count(cache_step) + self.workflow.count(hosted_cache_step), cache_count)
 
 
 class PremergeCITest(unittest.TestCase):

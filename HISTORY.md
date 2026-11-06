@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
+- Group C binding qualification into six Linux/macOS jobs instead of twenty-two, reusing Cargo dependencies while retaining all nine feature configurations per platform, both native sanitizer configurations and all four storage providers.
+- Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
+
 ### Added
 
 - Add resumable stored-model and analyzer image readers. Models retain bounded shape and numeric validation before output; analyzers borrow exact resolved descriptors and dictionary artifacts. Borrowed and independently owned readers preserve source cancellation and bytes after source closure, and synchronous output shares the same encoders. Complete memory Engine backup remains under implementation.
@@ -106,6 +112,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
+
+- Preserve encrypted compressed SQLite connection-pool growth after trusted-anchor admission and subsequent writes. Physical connections share authenticated publication state, including compaction and later synchronization failures, while explicit reopen retains exact external-anchor validation.
 
 - Preserve backup preparation across unrelated repository publications while still rejecting concurrent removal of verified references. Retried retirement now synchronizes its cancellation marker before acknowledging success, including operations that never published a root.
 

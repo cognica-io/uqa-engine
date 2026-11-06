@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -56,18 +57,26 @@ jobs:
     needs: scope
     if: needs.scope.outputs.required == 'true' && needs.scope.outputs.reused != 'true'
     name: FDW ${{ matrix.configuration }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'macos-15' && 120 || 60 }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'macos-26-arm64' && 120 || 60 }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26-arm64]
         configuration: [memory, arrow, duckdb]
     env:
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-D warnings -C linker-features=-lld"
       CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-D warnings"
       CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -82,7 +91,7 @@ jobs:
           shared-key: fdw-${{ matrix.configuration }}
           cache-bin: false
           cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - run: cargo fetch --locked
       - name: Verify native, development and browser dependency isolation
         if: matrix.configuration == 'memory'

@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
@@ -22,10 +23,18 @@ env:
 
 jobs:
   build:
-    name: Build regression archive (${{ inputs.os }})
-    runs-on: ${{ inputs.os }}
-    timeout-minutes: ${{ inputs.os == 'macos-15' && 120 || 60 }}
+    name: Build regression tests and validate local macOS checks (${{ inputs.os }})
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 120 || 60 }}
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
@@ -33,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
       - name: Verify the regression inventory and failure detection
         run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
@@ -43,6 +52,22 @@ jobs:
         run: |
           python3 scripts/run-performance-checks.py --build-claim-fixture
           tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
+      - name: Check macOS bounded work, memory and output correctness on the build worker
+        if: runner.os == 'macOS'
+        run: python3 scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
+      - name: Verify macOS independent-process claim workload without timing
+        if: runner.os == 'macOS'
+        run: target/debug/examples/row_claim_contention --verify > target/performance-checks/claim-contention.json
+      - name: Retain macOS regression results
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: performance-checks-${{ inputs.os }}
+          path: |
+            target/nextest/ci/junit.xml
+            target/performance-checks/
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: performance-binaries-${{ inputs.os }}
@@ -56,9 +81,18 @@ jobs:
   deterministic-work:
     name: Deterministic work and memory (${{ inputs.os }})
     needs: build
-    runs-on: ${{ inputs.os }}
+    if: inputs.os != 'macos-26-arm64'
+    runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     timeout-minutes: 25
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
