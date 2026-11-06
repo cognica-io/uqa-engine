@@ -63,6 +63,9 @@ jobs:
           echo "sha256=${archive_checksum%% *}" >> "$GITHUB_OUTPUT"
       - name: Run every macOS workspace test on its build worker
         if: runner.os == 'macOS'
+        env:
+          # Durable storage cases wait for I/O; the complete workspace needs more execution slots than compiler jobs.
+          NEXTEST_TEST_THREADS: "8"
         run: >-
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
