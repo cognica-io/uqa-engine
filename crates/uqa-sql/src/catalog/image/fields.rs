@@ -25,6 +25,7 @@ use uqa_core::{
 
 mod column_types;
 mod foreign_wrappers;
+mod functions;
 mod metadata;
 mod structured_types;
 

@@ -54,18 +54,22 @@ impl<'a> Fields<'a> {
             return Err(super::super::invalid("foreign callback identity"));
         }
         let ForeignWrapperFunction { oid, binding } = value;
+        self.scalar(oid.to_le_bytes());
+        self.function_binding(binding);
+        Ok(())
+    }
+    pub fn function_binding(&mut self, binding: &'a FunctionBinding) {
         let FunctionBinding {
             object_id,
             name,
             argument_types,
             builtin,
+            input_collation,
             dispatch: _,
             invocation: _,
             value_binding: _,
             resolution_error: _,
-            input_collation,
         } = binding;
-        self.scalar(oid.to_le_bytes());
         self.flag(object_id.is_some());
         if let Some(id) = object_id {
             self.scalar(*id);
@@ -74,7 +78,6 @@ impl<'a> Fields<'a> {
         self.flag(*builtin);
         self.optional_u32(input_collation.map(|value| value.oid()));
         self.count(argument_types.len());
-        Ok(())
     }
     pub fn invocation(&mut self, value: &'a RoutineInvocationBinding) {
         let RoutineInvocationBinding {

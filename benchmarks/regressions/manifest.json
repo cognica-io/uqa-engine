@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -46351,6 +46351,162 @@
       "capability": "Native domain restore validation",
       "workload": "A captured immutable domain root with embedded dots and escaped quotes after retiring its live registry.",
       "invariant": "Validate the original bound names and identities without changing capture admission; all validation and capture leases retire independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "function_binding_image_matches_independent_wire_fixture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions.rs",
+      "capability": "Native function binding images",
+      "workload": "A fixed version-one image containing a selected native NULL test.",
+      "invariant": "Literal bytes preserve native framing and the selected dispatch independently of the codec implementation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_function_failures_match_independent_wire_tags_and_original_text",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions.rs",
+      "capability": "Native function binding images",
+      "workload": "Undefined-function and operator failures with exact SQLSTATE and UTF-8 text.",
+      "invariant": "Independent error tags and lengths preserve the original lazy failure without raising it during import.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_binding_images_retain_invocation_value_and_deferred_failure_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions.rs",
+      "capability": "Native function binding images",
+      "workload": "Every variadic mode with optional errors, field projections and assignment paths, read at multiple widths.",
+      "invariant": "Preserve every original argument position, declared type, field identity, optional value and deferred diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_native_binding_retains_exact_payload_and_box_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions.rs",
+      "capability": "Native function binding images",
+      "workload": "Exact and insufficient budgets for a complete binding after retiring its original source.",
+      "invariant": "Retain every string, vector, type and optional box lease; failed imports and final retirement release all admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_binding_output_bounds_large_fields_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions.rs",
+      "capability": "Native function binding images",
+      "workload": "Large UTF-8 names and diagnostics with 16,384 empty argument declarations.",
+      "invariant": "Preparation and output allocate nothing, every read returns at most 16 KiB, and all original bytes survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_dispatch_images_preserve_every_fixed_operation_tag",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/dispatch.rs",
+      "capability": "Native function binding images",
+      "workload": "All payload-free operations, slice masks, JSON flags and nullable native predicates.",
+      "invariant": "Stable independent wire tags retain every selected operation and flag.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_dispatch_images_keep_distinct_absent_zero_and_maximum_identifiers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/dispatch.rs",
+      "capability": "Native function binding images",
+      "workload": "Absent, zero, normal and maximum type, collation and concatenation identities.",
+      "invariant": "Retain optional identity presence and the exact original 32-bit identity without normalization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "numeric_pattern_and_boolean_image_tags_match_the_native_operations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/dispatch.rs",
+      "capability": "Native function binding images",
+      "workload": "All numeric, pattern and Boolean operations with selected and absent pattern OIDs.",
+      "invariant": "Explicit format tags preserve operator identity independently of names and Rust enum order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_and_enum_images_retain_selected_operation_subtype_and_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/dispatch.rs",
+      "capability": "Native function binding images",
+      "workload": "Every built-in range operation, subtype and multirange flag and all enum operations.",
+      "invariant": "Retain the complete selected operation and native type contract across the image boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_binding_import_rejects_truncation_trailing_bytes_and_unknown_tags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/validation.rs",
+      "capability": "Native function binding images",
+      "workload": "Every truncation, trailing input, malformed counts, unknown operation tags and zero nonzero identities.",
+      "invariant": "Reject malformed images without retaining a partial binding or memory admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_binding_import_retires_partial_payloads_after_cancellation_or_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/validation.rs",
+      "capability": "Native function binding images",
+      "workload": "Input cancellation and injected unwind before, during and after native metadata allocation.",
+      "invariant": "Retire all partial string, vector, type and box ownership on every failed input path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_native_binding_readers_are_terminal_and_denied_import_reads_nothing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/validation.rs",
+      "capability": "Native function binding images",
+      "workload": "Cancellation after partial export and before import admission.",
+      "invariant": "Failed output remains terminal and already-cancelled input consumes no bytes or allocation.",
       "case_names": [
         ""
       ]

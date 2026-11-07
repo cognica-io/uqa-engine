@@ -156,10 +156,9 @@ impl Input<'_> {
         };
         Ok(Budgeted::new(Some(Box::new(value)), memory))
     }
-    pub(super) fn foreign_callback(
+    pub(super) fn function_binding_fields(
         &mut self,
-    ) -> Result<Budgeted<ForeignWrapperFunction>, SQLError> {
-        let oid = self.catalog_oid()?;
+    ) -> Result<Budgeted<FunctionBinding>, SQLError> {
         let object_id = if self.flag()? {
             Some(self.binary.array()?)
         } else {
@@ -183,20 +182,27 @@ impl Input<'_> {
         memory.absorb(reservation);
         let (value_binding, reservation) = self.callback_value()?.into_parts();
         memory.absorb(reservation);
-        let value = ForeignWrapperFunction {
-            oid,
-            binding: FunctionBinding {
+        Ok(Budgeted::new(
+            FunctionBinding {
                 object_id,
                 name,
                 argument_types,
                 builtin,
-                dispatch: None,
+                input_collation,
                 invocation,
                 value_binding,
+                dispatch: None,
                 resolution_error: None,
-                input_collation,
             },
-        };
+            memory,
+        ))
+    }
+    pub(super) fn foreign_callback(
+        &mut self,
+    ) -> Result<Budgeted<ForeignWrapperFunction>, SQLError> {
+        let oid = self.catalog_oid()?;
+        let (binding, memory) = self.function_binding_fields()?.into_parts();
+        let value = ForeignWrapperFunction { oid, binding };
         if !value.has_valid_identity() {
             return Err(invalid("foreign callback identity"));
         }
