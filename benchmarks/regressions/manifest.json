@@ -31071,13 +31071,28 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/tests/prepared/explain_named.rs",
       "capability": "Native EXPLAIN executable ownership",
-      "workload": "Prepared query and INSERT with CTE/view inputs, exhausted admission, savepoint recovery and view replacement on all four providers.",
+      "workload": "Prepared query and INSERT with CTE/view inputs, exhausted admission, savepoint recovery and view replacement on all four providers, with independent statistics paused for cache-identity assertions.",
       "invariant": "Preserve immutable retained plans, typed failure, exactly-once sequence/write effects, dependency invalidation, final owner release and persistent reopen.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "named_explain_selected_owner_survives_committed_catalog_refresh",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/tests/prepared/explain_named.rs",
+      "capability": "Named EXPLAIN selected-plan lifetime across catalog refresh",
+      "workload": "Native SQLite, SQLite Key/Value and redb; a peer ANALYZE commits after plan selection and before the actual EXPLAIN relation-lock boundary.",
+      "invariant": "Observe the new committed view and cache eviction while the selected immutable owner survives; preserve exactly-once sequence/write effects and release every owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     },
     {
