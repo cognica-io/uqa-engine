@@ -139,6 +139,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep SQL call-selection workspace out of recursive argument-observation frames, preventing stack exhaustion when a prepared nested collated expression is analyzed again on an ordinary thread stack.
+
 - Retire deeply nested native scalar expressions with constant stack and no traversal allocation, including cleanup after a retained resource unwinds. Native AST payloads move into execution plans without replacement boxes or declaration copies; Rust consumers borrow expression variants when inspecting their fields.
 
 - Reclaim derived benchmark build output before controlled performance compilation exhausts disk space, preserving retained reference executables and measurement records.

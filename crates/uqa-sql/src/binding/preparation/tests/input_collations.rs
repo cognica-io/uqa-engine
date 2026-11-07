@@ -163,6 +163,16 @@ fn stored_window_copies_keep_the_derived_input_collations() {
 
 #[test]
 fn nested_call_observation_preserves_collations_on_an_ordinary_thread_stack() {
+    struct Aliases;
+    impl OidAliasInput for Aliases {
+        fn resolve_oid_alias_input(
+            &self,
+            _: &ColumnType,
+            _: &str,
+        ) -> Result<Option<i64>, SQLError> {
+            panic!("collated calls have no OID alias inputs")
+        }
+    }
     std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(|| {
@@ -194,6 +204,14 @@ fn nested_call_observation_preserves_collations_on_an_ordinary_thread_stack() {
             assert!(calls[..31]
                 .iter()
                 .all(|(name, collation)| name == "||" && *collation == Some(100)));
+            let binding = context();
+            let schema = read_executable_inputs(&NoRoutines, &mut plan, &[], &binding, &Aliases)
+                .unwrap()
+                .result;
+            let repeated = read_executable_inputs(&NoRoutines, &mut plan, &[], &binding, &Aliases)
+                .unwrap()
+                .result;
+            assert_eq!(repeated, schema);
         })
         .unwrap()
         .join()
