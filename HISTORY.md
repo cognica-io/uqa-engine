@@ -8,11 +8,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation; complete stored catalog integration and Engine restore remain in progress.
+
 - Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
 - Group C binding qualification into six Linux/macOS jobs instead of twenty-two, reusing Cargo dependencies while retaining all nine feature configurations per platform, both native sanitizer configurations and all four storage providers.
 - Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
 
 ### Added
+
+- Add bounded native stored-view images preserving original query bindings, authority revisions and evaluated materialized rows. Reconstructed immutable catalogs retain their query cleanup and memory ownership through capture and replacement; whole-memory assembly and public Engine restore remain under implementation.
+
+- Add bounded native executable-scalar images preserving resolved types, selected calls, window clauses, collations and query-arena addresses. Admitted reconstruction owns deep-tree cleanup; complete stored-plan and memory Engine backup integration remains under implementation.
 
 - Add bounded native column-statistics and statistics-maintenance images preserving complete distributions, floating-point frequency bits, original counters and sampled analysis identities without rerunning ANALYZE. Complete memory Engine backup and public restore remain under implementation.
 

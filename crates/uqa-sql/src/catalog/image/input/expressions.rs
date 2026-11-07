@@ -31,7 +31,7 @@ pub(super) fn payload<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> 
     value
 }
 
-fn boxed<T>(value: T, memory: &mut MemoryReservation) -> Result<Box<T>, SQLError> {
+pub(super) fn boxed<T>(value: T, memory: &mut MemoryReservation) -> Result<Box<T>, SQLError> {
     memory.grow(size_of::<T>())?;
     Ok(Box::new(value))
 }
