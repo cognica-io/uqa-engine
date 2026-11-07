@@ -11,6 +11,8 @@ mod assignments;
 mod ctes;
 mod driver;
 mod fields;
+mod forest;
+use forest::NativeNode;
 mod memory;
 mod metadata;
 use memory::PlanMemory;
@@ -19,12 +21,16 @@ mod ownership;
 mod queries;
 mod retirement;
 mod sources;
+mod statements;
 #[cfg(test)]
 mod tests;
+mod unified;
 mod validation;
 mod windows;
 
 pub use api::{CapturedExpressionPlan, CapturedQuery};
+pub use statements::CapturedStatement;
+pub use unified::CapturedPlan;
 
 use super::{invalid, Input};
 use crate::{
@@ -36,7 +42,7 @@ use crate::{
 use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 #[derive(Debug)]
-enum Node {
+pub(super) enum Node {
     Empty,
     Query(QueryPlan),
     Source(SourcePlan),
@@ -46,7 +52,7 @@ enum Node {
 }
 
 #[derive(Clone, Copy)]
-enum Kind {
+pub(super) enum Kind {
     Query,
     Source,
     Cte,
@@ -55,8 +61,8 @@ enum Kind {
 }
 
 #[derive(Debug)]
-struct Frame {
-    node: Node,
+pub(super) struct Frame<N = Node> {
+    node: N,
     position: usize,
     count: Option<usize>,
     retiring: bool,
@@ -64,8 +70,8 @@ struct Frame {
     rule_references: super::scalars::References,
 }
 
-impl Frame {
-    fn new(node: Node) -> Self {
+impl<N> Frame<N> {
+    fn new(node: N) -> Self {
         Self {
             node,
             position: 0,
@@ -78,25 +84,33 @@ impl Frame {
 }
 
 #[derive(Debug)]
-pub(super) struct Owner {
-    root: Node,
-    frames: BudgetedVec<Frame>,
+pub(super) struct Owner<N: NativeNode = Node> {
+    root: N,
+    frames: BudgetedVec<Frame<N>>,
     memory: PlanMemory,
 }
 
-impl Owner {
+impl<N: NativeNode> Owner<N> {
     fn new(memory: &MemoryBudget) -> Self {
         Self {
-            root: Node::Empty,
+            root: N::empty(),
             frames: BudgetedVec::new(memory),
             memory: PlanMemory::new(memory),
         }
     }
 
-    fn begin(&mut self, kind: Kind) -> Result<(), SQLError> {
+    fn begin(&mut self, kind: N::Kind) -> Result<(), SQLError> {
         // One extra slot covers a required, still-empty boxed child during partial reconstruction. Retirement reuses this capacity and never acquires another allowance.
         self.frames.reserve(2)?;
-        let node = match kind {
+        let node = N::new(kind, &mut self.memory)?;
+        self.frames.push(Frame::new(node))?;
+        Ok(())
+    }
+}
+
+impl Node {
+    fn new(kind: Kind, memory: &mut PlanMemory) -> Result<Self, SQLError> {
+        Ok(match kind {
             Kind::Query => Node::Query(empty_query()),
             Kind::Source => Node::Source(empty_source()),
             Kind::Command => Node::Command(CommandPlan::Empty),
@@ -105,7 +119,7 @@ impl Owner {
                 subqueries: Vec::new(),
             }),
             Kind::Cte => {
-                self.memory.grow(size_of::<QueryPlan>())?;
+                memory.grow(size_of::<QueryPlan>())?;
                 Node::Cte(CtePlan {
                     name: String::new(),
                     columns: Vec::new(),
@@ -116,9 +130,7 @@ impl Owner {
                     body: CtePlanBody::Query(Box::new(empty_query())),
                 })
             }
-        };
-        self.frames.push(Frame::new(node))?;
-        Ok(())
+        })
     }
 }
 

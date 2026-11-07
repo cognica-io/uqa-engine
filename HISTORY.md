@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded images for original stored SQL query, mutation and NOTIFY bodies, with separate bound SQL plan images. Reconstruction preserves original syntax, bindings and local window addresses under admitted ownership; routine/rule catalog integration and complete Engine restore remain in progress.
+
 - Add bounded native stored-view images preserving original query bindings, authority revisions and evaluated materialized rows. Reconstructed immutable catalogs retain their query cleanup and memory ownership through capture and replacement; whole-memory assembly and public Engine restore remain under implementation.
 
 - Add bounded native executable-scalar images preserving resolved types, selected calls, window clauses, collations and query-arena addresses. Admitted reconstruction owns deep-tree cleanup; complete stored-plan and memory Engine backup integration remains under implementation.

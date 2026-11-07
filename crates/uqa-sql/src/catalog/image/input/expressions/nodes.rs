@@ -10,13 +10,21 @@ use super::{boxed, invalid, payload, Expr, Input, MemoryReservation, SQLError};
 use crate::ast::{BinaryOp, FunctionCallSyntax, InternalColumnRef, OrderBy};
 
 impl Input<'_> {
-    #[expect(clippy::too_many_lines, reason = "exhaustive stored scalar wire tags")]
     pub(super) fn expression_node(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<Expr, SQLError> {
         self.binary.cancellation.check()?;
         let tag = self.binary.array::<1>()?[0];
+        self.expression_tag(tag, memory)
+    }
+
+    #[expect(clippy::too_many_lines, reason = "exhaustive stored scalar wire tags")]
+    pub(in super::super) fn expression_tag(
+        &mut self,
+        tag: u8,
+        memory: &mut MemoryReservation,
+    ) -> Result<Expr, SQLError> {
         Ok(match tag {
             0 => Expr::Star,
             1 => Expr::QualifiedStar(payload(self.binary.text()?, memory).into()),

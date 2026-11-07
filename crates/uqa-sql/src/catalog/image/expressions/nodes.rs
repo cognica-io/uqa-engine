@@ -11,6 +11,9 @@ use crate::ast::{BinaryOp, Expr, FunctionCallSyntax};
 
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn node(&mut self, value: &'a Expr) -> Result<(), SQLError> {
+        if self.statement_expressions && is_query_expression(value) {
+            return self.push(Frame::Plan(super::plans::Frame::Node(value, 0)));
+        }
         self.fields.scalar([tag(value)?]);
         match value {
             Expr::Star | Expr::Default => {}
@@ -161,6 +164,16 @@ impl<'a> DefinitionImageReader<'a> {
         }
         Ok(())
     }
+}
+
+fn is_query_expression(value: &Expr) -> bool {
+    matches!(
+        value,
+        Expr::ScalarSubquery(_)
+            | Expr::Exists { .. }
+            | Expr::InSubquery { .. }
+            | Expr::WindowCall { .. }
+    )
 }
 
 fn tag(value: &Expr) -> Result<u8, SQLError> {

@@ -17,6 +17,7 @@ use uqa_core::{
 mod children;
 mod metadata;
 mod nodes;
+pub(super) use children::expression_child;
 #[cfg(test)]
 mod tests;
 

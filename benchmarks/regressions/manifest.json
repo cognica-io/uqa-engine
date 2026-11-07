@@ -48018,6 +48018,227 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_output_matches_independent_values_and_notify_wire",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/statements/tests.rs",
+      "capability": "native statement output matches independent values and notify wire",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_output_preserves_original_queries_mutations_and_stored_projection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/statements/tests.rs",
+      "capability": "native statement output preserves original queries mutations and stored projection",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_output_bounds_borrowed_payload_scratch_and_terminal_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/statements/tests.rs",
+      "capability": "native statement output bounds borrowed payload scratch and terminal failures",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_output_retains_cancellation_and_releases_unwinding_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/statements/tests.rs",
+      "capability": "native statement output retains cancellation and releases unwinding scratch",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_output_visits_deep_query_syntax_without_stack_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/statements/tests.rs",
+      "capability": "native statement output visits deep query syntax without stack growth",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_preserves_queries_sources_windows_and_cte_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests.rs",
+      "capability": "native statement input preserves queries sources windows and cte bodies",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_preserves_mutations_and_notify",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests.rs",
+      "capability": "native statement input preserves mutations and notify",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_matches_independent_wire_and_rejects_every_partial_image",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests.rs",
+      "capability": "native statement input matches independent wire and rejects every partial image",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_retires_deep_scalar_roots_without_stack_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests.rs",
+      "capability": "native statement input retires deep scalar roots without stack or allocation",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_retires_independent_deep_query_images_and_partial_forests",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/resources.rs",
+      "capability": "native statement input retires independent deep query images and partial forests",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_enforces_exact_peak_admission_and_invalid_handles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/resources.rs",
+      "capability": "native statement input enforces exact peak admission and invalid handles",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_releases_owned_fields_on_io_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/resources.rs",
+      "capability": "native statement input releases owned fields on io cancellation and unwind",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_input_preserves_merge_bindings_and_rejects_assignment_addresses",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/resources.rs",
+      "capability": "native statement input preserves merge bindings and rejects assignment addresses",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_keeps_admission_when_continuation_growth_fits_a_smaller_budget",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/resources.rs",
+      "capability": "native query input keeps admission when continuation growth fits a smaller budget",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_plan_images_preserve_queries_and_all_mutation_body_members",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/unified/tests.rs",
+      "capability": "native bound plan images preserve queries and all mutation body members",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_plan_images_reject_partial_invalid_and_unadmitted_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/unified/tests.rs",
+      "capability": "native bound plan images reject partial invalid and unadmitted ownership",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_plan_images_retire_deep_owned_roots_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/unified/tests.rs",
+      "capability": "native bound plan images retire deep owned roots without allocation",
+      "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
+      "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

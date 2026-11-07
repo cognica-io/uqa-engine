@@ -4,30 +4,37 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Frame, Input, Kind, Node, Owner, PlanMemory, SQLError};
+use super::{Frame, Input, Kind, NativeNode, Node, Owner, PlanMemory, SQLError};
 use uqa_core::memory::BudgetedVec;
 
-pub(super) enum Step {
+pub(in super::super) enum Step<K = Kind> {
     Advance,
-    Child(Kind),
+    Child(K),
     Done,
 }
 
 impl Input<'_> {
     pub(super) fn native_plan(&mut self, kind: Kind) -> Result<Owner, SQLError> {
-        let mut owner = Owner::new(self.binary.memory);
+        self.native_tree::<Node>(kind)
+    }
+
+    pub(super) fn native_tree<N: NativeNode>(
+        &mut self,
+        kind: N::Kind,
+    ) -> Result<Owner<N>, SQLError> {
+        let mut owner = Owner::<N>::new(self.binary.memory);
         owner.begin(kind)?;
         loop {
             self.binary.cancellation.check()?;
             let frame = owner.frames.last_mut().expect("active native plan");
-            match frame.read(self, &mut owner.memory)? {
+            match N::read(frame, self, &mut owner.memory)? {
                 Step::Advance => frame.position += 1,
                 Step::Child(kind) => owner.begin(kind)?,
                 Step::Done => {
-                    frame.validate(self)?;
+                    N::validate(frame, self)?;
                     let frame = owner.frames.pop().expect("completed native plan");
                     if let Some(parent) = owner.frames.last_mut() {
-                        parent.attach(frame);
+                        N::attach(parent, frame);
                     } else {
                         owner.root = frame.node;
                         return Ok(owner);
@@ -37,13 +44,13 @@ impl Input<'_> {
         }
     }
 
-    pub(super) fn plan_children<T>(
+    pub(super) fn plan_children<T, K>(
         &mut self,
         memory: &mut PlanMemory,
         count: &mut Option<usize>,
         values: &mut Vec<T>,
-        kind: Kind,
-    ) -> Result<Step, SQLError> {
+        kind: K,
+    ) -> Result<Step<K>, SQLError> {
         if count.is_none() {
             let declared = self.binary.count()?;
             let mut buffer = BudgetedVec::new(self.binary.memory);
@@ -83,7 +90,11 @@ impl Input<'_> {
 }
 
 impl Frame {
-    fn read(&mut self, input: &mut Input<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+    pub(super) fn read(
+        &mut self,
+        input: &mut Input<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step, SQLError> {
         match &mut self.node {
             Node::Query(value) => super::queries::read(
                 value,
@@ -122,7 +133,7 @@ impl Frame {
         }
     }
 
-    fn attach(&mut self, child: Self) {
+    pub(super) fn attach(&mut self, child: Self) {
         // Child storage and destination boxes were admitted before descent. Moving into the native parent cannot fail or release its payload lease.
         if matches!(child.node, Node::Source(_)) {
             self.references.absorb(child.references);

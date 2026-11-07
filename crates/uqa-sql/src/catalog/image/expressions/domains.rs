@@ -30,6 +30,7 @@ impl CapturedTypeDefinitions<StoredDomain> {
         fields.count(self.len());
         Ok(DefinitionImageReader {
             first: Some(Frame::NextDomain),
+            statement_expressions: false,
             domains: Some(self.iter()),
             views: None,
             frames: BudgetedVec::new(memory),

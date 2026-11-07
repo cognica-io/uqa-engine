@@ -62,7 +62,8 @@ fn native_query_input_retires_deep_full_and_partial_forests_without_stack_or_all
 
 #[test]
 fn native_query_input_admits_exact_peak_and_releases_exhausted_owners() {
-    let bytes = encode(&query("WITH q AS (INSERT INTO t(a) SELECT (SELECT 7) RETURNING a) SELECT * FROM q, (VALUES (1)) v"));
+    // A single native node uses no growing continuation buffer, so its peak is the required admission rather than a preferred growth capacity.
+    let bytes = encode(&query("VALUES (7)"));
     let token = CancellationToken::new();
     let memory = MemoryBudget::new(16 << 20);
     let value = QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token).unwrap();
@@ -85,6 +86,34 @@ fn native_query_input_admits_exact_peak_and_releases_exhausted_owners() {
     assert_eq!(allocations.count_total, 0);
     drop(remaining);
     assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn native_query_input_keeps_admission_when_continuation_growth_fits_a_smaller_budget() {
+    let bytes = encode(&query("WITH q AS (INSERT INTO t(a) SELECT (SELECT 7) RETURNING a) SELECT * FROM q, (VALUES (1)) v"));
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(16 << 20);
+    drop(QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token).unwrap());
+    let peak = memory.peak();
+    let mut denied = 0;
+    let mut accepted = 0;
+    for limit in (0..peak).step_by(73).chain([peak - 1, peak]) {
+        let memory = MemoryBudget::new(limit);
+        match QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token) {
+            Ok(value) => {
+                accepted += 1;
+                assert_eq!(encode(&value), bytes);
+                assert!(memory.used() <= limit);
+                let remaining = memory.reserve(limit - memory.used()).unwrap();
+                assert_eq!(allocation_counter::measure(|| drop(value)).count_total, 0);
+                drop(remaining);
+            }
+            Err(_) => denied += 1,
+        }
+        assert!(memory.peak() <= limit);
+        assert_eq!(memory.used(), 0);
+    }
+    assert!(denied > 0 && accepted > 0);
 }
 
 struct Interrupted<'a> {

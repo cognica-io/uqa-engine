@@ -87,6 +87,7 @@ enum State {
 /// Stream captured definitions and native query plans without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. AST query/window nodes remain outside the scalar-definition capture contract. Retained literals must expose their captured resident value.
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
+    statement_expressions: bool,
     domains: Option<
         crate::catalog::named_definitions::CapturedDefinitionIter<
             'a,
@@ -153,6 +154,7 @@ impl<'a> DefinitionImageReader<'a> {
         fields.count(count);
         Ok(Self {
             first: Some(first),
+            statement_expressions: false,
             domains: None,
             views: None,
             frames: BudgetedVec::new(memory),

@@ -11,7 +11,7 @@ use std::ops::{Deref, DerefMut};
 use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
 
 #[derive(Debug)]
-pub(super) struct PlanMemory {
+pub(in super::super) struct PlanMemory {
     payload: MemoryReservation,
     retained_children: usize,
 }
