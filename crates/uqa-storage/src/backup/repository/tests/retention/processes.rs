@@ -35,7 +35,9 @@ fn independent_process_leases_protect_readers_writers_and_prepared_recovery() {
         };
         let _reader = root.map(|root| repository.open_backup(root.backup(), &control).unwrap());
         let ready = std::path::Path::new(&path).with_extension("ready");
-        std::fs::write(&ready, operation.id().as_bytes()).unwrap();
+        let pending_ready = ready.with_extension("pending");
+        std::fs::write(&pending_ready, operation.id().as_bytes()).unwrap();
+        std::fs::rename(pending_ready, ready).unwrap();
         std::io::stdin().read_exact(&mut [0; 1]).unwrap();
         std::process::exit(0);
     }
