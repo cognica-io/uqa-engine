@@ -25,6 +25,47 @@ fn build(allowance: usize, carried: bool) -> ValueIndexCache {
 }
 
 #[test]
+fn spilled_value_capture_keeps_wide_evaluated_values_on_native_roots() {
+    let read = StorageReadControl::with_limit(4 << 20);
+    let source = ValueIndexBuilder::from_values(
+        "stored",
+        false,
+        0,
+        [(7, Value::Bytes(vec![0x5a; 2 << 20]))],
+        &read,
+    )
+    .unwrap();
+    assert!(source.is_spilled());
+    let small = StorageReadControl::with_limit(128 << 10);
+    let mut captured = None;
+    let allocated = allocation_counter::measure(|| {
+        captured = Some(source.capture_values(&small).unwrap());
+    });
+    assert!(allocated.bytes_total < 2048, "{allocated:?}");
+    let captured = captured.unwrap();
+    let retained = small.memory().used();
+    assert_eq!(captured.len().unwrap(), 1);
+    assert!(matches!(
+        captured.value(7),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(small.memory().used(), retained);
+    assert_eq!(captured.field().unwrap(), "stored");
+    let complete = StorageReadControl::with_limit(4 << 20);
+    let saved = source.capture_values(&complete).unwrap();
+    drop(source);
+    let value = saved.value(7).unwrap().unwrap();
+    assert!(complete.memory().used() >= 2 << 20);
+    assert!(
+        matches!(&*value, Value::Bytes(bytes) if bytes.len() == 2 << 20 && bytes.iter().all(|byte| *byte == 0x5a))
+    );
+    drop(value);
+    drop((captured, saved));
+    assert_eq!(small.memory().used(), 0);
+    assert_eq!(complete.memory().used(), 0);
+}
+
+#[test]
 fn resident_value_capture_retains_native_roots_without_visiting_or_copying_payloads() {
     for count in [1, 4096] {
         let read = StorageReadControl::with_limit(16 << 20);
@@ -49,7 +90,7 @@ fn resident_value_capture_retains_native_roots_without_visiting_or_copying_paylo
         let captured = captured.unwrap();
         assert_eq!(captured.len().unwrap(), count as usize);
         assert!(std::ptr::eq(
-            captured.value(0).unwrap().unwrap(),
+            captured.value(0).unwrap().as_deref().unwrap(),
             source.policy.stored_value(0).unwrap()
         ));
         let retained = control.memory().used();
@@ -74,7 +115,7 @@ fn resident_value_capture_retains_native_roots_without_visiting_or_copying_paylo
         );
         if count > 1 {
             assert!(std::ptr::eq(
-                captured.value(1).unwrap().unwrap(),
+                captured.value(1).unwrap().as_deref().unwrap(),
                 source.policy.stored_value(1).unwrap()
             ));
         }
@@ -82,7 +123,7 @@ fn resident_value_capture_retains_native_roots_without_visiting_or_copying_paylo
         source.clear();
         drop(source);
         assert_eq!(
-            captured.value(0).unwrap(),
+            captured.value(0).unwrap().as_deref(),
             Some(&Value::Str(format!("{:064}", 0)))
         );
         drop(captured);
@@ -114,16 +155,18 @@ fn resident_value_capture_counts_complete_nested_payloads_before_root_retention(
     let full = StorageReadControl::with_limit(8 << 20);
     let captured = source.capture_values(&full).unwrap();
     assert!(std::ptr::eq(
-        captured.value(1).unwrap().unwrap(),
+        captured.value(1).unwrap().as_deref().unwrap(),
         source.policy.stored_value(1).unwrap()
     ));
     drop(source);
-    let Value::List(values) = captured.value(1).unwrap().unwrap() else {
+    let value = captured.value(1).unwrap().unwrap();
+    let Value::List(values) = &*value else {
         panic!("stored list")
     };
     assert_eq!(values[1], Value::Float(-0.0));
     full.cancellation().cancel();
     assert!(captured.value(1).is_err());
+    drop(value);
     drop(captured);
     assert_eq!(full.memory().used(), 0);
 }
@@ -155,7 +198,10 @@ fn captured_value_indexes_preserve_resident_and_spilled_keys_after_source_loss()
             assert_eq!(snapshot.len().unwrap(), 4);
             assert!(!snapshot.is_empty().unwrap());
             assert!(snapshot.value(2).unwrap().is_none());
-            assert!(matches!(snapshot.value(9).unwrap(), Some(Value::Null)));
+            assert!(matches!(
+                snapshot.value(9).unwrap().as_deref(),
+                Some(Value::Null)
+            ));
             assert!(snapshot
                 .value(0)
                 .unwrap()
@@ -173,7 +219,7 @@ fn captured_value_indexes_preserve_resident_and_spilled_keys_after_source_loss()
                 .unwrap();
             assert_eq!(ids, [0, 1, 9, u64::MAX]);
             assert_eq!(
-                snapshot.value(u64::MAX).unwrap(),
+                snapshot.value(u64::MAX).unwrap().as_deref(),
                 Some(&Value::Str("original".into()))
             );
             assert!(control.memory().used() > 0);
@@ -212,7 +258,13 @@ fn value_index_capture_admission_keeps_membership_and_isolates_failed_cuts() {
     assert_eq!(captured.get(&key).unwrap().unwrap().len().unwrap(), 4);
     drop((source, registry, good, failed));
     assert_eq!(
-        captured.get(&key).unwrap().unwrap().value(1).unwrap(),
+        captured
+            .get(&key)
+            .unwrap()
+            .unwrap()
+            .value(1)
+            .unwrap()
+            .as_deref(),
         Some(&Value::Int(1))
     );
     drop(captured);

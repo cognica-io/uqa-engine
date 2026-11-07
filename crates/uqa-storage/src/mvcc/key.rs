@@ -9,7 +9,7 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
 
-use uqa_core::memory::{BudgetedVec, MemoryBudget};
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryError};
 
 use super::VersionResult;
 
@@ -29,6 +29,13 @@ impl RecordKey {
 
     pub(super) fn bytes(&self) -> &[u8] {
         &self.0
+    }
+
+    pub(super) fn retained_bytes(&self) -> Result<usize, MemoryError> {
+        self.0
+            .capacity()
+            .checked_add(size_of::<BudgetedVec<u8>>())
+            .ok_or(MemoryError::SizeOverflow)
     }
 }
 

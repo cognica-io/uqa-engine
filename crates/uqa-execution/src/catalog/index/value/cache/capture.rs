@@ -16,8 +16,8 @@ use uqa_core::{
     DocId, Value, ValueRetentionError,
 };
 use uqa_storage::{
-    memory_capture::MemoryCaptureSource, read_control::StorageReadControl, StorageBackendError,
-    StorageBackendResult, ValueIndexKey,
+    btree_index::retained::RetainedValueIndexSnapshot, memory_capture::MemoryCaptureSource,
+    read_control::StorageReadControl, StorageBackendError, StorageBackendResult, ValueIndexKey,
 };
 
 /// The live collection is mutated only through its enclosing source admission owner.
@@ -69,7 +69,23 @@ pub struct CapturedValueIndex {
 
 enum CapturedValues {
     Resident(Budgeted<RetainedMapSnapshot<DocId, Value>>),
-    Copied(BudgetedMap<DocId, Budgeted<Value>>),
+    Spilled(Budgeted<RetainedValueIndexSnapshot>),
+}
+
+/// Resident values borrow the admitted immutable root; spilled values retain the allowance of their individual decoding.
+pub enum CapturedValue<'a> {
+    Borrowed(&'a Value),
+    Owned(Budgeted<Value>),
+}
+
+impl Deref for CapturedValue<'_> {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
 }
 
 impl ValueIndexCache {
@@ -81,17 +97,7 @@ impl ValueIndexCache {
         let memory = control.memory().reserve(size_of::<CapturedValueIndex>())?;
         let field = copy_text(&self.field, control)?;
         let values = if let Some(retained) = &self.retained {
-            let mut values = BudgetedMap::new(control.memory());
-            retained.visit_values_owned(control, &mut |id, value| {
-                control.check()?;
-                if values.insert(id, value)?.is_some() {
-                    return Err(StorageBackendError::Other(
-                        "duplicate captured value-index identity".into(),
-                    ));
-                }
-                Ok(true)
-            })?;
-            CapturedValues::Copied(values)
+            CapturedValues::Spilled(retained.capture(control)?)
         } else {
             CapturedValues::Resident(self.policy.values.capture(control.memory())?)
         };
@@ -132,7 +138,7 @@ impl CapturedValueIndex {
         self.control.check()?;
         Ok(match &self.values {
             CapturedValues::Resident(values) => values.len(),
-            CapturedValues::Copied(values) => values.len(),
+            CapturedValues::Spilled(values) => values.len()?,
         })
     }
 
@@ -140,12 +146,14 @@ impl CapturedValueIndex {
         Ok(self.len()? == 0)
     }
 
-    /// Absence and an evaluated SQL NULL remain distinct. The returned borrow cannot outlive its admitted source owner.
-    pub fn value(&self, id: DocId) -> StorageBackendResult<Option<&Value>> {
+    /// Absence and an evaluated SQL NULL remain distinct. Decoding a spilled value retains its capture allowance until the returned value is dropped.
+    pub fn value(&self, id: DocId) -> StorageBackendResult<Option<CapturedValue<'_>>> {
         self.control.check()?;
         Ok(match &self.values {
-            CapturedValues::Resident(values) => values.get(&id),
-            CapturedValues::Copied(values) => values.get(&id).map(|value| &**value),
+            CapturedValues::Resident(values) => values.get(&id).map(CapturedValue::Borrowed),
+            CapturedValues::Spilled(values) => {
+                values.get(id, &self.control)?.map(CapturedValue::Owned)
+            }
         })
     }
 
@@ -166,10 +174,11 @@ impl CapturedValueIndex {
                     visit(id, value)?;
                 }
             }
-            CapturedValues::Copied(values) => {
-                for (&id, value) in values {
-                    visit(id, value)?;
-                }
+            CapturedValues::Spilled(values) => {
+                values.visit_values_owned(&self.control, &mut |id, value| {
+                    visit(id, &value)?;
+                    Ok(true)
+                })?;
             }
         }
         self.control.check()

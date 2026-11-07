@@ -140,7 +140,8 @@ fn committed_table_sources_preserve_unread_indexes_across_savepoint_commit_and_c
             .unwrap()
             .unwrap()
             .value(1)
-            .unwrap(),
+            .unwrap()
+            .as_deref(),
         Some(&Value::Row(vec![Value::Str("original term".into())].into()))
     );
     assert_eq!(saved.columns.get().unwrap().len(), 3);

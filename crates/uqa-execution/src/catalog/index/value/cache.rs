@@ -18,8 +18,8 @@ use uqa_storage::{
 mod builder;
 mod capture;
 pub use capture::{
-    CapturedValueIndex, CapturedValueIndexPolicy, CapturedValueIndexes, ValueIndexComparison,
-    ValueIndexes,
+    CapturedValue, CapturedValueIndex, CapturedValueIndexPolicy, CapturedValueIndexes,
+    ValueIndexComparison, ValueIndexes,
 };
 mod probes;
 mod projection;

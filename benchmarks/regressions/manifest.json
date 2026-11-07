@@ -48902,6 +48902,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_record_capture_retains_roots_without_spill_or_value_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/capture/tests.rs",
+      "capability": "Native record capture work",
+      "workload": "Capture 256 resident or spilled records, deny one byte below full admission, then delete and retire the live source.",
+      "invariant": "Capture allocates less than 2 KiB and performs zero record or payload reads and zero spill writes; roots, revisions, exact values and complete release survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_record_capture_charges_resident_payloads_and_preserves_undo_footprints",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/capture/tests.rs",
+      "capability": "Native record capture admission",
+      "workload": "Capture a two-MiB resident payload, replace it with a short value, mutate under a savepoint and roll back.",
+      "invariant": "Complete cached payload footprints reject insufficient independent limits, follow immutable undo roots and release all source and capture reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_capture_streams_wide_values_with_bounded_memory_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Spilled evaluated-key image output",
+      "workload": "Capture a two-MiB value with 128 KiB, mutate and close the source, then prepare in three-position steps and stream with 64 KiB.",
+      "invariant": "Capture allocates less than 2 KiB without decoding; every chunk and EOF is accounted, bytes match an independent UQAVAL01 fixture, an unfunded decode fails and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_capture_preserves_exact_representations_and_owned_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Native evaluated-key identity",
+      "workload": "Capture resident and spilled NULL, signed zero, NaN bits, tag-shaped maps and duplicate positional record names.",
+      "invariant": "Exact admission and one-byte-short rejection preserve every native carrier; independently decoded values retain their own allowance after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_image_preparation_counts_deleted_chunks_and_node_positions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Bounded deleted-key traversal",
+      "workload": "Replace a 128-KiB value with NULL and delete another identity before capture.",
+      "invariant": "Each deleted node or chunk remains a charged metadata position; preparation visits at most one position per call and output contains only the exact live NULL image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_images_reject_chunk_corruption_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Native chunk validation",
+      "workload": "Delete or alter the length of an evaluated value chunk before capture.",
+      "invariant": "Invalid chunk metadata fails before output, leaves no reader allocation, preserves typed errors and prevents reader resumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_images_preserve_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Captured chunk cancellation",
+      "workload": "Cancel either the original capture or the independent output control after preparing and reading one byte.",
+      "invariant": "The next read reports cancellation, drops all reader workspace and remains terminal; the ordinary source remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_value_capture_keeps_wide_evaluated_values_on_native_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Spilled evaluated-key capture",
+      "workload": "Capture a two-MiB evaluated key under 128 KiB and independently under a full decoding allowance.",
+      "invariant": "Capture allocates less than 2 KiB and retains native files; decoding alone requires payload admission, preserves exact bytes and releases every reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

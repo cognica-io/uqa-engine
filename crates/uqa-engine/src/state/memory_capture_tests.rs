@@ -66,7 +66,7 @@ fn memory_engine_capture_preserves_evaluated_expression_keys_after_routine_repla
         let captured = key.retained(&cut).unwrap().unwrap();
         let index = captured.get(&field).unwrap().unwrap();
         assert_eq!(
-            index.value(1).unwrap(),
+            index.value(1).unwrap().as_deref(),
             Some(&crate::Value::Row(
                 vec![crate::Value::Str("original".into())].into()
             ))

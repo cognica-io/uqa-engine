@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Spilled evaluated-index captures retain native record roots and encrypted files without reading or copying the complete value population. Independent retention charges cached metadata footprints; bounded chunk preparation and output preserve exact evaluated bytes after source mutation or closure.
+
 - Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.
 
 - Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.

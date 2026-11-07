@@ -261,7 +261,7 @@ impl SpilledRunWriter {
             block.end = end;
             block.last = last.clone();
         }
-        Ok(Some(SpilledRun {
+        let mut run = SpilledRun {
             entry_bytes: end,
             bytes: end + self.values.position(),
             entries: self.entries.file,
@@ -274,6 +274,9 @@ impl SpilledRunWriter {
             key_bytes: self.key_bytes,
             kinds: self.kinds,
             cache: std::sync::Arc::new(super::cache::RunCache::new(&self.memory)),
-        }))
+            retained_bytes: None,
+        };
+        run.retained_bytes = run.count_retained_bytes();
+        Ok(Some(run))
     }
 }

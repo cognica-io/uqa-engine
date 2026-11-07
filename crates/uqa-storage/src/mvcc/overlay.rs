@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use triomphe::Arc as StrongArc;
-use uqa_core::memory::{BudgetedSharedMap, BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
 use crate::StorageSavepointId;
@@ -20,13 +20,16 @@ use crate::StorageSavepointId;
 use super::key::RecordKey;
 use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError, VersionResult};
 
+mod capture;
 mod cursor;
 pub use cursor::{PrivateRecordCursor, PrivateRecordEntry};
 mod selection;
 pub(super) use selection::PrivateRecordSelection;
 mod policy;
+mod records;
 mod retained;
 use policy::RootPolicy;
+use records::Records;
 mod scopes;
 pub use scopes::PrivateRevisionScope;
 use scopes::RevisionScopes;
@@ -51,8 +54,6 @@ struct Change {
     write: PreparedRecordWrite,
     identity: PrivateRecordRevision,
 }
-
-type Records = BudgetedSharedMap<RecordKey, Change>;
 
 /// Process-local identity of an evaluated private batch. Identities are never reused across transactions or undo branches; they are not durable commit sequences.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
