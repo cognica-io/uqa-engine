@@ -23,6 +23,7 @@ use crate::{
             database::{BoundDatabaseSecurity, DatabasePrivileges},
             sequence_registry::SequenceAuthority,
             system_relations::{SystemAcl, SystemRelationSecurity},
+            table_binding::{BoundTableAclEntry, CapturedTableSecurity},
             BoundSchemaSecurity,
         },
         shell_type::StoredShellType,
@@ -42,6 +43,7 @@ use uqa_core::{
 };
 
 pub(super) enum Entries<'a> {
+    TableSecurity(Option<&'a CapturedTableSecurity>),
     FunctionBinding(Option<&'a FunctionBinding>),
     SequenceAuthorities(CapturedDefinitionIter<'a, RelationIdentity, SequenceAuthority>),
     Roles(CapturedDefinitionIter<'a, String, RoleDefinition>),
@@ -68,6 +70,7 @@ enum Acl<'a> {
 }
 enum Columns<'a> {
     None,
+    Table(Iter<'a, (String, Vec<BoundTableAclEntry>)>),
     System(BudgetedMapIter<'a, String, SystemAcl>),
     Graph(BudgetedMapIter<'a, String, u32>),
 }
@@ -159,8 +162,34 @@ impl<'a> CatalogImageReader<'a> {
         self.fields.count(acl.len());
         self.acl = Acl::Table(acl.iter());
     }
+    fn table_security(&mut self, value: &'a CapturedTableSecurity) {
+        let CapturedTableSecurity {
+            privileges,
+            relation_revision,
+            column_revisions,
+        } = value;
+        self.fields.identity(privileges.role_owner);
+        self.fields.optional_incarnation(*relation_revision);
+        self.fields.count(privileges.column_acls().len());
+        self.fields.count(column_revisions.len());
+        self.fields.flag(privileges.acl().is_some());
+        if let Some(acl) = privileges.acl() {
+            self.fields.count(acl.len());
+            self.acl = Acl::Table(acl.iter());
+        }
+        self.columns = Columns::Table(privileges.column_acls().iter());
+        self.tail = Tail::TableRevisions(column_revisions.iter());
+    }
     fn next_column(&mut self) -> bool {
         match &mut self.columns {
+            Columns::Table(columns) => {
+                if let Some((name, acl)) = columns.next() {
+                    self.fields.text(name);
+                    self.fields.count(acl.len());
+                    self.acl = Acl::Table(acl.iter());
+                    return true;
+                }
+            }
             Columns::System(columns) => {
                 if let Some((name, value)) = columns.next() {
                     self.fields.text(name);
@@ -205,6 +234,12 @@ impl<'a> CatalogImageReader<'a> {
             return Ok(true);
         }
         match &mut self.entries {
+            Entries::TableSecurity(entry) => {
+                let Some(value) = entry.take() else {
+                    return Ok(false);
+                };
+                self.table_security(value);
+            }
             Entries::SequenceAuthorities(entries) => {
                 let Some((relation, authority)) = entries.next() else {
                     return Ok(false);

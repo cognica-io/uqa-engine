@@ -149,7 +149,7 @@ impl<'a> DefinitionImageReader<'a> {
         }
     }
 
-    fn constraint_identity(&mut self, value: Option<ConstraintCatalogIdentity>) {
+    pub(super) fn constraint_identity(&mut self, value: Option<ConstraintCatalogIdentity>) {
         self.fields.flag(value.is_some());
         if let Some(ConstraintCatalogIdentity { object_id, oid }) = value {
             self.fields.scalar(object_id);

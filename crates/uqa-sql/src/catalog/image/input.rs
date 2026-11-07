@@ -35,6 +35,9 @@ mod roles;
 mod security;
 mod sequences;
 mod structured_types;
+mod table_security;
+mod tables;
+mod triggers;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use domains::domains;
@@ -48,6 +51,12 @@ pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
 pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
+pub(super) use table_security::table_security;
+pub use tables::{
+    read_columns_image, read_dropped_attributes_image, read_foreign_keys_image,
+    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image,
+};
+pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
 
 struct Input<'a> {

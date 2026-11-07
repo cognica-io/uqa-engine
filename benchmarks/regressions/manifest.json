@@ -2,6 +2,97 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_match_independent_physical_attribute_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",
+      "capability": "Native column image framing",
+      "workload": "Compare literal physical attribute bytes with multiple output windows and decode every field.",
+      "invariant": "Original attribute numbers, constraint identities, declaration flags and scalar children match the independent wire fixture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_preserve_declarations_and_optional_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",
+      "capability": "Native column declaration preservation",
+      "workload": "Round-trip 128 combinations of optional definitions, sequence provenance, generated dependencies and foreign references.",
+      "invariant": "Exact original presence, ordered metadata, identities and evaluated values survive without interpretation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_input_rejects_partial_invalid_and_unfunded_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Admitted native column reconstruction",
+      "workload": "Reject every truncated prefix, malformed tags, hostile counts and exact-peak-minus-one admission.",
+      "invariant": "Invalid or denied construction releases all native payloads; exact peak succeeds and trailing bytes are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_input_retires_read_errors_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Interrupted column reconstruction ownership",
+      "workload": "Inject reader errors, cancellation and panics at metadata and payload boundaries.",
+      "invariant": "Every failed path releases native payload and container reservations without publishing a definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_output_keeps_scratch_independent_of_attribute_payload_size",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Bounded native column image output",
+      "workload": "Stream an eight-MiB attribute payload, deny scratch and cancel active output.",
+      "invariant": "Preparation performs no scan or allocation, reads emit at most 16 KiB and terminal failures release bounded scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_reconstruct_deep_defaults_without_recursive_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Constant-stack column default reconstruction",
+      "workload": "Encode, decode and retire a 10000-node default on a 128 KiB stack.",
+      "invariant": "Original scalar bytes survive without recursive retirement or leaked admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_column_images_preserve_bound_defaults_and_generated_metadata_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine column images",
+      "workload": "Capture real identity, foreign, default and generated column definitions, roll back and replace the source before cross-thread output.",
+      "invariant": "Original bound functions, physical attribute and missing-value metadata survive source retirement without execution or rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-ml",
       "kind": "lib",
       "test": "resumable_model_images_preserve_all_layers_and_wire_boundaries",
@@ -46845,6 +46936,461 @@
       "capability": "Native domain input resource ownership",
       "workload": "Apply exact memory thresholds and inject I/O failure, cancellation and unwinding throughout native catalog construction.",
       "invariant": "Admission precedes construction and partial private catalogs release every native owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_match_literal_fields_and_native_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image framing",
+      "workload": "Compare independent literal wire bytes with every native field and measure live decoded allocations.",
+      "invariant": "Native metadata and scalar observations round-trip without unadmitted retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_preserve_optional_metadata_and_every_enum",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image metadata",
+      "workload": "Exercise 128 combinations of original optional identities, constraints and conditions with every native enum variant.",
+      "invariant": "Absence, declaration order and all original flags survive without normalization or execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_preserve_empty_relations_and_quoted_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image membership",
+      "workload": "Preserve an empty relation, quoted identities and ordered declarations with shared routine references.",
+      "invariant": "The complete durable relation and declaration membership remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_rejects_partial_malformed_and_mismatched_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input framing",
+      "workload": "Reject every truncated prefix and malformed flag, enum, identifier, key, relation or scalar frame.",
+      "invariant": "No incomplete catalog escapes and all partial ownership retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_rejects_duplicate_keys_incarnations_and_catalog_oids",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input identities",
+      "workload": "Reject duplicate relation/declaration keys, trigger incarnations, trigger/constraint OIDs and temporary roots.",
+      "invariant": "A private image cannot silently replace native membership or reuse an existing catalog identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_admits_exact_peak_and_retires_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input admission",
+      "workload": "Exercise exact memory thresholds, hostile counts and I/O failure, cancellation and unwinding during construction.",
+      "invariant": "Construction precedes publication and all owned payloads retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_keep_captured_generations_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger captured ownership",
+      "workload": "Capture durable and temporary declarations, replace the durable name and retire the original registry.",
+      "invariant": "Output retains only the selected durable generation with exact original fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_output_borrows_large_arguments_without_corpus_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger bounded output",
+      "workload": "Stream an eight-MiB argument using zero scratch admission and allocation measurement.",
+      "invariant": "Preparation and bounded output borrow original text without a second encoded corpus.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_conditions_use_constant_stack_and_admitted_child_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger scalar ownership",
+      "workload": "Decode, emit and retire a 10000-node condition on a 128-KiB stack and check exact child-reader admission.",
+      "invariant": "Deep native scalar ownership remains stack-safe and every failed child reader releases scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_output_cancellation_retires_children_and_remains_terminal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger output lifecycle",
+      "workload": "Cancel an active scalar child and read again after both failure and successful completion.",
+      "invariant": "Cancellation retires all scratch and both terminal states remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_trigger_images_preserve_original_bound_conditions_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Captured Engine trigger images",
+      "workload": "Capture real SQL trigger definitions, roll back DDL, replace their relation and functions, close the Engine and reconstruct the native catalog on another thread.",
+      "invariant": "Original execution-target and WHEN bindings, constraint identities and arguments survive the source lifecycle without execution or rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_images_match_independent_wire_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations.rs",
+      "capability": "Native table metadata wire contract",
+      "workload": "Compare all five native component formats against independently assembled literal bytes at four read widths.",
+      "invariant": "Framing and exact native field order remain independent of output chunk size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_images_preserve_constraints_and_partition_variants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Exercise optional metadata, independent identities, all partition kinds, action tags and CHECK/foreign/key flags.",
+      "invariant": "Declared order, absent fields, original bindings and inherited provenance survive native reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_retires_partial_invalid_and_unfunded_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata input admission",
+      "workload": "Reject every truncated prefix, invalid tags, trailing data, hostile counts and insufficient memory; accept the exact peak allowance.",
+      "invariant": "Private construction admits payloads before allocation and retires every failed component.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata interruption",
+      "workload": "Inject I/O failure, cancellation and unwinding during every component reconstruction.",
+      "invariant": "No partial component or retained memory escapes an interrupted construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_output_is_bounded_by_active_traversal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata bounded output",
+      "workload": "Stream original metadata including an eight-MiB parent name; deny scratch and cancel active readers.",
+      "invariant": "Reads emit at most 16 KiB with less than 16 KiB traversal allocation; failed readers remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_owns_deep_partition_scalars",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native partition scalar lifetime",
+      "workload": "Reconstruct and retire a 10000-node partition scalar and its truncated image on a 128-KiB stack.",
+      "invariant": "Deep successful and partial native ownership retires without recursive scalar stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_metadata_images_preserve_partition_constraints_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine table metadata images",
+      "workload": "Capture actual SQL partition keys, CHECK/foreign constraints and dropped slots; roll back DDL, replace the table and close its Engine before cross-thread reconstruction.",
+      "invariant": "Selected native generations and complete metadata survive source retirement without resolving names or running SQL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_images_match_independent_acl_and_revision_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority wire format",
+      "workload": "Compare native owner, optional ACL, ordered column grants and independent revision fields against literal bytes at four read widths.",
+      "invariant": "Original authority fields and wire order are independent of chunk size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_images_preserve_optional_acl_paths_and_all_privileges",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority preservation",
+      "workload": "Exercise all 256 privilege combinations, grant options, absent/empty ACLs and optional tuple revisions.",
+      "invariant": "Role incarnations, public grantees, grantor paths and absence remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_input_rejects_invalid_order_and_partial_or_denied_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority input admission",
+      "workload": "Reject every truncated prefix, invalid flags/counts, unordered or duplicate columns and insufficient memory; accept the exact peak allowance.",
+      "invariant": "No partial authority escapes and native buffers remain admitted until retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_output_borrows_large_columns_and_keeps_terminal_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority bounded output",
+      "workload": "Stream an eight-MiB column name and cancel a partial reader.",
+      "invariant": "Preparation and output allocate no payload; reads emit at most 16 KiB and failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority interrupted input",
+      "workload": "Inject I/O failure, cancellation and unwinding at header, payload and terminal boundaries.",
+      "invariant": "All unfinished authority buffers and reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_authority_images_keep_acl_incarnations_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine authority images",
+      "workload": "Capture actual relation/column grants, roll back REVOKE, replace the table and role, then emit on another thread after Engine closure.",
+      "invariant": "Original ACL paths, role incarnations and revision metadata survive source retirement without name resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_images_match_independent_distribution_bytes",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_images_preserve_optional_values_and_frequency_bits",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_input_rejects_invalid_order_and_retires_denied_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_output_borrows_payloads_and_retires_active_value_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_writer_failure_retires_active_traversal",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_images_match_independent_inline_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_images_preserve_absence_and_all_counter_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_input_rejects_malformed_and_truncated_records",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_output_failure_and_cancellation_are_terminal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_statistics_images_keep_distributions_and_maintenance_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine statistics images",
+      "workload": "Capture analyzed distributions and pending maintenance, roll back a new analysis, replace the relation and emit the old capture after Engine retirement on another thread.",
+      "invariant": "Original complete distributions and maintenance state survive rollback, replacement and source retirement with no retained allowance leak.",
       "case_names": [
         ""
       ]

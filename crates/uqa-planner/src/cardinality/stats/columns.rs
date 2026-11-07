@@ -11,8 +11,10 @@ use uqa_sql::SQLError;
 
 mod builder;
 mod copy;
+mod image;
 pub(crate) use builder::Builder;
 use builder::ColumnName;
+pub use image::ColumnStatisticsImageReader;
 #[cfg(test)]
 mod tests;
 

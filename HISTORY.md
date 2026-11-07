@@ -14,6 +14,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded native column-statistics and statistics-maintenance images preserving complete distributions, floating-point frequency bits, original counters and sampled analysis identities without rerunning ANALYZE. Complete memory Engine backup and public restore remain under implementation.
+
+- Add bounded native table and column authority images preserving role incarnations, grantor paths, optional ACLs and independent tuple revisions. Admitted input reconstructs private authority without resolving names; complete Engine restore remains under implementation.
+
+- Add bounded native images for table CHECKs, key and foreign-key constraints, inheritance and partition metadata, and dropped physical attributes. Admitted input preserves original identities, declaration order and bound expressions; complete memory Engine backup and restore remain under implementation.
+
+- Add bounded native column-definition images retaining physical attributes, missing values, bound defaults and generated expressions, foreign-reference identities and exact sequence provenance. Admitted input reconstructs private native columns without evaluation; complete memory Engine backup and restore remain under implementation.
+
+- Add native trigger catalog images preserving ordered relation membership, original function and constraint identities, enabled states, declaration metadata and bound WHEN expressions. Bounded output and admitted input retain source generations without firing triggers or resolving names; complete Engine restore remains under implementation.
+
 - Add bounded native domain and scalar-definition images with admitted native reconstruction, retaining original defaults, constraints, authority, function bindings and evaluated literal metadata. Input retires deep partial trees on malformed data, denied memory, cancellation or unwinding. Complete Engine restore remains under implementation.
 
 - Add native function-binding images that preserve selected operations, argument and type metadata, collations and deferred diagnostics with bounded output and admitted reconstruction. Existing foreign-callback image bytes remain unchanged; complete stored-expression backup and public Engine restore remain under implementation.
@@ -130,6 +140,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Keep SQL call-selection workspace out of recursive argument-observation frames, preventing stack exhaustion when a prepared nested collated expression is analyzed again on an ordinary thread stack.
 
 - Retire deeply nested native scalar expressions with constant stack and no traversal allocation, including cleanup after a retained resource unwinds. Native AST payloads move into execution plans without replacement boxes or declaration copies; Rust consumers borrow expression variants when inspecting their fields.
 

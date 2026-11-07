@@ -9,7 +9,8 @@
 use super::{StoredRule, StoredTrigger};
 use crate::{
     catalog::named_definitions::{
-        sealed, CapturedDefinitions, DefinitionIter, DefinitionRegistry, StoredDefinition,
+        sealed, CapturedDefinitionIter, CapturedDefinitions, DefinitionIter, DefinitionRegistry,
+        StoredDefinition,
     },
     plan::copy::SyntaxProduction,
     SQLError,
@@ -49,6 +50,29 @@ impl<T> Default for EventDefinitions<T> {
     }
 }
 impl<T> EventDefinitions<T> {
+    /// Transfer decoded payloads with their original admission into the native declaration tree.
+    pub(crate) fn insert_image_entry(
+        &mut self,
+        name: Budgeted<String>,
+        value: Budgeted<T>,
+    ) -> Result<(), SQLError> {
+        assert!(self.entries.budget().shares_allowance(name.budget()));
+        assert!(self.entries.budget().shares_allowance(value.budget()));
+        let (name, key_memory) = name.into_parts();
+        let (value, mut memory) = value.into_parts();
+        memory.absorb(key_memory);
+        let value = Budgeted::new(value, memory);
+        let bytes = value.reserved_bytes();
+        self.entries.insert(name, value, bytes)?;
+        Ok(())
+    }
+
+    pub(crate) fn last_key(&self) -> Option<&String> {
+        self.entries
+            .last_before::<str>(std::ops::Bound::Unbounded)
+            .map(|(key, _)| key)
+    }
+
     pub fn new() -> Self {
         Self::with_budget(&MemoryBudget::new(usize::MAX))
     }
@@ -213,6 +237,20 @@ impl<T> EventCatalog<T> {
     }
 }
 impl<T: EventDefinition> EventCatalog<T> {
+    pub(crate) fn insert_image_entry(
+        &mut self,
+        relation: Budgeted<RelationIdentity>,
+        entries: EventDefinitions<T>,
+    ) -> Result<(), SQLError> {
+        let memory = self.relations.budget().empty_reservation();
+        self.relations
+            .insert_image_entry(relation, Budgeted::new(entries, memory))
+    }
+
+    pub(crate) fn last_durable_key(&self) -> Option<&RelationIdentity> {
+        self.relations.last_durable_key()
+    }
+
     /// Transform selected declarations in a private successor. Callback or admission failure preserves every published relation root.
     pub fn rewrite(
         &mut self,
@@ -352,8 +390,17 @@ impl<T> CapturedEventCatalog<T> {
     pub fn get(&self, relation: &RelationIdentity) -> Option<&EventDefinitions<T>> {
         self.relations.get(relation)
     }
-    pub fn iter(&self) -> impl Iterator<Item = (&RelationIdentity, &EventDefinitions<T>)> {
+    pub fn iter(&self) -> CapturedDefinitionIter<'_, RelationIdentity, EventDefinitions<T>> {
         self.relations.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a CapturedEventCatalog<T> {
+    type Item = (&'a RelationIdentity, &'a EventDefinitions<T>);
+    type IntoIter = CapturedDefinitionIter<'a, RelationIdentity, EventDefinitions<T>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

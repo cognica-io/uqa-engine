@@ -21,6 +21,7 @@ use uqa_core::memory::BudgetedMapIter;
 
 pub(super) enum Tail<'a> {
     None,
+    TableRevisions(Iter<'a, (String, [u8; 16])>),
     Wrapper(Wrapper<'a>),
     FunctionBinding(Binding<'a>),
     Composite(Iter<'a, StoredCompositeAttribute>),
@@ -42,6 +43,13 @@ impl<'a> Tail<'a> {
     ) -> Result<bool, SQLError> {
         match self {
             Self::None => {}
+            Self::TableRevisions(revisions) => {
+                if let Some((column, revision)) = revisions.next() {
+                    fields.text(column);
+                    fields.scalar(*revision);
+                    return Ok(true);
+                }
+            }
             Self::Wrapper(value) => {
                 if value.next(fields, column_type)? {
                     return Ok(true);
@@ -172,7 +180,8 @@ impl<'a> CatalogImageReader<'a> {
                 self.fields.graph(key, value);
                 self.tail = Tail::Graph(value.labels.iter());
             }
-            Entries::Roles(_)
+            Entries::TableSecurity(_)
+            | Entries::Roles(_)
             | Entries::SequenceAuthorities(_)
             | Entries::Memberships(_)
             | Entries::Schemas(_)

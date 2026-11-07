@@ -39,6 +39,25 @@ impl Identities {
 }
 
 impl Input<'_> {
+    pub(super) fn optional_incarnation(&mut self) -> Result<Option<[u8; 16]>, SQLError> {
+        if self.flag()? {
+            Ok(Some(self.object_id()?))
+        } else {
+            Ok(None)
+        }
+    }
+    pub(super) fn optional_catalog_identity(
+        &mut self,
+    ) -> Result<Option<crate::ast::ConstraintCatalogIdentity>, SQLError> {
+        if self.flag()? {
+            Ok(Some(crate::ast::ConstraintCatalogIdentity {
+                object_id: self.object_id()?,
+                oid: self.oid()?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
     pub(super) fn object_id(&mut self) -> Result<[u8; 16], SQLError> {
         let id = self.binary.array()?;
         if id == [0; 16] {

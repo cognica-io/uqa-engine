@@ -6,7 +6,7 @@
 
 //! Scalar coercion contexts used while preparing a statement.
 
-use super::function_calls::FunctionResult;
+use super::function_calls::{FunctionResult, ObservedFunctionArguments};
 use super::ownership::AnalysisType;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
@@ -526,9 +526,8 @@ impl Preparation<'_> {
             name,
             binding,
             args,
-            distinct,
             order_by,
-            filter,
+            ..
         } = expression
         else {
             unreachable!("function expression");
@@ -542,8 +541,41 @@ impl Preparation<'_> {
             order_by.len(),
         );
         let ordered: &[crate::ScalarOrder] = if within_group { order_by } else { &[] };
-        let mut arguments =
-            self.observe_function_arguments(name, args, ordered, input, subqueries)?;
+        let arguments = self.observe_function_arguments(name, args, ordered, input, subqueries)?;
+        self.finish_function_expression(
+            expression,
+            input,
+            subqueries,
+            calls,
+            within_group,
+            arguments,
+        )
+    }
+
+    // Observe child calls before entering the frame that owns overload selection and result construction. Parent selection scratch must not remain on every recursive argument frame.
+    fn finish_function_expression(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        calls: usize,
+        within_group: bool,
+        mut arguments: ObservedFunctionArguments,
+    ) -> Result<ExpressionType, SQLError> {
+        let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            distinct,
+            order_by,
+            filter,
+            ..
+        } = expression
+        else {
+            unreachable!("function expression");
+        };
+        let binding = binding.as_ref();
+        let ordered: &[crate::ScalarOrder] = if within_group { order_by } else { &[] };
         let additional = self.function_modifier_collations(
             if within_group { &[] } else { order_by },
             filter.as_deref(),
