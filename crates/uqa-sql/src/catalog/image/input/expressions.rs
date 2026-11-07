@@ -62,7 +62,7 @@ impl Input<'_> {
         }
     }
 
-    fn scalar_value(&mut self) -> Result<Budgeted<Value>, SQLError> {
+    pub(super) fn scalar_value(&mut self) -> Result<Budgeted<Value>, SQLError> {
         uqa_core::value_image::read_value_image(
             self.binary.reader,
             self.binary.memory,

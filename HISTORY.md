@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded native column-definition images retaining physical attributes, missing values, bound defaults and generated expressions, foreign-reference identities and exact sequence provenance. Admitted input reconstructs private native columns without evaluation; complete memory Engine backup and restore remain under implementation.
+
 - Add native trigger catalog images preserving ordered relation membership, original function and constraint identities, enabled states, declaration metadata and bound WHEN expressions. Bounded output and admitted input retain source generations without firing triggers or resolving names; complete Engine restore remains under implementation.
 
 - Add bounded native domain and scalar-definition images with admitted native reconstruction, retaining original defaults, constraints, authority, function bindings and evaluated literal metadata. Input retires deep partial trees on malformed data, denied memory, cancellation or unwinding. Complete Engine restore remains under implementation.

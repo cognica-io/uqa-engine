@@ -2,6 +2,97 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_match_independent_physical_attribute_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",
+      "capability": "Native column image framing",
+      "workload": "Compare literal physical attribute bytes with multiple output windows and decode every field.",
+      "invariant": "Original attribute numbers, constraint identities, declaration flags and scalar children match the independent wire fixture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_preserve_declarations_and_optional_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",
+      "capability": "Native column declaration preservation",
+      "workload": "Round-trip 128 combinations of optional definitions, sequence provenance, generated dependencies and foreign references.",
+      "invariant": "Exact original presence, ordered metadata, identities and evaluated values survive without interpretation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_input_rejects_partial_invalid_and_unfunded_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Admitted native column reconstruction",
+      "workload": "Reject every truncated prefix, malformed tags, hostile counts and exact-peak-minus-one admission.",
+      "invariant": "Invalid or denied construction releases all native payloads; exact peak succeeds and trailing bytes are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_input_retires_read_errors_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Interrupted column reconstruction ownership",
+      "workload": "Inject reader errors, cancellation and panics at metadata and payload boundaries.",
+      "invariant": "Every failed path releases native payload and container reservations without publishing a definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_output_keeps_scratch_independent_of_attribute_payload_size",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Bounded native column image output",
+      "workload": "Stream an eight-MiB attribute payload, deny scratch and cancel active output.",
+      "invariant": "Preparation performs no scan or allocation, reads emit at most 16 KiB and terminal failures release bounded scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_column_images_reconstruct_deep_defaults_without_recursive_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Constant-stack column default reconstruction",
+      "workload": "Encode, decode and retire a 10000-node default on a 128 KiB stack.",
+      "invariant": "Original scalar bytes survive without recursive retirement or leaked admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_column_images_preserve_bound_defaults_and_generated_metadata_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine column images",
+      "workload": "Capture real identity, foreign, default and generated column definitions, roll back and replace the source before cross-thread output.",
+      "invariant": "Original bound functions, physical attribute and missing-value metadata survive source retirement without execution or rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-ml",
       "kind": "lib",
       "test": "resumable_model_images_preserve_all_layers_and_wire_boundaries",

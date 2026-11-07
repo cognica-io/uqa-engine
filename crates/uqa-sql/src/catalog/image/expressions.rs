@@ -27,6 +27,8 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
+mod tables;
+pub use tables::columns_image_reader;
 #[cfg(test)]
 mod tests;
 
@@ -34,6 +36,7 @@ pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
+    Table(tables::Part<'a>),
     NextDomain,
     DomainDefinition(&'a crate::ast::CreateDomain),
     DomainChecks(&'a [crate::ast::DomainCheck]),
@@ -118,12 +121,22 @@ impl<'a> DefinitionImageReader<'a> {
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
     ) -> Result<Self, SQLError> {
+        Self::start(Frame::Node(value), MAGIC, 1, memory, cancellation)
+    }
+
+    fn start(
+        first: Frame<'a>,
+        magic: [u8; 8],
+        count: usize,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+    ) -> Result<Self, SQLError> {
         cancellation.check()?;
         let mut fields = Fields::new();
-        fields.scalar(MAGIC);
-        fields.count(1);
+        fields.scalar(magic);
+        fields.count(count);
         Ok(Self {
-            first: Some(Frame::Node(value)),
+            first: Some(first),
             domains: None,
             frames: BudgetedVec::new(memory),
             fields,

@@ -23,14 +23,12 @@ impl Input<'_> {
         &mut self,
         identities: &mut Identities,
     ) -> Result<Option<ConstraintCatalogIdentity>, SQLError> {
-        if !self.flag()? {
+        let Some(identity) = self.optional_catalog_identity()? else {
             return Ok(None);
-        }
-        let object_id = self.object_id()?;
-        let oid = self.oid()?;
-        identities.object(object_id)?;
-        identities.oid(oid as u32)?;
-        Ok(Some(ConstraintCatalogIdentity { object_id, oid }))
+        };
+        identities.object(identity.object_id)?;
+        identities.oid(identity.oid as u32)?;
+        Ok(Some(identity))
     }
 
     fn domain_definition(

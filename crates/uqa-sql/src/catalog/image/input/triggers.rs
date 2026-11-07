@@ -53,14 +53,6 @@ impl Input<'_> {
         Ok(Budgeted::new(RelationIdentity { schema, name }, memory))
     }
 
-    fn optional_incarnation(&mut self) -> Result<Option<[u8; 16]>, SQLError> {
-        if self.flag()? {
-            Ok(Some(self.object_id()?))
-        } else {
-            Ok(None)
-        }
-    }
-
     fn trigger_oid(&mut self, identities: &mut Identities) -> Result<Option<i64>, SQLError> {
         if !self.flag()? {
             return Ok(None);

@@ -90,6 +90,12 @@ impl<'a> Fields<'a> {
             self.scalar(value.to_le_bytes());
         }
     }
+    pub fn optional_incarnation(&mut self, value: Option<[u8; 16]>) {
+        self.flag(value.is_some());
+        if let Some(value) = value {
+            self.scalar(value);
+        }
+    }
     pub fn identity(&mut self, value: RoleIdentity) {
         self.scalar(value.oid.to_le_bytes());
         self.scalar(value.object_id);

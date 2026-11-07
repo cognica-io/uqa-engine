@@ -38,13 +38,6 @@ impl<'a> Fields<'a> {
         }
     }
 
-    fn optional_incarnation(&mut self, value: Option<[u8; 16]>) {
-        self.flag(value.is_some());
-        if let Some(value) = value {
-            self.scalar(value);
-        }
-    }
-
     pub(super) fn trigger_definition(&mut self, value: &'a CreateTrigger) {
         let CreateTrigger {
             name,
