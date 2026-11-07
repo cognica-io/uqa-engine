@@ -189,13 +189,31 @@ pub fn validate_range_registry(
     Ok(())
 }
 
-pub(super) fn resolved_subtype(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Named(_) => false,
-        ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
-            resolved_subtype(element) && super::type_metadata::pg_type_oid(ty) != 0
+pub(super) fn resolved_subtype(mut ty: &ColumnType) -> bool {
+    loop {
+        match ty {
+            ColumnType::Named(_) => return false,
+            ColumnType::Array(element) => {
+                // Every consecutive array node has the same element-derived OID.
+                let mut element = element.as_ref();
+                while let ColumnType::Array(inner) = element {
+                    element = inner;
+                }
+                if matches!(element, ColumnType::Named(_))
+                    || super::type_metadata::pg_type_array_oid(element) == 0
+                {
+                    return false;
+                }
+                ty = element;
+            }
+            ColumnType::Domain { oid, base, .. } => {
+                if *oid == 0 {
+                    return false;
+                }
+                ty = base;
+            }
+            _ => return super::type_metadata::pg_type_oid(ty) != 0,
         }
-        _ => super::type_metadata::pg_type_oid(ty) != 0,
     }
 }
 

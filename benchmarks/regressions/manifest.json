@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -46012,6 +46012,32 @@
       "capability": "Native type ownership",
       "workload": "Decode 10,000 nested array nodes on a 256 KiB stack, then exercise successful retirement, invalid leaf input, denied admission and cancellation before the leaf.",
       "invariant": "Images retain exact bytes; success and every partial failure retire admitted native ownership without recursive destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_image_validation_walks_deep_type_chains_without_recursion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/deep_types.rs",
+      "capability": "Constant-stack range image validation",
+      "workload": "Import and retire 10000-level array, domain and mixed subtypes on a 256 KiB stack, including denied memory admission.",
+      "invariant": "Decoded images re-encode byte-for-byte and release all native allowances without a depth cap or recursive type validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_subtypes_preserve_each_domain_and_array_identity_without_recursive_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/range_type/tests.rs",
+      "capability": "Linear native range subtype and array OID observation",
+      "workload": "Observe 10000-level array chains ending in builtin, domain, unresolved and invalid-identity types on a 256 KiB stack.",
+      "invariant": "Every represented domain and array identity retains its original acceptance and OID; observation allocates no heap scratch.",
       "case_names": [
         ""
       ]

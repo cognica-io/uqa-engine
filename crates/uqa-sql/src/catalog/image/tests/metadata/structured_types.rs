@@ -16,6 +16,7 @@ use crate::{
     },
 };
 
+mod deep_types;
 mod validation;
 mod wire;
 

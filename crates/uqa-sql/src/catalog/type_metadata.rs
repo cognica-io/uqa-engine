@@ -126,10 +126,13 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             RangeSubtype::Date => 4535,
             RangeSubtype::BigInteger => 4536,
         },
-        ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Array(_) => pg_type_oid(element),
-            element => pg_type_array_oid(element),
-        },
+        ColumnType::Array(element) => {
+            let mut element = element.as_ref();
+            while let ColumnType::Array(inner) = element {
+                element = inner;
+            }
+            pg_type_array_oid(element)
+        }
         ColumnType::Date => 1082,
         ColumnType::Time | ColumnType::TimePrecision(_) => 1083,
         ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1266,

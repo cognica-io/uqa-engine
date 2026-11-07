@@ -125,7 +125,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reclaim derived benchmark build output before controlled performance compilation exhausts disk space, preserving retained reference executables and measurement records.
 
-- Retire and copy deeply nested native SQL types with constant stack. Failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries. Rust matches that extract payload fields must now borrow `ColumnType` because it implements `Drop`.
+- Retire, copy and validate deeply nested native SQL types with constant stack. Range-subtype validation and array-OID projection visit each nested node once; failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries. Rust matches that extract payload fields must now borrow `ColumnType` because it implements `Drop`.
 
 - Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
 
