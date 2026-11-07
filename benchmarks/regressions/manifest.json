@@ -46250,6 +46250,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_indexes_role_incarnations_once_in_bounded_steps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "4,096 role identities, four domain owners, interrupted index construction and an empty domain catalog.",
+      "invariant": "Visit at most one original role per step and each role once; reuse exact incarnations, stop on original cancellation, release scratch and avoid role traversal for an empty catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_stops_role_visits_at_the_required_owner_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "Three domain owners select the first or middle role from 4,096 identities, with an iterator that rejects visits beyond the required prefix.",
+      "invariant": "Stop at an already indexed owner, resume from the original cursor only for unseen owners and never scan an unneeded role suffix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_admits_each_step_and_retires_complete_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "Three domains with 256 CHECK constraints each, counted source visits and exact map-node growth.",
+      "invariant": "Construct without allocation or enumeration; visit at most one domain and admit at most three scratch nodes per step; completed validation releases all scratch without rescanning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_failure_retires_scratch_before_retry_or_drop",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "Four domains with sixteen checks at zero, small, exact and one-byte-insufficient allowances.",
+      "invariant": "Native scratch is admitted before construction; denial reports 53200 and immediately retires the continuation and every partial reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_preserves_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "Independent source and invoking cancellation after partial native validation.",
+      "invariant": "Either cancellation reports 57014, releases scratch before drop and prevents continuation reuse.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_is_terminal_after_iterator_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "A native domain-view iterator unwinds after one complete declaration.",
+      "invariant": "Unwinding retires retained identity scratch and a later advance never resumes the failed iterator.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_keeps_local_global_and_legacy_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "Local duplicate constraint names, cross-domain identity reuse and missing legacy names preceding corrupt supplied metadata.",
+      "invariant": "Preserve local-before-global validation and validate every supplied declaration before requiring complete legacy metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_accepts_captured_native_roots_and_exact_quoted_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests.rs",
+      "capability": "Native domain restore validation",
+      "workload": "A captured immutable domain root with embedded dots and escaped quotes after retiring its live registry.",
+      "invariant": "Validate the original bound names and identities without changing capture admission; all validation and capture leases retire independently.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

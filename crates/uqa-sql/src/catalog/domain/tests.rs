@@ -7,7 +7,7 @@
 use super::*;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn registry() -> BTreeMap<String, StoredDomain> {
     let crate::Statement::CreateDomain(mut definition) =
