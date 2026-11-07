@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reject saved query images whose DEFAULT positions exceed the original VALUES width, before rule rewriting can use those positions.
+
 - Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation; complete stored catalog integration and Engine restore remain in progress.
 
 - Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.

@@ -48048,6 +48048,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_rejects_default_positions_outside_original_value_width",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests.rs",
+      "capability": "Restored rule VALUES positions",
+      "workload": "Decode inline and non-inline VALUES metadata with empty, reordered in-range, boundary, oversized and maximum default positions.",
+      "invariant": "Valid original default ordering is preserved; every position outside the original value width is rejected before publication and releases all input admission.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

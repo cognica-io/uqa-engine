@@ -61,6 +61,9 @@ impl Input<'_> {
         {
             return Err(super::super::invalid("query VALUES source width"));
         }
+        if defaults.iter().any(|position| *position >= width) {
+            return Err(super::super::invalid("query VALUES default position"));
+        }
         Ok(Some(RuleValuesInput {
             width,
             inline,
