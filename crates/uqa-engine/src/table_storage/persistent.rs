@@ -20,7 +20,7 @@ impl Engine {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
-        let analyzer = table.analyzer.read().clone();
+        let analyzer = table.analyzer.read().configuration().clone();
         *table.document_store.write() = backend.document_store(table_name);
         table
             .doc_count_dirty

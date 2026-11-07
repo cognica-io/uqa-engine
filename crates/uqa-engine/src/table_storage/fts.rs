@@ -111,12 +111,16 @@ impl Engine {
             .install(field, t.inverted_index.write().as_mut())
             .map_err(|error| storage_error("install FTS analyzer", &error))?;
         if uses_default {
-            *t.analyzer.write() = candidate
-                .index
-                .compiled
-                .descriptor()
-                .configuration()
-                .map_err(|error| storage_error("read FTS analyzer configuration", &error.into()))?;
+            *t.analyzer.write() = uqa_analysis::AnalyzerDefinition::new(
+                candidate
+                    .index
+                    .compiled
+                    .descriptor()
+                    .configuration()
+                    .map_err(|error| {
+                        storage_error("read FTS analyzer configuration", &error.into())
+                    })?,
+            );
         }
         self.persist_field_analyzer_binding(&table_name, field, &candidate)
             .map_err(|error| storage_error("persist FTS analyzer binding", &error))?;
@@ -214,6 +218,7 @@ impl Engine {
         let revision = t
             .analyzer
             .read()
+            .configuration()
             .clone()
             .compile()
             .map_err(|error| storage_error("compile FTS analyzer", &error.into()))?;
@@ -240,10 +245,10 @@ impl Engine {
                 &self.runtime.cancellation,
             )
             .map_err(|error| storage_error("rebuild FTS analyzer", &error))?;
-        *t.analyzer.write() = revision
-            .descriptor()
-            .configuration()
-            .map_err(|error| storage_error("read FTS analyzer configuration", &error.into()))?;
+        *t.analyzer.write() =
+            uqa_analysis::AnalyzerDefinition::new(revision.descriptor().configuration().map_err(
+                |error| storage_error("read FTS analyzer configuration", &error.into()),
+            )?);
         self.persist_field_analyzer_binding(&table_name, field, &binding)
             .map_err(|error| storage_error("persist FTS analyzer binding", &error))?;
         *self.durable.table_field_analyzers.write() = bindings;

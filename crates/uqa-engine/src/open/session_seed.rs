@@ -99,7 +99,7 @@ impl Engine {
         name: &str,
         source: &TableState,
     ) -> Arc<TableState> {
-        let analyzer = source.analyzer.read().clone();
+        let analyzer = source.analyzer.read().configuration().clone();
         Arc::new(TableState {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),

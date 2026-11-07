@@ -594,7 +594,10 @@ struct TableDataSnapshot {
     /// available final id and can never wrap or issue a duplicate.
     next_id: state::CatalogSnapshot<u128>,
     maps_integer_keys: state::CatalogSnapshot<bool>,
-    analyzer: state::CatalogSnapshot<Analyzer, Vec<u8>>,
+    analyzer: state::CatalogSnapshot<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
     column_stats: state::CatalogSnapshot<uqa_planner::ColumnStatistics>,
     column_stats_loaded: state::CatalogSnapshot<bool>,
     column_stats_dirty: state::CatalogSnapshot<bool>,
@@ -635,7 +638,10 @@ pub(crate) struct TableState {
     next_id: state::CatalogCell<u128>,
     /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
     maps_integer_keys: state::CatalogCell<bool>,
-    analyzer: state::CatalogCell<Analyzer, Vec<u8>>,
+    analyzer: state::CatalogCell<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.

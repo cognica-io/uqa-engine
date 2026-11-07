@@ -49175,6 +49175,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_share_original_bytes_without_configuration_retention",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Published analyzer image retention",
+      "workload": "Capture a one-MiB configuration, replace its definition and retire the original configuration owner.",
+      "invariant": "Capture allocates nothing, independently admits the exact exposed image capacity and preserves original bytes without retaining configuration or executable resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_preserve_unresolved_paths_and_deferred_validation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Unresolved analyzer publication",
+      "workload": "Publish an invalid regular expression and missing synonym path and compare its image with independent JSON bytes.",
+      "invariant": "Publication and capture preserve deferred validation, do not resolve files and retain the exact existing serialized configuration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_admit_exact_capacity_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Analyzer image admission",
+      "workload": "Capture a published image with exact and insufficient allowances and independently cancelled original/invoking scopes.",
+      "invariant": "Admission is checked before shared retention and every failure or final retirement releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_encoding_errors_leave_the_original_configuration_usable",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Analyzer configuration failure preservation",
+      "workload": "Publish a native non-UTF-8 synonym path and independently request its unavailable JSON image twice.",
+      "invariant": "The original configuration remains intact; capture returns the same cached serialization error without rewriting paths or rerunning encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_analyzer_capture_shares_the_original_published_image",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed analyzer image selection",
+      "workload": "Select a one-MiB original analyzer image during a private replacement, then roll back, replace and retire the Engine.",
+      "invariant": "The selected image preserves its original address and bytes with less than 64 KiB of capture allocation, independent admission and complete cancellation/lifetime handling.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

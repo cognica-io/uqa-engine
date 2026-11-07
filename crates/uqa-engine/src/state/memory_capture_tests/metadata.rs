@@ -8,6 +8,52 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn committed_memory_analyzer_capture_shares_the_original_published_image() {
+    use uqa_analysis::{Analyzer, AnalyzerDefinition, Tokenizer};
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE saved(body text)");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.analyzer.write() = AnalyzerDefinition::new(Analyzer {
+        tokenizer: Tokenizer::Pattern {
+            pattern: "x".repeat(1 << 20),
+        },
+        ..Analyzer::default()
+    });
+    let original = table
+        .analyzer
+        .read()
+        .capture_image(&uqa_core::memory::ProductionControl::uncontrolled())
+        .unwrap()
+        .as_ptr();
+    sql(&engine, "BEGIN");
+    *table.analyzer.write() = AnalyzerDefinition::new(uqa_analysis::keyword_analyzer());
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 1 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(retained.analyzer.get().unwrap().as_ptr(), original);
+    sql(&engine, "ROLLBACK");
+    *table.analyzer.write() = AnalyzerDefinition::new(uqa_analysis::keyword_analyzer());
+    drop((table, engine));
+    let restored: Analyzer = serde_json::from_slice(retained.analyzer.get().unwrap()).unwrap();
+    assert!(
+        matches!(restored.tokenizer, Tokenizer::Pattern { ref pattern } if pattern == &"x".repeat(1 << 20))
+    );
+    control.cancellation().cancel();
+    assert!(retained.analyzer.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn committed_memory_statistics_capture_preserves_native_distributions_without_copying() {
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE saved(payload text)");

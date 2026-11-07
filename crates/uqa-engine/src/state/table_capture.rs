@@ -55,18 +55,9 @@ impl StorageContext {
             uqa_planner::ColumnStatistics::capture_with_control
         );
         capture!(analyzer, |value, control| {
-            let copied = value
-                .encode_configuration_budgeted(
-                    control.budget().expect("catalog capture allowance"),
-                    || {
-                        control
-                            .check_cancellation()
-                            .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
-                    },
-                )
-                .map_err(|error| uqa_sql::SQLError::Host(Arc::new(error)))?;
-            let (copied, memory) = copied.into_parts();
-            Ok(control.finish(copied, Some(memory))?)
+            value
+                .capture_image(control)
+                .map_err(|error| uqa_sql::SQLError::Host(Arc::new(error)))
         });
         capture!(storage_generation, inline);
         capture!(next_id, inline);

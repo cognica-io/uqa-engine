@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Committed memory captures share the original table analyzer configuration image while preserving deferred validation and resource loading.
+
 - Committed memory captures retain original Planner statistics under independent cached-footprint admission without copying their distribution population.
 
 - Stream original evaluated-index policies and value images from committed memory captures, including spilled keys, without reevaluation. Complete memory inventory and Engine restore remain under implementation.

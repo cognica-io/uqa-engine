@@ -125,7 +125,7 @@ table_sources! {
     columns_declared: CapturedMemoryValue<bool>,
     next_id: CapturedMemoryValue<u128>,
     maps_integer_keys: CapturedMemoryValue<bool>,
-    analyzer: CapturedMemoryValue<Vec<u8>>,
+    analyzer: CapturedMemoryValue<uqa_analysis::AnalyzerConfigurationImage>,
     column_stats: CapturedMemoryValue<uqa_planner::ColumnStatistics>,
     column_stats_loaded: CapturedMemoryValue<bool>,
     column_stats_dirty: CapturedMemoryValue<bool>,

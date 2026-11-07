@@ -329,7 +329,7 @@ impl Engine {
             columns_declared: CatalogCell::new(false),
             next_id: CatalogCell::new(1),
             maps_integer_keys: CatalogCell::new(true),
-            analyzer: CatalogCell::new(analyzer),
+            analyzer: CatalogCell::new(uqa_analysis::AnalyzerDefinition::new(analyzer)),
             column_stats: CatalogCell::new(uqa_planner::ColumnStatistics::default()),
             column_stats_loaded: CatalogCell::new(true),
             column_stats_dirty: CatalogCell::new(true),

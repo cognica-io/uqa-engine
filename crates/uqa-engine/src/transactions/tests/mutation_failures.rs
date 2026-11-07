@@ -90,12 +90,10 @@ fn direct_text_errors_after_private_mutation_cannot_commit_incomplete_intents() 
                     .unwrap();
 
                 let table = engine.require_table("texts").unwrap();
-                let native = engine
-                    .storage
-                    .backend
-                    .as_ref()
-                    .unwrap()
-                    .inverted_index("public.texts", table.analyzer.read().clone());
+                let native = engine.storage.backend.as_ref().unwrap().inverted_index(
+                    "public.texts",
+                    table.analyzer.read().configuration().clone(),
+                );
                 let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 *table.inverted_index.write() = Box::new(index::CancelAfterMutation {
                     index: native,
