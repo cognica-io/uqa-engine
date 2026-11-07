@@ -25,7 +25,8 @@ jobs:
   build:
     name: Build regression tests and validate local macOS checks (${{ inputs.os }})
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
-    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 120 || 60 }}
+    # macOS builds and executes the inventory here; execution has its own deadline.
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 60 }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
@@ -47,6 +48,7 @@ jobs:
       - name: Verify the regression inventory and failure detection
         run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
       - name: Build the selected existing test targets
+        timeout-minutes: 60
         run: python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Build the independent-process claim fixture
         run: |
@@ -54,6 +56,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
       - name: Check macOS bounded work, memory and output correctness on the build worker
         if: runner.os == 'macOS'
+        timeout-minutes: 120
         run: python3 scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Verify macOS independent-process claim workload without timing
         if: runner.os == 'macOS'
