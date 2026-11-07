@@ -27,6 +27,8 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
+mod scalars;
+pub(super) use scalars::MAGIC as SCALAR_MAGIC;
 mod tables;
 pub use tables::{
     columns_image_reader, dropped_attributes_image_reader, foreign_keys_image_reader,
@@ -39,6 +41,7 @@ pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
+    Scalar(scalars::Part<'a>),
     Table(tables::Part<'a>),
     NextDomain,
     DomainDefinition(&'a crate::ast::CreateDomain),

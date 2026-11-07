@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded native executable-scalar images preserving resolved types, selected calls, window clauses, collations and query-arena addresses. Admitted reconstruction owns deep-tree cleanup; complete stored-plan and memory Engine backup integration remains under implementation.
+
 - Add bounded native column-statistics and statistics-maintenance images preserving complete distributions, floating-point frequency bits, original counters and sampled analysis identities without rerunning ANALYZE. Complete memory Engine backup and public restore remain under implementation.
 
 - Add bounded native table and column authority images preserving role incarnations, grantor paths, optional ACLs and independent tuple revisions. Admitted input reconstructs private authority without resolving names; complete Engine restore remains under implementation.

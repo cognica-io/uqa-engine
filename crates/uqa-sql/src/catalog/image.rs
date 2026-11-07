@@ -44,7 +44,7 @@ pub use expressions::{
 };
 pub use input::{
     read_columns_image, read_dropped_attributes_image, read_foreign_keys_image,
-    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image,
+    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image, CapturedScalar,
 };
 pub use reader::CatalogImageReader;
 use reader::Entries;

@@ -107,7 +107,13 @@ impl<'a> DefinitionImageReader<'a> {
         &mut self,
         value: &'a crate::ast::RetainedInputLiteral,
     ) -> Result<(), SQLError> {
-        let literal = &value.0;
+        self.retained_scalar_literal(&value.0)
+    }
+
+    pub(super) fn retained_scalar_literal(
+        &mut self,
+        literal: &'a crate::ir::RetainedScalarLiteral,
+    ) -> Result<(), SQLError> {
         let resident = literal
             .value
             .resident_value()
@@ -190,7 +196,7 @@ fn tag(value: &Expr) -> Result<u8, SQLError> {
     })
 }
 
-fn binary_tag(value: BinaryOp) -> u8 {
+pub(super) fn binary_tag(value: BinaryOp) -> u8 {
     match value {
         BinaryOp::Equal => 0,
         BinaryOp::NotEqual => 1,

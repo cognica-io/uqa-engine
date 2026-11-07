@@ -47394,6 +47394,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_input_matches_literal_wire_and_rejects_malformed_framing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_input_admits_original_payloads_and_exact_peak",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_input_reconstructs_and_retires_deep_trees_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "interrupted_executable_scalar_input_retires_partial_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "decoded_executable_literals_keep_their_native_lease_after_scalar_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_images_preserve_native_addresses_and_selected_collations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_images_keep_bound_literals_composite_sources_and_overload_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_window_images_preserve_each_clause_child_order_and_written_flags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_image_reader_borrows_payloads_and_terminates_after_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_images_reject_uncaptured_values_without_invoking_sources",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_native_retirement_uses_no_new_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_scalar_retirement_handles_every_window_continuation_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/metadata.rs",
+      "capability": "Native executable scalar images",
+      "workload": "Exercise native constructor metadata, independent wire records, selected calls and windows, deep tree retirement, denied or interrupted input and borrowed output.",
+      "invariant": "Original executable fields survive without evaluation; all output scratch and reconstructed payloads remain admitted and retire on completion or failure.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
