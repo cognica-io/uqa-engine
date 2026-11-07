@@ -25,7 +25,7 @@ jobs:
     name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
     # macOS builds and executes the full suite here; execution has its own deadline.
-    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 60 }}
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 240 || 60 }}
     outputs:
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
@@ -66,7 +66,7 @@ jobs:
       - name: Run every macOS workspace test on its build worker
         if: runner.os == 'macOS'
         # The whole-suite budget is separate from the unchanged per-case CI deadlines.
-        timeout-minutes: 120
+        timeout-minutes: 180
         env:
           # Bound durable test concurrency independently of the other workers sharing this host.
           NEXTEST_TEST_THREADS: "8"
