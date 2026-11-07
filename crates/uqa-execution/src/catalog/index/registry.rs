@@ -17,6 +17,8 @@ use uqa_storage::{
     read_control::StorageReadControl, CatalogIndexRow, StorageBackendError, StorageBackendResult,
 };
 
+mod image;
+
 #[derive(Clone)]
 pub struct CatalogIndexes {
     durable: RetainedMap<RelationIdentity, Budgeted<CatalogIndexRow>>,

@@ -48447,6 +48447,240 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_images_preserve_addresses_text_and_durable_membership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_images_reject_partial_malformed_and_unadmitted_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_image_output_has_bounded_workspace_and_terminal_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_image_output_rejects_invalid_native_entries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_images_release_partial_input_on_cancellation_io_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests/resources.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_comment_images_preserve_original_addresses_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Native durable comment image ownership",
+      "workload": "Original object/subobject/class identities and UTF-8 text; temporary exclusion, large payloads, interrupted reconstruction and retained Engine generations.",
+      "invariant": "Bounded output and admitted private reconstruction preserve exact durable descriptions; malformed input, cancellation and source retirement release the original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_images_release_partial_input_on_cancellation_io_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests/resources.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_image_output_rejects_invalid_native_identifiers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests/resources.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_images_preserve_exact_encodings_and_durable_membership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_images_reject_truncation_order_tags_and_invalid_identifiers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_image_admission_funds_keys_payloads_and_native_lifetimes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_image_output_has_constant_workspace_and_terminal_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_parameter_images_preserve_opaque_bytes_and_native_generations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_parameter_images_reject_malformed_partial_and_unadmitted_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_parameter_image_native_lease_tracks_every_key_and_value_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_parameter_image_output_is_bounded_and_failure_is_terminal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_parameter_images_release_partial_input_on_io_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native index and scoring metadata image ownership",
+      "workload": "Original opaque metadata, optional index definitions, durable membership, immutable generations, exact admission, malformed input, interruption and large payloads.",
+      "invariant": "Bounded borrowed output and admitted native reconstruction preserve exact values and retain payload allowances through source replacement, cloning and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_index_and_scoring_images_preserve_selected_definitions_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Retained Engine index and scoring image ownership",
+      "workload": "Actual durable and temporary indexes, rollback, same-name replacement, opaque scoring values, source closure and cross-thread image output.",
+      "invariant": "The selected original definitions and encoded values survive Engine retirement and reconstruct in private native catalogs under independent allowances.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

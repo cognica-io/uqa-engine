@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Complete memory backup and public Engine restore remain in progress.
+
 - Add native routine catalog images preserving original declarations, unexamined source bodies, separately bound SQL plans and execution authority. Restored definitions and shared bodies retain independent memory and cleanup ownership; complete memory backup and public Engine restore remain under implementation.
 
 - Add bounded images for original stored SQL query, mutation and NOTIFY bodies, with separate bound SQL plan images. Reconstruction preserves original syntax, bindings and local window addresses under admitted ownership; routine/rule catalog integration and complete Engine restore remain in progress.
