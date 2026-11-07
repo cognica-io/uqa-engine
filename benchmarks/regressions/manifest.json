@@ -4,6 +4,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "mutable_call_binding_keeps_unrelated_workspace_off_the_descent_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/introspection/owned/tests.rs",
+      "capability": "Native scalar binding stack ownership",
+      "workload": "Bind a 32-operand collation-aware concatenation on a 2 MiB thread stack with controlled scalar ownership.",
+      "invariant": "Recursive argument and constructor descent does not retain unrelated coercion workspace; successful binding retains exactly its owned memory and cleanup releases it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_column_images_match_independent_physical_attribute_bytes",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",

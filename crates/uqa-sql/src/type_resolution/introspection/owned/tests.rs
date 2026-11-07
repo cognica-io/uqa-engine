@@ -53,6 +53,34 @@ impl FunctionTypeResolver for EmptyResolver {
 }
 
 #[test]
+fn mutable_call_binding_keeps_unrelated_workspace_off_the_descent_stack() {
+    let sql = format!(
+        "lower(({}) COLLATE \"pg_c_utf8\")",
+        std::iter::repeat_n("chr(201)", 32)
+            .collect::<Vec<_>>()
+            .join(" || ")
+    );
+    let source = expression(&sql);
+    std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(move || {
+            let memory = MemoryBudget::new(8 << 20);
+            let token = CancellationToken::new();
+            let control = ProductionControl::new(&memory, &token, &token);
+            let input = source.copy_for_rewrite(&control).unwrap();
+            let output =
+                bind_type_introspection_owned(input, &RowSchema::default(), &[], None, &control)
+                    .unwrap();
+            assert_eq!(memory.used(), output.reserved_bytes());
+            drop(output);
+            assert_eq!(memory.used(), 0);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn mutable_binding_preserves_scalar_semantics_and_exact_live_constructor_ownership() {
     let schema = schema();
     let resolver = EmptyResolver;
