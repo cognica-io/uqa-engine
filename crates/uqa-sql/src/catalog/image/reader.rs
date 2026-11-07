@@ -8,7 +8,7 @@
 
 use super::fields::{Field, Fields};
 use crate::{
-    ast::{ColumnType, ObjectAclEntry},
+    ast::{ColumnType, FunctionBinding, ObjectAclEntry},
     catalog::{
         composite_type::StoredComposite,
         enum_type::StoredEnum,
@@ -31,6 +31,7 @@ use crate::{
 };
 
 mod foreign_wrappers;
+mod functions;
 mod metadata;
 use metadata::Tail;
 use std::{io::Write, slice::Iter};
@@ -41,6 +42,7 @@ use uqa_core::{
 };
 
 pub(super) enum Entries<'a> {
+    FunctionBinding(Option<&'a FunctionBinding>),
     SequenceAuthorities(CapturedDefinitionIter<'a, RelationIdentity, SequenceAuthority>),
     Roles(CapturedDefinitionIter<'a, String, RoleDefinition>),
     Memberships(CapturedDefinitionIter<'a, RoleMembershipKey, RoleMembership>),
@@ -273,7 +275,8 @@ impl<'a> CatalogImageReader<'a> {
                     self.system_acl(table);
                 }
             }
-            Entries::Composites(_)
+            Entries::FunctionBinding(_)
+            | Entries::Composites(_)
             | Entries::Ranges(_)
             | Entries::Enums(_)
             | Entries::Shells(_)

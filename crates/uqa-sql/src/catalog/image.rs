@@ -30,10 +30,13 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod column_types;
 mod fields;
+mod function_dispatch;
 mod input;
 mod reader;
 pub use reader::CatalogImageReader;
 use reader::Entries;
+
+const FUNCTION_BINDING: [u8; 8] = *b"UQAFNB01";
 
 const ROLES: [u8; 8] = *b"UQAROL01";
 const MEMBERSHIPS: [u8; 8] = *b"UQARMB01";
@@ -54,6 +57,29 @@ fn invalid(message: &'static str) -> SQLError {
     SQLError::Routine {
         sqlstate: "XX001".into(),
         message: format!("invalid catalog image: {message}"),
+    }
+}
+
+impl crate::ast::FunctionBinding {
+    /// Borrow the original selected function metadata. Bounded reads never resolve names or invoke a routine.
+    pub fn image_reader<'a>(
+        &'a self,
+        cancellation: &'a CancellationToken,
+    ) -> Result<CatalogImageReader<'a>, SQLError> {
+        CatalogImageReader::new(
+            Entries::FunctionBinding(Some(self)),
+            FUNCTION_BINDING,
+            1,
+            cancellation,
+        )
+    }
+    /// Reconstruct one complete native binding with admitted payloads and unchanged dispatch metadata.
+    pub fn read_image(
+        reader: &mut dyn Read,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<uqa_core::memory::Budgeted<Self>, SQLError> {
+        input::function_binding_image(reader, memory, cancellation)
     }
 }
 

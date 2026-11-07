@@ -6,7 +6,7 @@
 
 //! Native child iterators resume without a catalog prewalk or output allocation.
 
-use super::foreign_wrappers::Wrapper;
+use super::{foreign_wrappers::Wrapper, functions::Binding};
 use super::{Acl, CatalogImageReader, Columns, Entries, Fields};
 use crate::SQLError;
 use crate::{
@@ -22,6 +22,7 @@ use uqa_core::memory::BudgetedMapIter;
 pub(super) enum Tail<'a> {
     None,
     Wrapper(Wrapper<'a>),
+    FunctionBinding(Binding<'a>),
     Composite(Iter<'a, StoredCompositeAttribute>),
     Multirange(Option<&'a StoredMultirange>),
     Enum(Iter<'a, StoredEnumLabel>),
@@ -42,6 +43,11 @@ impl<'a> Tail<'a> {
         match self {
             Self::None => {}
             Self::Wrapper(value) => {
+                if value.next(fields, column_type)? {
+                    return Ok(true);
+                }
+            }
+            Self::FunctionBinding(value) => {
                 if value.next(fields, column_type)? {
                     return Ok(true);
                 }
@@ -100,6 +106,12 @@ impl<'a> CatalogImageReader<'a> {
 
     pub(super) fn next_metadata(&mut self) -> bool {
         match &mut self.entries {
+            Entries::FunctionBinding(entry) => {
+                let Some(binding) = entry.take() else {
+                    return false;
+                };
+                self.tail = Tail::FunctionBinding(Binding::new(binding));
+            }
             Entries::Composites(entries) => {
                 let Some((key, value)) = entries.next() else {
                     return false;

@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native function-binding images that preserve selected operations, argument and type metadata, collations and deferred diagnostics with bounded output and admitted reconstruction. Existing foreign-callback image bytes remain unchanged; complete stored-expression backup and public Engine restore remain under implementation.
+
 - Add resumable native domain-catalog validation with admitted identity scratch, bounded role-index construction and terminal cancellation or failure handling. Existing domain restoration shares the same predicates and validation order; complete public Engine restore remains under implementation.
 
 - Add native sequence metadata and authority images for memory backup assembly. Bounded readers retain original allocation generations, reserved positions, owners, persistence and grants after source retirement. Import validates matching membership and preserves admitted native ownership; complete memory Engine backup and public restore remain under implementation.
