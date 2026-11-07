@@ -18,6 +18,7 @@ use super::{
         builtin_routines::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities},
         database::{CapturedDatabaseAuthority, DatabaseAuthority},
         schema_registry::{CapturedSchemaRegistry, SchemaRegistry},
+        sequence_registry::{CapturedSequenceSecurities, SequenceSecurities},
         system_relations::{CapturedSystemRelationSecurities, SystemRelationSecurities},
     },
     shell_type::StoredShellType,
@@ -47,6 +48,7 @@ const SHELLS: [u8; 8] = *b"UQASHL01";
 const FOREIGN_WRAPPERS: [u8; 8] = *b"UQAFWR01";
 const FOREIGN_SERVERS: [u8; 8] = *b"UQAFSR01";
 const GRAPH_OIDS: [u8; 8] = *b"UQAGOI01";
+const SEQUENCE_AUTHORITIES: [u8; 8] = *b"UQASQA01";
 
 fn invalid(message: &'static str) -> SQLError {
     SQLError::Routine {
@@ -98,6 +100,13 @@ catalog_image!(
     Roles,
     ROLES,
     roles
+);
+catalog_image!(
+    CapturedSequenceSecurities,
+    SequenceSecurities,
+    SequenceAuthorities,
+    SEQUENCE_AUTHORITIES,
+    sequence_authorities
 );
 catalog_image!(
     CapturedRoleMemberships,

@@ -7,16 +7,20 @@
 //! Fixed field descriptors borrow original text and encode scalar identities explicitly.
 
 use crate::{
-    ast::{ObjectAclEntry, RoleAttribute},
+    ast::{ObjectAclEntry, RelationPersistence, RoleAttribute},
     catalog::{
         roles::{
             identity::RoleBinding, RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey,
         },
-        security::database::DatabasePrivileges,
+        security::{
+            database::DatabasePrivileges, sequence_registry::SequenceAuthority, BoundSchemaSecurity,
+        },
     },
+    SQLError,
 };
 use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
+    catalog_sequence::SequencePrivileges, RelationIdentity,
 };
 
 mod column_types;
@@ -127,6 +131,52 @@ impl<'a> Fields<'a> {
         self.identity(*grantor);
         self.flag(*grant_option);
     }
+    pub fn schema(&mut self, key: &'a str, schema: &'a BoundSchemaSecurity) {
+        let BoundSchemaSecurity {
+            tuple,
+            role_owner,
+            acl,
+        } = schema;
+        self.text(key);
+        self.flag(tuple.is_some());
+        if let Some(tuple) = tuple {
+            let uqa_core::catalog_schema::SchemaTupleIdentity {
+                oid,
+                object_id,
+                revision,
+            } = tuple;
+            self.scalar(oid.to_le_bytes());
+            self.scalar(*object_id);
+            self.scalar(*revision);
+        }
+        self.identity(*role_owner);
+        self.flag(acl.is_some());
+        if let Some(acl) = acl {
+            self.count(acl.len());
+        }
+    }
+    pub fn sequence_authority(
+        &mut self,
+        relation: &'a RelationIdentity,
+        authority: &'a SequenceAuthority,
+    ) -> Result<(), SQLError> {
+        self.text(&relation.schema);
+        self.text(&relation.name);
+        self.scalar([match authority.persistence() {
+            RelationPersistence::Permanent => 0,
+            RelationPersistence::Unlogged => 1,
+            RelationPersistence::Temporary => {
+                return Err(super::invalid("temporary sequence authority"));
+            }
+        }]);
+        let security = authority.security();
+        self.identity(security.role_owner);
+        self.flag(security.acl.is_some());
+        if let Some(acl) = &security.acl {
+            self.count(acl.len());
+        }
+        Ok(())
+    }
     pub fn role(&mut self, key: &'a str, role: &'a RoleDefinition) {
         let RoleDefinition {
             oid,
@@ -198,6 +248,23 @@ pub(super) fn attribute_bit(value: RoleAttribute) -> u8 {
 pub(super) trait Privileges: Sized {
     fn bits(&self) -> u8;
     fn from_bits(bits: u8) -> Option<Self>;
+}
+impl Privileges for SequencePrivileges {
+    fn bits(&self) -> u8 {
+        let Self {
+            select,
+            update,
+            usage,
+        } = self;
+        u8::from(*select) | (u8::from(*update) << 1) | (u8::from(*usage) << 2)
+    }
+    fn from_bits(bits: u8) -> Option<Self> {
+        (bits & !7 == 0).then_some(Self {
+            select: bits & 1 != 0,
+            update: bits & 2 != 0,
+            usage: bits & 4 != 0,
+        })
+    }
 }
 impl Privileges for SchemaPrivileges {
     fn bits(&self) -> u8 {

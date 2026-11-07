@@ -39,6 +39,14 @@ pub struct CapturedSequences {
 }
 
 impl CapturedSequences {
+    /// The SQL owner encodes complete authority from the same captured generation as the sequence metadata image. Both images are required; neither rebinds a role name.
+    pub fn authority_image_reader<'a>(
+        &'a self,
+        cancellation: &'a uqa_core::CancellationToken,
+    ) -> Result<uqa_sql::catalog::image::CatalogImageReader<'a>, SQLError> {
+        self.catalog.security.image_reader(cancellation)
+    }
+
     pub fn len(&self) -> usize {
         self.catalog.records.len()
     }

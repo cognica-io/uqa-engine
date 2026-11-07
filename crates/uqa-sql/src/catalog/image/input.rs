@@ -30,6 +30,7 @@ mod memberships;
 mod metadata;
 mod roles;
 mod security;
+mod sequences;
 mod structured_types;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
@@ -39,6 +40,7 @@ pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
 pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
+pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
 pub(super) use types::{enums, shells};
 

@@ -27,6 +27,7 @@ use uqa_core::{
 mod authorities;
 mod metadata;
 mod retention;
+mod sequences;
 mod validation;
 
 fn role(name: &str, oid: i64) -> RoleDefinition {

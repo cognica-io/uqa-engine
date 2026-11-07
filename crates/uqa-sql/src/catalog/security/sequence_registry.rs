@@ -15,7 +15,7 @@ use crate::{
     SQLError,
 };
 use uqa_core::{
-    memory::{MemoryBudget, Produced, ProductionControl},
+    memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
     RelationIdentity,
 };
 
@@ -26,6 +26,10 @@ pub struct SequenceAuthority {
 }
 
 impl SequenceAuthority {
+    pub const fn persistence(&self) -> RelationPersistence {
+        self.persistence
+    }
+
     pub fn security(&self) -> &BoundSequenceSecurity {
         &self.security
     }
@@ -77,6 +81,32 @@ impl SequenceSecurities {
     }
     pub fn get(&self, relation: &RelationIdentity) -> Option<&BoundSequenceSecurity> {
         self.0.get(relation).map(SequenceAuthority::security)
+    }
+    pub fn persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence> {
+        self.0.get(relation).map(SequenceAuthority::persistence)
+    }
+
+    pub(crate) fn last_durable_key(&self) -> Option<&RelationIdentity> {
+        self.0.last_durable_key()
+    }
+
+    pub(crate) fn insert_image_entry(
+        &mut self,
+        relation: Budgeted<RelationIdentity>,
+        persistence: RelationPersistence,
+        security: Budgeted<BoundSequenceSecurity>,
+    ) -> Result<(), SQLError> {
+        let (security, memory) = security.into_parts();
+        self.0.insert_image_entry(
+            relation,
+            Budgeted::new(
+                SequenceAuthority {
+                    persistence,
+                    security,
+                },
+                memory,
+            ),
+        )
     }
     pub fn contains_key(&self, relation: &RelationIdentity) -> bool {
         self.0.contains_key(relation)

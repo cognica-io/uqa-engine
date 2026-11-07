@@ -18,6 +18,7 @@ use uqa_sql::{
     SQLError,
 };
 
+mod image;
 pub mod publication;
 mod records;
 use records::SequenceRecords;

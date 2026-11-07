@@ -46019,6 +46019,215 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "sequence_authority_image_matches_literal_identity_and_absent_acl",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Compare the versioned authority image with literal bytes and distinguish absent from empty ACLs.",
+      "invariant": "Native identity, persistence and optional ACL state survive unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_image_preserves_all_grant_bits_and_original_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Encode every SELECT, UPDATE and USAGE bit with PUBLIC and original role incarnations.",
+      "invariant": "Grantee, grantor and privilege masks survive without name rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_image_rejects_bad_tags_names_order_and_partial_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Truncate every image prefix and corrupt names, flags, privilege masks and key order.",
+      "invariant": "Every malformed image fails without publishing authority or retaining memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_capture_excludes_temporary_members_and_keeps_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture a large temporary authority beside one permanent record and exhaust each insufficient allowance.",
+      "invariant": "Temporary capacity stays absent and every failed or cancelled import releases its reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_matches_independent_wire_and_native_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Compare all fixed native fields against a literal binary fixture and reconstruct the complete catalog.",
+      "invariant": "The original allocation generation, OIDs, owners, position and definition survive bit-for-bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_images_keep_all_numeric_boundaries_types_persistence_and_owner_modes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Round-trip integer boundaries with each sequence type, permanent/unlogged persistence and both owner dependencies.",
+      "invariant": "Native type, optional OID, absent/empty ACL and current/called state remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_retains_selected_autonomous_position_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture an autonomous position, replace it, close the source and decode its two images.",
+      "invariant": "Only the originally selected object and definition supply the restored allocation position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_preparation_and_fragmented_output_allocate_no_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Stream a 64 KiB quoted relation through one-byte to oversized output buffers after source loss.",
+      "invariant": "Preparation and output allocate no payloads and no read emits more than 16 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_rejects_truncation_invalid_tags_identities_and_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Truncate every metadata and authority prefix and corrupt all native discriminants and required identities.",
+      "invariant": "Invalid input fails before catalog publication and releases every charged destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_requires_exact_authority_membership_and_persistence",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Pair record images with renamed or differently persisted authorities and exercise the empty pair.",
+      "invariant": "Both catalogs must describe exactly the same durable relations and persistence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_failure_and_cancellation_release_every_admitted_destination",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Try each memory allowance through first success and cancel input before reconstruction.",
+      "invariant": "Failed admission and cancellation retain no native records, authority or scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_reader_is_terminal_after_cancellation_write_failure_or_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Cancel a reader and inject writer errors and panics after selection.",
+      "invariant": "Each failed reader remains terminal without caller-side repair.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_rejects_duplicate_names_objects_and_effective_oids",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Corrupt the second of two records with a preceding name, object identity or OID.",
+      "invariant": "A complete candidate cannot contain repeated relation, incarnation or effective catalog identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_interruptions_during_input_retire_partial_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Inject cancellation and I/O failures after multiple partial metadata boundaries.",
+      "invariant": "Every partially constructed native catalog retires with all reservations released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_sequence_images_preserve_positions_authority_and_owners_after_source_loss",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture during private sequence DDL, complete with COMMIT or ROLLBACK, replace the source objects and close the Engine.",
+      "invariant": "Original durable positions, allocation owners and authority survive; private and temporary definitions remain absent.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_native_clones_and_captures_retain_decoded_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence image retention",
+      "workload": "Clone an imported catalog, capture it with an independent allowance, close the decoded source and re-encode the retained generation.",
+      "invariant": "Both native and capture allowances remain held through their actual payload lifetimes and retire completely after the final captured owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "range_image_validation_walks_deep_type_chains_without_recursion",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/deep_types.rs",

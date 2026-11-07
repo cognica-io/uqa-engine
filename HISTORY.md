@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native sequence metadata and authority images for memory backup assembly. Bounded readers retain original allocation generations, reserved positions, owners, persistence and grants after source retirement. Import validates matching membership and preserves admitted native ownership; complete memory Engine backup and public restore remain under implementation.
+
 - Add native foreign-wrapper images that preserve original handler and validator identities, complete invocation and value bindings, and option order without executing callbacks. Bounded streaming and admitted reconstruction survive callback removal, name reuse and source closure; complete memory Engine restore remains under implementation.
 
 - Add native composite and range catalog images that preserve dropped attributes, complete type modifiers and bindings, selected support OIDs and independently named multiranges. Bounded streaming and admitted private reconstruction retain original metadata after source closure without SQL replay; complete memory Engine restore remains under implementation.

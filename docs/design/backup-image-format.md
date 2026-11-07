@@ -2,6 +2,36 @@
 
 The common Storage [backup module](../../crates/uqa-storage/src/backup.rs) owns versioned image identities, ordered inventory encoding, fixed backup roots and protected frames for the [online backup design](online-and-incremental-backup.md). The native local repository also owns immutable pack installation, full object verification, durable root publication, prepared-image recovery and private restore-directory publication. Provider snapshot capture, import and Engine backup support remain separate deliveries. Those deliveries remain tracked in [#1322](https://github.com/cognica-io/uqa-engine/issues/1322) and the [implementation plan](../plans/0031-online-and-incremental-backup.md).
 
+## Native sequence images
+
+Execution's sequence owner emits two images from one `CapturedSequences` generation: record metadata through `image_reader` and SQL-owned authority through `authority_image_reader`. The record iterator first selects the autonomous value by the original object and definition-generation pair. Neither image opens a live sequence, allocates a value, restores a session cache or resolves a role name. Both images are required by `SequenceCatalog::read_images`; final database-wide role, owner-column and OID closure remains the enclosing restore's responsibility.
+
+The metadata header is the eight bytes `UQASEQ01` and a little-endian `u64` record count. Entries are strictly ordered by the original decoded `(schema, name)` pair. Each name is a `u64` byte count and exact UTF-8 bytes. The names precede a fixed 130-byte record with the following fields, in order. All integers use little-endian encoding.
+
+| Field | Encoding |
+| --- | --- |
+| Object incarnation | 16 bytes |
+| Recorded catalog OID | Boolean presence tag followed by `u32`; an absent value carries zero |
+| Persistence and data type | One byte each: permanent/unlogged are 0/1; smallint/integer/bigint are 0/1/2 |
+| Called and cycle | One Boolean byte each |
+| Owning column dependency | One byte: absent/automatic/internal are 0/1/2, followed by the 16-byte table and column incarnations; absent ownership carries two zero identities |
+| Definition generation | 16 bytes |
+| Allocation and definition numbers | Seven `i64` values: start, increment, current, log count, minimum, maximum and cache size |
+
+The companion authority header is `UQASQA01` and a `u64` count. Each ordered entry contains the same two length-prefixed names, the persistence byte, the bound owner's `i64` OID and 16-byte incarnation, and an optional ACL. An ACL has a Boolean presence tag and, when present, a `u64` entry count. Each entry encodes an optional grantee identity, a required grantor identity and two one-byte privilege masks; SELECT, UPDATE and USAGE occupy bits 0, 1 and 2. `None`, an empty ACL, PUBLIC and an explicit role incarnation remain distinct. SQL's catalog image reader and admitted authority decoder own this representation.
+
+Both output cursors have fixed state, perform no payload allocation and emit at most 16 KiB per read, checking cancellation between fields and at most 4 KiB between payload copies. Their borrowed source retains the original capture allowance. Import admits name bytes, ACL entries, persistent native nodes and OID-validation scratch before allocation. Validated names and metadata move directly into native sequence roots, retaining their original allowance; there is no uncharged copy of the names. Failed input, admission or cancellation retires the unpublished candidate. A failed output cursor is terminal, including writer unwinding.
+
+Input rejects unknown headers or tags, truncation, trailing bytes, invalid names, temporary objects, zero required incarnations, repeated names or object identities, duplicate effective OIDs and mismatched authority membership or persistence. Recorded OIDs retain their presence; legacy absent OIDs keep the existing identity-derived interpretation. Definition validation reuses SQL's sequence definition owner, while nonnegative log counts and nonzero allocation generations retain the existing restoration contract. Legacy current positions outside present definition bounds remain unchanged, as they do through ordinary catalog restoration. Image input never repairs a sequence position or executes `setval`.
+
+### Sequence image preservation argument
+
+Let a captured sequence catalog be the ordered finite relation map `M`, its complete authority map `A`, and its selected immutable autonomous-value map `V`. Existing capture selects `V[(object, definition)]` only for the matching pair. Define `P(M,V)` to replace only a matching record's current, called and log-count fields; every other metadata field is unchanged. The metadata image enumerates exactly `P(M,V)`, and the companion image enumerates exactly `A` from the same capture generation. Temporary objects are absent from both prepublished durable roots.
+
+For each admitted native record, fixed-width integer and byte-array encodings have exact inverses. Explicit tags distinguish every type, persistence, Boolean and optional value; length framing preserves decoded names, including embedded dots and quotes. Thus metadata decoding returns the same relation key and all fields of `P(M,V)`. The authority encoder preserves each original role incarnation and ordered ACL entry; its three-bit masks invert the three independent privilege Booleans, and its presence tags preserve PUBLIC, absent ACL and empty ACL distinctions. Therefore authority decoding returns `A`.
+
+Strict ordering and equal counts, together with a matching authority lookup for every unique metadata key and matching persistence, prove that neither image has an unmatched relation. Unique incarnation and effective-OID checks preserve the native catalog's identity maps. Native insertion transfers the admitted names and record payloads without evaluating expressions, resolving roles or publishing the candidate. Consequently decoding the pair yields exactly `(P(M,V), A)` under the same surrounding catalog and runtime. Existing sequence allocation receives the identical definition and durable reservation position; unused session-local cached values are not revived. This introduces no new algebraic operator or optimizer rewrite. Full database restoration must additionally validate the referenced owner columns and roles and activate the selected fresh database history.
+
 ## Ownership and compatibility
 
 Common Storage interprets archive structure and treats provider image bytes as opaque. The existing runtime dependency directions remain unchanged: Storage depends on Core and Analysis; no Engine, SQL, Execution or concrete provider dependency is introduced. The implementation uses the existing SHA-256, XChaCha20-Poly1305, random-source and Core memory interfaces without modifying external dependencies. No Cargo feature advertises a provider image implementation.

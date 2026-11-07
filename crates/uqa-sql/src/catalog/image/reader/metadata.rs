@@ -161,6 +161,7 @@ impl<'a> CatalogImageReader<'a> {
                 self.tail = Tail::Graph(value.labels.iter());
             }
             Entries::Roles(_)
+            | Entries::SequenceAuthorities(_)
             | Entries::Memberships(_)
             | Entries::Schemas(_)
             | Entries::Database(_)

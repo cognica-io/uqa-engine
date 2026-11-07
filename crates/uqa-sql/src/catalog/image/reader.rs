@@ -21,6 +21,7 @@ use crate::{
         security::{
             builtin_routines::BuiltinRoutineSecurity,
             database::{BoundDatabaseSecurity, DatabasePrivileges},
+            sequence_registry::SequenceAuthority,
             system_relations::{SystemAcl, SystemRelationSecurity},
             BoundSchemaSecurity,
         },
@@ -35,10 +36,12 @@ use metadata::Tail;
 use std::{io::Write, slice::Iter};
 use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
-    image_io::ImageOutput, memory::BudgetedMapIter, CancellationToken, RelationIdentity,
+    catalog_sequence::SequencePrivileges, image_io::ImageOutput, memory::BudgetedMapIter,
+    CancellationToken, RelationIdentity,
 };
 
 pub(super) enum Entries<'a> {
+    SequenceAuthorities(CapturedDefinitionIter<'a, RelationIdentity, SequenceAuthority>),
     Roles(CapturedDefinitionIter<'a, String, RoleDefinition>),
     Memberships(CapturedDefinitionIter<'a, RoleMembershipKey, RoleMembership>),
     Schemas(CapturedDefinitionIter<'a, String, BoundSchemaSecurity>),
@@ -59,6 +62,7 @@ enum Acl<'a> {
     Database(Iter<'a, BoundAclEntry<DatabasePrivileges>>),
     Object(Iter<'a, ObjectAclEntry>),
     Table(Iter<'a, BoundAclEntry<TablePrivileges>>),
+    Sequence(Iter<'a, BoundAclEntry<SequencePrivileges>>),
 }
 enum Columns<'a> {
     None,
@@ -112,6 +116,12 @@ impl<'a> CatalogImageReader<'a> {
     }
     fn next_acl(&mut self) -> bool {
         match &mut self.acl {
+            Acl::Sequence(acl) => {
+                if let Some(entry) = acl.next() {
+                    self.fields.acl(entry);
+                    return true;
+                }
+            }
             Acl::Schema(acl) => {
                 if let Some(entry) = acl.next() {
                     self.fields.acl(entry);
@@ -193,6 +203,15 @@ impl<'a> CatalogImageReader<'a> {
             return Ok(true);
         }
         match &mut self.entries {
+            Entries::SequenceAuthorities(entries) => {
+                let Some((relation, authority)) = entries.next() else {
+                    return Ok(false);
+                };
+                self.fields.sequence_authority(relation, authority)?;
+                if let Some(acl) = &authority.security().acl {
+                    self.acl = Acl::Sequence(acl.iter());
+                }
+            }
             Entries::Roles(entries) => {
                 let Some((key, role)) = entries.next() else {
                     return Ok(false);
@@ -209,27 +228,8 @@ impl<'a> CatalogImageReader<'a> {
                 let Some((key, schema)) = entries.next() else {
                     return Ok(false);
                 };
-                let BoundSchemaSecurity {
-                    tuple,
-                    role_owner,
-                    acl,
-                } = schema;
-                self.fields.text(key);
-                self.fields.flag(tuple.is_some());
-                if let Some(tuple) = tuple {
-                    let uqa_core::catalog_schema::SchemaTupleIdentity {
-                        oid,
-                        object_id,
-                        revision,
-                    } = tuple;
-                    self.fields.scalar(oid.to_le_bytes());
-                    self.fields.scalar(*object_id);
-                    self.fields.scalar(*revision);
-                }
-                self.fields.identity(*role_owner);
-                self.fields.flag(acl.is_some());
-                if let Some(acl) = acl {
-                    self.fields.count(acl.len());
+                self.fields.schema(key, schema);
+                if let Some(acl) = &schema.acl {
                     self.acl = Acl::Schema(acl.iter());
                 }
             }
