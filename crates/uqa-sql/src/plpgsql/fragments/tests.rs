@@ -41,10 +41,10 @@ fn runtime_metadata_defers_syntax_and_uses_first_reached_parser_settings() {
         ..ParserSettings::default()
     };
     let (parsed, notices) = with_settings(off, || expr.parse());
-    assert!(matches!(parsed.unwrap(), Expr::Literal(uqa_core::Value::Str(v)) if v == "a\nb"));
+    assert!(matches!(&parsed.unwrap(), Expr::Literal(uqa_core::Value::Str(v)) if v == "a\nb"));
     assert_eq!(notices.notices.len(), 1);
     let (parsed, notices) = with_settings(ParserSettings::default(), || expr.parse());
-    assert!(matches!(parsed.unwrap(), Expr::Literal(uqa_core::Value::Str(v)) if v == r"a\nb"));
+    assert!(matches!(&parsed.unwrap(), Expr::Literal(uqa_core::Value::Str(v)) if v == r"a\nb"));
     assert!(notices.notices.is_empty());
 }
 #[test]

@@ -194,11 +194,11 @@ fn removing_a_field_preserves_its_original_datum_and_descriptor_through_serializ
         collation_oid: None,
         composite_source: Some(source),
         ..
-    } = restored
+    } = &restored
     else {
         panic!("retained composite datum")
     };
-    assert_eq!(projected, Value::Record(Vec::new().into()));
+    assert_eq!(*projected, Value::Record(Vec::new().into()));
     assert_eq!(source.value, value());
     assert_eq!(source.descriptors.len(), 1);
     assert_eq!(source.descriptors[0].attributes[0].number, 1);
@@ -221,7 +221,7 @@ fn array_constants_keep_bounds_nulls_and_existing_fields() {
     let Expr::TypedLiteral {
         value: Value::Array(array),
         ..
-    } = expression
+    } = &expression
     else {
         panic!("array datum")
     };

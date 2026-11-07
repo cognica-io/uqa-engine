@@ -137,13 +137,13 @@ fn loaded_sequence_binding_does_not_consult_the_session_search_path() {
         *references.calls.borrow(),
         ["stored-sequence:seq", "bound-oid:stored.seq"]
     );
-    let Expr::Func { args, binding, .. } = expression else {
+    let Expr::Func { args, binding, .. } = &expression else {
         panic!("expected function")
     };
     assert!(
         matches!(&args[0],Expr::TypedLiteral {value: Value::Int(41), ty, .. } if ty==&ColumnType::Regclass.catalog_name())
     );
-    assert_eq!(binding.unwrap().argument_types, ["regclass"]);
+    assert_eq!(binding.as_ref().unwrap().argument_types, ["regclass"]);
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn current_sequence_binding_uses_visible_names_before_storing_the_reference() {
     prepare_foreign_table_sequence_references(&references, &references, &mut expression, false)
         .unwrap();
     assert_eq!(*references.calls.borrow(), ["current-sequence:seq"]);
-    let Expr::Func { args, .. } = expression else {
+    let Expr::Func { args, .. } = &expression else {
         panic!("expected function")
     };
     assert!(matches!(&args[0],Expr::Literal(Value::Str(name)) if name=="visible.seq"));
@@ -173,7 +173,7 @@ fn bound_regclass_is_resolved_before_any_sequence_name_rewrite() {
         *references.calls.borrow(),
         ["loaded-relation:seq", "bound-oid:stored.seq"]
     );
-    let Expr::Func { args, .. } = expression else {
+    let Expr::Func { args, .. } = &expression else {
         panic!("expected function")
     };
     assert!(

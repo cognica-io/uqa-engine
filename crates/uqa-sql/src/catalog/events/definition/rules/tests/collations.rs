@@ -89,7 +89,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
             );
             let Expr::TypedLiteral {
                 collation_oid, ty, ..
-            } = bind_expr(
+            } = &bind_expr(
                 &Expr::qualified_column(&variable.side, name),
                 &mut RuleRowTypeResolver::for_condition(&columns, rule.event),
             )
@@ -99,7 +99,7 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
             };
             let actual = collation_oid.unwrap_or_else(|| {
                 u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
-                    &crate::ColumnType::from_sql_name(&ty).unwrap(),
+                    &crate::ColumnType::from_sql_name(ty).unwrap(),
                 ))
                 .unwrap()
             });

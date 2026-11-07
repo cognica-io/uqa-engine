@@ -11,24 +11,7 @@ use crate::{
 };
 use std::sync::Arc;
 
-struct Chain(Option<Expr>);
-impl Drop for Chain {
-    fn drop(&mut self) {
-        let mut next = self.0.take();
-        while let Some(value) = next {
-            next = match value {
-                Expr::Binary { lhs, rhs, .. } => {
-                    drop(rhs);
-                    Some(*lhs)
-                }
-                Expr::UnaryMinus(child) => Some(*child),
-                _ => None,
-            };
-        }
-    }
-}
-
-fn chain(depth: usize) -> Chain {
+fn chain(depth: usize) -> Expr {
     let mut value = Expr::Star;
     for _ in 0..depth {
         value = Expr::Binary {
@@ -37,13 +20,13 @@ fn chain(depth: usize) -> Chain {
             rhs: Box::new(Expr::Default),
         };
     }
-    Chain(Some(value))
+    value
 }
 
 #[test]
 fn definition_readers_admit_deep_continuations_and_retire_every_failed_read() {
     let owned = chain(4096);
-    let value = owned.0.as_ref().unwrap();
+    let value = &owned;
     let token = CancellationToken::new();
     let ample = MemoryBudget::new(16 << 20);
     let expected = collect(value.image_reader(&ample, &token).unwrap(), 20000);
@@ -85,15 +68,7 @@ fn definition_export_is_iterative_on_small_stacks_and_borrows_large_names() {
         .spawn(move || {
             let memory = MemoryBudget::new(16 << 20);
             let token = CancellationToken::new();
-            let bytes = collect(
-                owned
-                    .0
-                    .as_ref()
-                    .unwrap()
-                    .image_reader(&memory, &token)
-                    .unwrap(),
-                127,
-            );
+            let bytes = collect(owned.image_reader(&memory, &token).unwrap(), 127);
             assert_eq!(bytes.len(), 30017);
             assert_eq!(memory.used(), 0);
         })
@@ -134,7 +109,8 @@ fn definition_readers_retire_cancelled_state_and_keep_completion_terminal() {
     assert!(reader.read(&mut []).is_err());
     assert!(value.image_reader(&memory, &token).is_err());
     let token = CancellationToken::new();
-    let mut reader = Expr::Star.image_reader(&memory, &token).unwrap();
+    let complete = Expr::Star;
+    let mut reader = complete.image_reader(&memory, &token).unwrap();
     assert_eq!(reader.read(&mut [0; 64]).unwrap(), 17);
     token.cancel();
     assert_eq!(reader.read(&mut [0; 64]).unwrap(), 0);

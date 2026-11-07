@@ -37,7 +37,7 @@ fn assert_stored_identity(engine: &Engine, columns: &[&str]) {
             .column_default_expr("dr_left.defaults", column)
             .unwrap()
             .unwrap();
-        let Expr::Func { args, .. } = expression else {
+        let Expr::Func { args, .. } = &expression else {
             panic!("stored sequence call");
         };
         let Expr::TypedLiteral {
