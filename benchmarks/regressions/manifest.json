@@ -46848,6 +46848,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_match_literal_fields_and_native_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image framing",
+      "workload": "Compare independent literal wire bytes with every native field and measure live decoded allocations.",
+      "invariant": "Native metadata and scalar observations round-trip without unadmitted retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_preserve_optional_metadata_and_every_enum",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image metadata",
+      "workload": "Exercise 128 combinations of original optional identities, constraints and conditions with every native enum variant.",
+      "invariant": "Absence, declaration order and all original flags survive without normalization or execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_preserve_empty_relations_and_quoted_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native trigger image membership",
+      "workload": "Preserve an empty relation, quoted identities and ordered declarations with shared routine references.",
+      "invariant": "The complete durable relation and declaration membership remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_rejects_partial_malformed_and_mismatched_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input framing",
+      "workload": "Reject every truncated prefix and malformed flag, enum, identifier, key, relation or scalar frame.",
+      "invariant": "No incomplete catalog escapes and all partial ownership retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_rejects_duplicate_keys_incarnations_and_catalog_oids",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input identities",
+      "workload": "Reject duplicate relation/declaration keys, trigger incarnations, trigger/constraint OIDs and temporary roots.",
+      "invariant": "A private image cannot silently replace native membership or reuse an existing catalog identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_admits_exact_peak_and_retires_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/input.rs",
+      "capability": "Native trigger input admission",
+      "workload": "Exercise exact memory thresholds, hostile counts and I/O failure, cancellation and unwinding during construction.",
+      "invariant": "Construction precedes publication and all owned payloads retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_images_keep_captured_generations_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger captured ownership",
+      "workload": "Capture durable and temporary declarations, replace the durable name and retire the original registry.",
+      "invariant": "Output retains only the selected durable generation with exact original fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_output_borrows_large_arguments_without_corpus_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger bounded output",
+      "workload": "Stream an eight-MiB argument using zero scratch admission and allocation measurement.",
+      "invariant": "Preparation and bounded output borrow original text without a second encoded corpus.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_conditions_use_constant_stack_and_admitted_child_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger scalar ownership",
+      "workload": "Decode, emit and retire a 10000-node condition on a 128-KiB stack and check exact child-reader admission.",
+      "invariant": "Deep native scalar ownership remains stack-safe and every failed child reader releases scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_output_cancellation_retires_children_and_remains_terminal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/retention.rs",
+      "capability": "Native trigger output lifecycle",
+      "workload": "Cancel an active scalar child and read again after both failure and successful completion.",
+      "invariant": "Cancellation retires all scratch and both terminal states remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_trigger_images_preserve_original_bound_conditions_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/triggers.rs",
+      "capability": "Captured Engine trigger images",
+      "workload": "Capture real SQL trigger definitions, roll back DDL, replace their relation and functions, close the Engine and reconstruct the native catalog on another thread.",
+      "invariant": "Original execution-target and WHEN bindings, constraint identities and arguments survive the source lifecycle without execution or rebinding.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

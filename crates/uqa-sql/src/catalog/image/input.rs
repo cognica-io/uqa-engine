@@ -35,6 +35,7 @@ mod roles;
 mod security;
 mod sequences;
 mod structured_types;
+mod triggers;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use domains::domains;
@@ -48,6 +49,7 @@ pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
 pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
+pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
 
 struct Input<'a> {

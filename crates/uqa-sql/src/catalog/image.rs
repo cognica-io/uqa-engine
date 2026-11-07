@@ -34,9 +34,11 @@ mod fields;
 mod function_dispatch;
 mod input;
 mod reader;
+mod triggers;
 pub use expressions::DefinitionImageReader;
 pub use reader::CatalogImageReader;
 use reader::Entries;
+pub use triggers::TriggerImageReader;
 
 const FUNCTION_BINDING: [u8; 8] = *b"UQAFNB01";
 

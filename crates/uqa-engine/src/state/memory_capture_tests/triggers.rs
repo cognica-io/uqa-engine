@@ -119,3 +119,77 @@ fn denied_trigger_capture_preserves_ordinary_ddl_and_independently_funded_defini
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
 }
+
+#[test]
+fn captured_trigger_images_preserve_original_bound_conditions_after_engine_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        fixture(&engine);
+        let original = engine.durable.triggers.snapshot();
+        let key = engine.durable.triggers.key().unwrap();
+        let control = StorageReadControl::with_limit(2 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE docs DISABLE TRIGGER saved; SAVEPOINT changed; DROP TRIGGER saved ON docs; ROLLBACK TO changed; ROLLBACK");
+            sql(
+                &engine,
+                "DROP TABLE docs; DROP FUNCTION fire(); DROP FUNCTION guard(integer)",
+            );
+            fixture(&engine);
+            let relation = RelationIdentity::new("public", "docs");
+            assert_ne!(
+                engine.durable.triggers.read()[&relation]["saved"].function_object_id,
+                original[&relation]["saved"].function_object_id
+            );
+        }
+        drop(engine);
+        let saved = key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let image = std::thread::spawn(move || {
+            let memory = MemoryBudget::new(1 << 20);
+            let token = CancellationToken::new();
+            let mut reader = saved.get().unwrap().image_reader(&memory, &token).unwrap();
+            let mut image = Vec::new();
+            let mut buffer = [0; 127];
+            loop {
+                let count = reader.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                image.extend_from_slice(&buffer[..count]);
+            }
+            drop(reader);
+            assert_eq!(memory.used(), 0);
+            image
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let memory = MemoryBudget::new(2 << 20);
+        let decoded =
+            TriggerCatalog::read_image(&mut image.as_slice(), &memory, &CancellationToken::new())
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded.iter().collect::<Vec<_>>()).unwrap(),
+            serde_json::to_value(original.iter().collect::<Vec<_>>()).unwrap()
+        );
+        let relation = RelationIdentity::new("public", "docs");
+        assert_eq!(
+            decoded[&relation]["saved"].definition.arguments,
+            ["original", ""]
+        );
+        assert!(decoded[&relation]["saved"].definition.when.is_some());
+        assert!(decoded[&relation]["constrained"]
+            .constraint_catalog_oid
+            .is_some());
+        drop(decoded);
+        assert_eq!(memory.used(), 0);
+    }
+}

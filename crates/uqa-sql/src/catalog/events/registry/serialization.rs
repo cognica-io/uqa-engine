@@ -40,7 +40,7 @@ impl<'de, T: EventDefinition + Deserialize<'de>> Deserialize<'de> for EventCatal
 impl<T: Serialize> Serialize for CapturedEventCatalog<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut relations = serializer.serialize_seq(Some(self.len()))?;
-        for (relation, entries) in self.iter() {
+        for (relation, entries) in self {
             relations.serialize_element(&(relation, CapturedEntries(entries)))?;
         }
         relations.end()
