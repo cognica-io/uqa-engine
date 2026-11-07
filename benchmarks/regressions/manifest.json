@@ -49006,6 +49006,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_capture_retains_names_without_visiting_child_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Native evaluated-index membership",
+      "workload": "Capture 128 named indexes and one derived column cache, then seek the final identity and read a selected child.",
+      "invariant": "Membership capture allocates less than 2 KiB, preserves ordered names and leaves every child unread until selected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_publication_keeps_exact_children_after_replacement_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Evaluated-index source publication",
+      "workload": "Reuse a name, add and remove children, retain three independently selected memberships, and retire the source.",
+      "invariant": "Each cut resolves its exact original child; foreign cuts are rejected and independently retained values survive cut retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_denied_successors_preserve_live_and_selected_collections",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Evaluated-index publication admission",
+      "workload": "Exhaust native name and published membership allowances before insertion and clearing, then update the original child.",
+      "invariant": "Denied successor preparation changes neither live membership nor published selection, and the old captured value remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_value_index_publication_preserves_reused_names_and_restored_child_membership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/live_publication.rs",
+      "capability": "Idle evaluated-index generations",
+      "workload": "Capture lower-case expression keys, recreate the same index using upper-case keys, roll back a row change, add another index and close the Engine.",
+      "invariant": "Idle cuts retain original evaluated keys and the restored child group includes later indexes; all captured leases retire with their final child owners.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

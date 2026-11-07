@@ -314,7 +314,7 @@ impl Engine {
             .read()
             .with_renamed_field(&table_name, from, to)?;
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
-        Self::value_indexes_clear(&t);
+        Self::value_indexes_clear(&t)?;
         uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
         Self::rename_column_acl(&t, from, to);
         Self::rename_column_key_metadata(&t, from, to);

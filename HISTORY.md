@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain immutable named-index membership separately from evaluated child values. Live publication and rollback preserve exact child identities through name reuse, deletion and source retirement without scanning values when capturing the name root. Complete memory backup and public restore remain under implementation.
+
 - Spilled evaluated-index captures retain native record roots and encrypted files without reading or copying the complete value population. Independent retention charges cached metadata footprints; bounded chunk preparation and output preserve exact evaluated bytes after source mutation or closure.
 
 - Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.

@@ -6,7 +6,7 @@
 
 //! Prepare every field before publishing a row's cached keys.
 
-use super::ValueIndexCache;
+use super::{ValueIndexCache, ValueIndexes};
 use std::collections::BTreeMap;
 use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
@@ -38,7 +38,7 @@ impl ValueIndexCache {
 
 /// A failed field read, migration or replacement leaves every cache unchanged. Stored old keys remain authoritative even if the defining expression has since changed.
 pub fn apply_cached_values(
-    indexes: &mut BTreeMap<ValueIndexKey, ValueIndexCache>,
+    indexes: &mut ValueIndexes,
     id: DocId,
     new: Option<&BTreeMap<ValueIndexKey, Value>>,
     control: &StorageReadControl,

@@ -94,8 +94,8 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
     fn object_id(&self) -> [u8; 16] {
         self.state.object_id()
     }
-    fn clear_value_indexes(&self) {
-        self.state.value_indexes.write().clear();
+    fn clear_value_indexes(&self) -> StorageBackendResult<()> {
+        self.state.value_indexes.write().clear()
     }
     fn write_dropped_attributes(
         &self,
@@ -163,7 +163,7 @@ impl ColumnDropIndexes for Engine {
     }
     fn remove_value_index(&self, table: &str, key: &ValueIndexKey) -> StorageBackendResult<()> {
         if let Some(state) = self.try_table(table)? {
-            state.value_indexes.write().remove(key);
+            state.value_indexes.write().remove(key)?;
         }
         Ok(())
     }

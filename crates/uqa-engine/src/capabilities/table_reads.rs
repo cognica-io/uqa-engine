@@ -38,16 +38,13 @@ impl TableRead for TableState {
             return Ok(None);
         };
         // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
-        let presence = if let Some(column) = columns.first() {
-            *column
-        } else {
-            let Some(index) = indexes.values().next() else {
-                return Ok(None);
-            };
-            index
+        let fallback = indexes.values().next();
+        let Some(presence) = columns.first().or(fallback.as_ref()) else {
+            return Ok(None);
         };
+        let borrowed: Vec<_> = columns.iter().map(|column| &**column).collect();
         uqa_execution::catalog::index::value::visit_stored_fields(
-            &columns, presence, ids, control, visitor,
+            &borrowed, presence, ids, control, visitor,
         )
         .map(Some)
     }

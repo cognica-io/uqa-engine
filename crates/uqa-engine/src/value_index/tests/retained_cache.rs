@@ -40,14 +40,14 @@ fn cold_value_cache_keeps_bounded_payload_and_transaction_snapshots(#[case] kind
     };
     engine.sql("SET work_mem = '64kB'", &[]).unwrap();
     let table = engine.require_table("retained_keys").unwrap();
-    crate::Engine::value_indexes_clear(&table);
+    crate::Engine::value_indexes_clear(&table).unwrap();
     let field = ValueIndexKey::Column("body".into());
     let allocation = allocation_counter::measure(|| {
         assert!(engine.ensure_value_index("retained_keys", &field).unwrap());
     });
     assert!(allocation.bytes_max < 1536 * 1024, "{kind}: {allocation:?}");
     let control = engine.query_retention_control().unwrap();
-    let before = table.value_indexes.read()[&field].clone();
+    let before = table.value_indexes.read().get(&field).unwrap().clone();
     assert!(before.is_spilled());
     let original = before
         .stored_value(1, &control)
@@ -124,7 +124,7 @@ fn cold_value_cache_preserves_persisted_expression_values_after_routine_replacem
                 .ensure_query_value_index("expression_keys", &table, &field)
                 .unwrap());
             let indexes = table.value_indexes.read();
-            let index = &indexes[&field];
+            let index = indexes.get(&field).unwrap();
             assert!(index.is_spilled());
             for (id, expected) in expected {
                 assert!(index
@@ -148,7 +148,7 @@ fn cold_detached_value_cache_reads_its_selected_document_generation(#[case] kind
     engine.sql("CREATE TABLE selected_keys (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO selected_keys VALUES (1,'old'),(2,NULL); CREATE INDEX selected_body ON selected_keys (body)", &[]).unwrap();
     let live = engine.require_table("selected_keys").unwrap();
     let selected = engine.detach_query_table(&live, &live, None).unwrap();
-    crate::Engine::value_indexes_clear(&selected);
+    crate::Engine::value_indexes_clear(&selected).unwrap();
     engine
         .sql(
             "UPDATE selected_keys SET body='new' WHERE id=1; DELETE FROM selected_keys WHERE id=2",
@@ -162,14 +162,18 @@ fn cold_detached_value_cache_reads_its_selected_document_generation(#[case] kind
     let control = engine.query_retention_control().unwrap();
     let indexes = selected.value_indexes.read();
     assert_eq!(
-        indexes[&field]
+        indexes
+            .get(&field)
+            .unwrap()
             .stored_value(1, &control)
             .unwrap()
             .as_deref(),
         Some(&Value::Str("old".into()))
     );
     assert_eq!(
-        indexes[&field]
+        indexes
+            .get(&field)
+            .unwrap()
             .stored_value(2, &control)
             .unwrap()
             .as_deref(),

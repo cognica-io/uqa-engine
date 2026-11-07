@@ -5,8 +5,10 @@
 //
 
 use super::*;
-use crate::catalog::index::value::ValueIndexBuilder;
+use crate::catalog::index::value::{ValueIndexBuilder, ValueIndexes};
+use std::collections::BTreeMap;
 use uqa_storage::memory_capture::MemoryCaptureRegistry;
+use uqa_storage::ValueIndexKey;
 
 fn build(allowance: usize, carried: bool) -> ValueIndexCache {
     ValueIndexBuilder::from_values(
@@ -244,30 +246,24 @@ fn value_index_capture_admission_keeps_membership_and_isolates_failed_cuts() {
         )
         .unwrap();
     indexes.insert(ValueIndexKey::Column("derived".into()), derived);
-    let source = registry.cell(ValueIndexes::from(indexes)).unwrap();
+    let mut collection = ValueIndexes::memory(&registry);
+    collection.replace(indexes).unwrap();
+    let source = registry.cell(collection).unwrap();
     let small = StorageReadControl::with_limit(1 << 10);
     let large = StorageReadControl::with_limit(32 << 10);
     let failed = registry.capture(&small).unwrap();
     let good = registry.capture(&large).unwrap();
     let retained = source.key().unwrap();
-    source.write().clear();
+    source.write().clear().unwrap();
     assert!(failed.check().is_err());
     good.check().unwrap();
     let captured = retained.retained(&good).unwrap().unwrap();
     assert!(captured.keys().unwrap().eq(std::iter::once(&key)));
-    assert_eq!(captured.get(&key).unwrap().unwrap().len().unwrap(), 4);
+    let index = captured.get(&key, &good).unwrap().unwrap();
+    assert_eq!(index.len().unwrap(), 4);
     drop((source, registry, good, failed));
-    assert_eq!(
-        captured
-            .get(&key)
-            .unwrap()
-            .unwrap()
-            .value(1)
-            .unwrap()
-            .as_deref(),
-        Some(&Value::Int(1))
-    );
-    drop(captured);
+    assert_eq!(index.value(1).unwrap().as_deref(), Some(&Value::Int(1)));
+    drop((captured, index));
     assert_eq!(large.memory().used(), 0);
     assert_eq!(small.memory().used(), 0);
 }

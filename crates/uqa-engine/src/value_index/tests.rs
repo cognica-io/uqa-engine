@@ -176,7 +176,7 @@ fn rebuild_rejects_a_document_missing_from_the_field_projection() {
         .unwrap();
     let table = engine.try_table("projection_gap").unwrap().unwrap();
     *table.document_store.write() = Box::new(MissingProjectionStore);
-    crate::Engine::value_indexes_clear(&table);
+    crate::Engine::value_indexes_clear(&table).unwrap();
 
     let error = engine
         .ensure_value_index("projection_gap", &"id".into())
@@ -217,7 +217,7 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .drop_btree_index("public.items", &"id".into())
         .unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
-    crate::Engine::value_indexes_clear(&table);
+    crate::Engine::value_indexes_clear(&table).unwrap();
 
     let result = engine
         .sql("SELECT id FROM items WHERE id = 1", &[])
@@ -236,7 +236,7 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .contains_key(&"id".into()));
 
     // Recovery leaves a missing durable index cold, so it cannot execute SQL callbacks while the transaction state is locked. Its next read builds only the in-memory accelerator.
-    engine.drop_persistent_value_indexes();
+    engine.drop_persistent_value_indexes().unwrap();
     assert!(backend
         .load_btree_index("public.items", &"id".into())
         .unwrap()
@@ -311,7 +311,7 @@ fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
     .unwrap();
     drop(raw);
     let table = engine.try_table("items").unwrap().unwrap();
-    crate::Engine::value_indexes_clear(&table);
+    crate::Engine::value_indexes_clear(&table).unwrap();
     drop(table);
     drop(backend);
     drop(engine);

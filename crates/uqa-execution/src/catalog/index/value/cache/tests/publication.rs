@@ -14,11 +14,11 @@ fn retained_index_cache_prepares_all_fields_before_publishing_a_row() {
     let b = ValueIndexKey::Column("b".into());
     let control = StorageReadControl::with_limit(64 * 1024);
     for allowance in [0, 64 * 1024] {
-        let mut indexes = BTreeMap::from([
+        let mut indexes = super::super::ValueIndexes::from(BTreeMap::from([
             (a.clone(), build(&[(1, Value::Int(10))], false, allowance)),
             (b.clone(), build(&[(1, Value::Int(20))], true, 64 * 1024)),
-        ]);
-        let old = indexes.clone();
+        ]));
+        let old = indexes.snapshot();
         let new = BTreeMap::from([
             (a.clone(), Value::Int(30)),
             (b.clone(), Value::List(vec![Value::Int(40)])),
@@ -33,20 +33,29 @@ fn retained_index_cache_prepares_all_fields_before_publishing_a_row() {
         assert_eq!(error.sqlstate(), Some("53200"));
         for field in [&a, &b] {
             assert_eq!(
-                indexes[field].stored_value(1, &control).unwrap(),
+                indexes
+                    .get(field)
+                    .unwrap()
+                    .stored_value(1, &control)
+                    .unwrap(),
                 old[field].stored_value(1, &control).unwrap()
             );
         }
         apply_cached_values(&mut indexes, 1, Some(&new), &control).unwrap();
         for field in [&a, &b] {
             assert_eq!(
-                indexes[field].stored_value(1, &control).unwrap().as_deref(),
+                indexes
+                    .get(field)
+                    .unwrap()
+                    .stored_value(1, &control)
+                    .unwrap()
+                    .as_deref(),
                 new.get(field)
             );
         }
         apply_cached_values(&mut indexes, 1, None, &control).unwrap();
         for field in [&a, &b] {
-            assert!(!indexes[field].contains(1, &control).unwrap());
+            assert!(!indexes.get(field).unwrap().contains(1, &control).unwrap());
             assert!(old[field].contains(1, &control).unwrap());
         }
     }

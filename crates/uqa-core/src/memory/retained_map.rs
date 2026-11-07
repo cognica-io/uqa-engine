@@ -218,6 +218,16 @@ impl<K, V> RetainedMapSnapshot<K, V> {
 }
 
 impl<K: Ord, V> RetainedMapSnapshot<K, V> {
+    /// Select the least retained entry at a lower bound without allocating or visiting earlier entries.
+    pub fn first_from<Q: Ord + ?Sized>(&self, start: std::ops::Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        self.values
+            .first_from(start)
+            .map(|(key, entry)| (key, &entry.value))
+    }
+
     pub fn iter_bidirectional(&self) -> RetainedMapBidirectionalIter<'_, K, V> {
         RetainedMapBidirectionalIter(self.values.iter_bidirectional())
     }

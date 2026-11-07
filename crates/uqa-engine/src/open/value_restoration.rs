@@ -20,7 +20,7 @@ impl uqa_execution::catalog::value_restoration::ValueRestorationSession for Engi
         let state = self.try_table(table)?.ok_or_else(|| {
             StorageBackendError::Other(format!("restored value owner `{table}` disappeared"))
         })?;
-        state.value_indexes.write().clear();
+        state.value_indexes.write().clear()?;
         *state.column_stats.write() = uqa_planner::ColumnStatistics::default();
         *state.column_stats_loaded.write() = true;
         *state.column_stats_dirty.write() = true;

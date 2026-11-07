@@ -7,41 +7,15 @@
 //! Capture stored expression keys and their eligibility without evaluating expressions again.
 
 use super::{comparison::StoredComparison, ValueIndexCache};
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
+use std::ops::Deref;
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap, BudgetedString, RetainedMapSnapshot},
+    memory::{Budgeted, BudgetedString, RetainedMapSnapshot},
     DocId, Value, ValueRetentionError,
 };
 use uqa_storage::{
     btree_index::retained::RetainedValueIndexSnapshot, memory_capture::MemoryCaptureSource,
-    read_control::StorageReadControl, StorageBackendError, StorageBackendResult, ValueIndexKey,
+    read_control::StorageReadControl, StorageBackendError, StorageBackendResult,
 };
-
-/// The live collection is mutated only through its enclosing source admission owner.
-#[derive(Default)]
-pub struct ValueIndexes(BTreeMap<ValueIndexKey, ValueIndexCache>);
-
-impl From<BTreeMap<ValueIndexKey, ValueIndexCache>> for ValueIndexes {
-    fn from(indexes: BTreeMap<ValueIndexKey, ValueIndexCache>) -> Self {
-        Self(indexes)
-    }
-}
-
-impl Deref for ValueIndexes {
-    type Target = BTreeMap<ValueIndexKey, ValueIndexCache>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ValueIndexes {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueIndexComparison {
@@ -95,6 +69,15 @@ impl ValueIndexCache {
     ) -> StorageBackendResult<Budgeted<CapturedValueIndex>> {
         control.check()?;
         let memory = control.memory().reserve(size_of::<CapturedValueIndex>())?;
+        Ok(Budgeted::new(self.freeze(control)?, memory))
+    }
+}
+
+impl MemoryCaptureSource for ValueIndexCache {
+    type Frozen = CapturedValueIndex;
+
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        control.check()?;
         let field = copy_text(&self.field, control)?;
         let values = if let Some(retained) = &self.retained {
             CapturedValues::Spilled(retained.capture(control)?)
@@ -102,24 +85,21 @@ impl ValueIndexCache {
             CapturedValues::Resident(self.policy.values.capture(control.memory())?)
         };
         control.check()?;
-        Ok(Budgeted::new(
-            CapturedValueIndex {
-                field,
-                policy: CapturedValueIndexPolicy {
-                    carried: self.is_carried(),
-                    has_temporal: self.policy.has_temporal,
-                    has_row_values: self.policy.has_row_values,
-                    comparison: match self.policy.comparison {
-                        StoredComparison::Ordered => ValueIndexComparison::Ordered,
-                        StoredComparison::TypedField => ValueIndexComparison::TypedField,
-                        StoredComparison::Fallible => ValueIndexComparison::Fallible,
-                    },
+        Ok(CapturedValueIndex {
+            field,
+            policy: CapturedValueIndexPolicy {
+                carried: self.is_carried(),
+                has_temporal: self.policy.has_temporal,
+                has_row_values: self.policy.has_row_values,
+                comparison: match self.policy.comparison {
+                    StoredComparison::Ordered => ValueIndexComparison::Ordered,
+                    StoredComparison::TypedField => ValueIndexComparison::TypedField,
+                    StoredComparison::Fallible => ValueIndexComparison::Fallible,
                 },
-                values,
-                control: control.clone(),
             },
-            memory,
-        ))
+            values,
+            control: control.clone(),
+        })
     }
 }
 
@@ -185,48 +165,6 @@ impl CapturedValueIndex {
     }
 }
 
-/// Named SQL indexes retain evaluated keys. Opportunistic column accelerators are derived caches and do not enter the image.
-pub struct CapturedValueIndexes {
-    indexes: BudgetedMap<ValueIndexKey, Budgeted<CapturedValueIndex>>,
-    control: StorageReadControl,
-}
-
-impl MemoryCaptureSource for ValueIndexes {
-    type Frozen = CapturedValueIndexes;
-    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
-        control.check()?;
-        let mut indexes = BudgetedMap::new(control.memory());
-        for (key, index) in &self.0 {
-            if !matches!(key, ValueIndexKey::Index(_)) {
-                continue;
-            }
-            control.check()?;
-            let name = copy_text(key.name(), control)?;
-            let (name, name_memory) = name.into_parts();
-            let (index, mut memory) = index.capture_values(control)?.into_parts();
-            memory.absorb(name_memory);
-            indexes.insert(ValueIndexKey::Index(name), Budgeted::new(index, memory))?;
-        }
-        control.check()?;
-        Ok(CapturedValueIndexes {
-            indexes,
-            control: control.clone(),
-        })
-    }
-}
-
-impl CapturedValueIndexes {
-    pub fn get(&self, key: &ValueIndexKey) -> StorageBackendResult<Option<&CapturedValueIndex>> {
-        self.control.check()?;
-        Ok(self.indexes.get(key).map(|index| &**index))
-    }
-
-    pub fn keys(&self) -> StorageBackendResult<impl ExactSizeIterator<Item = &ValueIndexKey>> {
-        self.control.check()?;
-        Ok(self.indexes.iter().map(|(key, _)| key))
-    }
-}
-
 fn copy_text(value: &str, control: &StorageReadControl) -> StorageBackendResult<BudgetedString> {
     let value = uqa_core::memory::ProductionControl::new(
         control.memory(),
@@ -240,7 +178,7 @@ fn copy_text(value: &str, control: &StorageReadControl) -> StorageBackendResult<
     Ok(BudgetedString::from_budgeted(value))
 }
 
-fn value_error(error: ValueRetentionError) -> StorageBackendError {
+pub(super) fn value_error(error: ValueRetentionError) -> StorageBackendError {
     match error {
         ValueRetentionError::Memory(error) => error.into(),
         ValueRetentionError::Cancelled(error) => error.into(),

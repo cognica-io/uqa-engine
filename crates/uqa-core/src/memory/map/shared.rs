@@ -88,6 +88,14 @@ impl<K, V> BudgetedSharedMapSnapshot<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
+    /// Select the least entry at a lower bound without allocating or retaining a mutable map.
+    pub fn first_from<Q: Ord + ?Sized>(&self, start: Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        first_from(&self.root, start)
+    }
+
     /// Borrow both ends in constant space, seeking each next key in logarithmic time.
     pub fn iter_bidirectional(&self) -> BudgetedSharedMapBidirectionalIter<'_, K, V> {
         BudgetedSharedMapBidirectionalIter::new(&self.root, self.len)
@@ -99,6 +107,28 @@ impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
     {
         lookup(&self.root, key)
     }
+}
+
+fn first_from<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
+    root: &'a Link<K, V>,
+    start: Bound<&Q>,
+) -> Option<(&'a K, &'a V)> {
+    let mut link = root;
+    let mut found = None;
+    while let Some(node) = link {
+        let included = match start {
+            Bound::Unbounded => true,
+            Bound::Included(key) => node.entry.0.borrow() >= key,
+            Bound::Excluded(key) => node.entry.0.borrow() > key,
+        };
+        if included {
+            found = Some((&node.entry.0, &node.entry.1));
+            link = &node.left;
+        } else {
+            link = &node.right;
+        }
+    }
+    found
 }
 
 impl<K, V> Clone for BudgetedSharedMap<K, V> {
@@ -174,22 +204,7 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
     where
         K: Borrow<Q>,
     {
-        let mut link = &self.root;
-        let mut found = None;
-        while let Some(node) = link {
-            let included = match start {
-                Bound::Unbounded => true,
-                Bound::Included(key) => node.entry.0.borrow() >= key,
-                Bound::Excluded(key) => node.entry.0.borrow() > key,
-            };
-            if included {
-                found = Some((&node.entry.0, &node.entry.1));
-                link = &node.left;
-            } else {
-                link = &node.right;
-            }
-        }
-        found
+        first_from(&self.root, start)
     }
 
     /// Borrow both ends in constant space, seeking each next key in logarithmic time.

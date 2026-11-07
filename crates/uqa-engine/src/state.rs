@@ -140,10 +140,11 @@ impl StorageContext {
             uqa_execution::catalog::index::value::ValueIndexes,
         >,
     > {
-        self.memory_cell(
-            uqa_execution::catalog::index::value::ValueIndexes::default(),
-            persistence,
-        )
+        use uqa_execution::catalog::index::value::ValueIndexes;
+        let indexes = self
+            .table_capture_registry(persistence)
+            .map_or_else(ValueIndexes::default, ValueIndexes::memory);
+        self.memory_cell(indexes, persistence)
     }
 }
 

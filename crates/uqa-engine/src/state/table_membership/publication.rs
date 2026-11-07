@@ -59,11 +59,15 @@ impl Publication {
         };
         let mut vectors = table.vector_indexes.write();
         let publication = vectors.source_publication()?;
+        let mut values = table.value_indexes.write();
+        let value_publication = values.source_publication()?;
         let sources = source
             .select(&self.registry.sources(&self.memory))?
-            .with_sources(publication.sources())?;
+            .with_sources(publication.sources())?
+            .with_sources(value_publication.sources())?;
         let member = self.owner.publish(self.members.get(name), &sources)?;
         publication.bind(member.clone());
+        value_publication.bind(member.clone());
         self.members.insert(name.clone(), member);
         Ok(())
     }
@@ -98,17 +102,26 @@ impl Publication {
         let mut guards: Vec<_> = membership
             .sources
             .iter()
-            .map(|(name, _)| (name, live[name].vector_indexes.write()))
+            .map(|(name, _)| {
+                (
+                    name,
+                    live[name].vector_indexes.write(),
+                    live[name].value_indexes.write(),
+                )
+            })
             .collect();
         let mut bindings = Vec::with_capacity(guards.len());
-        for (name, vectors) in &mut guards {
+        for (name, vectors, values) in &mut guards {
             let publication = vectors.source_publication()?;
+            let value_publication = values.source_publication()?;
             let member = next.members[*name].clone();
             member.replace_sources(&empty, publication.sources())?;
-            bindings.push((publication, member));
+            member.replace_sources(&empty, value_publication.sources())?;
+            bindings.push((publication, value_publication, member));
         }
-        for (publication, member) in bindings {
-            publication.bind(member);
+        for (publication, value_publication, member) in bindings {
+            publication.bind(member.clone());
+            value_publication.bind(member);
         }
         Ok(next)
     }

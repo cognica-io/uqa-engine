@@ -136,7 +136,7 @@ fn committed_table_sources_preserve_unread_indexes_across_savepoint_commit_and_c
     assert_eq!(
         saved
             .value_indexes
-            .get(&field)
+            .get(&field, &selected.cut)
             .unwrap()
             .unwrap()
             .value(1)

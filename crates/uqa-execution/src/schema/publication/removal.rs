@@ -28,7 +28,7 @@ pub type IndexRowsWrite<'a> =
 /// One retained relation generation for the entire schema and physical-field removal.
 pub trait ColumnDropTable: ColumnDependencyState {
     fn object_id(&self) -> [u8; 16];
-    fn clear_value_indexes(&self);
+    fn clear_value_indexes(&self) -> StorageBackendResult<()>;
     fn write_columns(&self) -> SchemaWrite<'_, ColumnDef>;
     fn write_dropped_attributes(
         &self,
@@ -142,7 +142,7 @@ pub fn drop_column(
     crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
     let mut hierarchy = state.hierarchy();
     let dropped = dropped_attribute(context.catalog, state.as_ref(), column, &hierarchy)?;
-    state.clear_value_indexes();
+    state.clear_value_indexes()?;
     state.write_dropped_attributes().push(dropped);
     uqa_sql::schema::columns::publication::remove_local_column(&mut hierarchy, column);
     state.publish_hierarchy(hierarchy);

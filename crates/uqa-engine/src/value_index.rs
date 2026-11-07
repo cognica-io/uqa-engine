@@ -308,8 +308,8 @@ impl crate::Engine {
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return read(index);
-            }
+                return read(&index);
+            };
         }
         if !self
             .ensure_query_value_index(table, t, field)
@@ -320,8 +320,9 @@ impl crate::Engine {
             return Ok(None);
         }
         let indexes = t.value_indexes.read();
-        match indexes.get(field) {
-            Some(index) => read(index),
+        let selected = indexes.get(field);
+        match selected {
+            Some(index) => read(&index),
             None => Ok(None),
         }
     }
@@ -339,7 +340,7 @@ impl crate::Engine {
             let indexes = table_state.value_indexes.read();
             if let Some(index) = indexes.get(field) {
                 return index.estimate_cardinality(predicate, &self.query_retention_control()?);
-            }
+            };
         }
         if let Some(posting) = self
             .probe_value_index_state(table, &table_state, field, predicate)
@@ -452,7 +453,7 @@ impl crate::Engine {
             return Ok(false);
         }
         let built = self.hydrate_value_index_cache(&table_name, table, field, None)?;
-        table.value_indexes.write().insert(field.clone(), built);
+        table.value_indexes.write().insert(field.clone(), built)?;
         Ok(true)
     }
 
@@ -500,8 +501,7 @@ impl crate::Engine {
                     self.hydrate_value_index_cache(&table_name, &t, field, persistent_backend)?;
                 t.value_indexes
                     .write()
-                    .entry(field.clone())
-                    .or_insert(built);
+                    .insert_if_absent(field.clone(), built)?;
             }
             return Ok(true);
         }
@@ -571,9 +571,9 @@ impl crate::Engine {
             let built = self.build_value_index(&table_name, &t, field, values)?;
             let mut indexes = t.value_indexes.write();
             if support_changed {
-                indexes.insert(field.clone(), built);
+                indexes.insert(field.clone(), built)?;
             } else {
-                indexes.entry(field.clone()).or_insert(built);
+                indexes.insert_if_absent(field.clone(), built)?;
             }
         }
         Ok(true)
@@ -614,9 +614,9 @@ impl crate::Engine {
         let carried = self.value_index_carried_fields(&table_name, &t)?;
         {
             let mut indexes = t.value_indexes.write();
-            indexes.retain(|field, _| desired.contains(field));
+            indexes.retain(|field| desired.contains(field))?;
             // An index definition may have turned a carried column into a search key, or the reverse.
-            for (field, index) in indexes.iter_mut() {
+            for (field, mut index) in indexes.iter_mut() {
                 let carry = carried.contains(field);
                 if index.is_carried() != carry {
                     index.set_use(field.name(), carry);
@@ -732,9 +732,9 @@ impl crate::Engine {
 
     /// Restore hot accelerators directly from rolled-back postings. Recovery can hold the transaction mutex, so it must never bind SQL expressions or execute callbacks; missing indexes remain cold until the next statement.
     /// Drop the in-memory value indexes of every durable table after a rollback. The table catalog reload that follows every rollback builds a new state for each durable table, without indexes, so reloading them from storage beforehand was thrown away: a query builds the indexes it needs again from the snapshot it reads. Dropping them here keeps the earlier states from serving rolled-back keys when that reload fails. A temporary table's indexes are restored with its data snapshot instead, and a memory-only engine restores every table that way.
-    pub(crate) fn drop_persistent_value_indexes(&self) {
+    pub(crate) fn drop_persistent_value_indexes(&self) -> StorageBackendResult<()> {
         if self.storage.backend.is_none() {
-            return;
+            return Ok(());
         }
         let tables = self
             .storage
@@ -745,9 +745,10 @@ impl crate::Engine {
             .collect::<Vec<_>>();
         for table in tables {
             if table.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                table.value_indexes.write().clear();
+                table.value_indexes.write().clear()?;
             }
         }
+        Ok(())
     }
 
     /// `unused` names the namespace in which no document ever had `doc_id`, so that the document's entries replace none.
@@ -797,7 +798,7 @@ impl crate::Engine {
                 .clear_btree_indexes(&table_name)
                 .map_err(|err| SQLError::Internal(format!("btree truncate failed: {err}")))?;
         }
-        for index in t.value_indexes.write().values_mut() {
+        for mut index in t.value_indexes.write().values_mut() {
             index.clear();
         }
         Ok(())
@@ -857,8 +858,8 @@ impl crate::Engine {
 
     /// Drop every built index for the table (TRUNCATE, bulk reloads,
     /// store replacement, schema changes).
-    pub(crate) fn value_indexes_clear(t: &TableState) {
-        t.value_indexes.write().clear();
+    pub(crate) fn value_indexes_clear(t: &TableState) -> StorageBackendResult<()> {
+        t.value_indexes.write().clear()
     }
 }
 
