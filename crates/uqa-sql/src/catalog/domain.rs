@@ -7,12 +7,12 @@
 use crate::ast::{ColumnType, CreateDomain};
 use crate::catalog::roles::RoleDefinitions;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleReference};
+use super::roles::RoleReference;
 
 mod production;
+pub mod validation;
 
 pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
     u32::try_from(super::oids::stable_object_oid("domain", object_id))
@@ -82,12 +82,7 @@ pub fn validate_domain_registry(
     registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
     roles: &RoleDefinitions,
 ) -> Result<(), String> {
-    validate_domain_definitions(registry, roles)?;
-    for domain in registry.values() {
-        crate::schema::domains::constraints::validate(&domain.definition, false)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    validation::finish(registry, roles, validation::DomainValidationMode::Complete)
 }
 
 /// Early restoration validates authority and supplied identities before any missing legacy constraint metadata is allocated.
@@ -95,54 +90,11 @@ pub fn validate_domain_definitions(
     registry: &impl super::type_definitions::TypeDefinitionView<StoredDomain>,
     roles: &RoleDefinitions,
 ) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    let mut constraint_objects = BTreeSet::new();
-    let mut constraint_oids = BTreeSet::new();
-    for (name, domain) in registry.iter() {
-        // A domain with a recorded array OID drew both OIDs from the database's counter; an earlier one derives its OID from its identity.
-        let oids_valid = match domain.array_oid {
-            Some(array_oid) => {
-                domain.oid >= super::oids::FIRST_NORMAL_OBJECT_ID
-                    && array_oid >= super::oids::FIRST_NORMAL_OBJECT_ID
-                    && oids.insert(array_oid)
-            }
-            None => domain.oid == domain_object_oid(&domain.object_id),
-        };
-        if domain.object_id == [0; 16]
-            || !identities.insert(domain.object_id)
-            || !oids_valid
-            || !oids.insert(domain.oid)
-        {
-            return Err(format!("invalid or duplicate domain identity for `{name}`"));
-        }
-        if domain.identity.schema.is_empty()
-            || domain.identity.name.is_empty()
-            || domain.identity.qualified_name() != *name
-            || RelationIdentity::from_legacy_name(&domain.definition.name).as_ref()
-                != Ok(&domain.identity)
-        {
-            return Err(format!("inconsistent domain name for `{name}`"));
-        }
-        if !domain.owner.is_valid() || domain.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "domain `{name}` references missing role incarnation {}",
-                domain.owner.oid
-            ));
-        }
-        crate::schema::domains::constraints::validate(&domain.definition, true)
-            .map_err(|error| error.to_string())?;
-        for identity in crate::schema::domains::constraints::identities(&domain.definition) {
-            if !constraint_objects.insert(identity.object_id)
-                || !constraint_oids.insert(identity.oid)
-            {
-                return Err(format!(
-                    "duplicate domain constraint catalog identity for `{name}`"
-                ));
-            }
-        }
-    }
-    Ok(())
+    validation::finish(
+        registry,
+        roles,
+        validation::DomainValidationMode::Definitions,
+    )
 }
 
 /// Definition lookup for domain inheritance and constraint binding.

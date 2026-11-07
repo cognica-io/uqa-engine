@@ -15,6 +15,9 @@ use crate::SQLError;
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 
+mod validation;
+pub(crate) use validation::{constraint, ConstraintValidation};
+
 pub fn assign_names(
     definition: &mut CreateDomain,
     schema_names: &BTreeSet<String>,
@@ -78,40 +81,12 @@ pub fn identities(
 
 /// Unmaterialized declarations and initial legacy conversion may omit metadata. Supplied corrupt metadata is never replaced.
 pub fn validate(definition: &CreateDomain, allow_missing: bool) -> ConstraintMetadataResult<()> {
-    let mut names = BTreeSet::new();
-    let mut objects = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    let rows = definition
-        .not_null
-        .iter()
-        .map(|constraint| (&constraint.name, constraint.catalog_identity))
-        .chain(
-            definition
-                .checks
-                .iter()
-                .map(|constraint| (&constraint.name, constraint.catalog_identity)),
-        );
-    for (name, identity) in rows {
-        if let Some(name) = name {
-            if name.is_empty() || !names.insert(name) {
-                return Err(invalid("invalid or duplicate domain constraint name"));
-            }
-        } else if !allow_missing {
-            return Err(invalid("domain constraint has no durable name"));
-        }
-        if let Some(identity) = identity {
-            if !identity.is_valid()
-                || !objects.insert(identity.object_id)
-                || !oids.insert(identity.oid)
-            {
-                return Err(invalid(
-                    "invalid or duplicate domain constraint catalog identity",
-                ));
-            }
-        } else if !allow_missing {
-            return Err(invalid("domain constraint has no catalog identity"));
-        }
-    }
+    let mut validation = ConstraintValidation::new(
+        definition,
+        allow_missing,
+        uqa_core::memory::ProductionControl::uncontrolled(),
+    );
+    while !validation.advance()? {}
     Ok(())
 }
 

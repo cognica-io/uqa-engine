@@ -63,6 +63,19 @@ impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for DefinitionRegistry<K, T>
     }
 }
 
+impl<T, K: DefinitionKey> NamedDefinitionView<T, K> for CapturedDefinitions<K, T> {
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
+    where
+        T: 'a,
+        K: 'a,
+    {
+        self.iter()
+    }
+    fn get(&self, name: &K::View) -> Option<&T> {
+        self.get(name)
+    }
+}
+
 impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K>
     for std::sync::Arc<V>
 {
