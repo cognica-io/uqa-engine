@@ -16,6 +16,9 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod image;
+use image::DefinitionEntry;
+pub(crate) use image::DefinitionImage;
 mod serialization;
 
 /// Borrowed catalog access shared by native generations and legacy decoded maps during validation.
@@ -126,8 +129,8 @@ pub type NamedDefinitionIter<'a, T> = DefinitionIter<'a, String, T>;
 
 /// One canonical entry per key. Temporary definitions live in their own tree and never belong to a durable capture. Native readers merge the two ordered roots without allocating; mutation publishes both roots only after all admission succeeds.
 pub struct DefinitionRegistry<K, T> {
-    durable: RetainedMap<K, Budgeted<T>>,
-    temporary: RetainedMap<K, Budgeted<T>>,
+    durable: RetainedMap<K, DefinitionEntry<T>>,
+    temporary: RetainedMap<K, DefinitionEntry<T>>,
 }
 
 impl<K: Ord, T> Clone for DefinitionRegistry<K, T> {
@@ -288,7 +291,11 @@ impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
         let (name, key_memory) = name.into_parts();
         let (value, mut memory) = value.into_parts();
         memory.absorb(key_memory);
-        self.publish_entry(name, Budgeted::new(value, memory), bytes)
+        self.publish_entry(
+            name,
+            DefinitionEntry::Native(Budgeted::new(value, memory)),
+            bytes,
+        )
     }
 
     pub(crate) fn last_durable_key(&self) -> Option<&K> {
@@ -310,10 +317,15 @@ impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
             .checked_add(value.reserved_bytes())
             .and_then(|bytes| bytes.checked_add(children))
             .ok_or(MemoryError::SizeOverflow)?;
-        self.publish_entry(name, value, bytes)
+        self.publish_entry(name, DefinitionEntry::Native(value), bytes)
     }
 
-    fn publish_entry(&mut self, name: K, value: Budgeted<T>, bytes: usize) -> Result<(), SQLError> {
+    fn publish_entry(
+        &mut self,
+        name: K,
+        value: DefinitionEntry<T>,
+        bytes: usize,
+    ) -> Result<(), SQLError> {
         // The tuple retires the key before the value's lease, including imported key payloads.
         let entry = (name, value);
         let temporary = entry.1.is_temporary(entry.0.borrow());
@@ -365,8 +377,8 @@ impl<K: Ord + Borrow<Q>, T, Q: Ord + ?Sized> std::ops::Index<&Q> for DefinitionR
 
 /// Ordered native view over the two disjoint canonical partitions.
 pub struct DefinitionIter<'a, K, T> {
-    durable: Peekable<RetainedMapIter<'a, K, Budgeted<T>>>,
-    temporary: Peekable<RetainedMapIter<'a, K, Budgeted<T>>>,
+    durable: Peekable<RetainedMapIter<'a, K, DefinitionEntry<T>>>,
+    temporary: Peekable<RetainedMapIter<'a, K, DefinitionEntry<T>>>,
 }
 
 impl<'a, K: Ord, T> Iterator for DefinitionIter<'a, K, T> {
@@ -392,7 +404,7 @@ impl<'a, K: Ord, T> IntoIterator for &'a DefinitionRegistry<K, T> {
 
 /// Immutable durable definitions; the enclosing produced owner retains their independent admission.
 pub struct CapturedDefinitions<K, T> {
-    root: RetainedMapSnapshot<K, Budgeted<T>>,
+    root: RetainedMapSnapshot<K, DefinitionEntry<T>>,
 }
 
 impl<K: Ord, T> CapturedDefinitions<K, T> {
@@ -417,7 +429,7 @@ impl<K: Ord, T> CapturedDefinitions<K, T> {
 
 /// Allocation-free ordered access to captured native definitions.
 pub struct CapturedDefinitionIter<'a, K, T> {
-    inner: RetainedMapIter<'a, K, Budgeted<T>>,
+    inner: RetainedMapIter<'a, K, DefinitionEntry<T>>,
 }
 
 impl<'a, K, T> Iterator for CapturedDefinitionIter<'a, K, T> {

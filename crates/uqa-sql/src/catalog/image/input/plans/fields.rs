@@ -10,36 +10,44 @@ use super::super::{expressions::payload, scalars::References};
 use super::{
     invalid,
     retirement::{Pending, Retire},
-    Input, MemoryReservation, SQLError, ScalarExpr,
+    Input, PlanMemory, SQLError, ScalarExpr,
 };
 use crate::catalog::roles::{identity::RoleBinding, RoleIdentity, RoleReference};
 use uqa_core::memory::{BudgetedVec, OwnedSet};
 
 impl Input<'_> {
-    pub(super) fn plan_text(&mut self, memory: &mut MemoryReservation) -> Result<String, SQLError> {
+    pub(super) fn plan_text(&mut self, memory: &mut PlanMemory) -> Result<String, SQLError> {
         Ok(payload(self.binary.text()?, memory))
     }
 
     pub(super) fn plan_optional_text(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<String>, SQLError> {
         Ok(payload(self.optional_text()?, memory))
     }
 
     pub(super) fn plan_vector<T>(
         &mut self,
-        memory: &mut MemoryReservation,
-        mut read: impl FnMut(&mut Self, &mut MemoryReservation) -> Result<T, SQLError>,
+        memory: &mut PlanMemory,
+        mut read: impl FnMut(&mut Self, &mut PlanMemory) -> Result<T, SQLError>,
     ) -> Result<Vec<T>, SQLError> {
         let count = self.binary.count()?;
-        self.items(count, memory, |input, memory| read(input, memory))
+        let mut values = BudgetedVec::new(self.binary.memory);
+        values.reserve(count)?;
+        for _ in 0..count {
+            self.binary.cancellation.check()?;
+            values.push(read(self, memory)?)?;
+        }
+        let (values, reservation) = values.into_parts();
+        memory.absorb(reservation);
+        Ok(values)
     }
 
     pub(super) fn plan_scalar_vector<T: Retire>(
         &mut self,
-        memory: &mut MemoryReservation,
-        mut read: impl FnMut(&mut Self, &mut MemoryReservation) -> Result<Pending<T>, SQLError>,
+        memory: &mut PlanMemory,
+        mut read: impl FnMut(&mut Self, &mut PlanMemory) -> Result<Pending<T>, SQLError>,
     ) -> Result<Pending<Vec<T>>, SQLError> {
         let count = self.binary.count()?;
         let mut buffer = BudgetedVec::new(self.binary.memory);
@@ -56,7 +64,7 @@ impl Input<'_> {
 
     pub(super) fn plan_scalar(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<ScalarExpr>, SQLError> {
         let (value, reservation, observed) = self.native_scalar()?.into_native_parts();
@@ -67,7 +75,7 @@ impl Input<'_> {
 
     pub(super) fn plan_optional_scalar(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Option<ScalarExpr>>, SQLError> {
         Ok(Pending::new(if self.flag()? {
@@ -79,7 +87,7 @@ impl Input<'_> {
 
     pub(super) fn plan_optional_scalar_box(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Option<Box<ScalarExpr>>>, SQLError> {
         if !self.flag()? {
@@ -93,7 +101,7 @@ impl Input<'_> {
 
     pub(super) fn plan_scalars(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<ScalarExpr>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -103,7 +111,7 @@ impl Input<'_> {
 
     pub(super) fn plan_rows(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<Vec<ScalarExpr>>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -113,7 +121,7 @@ impl Input<'_> {
 
     pub(super) fn plan_role(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<RoleReference>, SQLError> {
         if !self.flag()? {
             return Ok(None);
@@ -131,9 +139,9 @@ impl Input<'_> {
                     oid: i64::from(oid),
                     object_id,
                 })?;
-                Ok(Some(RoleReference::Bound(RoleBinding::from_captured_name(
-                    name, oid, object_id,
-                )?)))
+                let role = RoleBinding::from_captured_name(name, oid, object_id)?;
+                memory.retain_child(role.reserved_bytes())?;
+                Ok(Some(RoleReference::Bound(role)))
             }
             _ => Err(invalid("query role constructor")),
         }
@@ -141,7 +149,7 @@ impl Input<'_> {
 
     pub(super) fn plan_positions(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<OwnedSet<usize>, SQLError> {
         let count = self.binary.count()?;
         let mut result = OwnedSet::new();

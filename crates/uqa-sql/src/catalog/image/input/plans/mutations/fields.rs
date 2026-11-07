@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Input, Kind, MemoryReservation, References, SQLError, Step};
+use super::{Input, Kind, PlanMemory, References, SQLError, Step};
 use crate::plan::{RuleValuesInput, ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan};
 
 pub(super) fn returning(
@@ -12,7 +12,7 @@ pub(super) fn returning(
     count: &mut Option<usize>,
     references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     if count.is_none() {
         if !input.flag()? {
@@ -45,7 +45,7 @@ pub(super) fn returning(
 impl Input<'_> {
     pub(in super::super) fn plan_rule_values(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<RuleValuesInput>, SQLError> {
         if !self.flag()? {
             return Ok(None);
@@ -72,7 +72,7 @@ impl Input<'_> {
 
     pub(in super::super) fn plan_rule_inserts(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Vec<ViewRuleInsertPlan>, SQLError> {
         self.plan_vector(memory, |input, memory| {
             Ok(ViewRuleInsertPlan {
@@ -85,7 +85,7 @@ impl Input<'_> {
 
     pub(in super::super) fn plan_rule_updates(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Vec<ViewRuleUpdatePlan>, SQLError> {
         self.plan_vector(memory, |input, memory| {
             Ok(ViewRuleUpdatePlan {

@@ -46,6 +46,7 @@ enum Frame<'a> {
     Scalar(scalars::Part<'a>),
     Table(tables::Part<'a>),
     NextDomain,
+    NextView,
     DomainDefinition(&'a crate::ast::CreateDomain),
     DomainChecks(&'a [crate::ast::DomainCheck]),
     DomainNotNull(&'a crate::ast::DomainNotNull),
@@ -91,6 +92,13 @@ pub struct DefinitionImageReader<'a> {
             'a,
             String,
             crate::catalog::domain::StoredDomain,
+        >,
+    >,
+    views: Option<
+        crate::catalog::named_definitions::CapturedDefinitionIter<
+            'a,
+            uqa_core::RelationIdentity,
+            crate::catalog::stored_view::StoredView,
         >,
     >,
     frames: BudgetedVec<Frame<'a>>,
@@ -146,6 +154,7 @@ impl<'a> DefinitionImageReader<'a> {
         Ok(Self {
             first: Some(first),
             domains: None,
+            views: None,
             frames: BudgetedVec::new(memory),
             fields,
             field: Field::Bytes(&[]),
@@ -230,6 +239,7 @@ impl<'a> DefinitionImageReader<'a> {
         self.state = State::Failed;
         self.first = None;
         self.domains = None;
+        self.views = None;
         self.child = None;
         self.frames = BudgetedVec::new(self.memory);
         self.fields = Fields::new();

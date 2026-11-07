@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add bounded native stored-view images preserving original query bindings, authority revisions and evaluated materialized rows. Reconstructed immutable catalogs retain their query cleanup and memory ownership through capture and replacement; whole-memory assembly and public Engine restore remain under implementation.
+
 - Add bounded native executable-scalar images preserving resolved types, selected calls, window clauses, collations and query-arena addresses. Admitted reconstruction owns deep-tree cleanup; complete stored-plan and memory Engine backup integration remains under implementation.
 
 - Add bounded native column-statistics and statistics-maintenance images preserving complete distributions, floating-point frequency bits, original counters and sampled analysis identities without rerunning ANALYZE. Complete memory Engine backup and public restore remain under implementation.

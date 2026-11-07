@@ -5,9 +5,7 @@
 //
 
 use super::super::scalars::References;
-use super::{
-    driver::Step, invalid, retirement::Pending, Input, Kind, MemoryReservation, Node, SQLError,
-};
+use super::{driver::Step, invalid, retirement::Pending, Input, Kind, Node, PlanMemory, SQLError};
 use crate::plan::{CommandPlan, CteCyclePlan, CtePlan, CtePlanBody, CteSearchPlan, QueryPlan};
 
 pub(super) fn read(
@@ -15,7 +13,7 @@ pub(super) fn read(
     position: usize,
     references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     match position {
         0 => value.name = input.plan_text(memory)?,
@@ -54,7 +52,7 @@ pub(super) fn read(
 impl Input<'_> {
     fn plan_cycle(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Option<CteCyclePlan>>, SQLError> {
         if !self.flag()? {

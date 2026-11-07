@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Input, MemoryReservation, SQLError};
+use super::{Input, PlanMemory, SQLError};
 use crate::{
     ast::ReturningAliases,
     plan::{CommandPlan, DeletePlan, InsertPlan, MergePlan, SourcePlan, UpdatePlan},
@@ -22,7 +22,7 @@ pub(super) fn aliases() -> ReturningAliases {
 
 pub(super) fn read(
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<CommandPlan, SQLError> {
     Ok(match input.binary.array::<1>()?[0] {
         0 => {

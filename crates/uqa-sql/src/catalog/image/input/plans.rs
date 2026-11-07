@@ -11,7 +11,9 @@ mod assignments;
 mod ctes;
 mod driver;
 mod fields;
+mod memory;
 mod metadata;
+use memory::PlanMemory;
 mod mutations;
 mod ownership;
 mod queries;
@@ -31,7 +33,7 @@ use crate::{
     },
     SQLError, ScalarExpr,
 };
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 #[derive(Debug)]
 enum Node {
@@ -76,10 +78,10 @@ impl Frame {
 }
 
 #[derive(Debug)]
-struct Owner {
+pub(super) struct Owner {
     root: Node,
     frames: BudgetedVec<Frame>,
-    memory: MemoryReservation,
+    memory: PlanMemory,
 }
 
 impl Owner {
@@ -87,7 +89,7 @@ impl Owner {
         Self {
             root: Node::Empty,
             frames: BudgetedVec::new(memory),
-            memory: memory.empty_reservation(),
+            memory: PlanMemory::new(memory),
         }
     }
 

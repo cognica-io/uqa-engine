@@ -5,7 +5,7 @@
 //
 
 use super::super::scalars::References;
-use super::{driver::Step, Input, Kind, MemoryReservation, Node, SQLError};
+use super::{driver::Step, Input, Kind, Node, PlanMemory, SQLError};
 use crate::plan::{CommandPlan, QueryPlan, SourcePlan};
 
 mod attachment;
@@ -23,7 +23,7 @@ pub(super) fn read(
     references: &mut References,
     rule_references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     if position == 0 {
         *command = constructors::read(input, memory)?;

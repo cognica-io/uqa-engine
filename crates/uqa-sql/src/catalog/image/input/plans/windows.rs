@@ -5,7 +5,7 @@
 //
 
 use super::super::scalars::References;
-use super::{invalid, retirement::Pending, Input, MemoryReservation, SQLError};
+use super::{invalid, retirement::Pending, Input, PlanMemory, SQLError};
 use crate::{
     ast::WindowDefinition, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
@@ -13,7 +13,7 @@ use crate::{
 impl Input<'_> {
     pub(super) fn plan_windows(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<WindowDefinition<ScalarWindowSpec>>>, SQLError> {
         let mut position = 0;
@@ -35,7 +35,7 @@ impl Input<'_> {
 
     fn plan_window(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<ScalarWindowSpec>, SQLError> {
         let definition = self.plan_optional_count()?;
@@ -66,7 +66,7 @@ impl Input<'_> {
 
     fn plan_frame(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<ScalarWindowFrame>, SQLError> {
         let mode = self.plan_frame_mode()?;
@@ -85,7 +85,7 @@ impl Input<'_> {
 
     fn plan_frame_bound(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<ScalarFrameBound>, SQLError> {
         let tag = self.binary.array::<1>()?[0];

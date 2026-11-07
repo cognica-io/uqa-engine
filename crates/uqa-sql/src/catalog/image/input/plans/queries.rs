@@ -5,7 +5,7 @@
 //
 
 use super::super::scalars::References;
-use super::{driver::Step, empty_query, invalid, Input, Kind, MemoryReservation, Node, SQLError};
+use super::{driver::Step, empty_query, invalid, Input, Kind, Node, PlanMemory, SQLError};
 use crate::{
     ast::SetOpKind,
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
@@ -18,7 +18,7 @@ pub(super) fn read(
     count: &mut Option<usize>,
     references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     match position {
         0 => value.relations_bound = input.flag()?,
@@ -67,7 +67,7 @@ pub(super) fn read(
     Ok(Step::Advance)
 }
 
-fn root(input: &mut Input<'_>, memory: &mut MemoryReservation) -> Result<RelationalPlan, SQLError> {
+fn root(input: &mut Input<'_>, memory: &mut PlanMemory) -> Result<RelationalPlan, SQLError> {
     Ok(match input.binary.array::<1>()?[0] {
         0 => {
             memory.grow(size_of::<QueryBlockPlan>())?;
@@ -122,7 +122,7 @@ fn block_fields(
     count: &mut Option<usize>,
     references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     match position {
         0 => value.windows = input.plan_windows(memory, references)?.take(),

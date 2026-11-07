@@ -32,12 +32,16 @@ pub(super) enum Part<'a> {
     Scalar(&'a crate::ScalarExpr),
     Type(&'a crate::ColumnType),
     Binding(&'a crate::ast::FunctionBinding),
+    ViewMap(views::Map<'a>),
+    ViewAcl(&'a crate::catalog::security::table_binding::BoundTableAclEntry),
+    Value(&'a uqa_core::Value),
     Columns(&'a OwnedSet<ColumnIdentity>),
     Positions(&'a OwnedSet<usize>),
 }
 
 pub(super) enum Frame<'a> {
     Node(&'a dyn Node, usize),
+    ViewMap(Box<views::Cursor<'a>>, MemoryReservation),
     Columns(Box<OwnedSetIter<'a, ColumnIdentity>>, MemoryReservation),
     Positions(Box<OwnedSetIter<'a, usize>>, MemoryReservation),
 }
@@ -85,6 +89,7 @@ mod queries;
 mod sources;
 #[cfg(test)]
 mod tests;
+mod views;
 
 impl QueryPlan {
     /// Stream the stored-syntax projection of this query, including all four kinds of data-modifying CTE. Analysis caches and execution-scoped sources do not enter a stored image.
@@ -123,6 +128,7 @@ impl crate::plan::ExpressionPlan {
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn plan_part(&mut self, frame: Frame<'a>) -> Result<(), SQLError> {
         match frame {
+            Frame::ViewMap(cursor, memory) => self.view_map(cursor, memory)?,
             Frame::Node(node, position) => {
                 let Some(part) = node.part(position)? else {
                     return Ok(());
@@ -148,6 +154,9 @@ impl<'a> DefinitionImageReader<'a> {
 
     fn plan_field(&mut self, part: Part<'a>) -> Result<(), SQLError> {
         match part {
+            Part::ViewMap(map) => self.start_view_map(map)?,
+            Part::ViewAcl(acl) => self.fields.acl(acl),
+            Part::Value(value) => self.push(ImageFrame::Value(value))?,
             Part::Node(node) => self.push(ImageFrame::Plan(Frame::Node(node, 0)))?,
             Part::Text(value) => self.fields.text(value),
             Part::OptionalText(value) => self.fields.optional_text(value),

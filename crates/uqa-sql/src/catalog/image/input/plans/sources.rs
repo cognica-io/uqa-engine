@@ -6,8 +6,7 @@
 
 use super::super::scalars::References;
 use super::{
-    driver::Step, empty_query, empty_source, invalid, Input, Kind, MemoryReservation, Node,
-    SQLError,
+    driver::Step, empty_query, empty_source, invalid, Input, Kind, Node, PlanMemory, SQLError,
 };
 use crate::{
     ast::{InternalRelationId, JoinKind},
@@ -23,7 +22,7 @@ pub(super) fn read(
     position: usize,
     references: &mut References,
     input: &mut Input<'_>,
-    memory: &mut MemoryReservation,
+    memory: &mut PlanMemory,
 ) -> Result<Step, SQLError> {
     if position == 0 {
         *value = node(input, memory)?;
@@ -153,7 +152,7 @@ pub(super) fn read(
     Ok(Step::Advance)
 }
 
-fn node(input: &mut Input<'_>, memory: &mut MemoryReservation) -> Result<SourcePlan, SQLError> {
+fn node(input: &mut Input<'_>, memory: &mut PlanMemory) -> Result<SourcePlan, SQLError> {
     Ok(match input.binary.array::<1>()?[0] {
         0 => SourcePlan::Table {
             name: String::new(),

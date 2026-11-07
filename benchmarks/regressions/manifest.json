@@ -47875,6 +47875,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_preserve_authority_syntax_metadata_and_evaluated_bits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests.rs",
+      "capability": "native view images preserve authority syntax metadata and evaluated bits",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_share_immutable_roots_and_fund_independent_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests.rs",
+      "capability": "native view images share immutable roots and fund independent capture",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_reject_truncation_order_duplicates_and_trailing_data",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests.rs",
+      "capability": "native view images reject truncation order duplicates and trailing data",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_admit_exact_peak_and_release_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests.rs",
+      "capability": "native view images admit exact peak and release failed publication",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_capture_deep_query_retirement_without_stack_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests.rs",
+      "capability": "native view images capture deep query retirement without stack growth",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_release_catalogs_on_io_cancel_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/resources.rs",
+      "capability": "native view images release catalogs on io cancel and unwind",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_retain_bound_role_leases_through_independent_catalog_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/resources.rs",
+      "capability": "native view images retain bound role leases through independent catalog capture",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_match_independent_wire_and_reject_invalid_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/resources.rs",
+      "capability": "native view images match independent wire and reject invalid metadata",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_output_bounds_windows_and_scratch_independently_of_cell_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/resources.rs",
+      "capability": "native view output bounds windows and scratch independently of cell payloads",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_view_images_preserve_captured_sql_after_replacement_and_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/views.rs",
+      "capability": "memory view images preserve captured sql after replacement and engine retirement",
+      "workload": "Exercise original stored view syntax, authority, evaluated data and independently retained image ownership.",
+      "invariant": "Captured generations preserve exact native observations and release admitted payloads without replay or partial publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_images_reject_duplicate_incarnations_and_invalid_oid_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/resources.rs",
+      "capability": "Native view identity ownership",
+      "workload": "Decode duplicate view incarnations, cross-view and intra-view OID collisions, an absent array OID and a zero relation OID.",
+      "invariant": "Invalid object claims reject the unpublished catalog and release all payloads and identity scratch.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

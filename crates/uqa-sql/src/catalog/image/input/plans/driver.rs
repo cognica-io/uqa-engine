@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Frame, Input, Kind, MemoryReservation, Node, Owner, SQLError};
+use super::{Frame, Input, Kind, Node, Owner, PlanMemory, SQLError};
 use uqa_core::memory::BudgetedVec;
 
 pub(super) enum Step {
@@ -39,7 +39,7 @@ impl Input<'_> {
 
     pub(super) fn plan_children<T>(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         count: &mut Option<usize>,
         values: &mut Vec<T>,
         kind: Kind,
@@ -71,7 +71,7 @@ impl Input<'_> {
 
     pub(super) fn plan_optional_box<T>(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         kind: Kind,
     ) -> Result<Step, SQLError> {
         if !self.flag()? {
@@ -83,11 +83,7 @@ impl Input<'_> {
 }
 
 impl Frame {
-    fn read(
-        &mut self,
-        input: &mut Input<'_>,
-        memory: &mut MemoryReservation,
-    ) -> Result<Step, SQLError> {
+    fn read(&mut self, input: &mut Input<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
         match &mut self.node {
             Node::Query(value) => super::queries::read(
                 value,

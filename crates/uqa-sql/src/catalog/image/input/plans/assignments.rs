@@ -5,7 +5,7 @@
 //
 
 use super::super::scalars::References;
-use super::{invalid, retirement::Pending, Input, MemoryReservation, SQLError, ScalarExpr};
+use super::{invalid, retirement::Pending, Input, PlanMemory, SQLError, ScalarExpr};
 use crate::{
     ast::{AssignmentStep, AssignmentTarget, AssignmentTargets, MultipleAssignmentTargets},
     plan::{AssignmentPlan, ConflictActionPlan, ConflictPlan, MergeWhenPlan, ViewCheckPlan},
@@ -14,7 +14,7 @@ use crate::{
 impl Input<'_> {
     pub(super) fn plan_targets(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<AssignmentTarget<ScalarExpr>>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -24,7 +24,7 @@ impl Input<'_> {
 
     fn plan_target(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<AssignmentTarget<ScalarExpr>>, SQLError> {
         let column = self.plan_text(memory)?;
@@ -39,7 +39,7 @@ impl Input<'_> {
 
     fn plan_assignment_step(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<AssignmentStep<ScalarExpr>>, SQLError> {
         Ok(Pending::new(match self.binary.array::<1>()?[0] {
@@ -62,7 +62,7 @@ impl Input<'_> {
 
     fn plan_assignment_targets(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<AssignmentTargets<ScalarExpr>>, SQLError> {
         Ok(Pending::new(match self.binary.array::<1>()?[0] {
@@ -93,7 +93,7 @@ impl Input<'_> {
 
     pub(super) fn plan_assignments(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<AssignmentPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -108,7 +108,7 @@ impl Input<'_> {
 
     pub(super) fn plan_conflict(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Option<ConflictPlan>>, SQLError> {
         if !self.flag()? {
@@ -141,7 +141,7 @@ impl Input<'_> {
 
     pub(super) fn plan_view_checks(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<ViewCheckPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -156,7 +156,7 @@ impl Input<'_> {
 
     pub(super) fn plan_when_clauses(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<MergeWhenPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| input.plan_when(memory, references))
@@ -164,7 +164,7 @@ impl Input<'_> {
 
     fn plan_when(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<MergeWhenPlan>, SQLError> {
         let tag = self.binary.array::<1>()?[0];

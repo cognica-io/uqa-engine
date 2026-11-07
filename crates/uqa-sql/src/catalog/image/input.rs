@@ -41,6 +41,7 @@ mod table_security;
 mod tables;
 mod triggers;
 mod types;
+mod views;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use domains::domains;
 pub(super) use expressions::expression_image;
@@ -63,6 +64,7 @@ pub use tables::{
 };
 pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
+pub(super) use views::views;
 
 struct Input<'a> {
     binary: ImageInput<'a>,

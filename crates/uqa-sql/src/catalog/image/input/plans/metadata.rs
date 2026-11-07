@@ -7,7 +7,7 @@
 //! Query-local metadata retains the original wire order and admitted scalar owners.
 
 use super::super::{expressions::payload, scalars::References};
-use super::{invalid, retirement::Pending, Input, MemoryReservation, SQLError};
+use super::{invalid, retirement::Pending, Input, PlanMemory, SQLError};
 use crate::{
     ast::{
         CteMaterialization, FrameExclusion, FrameMode, FunctionBinding, JoinKind, JoinUsing,
@@ -48,10 +48,7 @@ enum_field!(plan_compute, ComputePlan, 0 => Project, 1 => Aggregate, 2 => Window
 enum_field!(plan_strategy, JoinExecutionStrategy, 0 => Auto, 1 => Hash);
 
 impl Input<'_> {
-    pub(super) fn plan_texts(
-        &mut self,
-        memory: &mut MemoryReservation,
-    ) -> Result<Vec<String>, SQLError> {
+    pub(super) fn plan_texts(&mut self, memory: &mut PlanMemory) -> Result<Vec<String>, SQLError> {
         self.plan_vector(memory, Self::plan_text)
     }
 
@@ -63,14 +60,14 @@ impl Input<'_> {
 
     pub(super) fn plan_optional_texts(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<Vec<String>>, SQLError> {
         self.flag()?.then(|| self.plan_texts(memory)).transpose()
     }
 
     pub(super) fn plan_binding(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<FunctionBinding>, SQLError> {
         if !self.flag()? {
             return Ok(None);
@@ -83,7 +80,7 @@ impl Input<'_> {
 
     pub(super) fn plan_optional_type(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<ColumnType>, SQLError> {
         self.flag()?
             .then(|| self.column_type().map(|value| payload(value, memory)))
@@ -102,7 +99,7 @@ impl Input<'_> {
 
     pub(super) fn plan_relations(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<OperatorJoinRelations>, SQLError> {
         if !self.flag()? {
             return Ok(None);
@@ -115,7 +112,7 @@ impl Input<'_> {
 
     pub(super) fn plan_using(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Option<JoinUsing>, SQLError> {
         if !self.flag()? {
             return Ok(None);
@@ -128,7 +125,7 @@ impl Input<'_> {
 
     pub(super) fn plan_returning_aliases(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<ReturningAliases, SQLError> {
         Ok(ReturningAliases {
             old: self.plan_text(memory)?,
@@ -151,7 +148,7 @@ impl Input<'_> {
 
     pub(super) fn plan_locking(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<Vec<LockingClause>, SQLError> {
         self.plan_vector(memory, |input, memory| {
             Ok(LockingClause {
@@ -164,7 +161,7 @@ impl Input<'_> {
 
     pub(super) fn plan_projections(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<ProjectionPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -179,7 +176,7 @@ impl Input<'_> {
 
     pub(super) fn plan_orders(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<OrderPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -196,7 +193,7 @@ impl Input<'_> {
 
     pub(super) fn plan_functions(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
         references: &mut References,
     ) -> Result<Pending<Vec<TableFunctionPlan>>, SQLError> {
         self.plan_scalar_vector(memory, |input, memory| {
@@ -219,7 +216,7 @@ impl Input<'_> {
         })
     }
 
-    fn plan_column(&mut self, memory: &mut MemoryReservation) -> Result<ColumnIdentity, SQLError> {
+    fn plan_column(&mut self, memory: &mut PlanMemory) -> Result<ColumnIdentity, SQLError> {
         let qualifier = self.optional_text()?;
         let column = self.binary.text()?;
         let control = ProductionControl::new(
@@ -254,7 +251,7 @@ impl Input<'_> {
 
     pub(super) fn plan_columns(
         &mut self,
-        memory: &mut MemoryReservation,
+        memory: &mut PlanMemory,
     ) -> Result<OwnedSet<ColumnIdentity>, SQLError> {
         let count = self.binary.count()?;
         let mut result = OwnedSet::new();
