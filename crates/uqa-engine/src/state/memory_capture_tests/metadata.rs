@@ -8,6 +8,99 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn captured_table_metadata_images_preserve_partition_constraints_after_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_sql::catalog::image;
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE TABLE parent(id integer PRIMARY KEY); CREATE TABLE root(id integer PRIMARY KEY, ref integer, old text, CONSTRAINT valid_id CHECK(id>0), CONSTRAINT fk FOREIGN KEY(ref) REFERENCES parent(id) ON DELETE SET NULL) PARTITION BY RANGE(id); CREATE TABLE docs PARTITION OF root FOR VALUES FROM (1) TO (100); ALTER TABLE root DROP COLUMN old");
+        let table = engine.table("docs").unwrap().unwrap();
+        assert!(!table.table_checks.read().is_empty());
+        assert!(!table.foreign_keys.read().is_empty());
+        assert!(!table.key_constraints.read().is_empty());
+        assert!(table.hierarchy.read().partition_bound.is_some());
+        assert!(!table.dropped_attributes.read().is_empty());
+        macro_rules! remember {
+            ($($field:ident),*) => {$ (
+                let $field = (table.$field.key().unwrap(), serde_json::to_value(&*table.$field.snapshot()).unwrap());
+            )*};
+        }
+        remember!(
+            table_checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+            dropped_attributes
+        );
+        let control = StorageReadControl::with_limit(4 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE root RENAME COLUMN ref TO private; ROLLBACK; DROP TABLE root CASCADE; CREATE TABLE docs(replacement text)");
+        }
+        drop((table, engine));
+        std::thread::spawn(move || {
+            macro_rules! verify_image {
+                ($field:ident, $encode:ident, $decode:ident) => {{
+                    let saved = $field.0.retained(&cut).unwrap().unwrap();
+                    let memory = MemoryBudget::new(4 << 20);
+                    let token = CancellationToken::new();
+                    let mut reader = image::$encode(saved.get().unwrap(), &memory, &token).unwrap();
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 127];
+                    loop {
+                        let count = reader.read(&mut buffer).unwrap();
+                        if count == 0 {
+                            break;
+                        }
+                        bytes.extend_from_slice(&buffer[..count]);
+                    }
+                    drop(reader);
+                    assert_eq!(memory.used(), 0);
+                    let restored = image::$decode(&mut bytes.as_slice(), &memory, &token).unwrap();
+                    assert_eq!(serde_json::to_value(&*restored).unwrap(), $field.1);
+                    drop(restored);
+                    assert_eq!(memory.used(), 0);
+                }};
+            }
+            verify_image!(
+                table_checks,
+                table_checks_image_reader,
+                read_table_checks_image
+            );
+            verify_image!(
+                foreign_keys,
+                foreign_keys_image_reader,
+                read_foreign_keys_image
+            );
+            verify_image!(
+                key_constraints,
+                table_keys_image_reader,
+                read_table_keys_image
+            );
+            verify_image!(
+                hierarchy,
+                table_hierarchy_image_reader,
+                read_table_hierarchy_image
+            );
+            verify_image!(
+                dropped_attributes,
+                dropped_attributes_image_reader,
+                read_dropped_attributes_image
+            );
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn captured_column_images_preserve_bound_defaults_and_generated_metadata_after_retirement() {
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     use uqa_sql::catalog::image::{columns_image_reader, read_columns_image};

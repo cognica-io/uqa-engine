@@ -13,6 +13,7 @@ use crate::catalog::image::read_columns_image;
 use uqa_core::Value;
 
 mod ownership;
+mod relations;
 
 fn collect(mut reader: DefinitionImageReader<'_>, size: usize) -> Vec<u8> {
     let mut bytes = Vec::new();

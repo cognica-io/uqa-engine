@@ -20,7 +20,13 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod attributes;
+mod constraints;
+mod hierarchy;
 mod sequences;
+pub use attributes::read_dropped_attributes_image;
+pub use constraints::{read_foreign_keys_image, read_table_checks_image, read_table_keys_image};
+pub use hierarchy::read_table_hierarchy_image;
 
 /// Reconstruct ordered native columns under one retained allowance. Scalar payloads, physical identities and declaration order remain unchanged; relation-wide validation belongs to the enclosing restore owner.
 pub fn read_columns_image(
@@ -28,12 +34,28 @@ pub fn read_columns_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Vec<ColumnDef>>, SQLError> {
+    read_list(
+        reader,
+        memory,
+        cancellation,
+        *b"UQACOL01",
+        Input::column_definition,
+    )
+}
+
+fn read_list<'a, T>(
+    reader: &'a mut dyn Read,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+    magic: [u8; 8],
+    item: impl FnMut(&mut Input<'a>, &mut MemoryReservation) -> Result<T, SQLError>,
+) -> Result<Budgeted<Vec<T>>, SQLError> {
     let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(*b"UQACOL01")?;
+    let count = input.header(magic)?;
     let mut reservation = memory.empty_reservation();
-    let columns = input.items(count, &mut reservation, Input::column_definition)?;
+    let values = input.items(count, &mut reservation, item)?;
     input.binary.end()?;
-    Ok(Budgeted::new(columns, reservation))
+    Ok(Budgeted::new(values, reservation))
 }
 
 impl Input<'_> {
@@ -162,6 +184,40 @@ impl Input<'_> {
         }
     }
 
+    fn foreign_match(&mut self) -> Result<ForeignKeyMatch, SQLError> {
+        match self.binary.array::<1>()?[0] {
+            0 => Ok(ForeignKeyMatch::Simple),
+            1 => Ok(ForeignKeyMatch::Full),
+            _ => Err(invalid("foreign key match")),
+        }
+    }
+
+    fn referenced_partition(
+        &mut self,
+        memory: &mut MemoryReservation,
+    ) -> Result<ReferencedPartitionConstraint, SQLError> {
+        Ok(ReferencedPartitionConstraint {
+            partition: self.object_id()?,
+            parent: self.optional_incarnation()?,
+            name: payload(self.binary.text()?, memory),
+            catalog_identity: ConstraintCatalogIdentity {
+                object_id: self.object_id()?,
+                oid: self.oid()?,
+            },
+            validated: self.flag()?,
+        })
+    }
+
+    fn texts(
+        &mut self,
+        count: usize,
+        memory: &mut MemoryReservation,
+    ) -> Result<Vec<String>, SQLError> {
+        self.items(count, memory, |input, memory| {
+            Ok(payload(input.binary.text()?, memory))
+        })
+    }
+
     fn foreign_reference(
         &mut self,
         memory: &mut MemoryReservation,
@@ -175,29 +231,14 @@ impl Input<'_> {
         let column = payload(self.optional_text()?, memory);
         let on_update = self.foreign_action()?;
         let on_delete = self.foreign_action()?;
-        let match_type = match self.binary.array::<1>()?[0] {
-            0 => ForeignKeyMatch::Simple,
-            1 => ForeignKeyMatch::Full,
-            _ => return Err(invalid("foreign key match")),
-        };
+        let match_type = self.foreign_match()?;
         let enforced = self.flag()?;
         let validated = self.flag()?;
         let deferrable = self.flag()?;
         let initially_deferred = self.flag()?;
         let period = self.flag()?;
         let count = self.binary.count()?;
-        let referenced_partitions = self.items(count, memory, |input, memory| {
-            Ok(ReferencedPartitionConstraint {
-                partition: input.object_id()?,
-                parent: input.optional_incarnation()?,
-                name: payload(input.binary.text()?, memory),
-                catalog_identity: ConstraintCatalogIdentity {
-                    object_id: input.object_id()?,
-                    oid: input.oid()?,
-                },
-                validated: input.flag()?,
-            })
-        })?;
+        let referenced_partitions = self.items(count, memory, Self::referenced_partition)?;
         Ok(ForeignKeyRef {
             referenced_index,
             referenced_key,

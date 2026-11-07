@@ -28,7 +28,10 @@ mod domains;
 mod nodes;
 mod parts;
 mod tables;
-pub use tables::columns_image_reader;
+pub use tables::{
+    columns_image_reader, dropped_attributes_image_reader, foreign_keys_image_reader,
+    table_checks_image_reader, table_hierarchy_image_reader, table_keys_image_reader,
+};
 #[cfg(test)]
 mod tests;
 
@@ -75,7 +78,7 @@ enum State {
     Failed,
 }
 
-/// Stream one captured scalar definition without copying its syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
+/// Stream captured scalar or table definitions without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
     domains: Option<

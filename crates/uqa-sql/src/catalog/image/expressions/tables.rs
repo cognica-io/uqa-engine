@@ -17,11 +17,22 @@ use crate::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod attributes;
+mod constraints;
+mod hierarchy;
 mod sequences;
+pub use attributes::dropped_attributes_image_reader;
+pub use constraints::{
+    foreign_keys_image_reader, table_checks_image_reader, table_keys_image_reader,
+};
+pub use hierarchy::table_hierarchy_image_reader;
 #[cfg(test)]
 mod tests;
 
 pub(super) enum Part<'a> {
+    Constraints(constraints::Part<'a>),
+    Hierarchy(hierarchy::Part<'a>),
+    Dropped(&'a [crate::catalog::relation_attributes::DroppedAttribute]),
     Columns(&'a [ColumnDef]),
     Column(&'a ColumnDef),
     ColumnConstraints(&'a ColumnDef),
@@ -59,6 +70,9 @@ impl<'a> DefinitionImageReader<'a> {
 
     pub(super) fn table_part(&mut self, part: Part<'a>) -> Result<(), SQLError> {
         match part {
+            Part::Constraints(value) => self.table_constraint_part(value)?,
+            Part::Hierarchy(value) => self.table_hierarchy_part(value)?,
+            Part::Dropped(values) => self.dropped_attributes(values)?,
             Part::Columns(values) => {
                 if let Some((first, rest)) = values.split_first() {
                     self.table_push(Part::Columns(rest))?;

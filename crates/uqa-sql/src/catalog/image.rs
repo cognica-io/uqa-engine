@@ -35,8 +35,15 @@ mod function_dispatch;
 mod input;
 mod reader;
 mod triggers;
-pub use expressions::{columns_image_reader, DefinitionImageReader};
-pub use input::read_columns_image;
+pub use expressions::{
+    columns_image_reader, dropped_attributes_image_reader, foreign_keys_image_reader,
+    table_checks_image_reader, table_hierarchy_image_reader, table_keys_image_reader,
+    DefinitionImageReader,
+};
+pub use input::{
+    read_columns_image, read_dropped_attributes_image, read_foreign_keys_image,
+    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image,
+};
 pub use reader::CatalogImageReader;
 use reader::Entries;
 pub use triggers::TriggerImageReader;

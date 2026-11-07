@@ -47082,6 +47082,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_images_match_independent_wire_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations.rs",
+      "capability": "Native table metadata wire contract",
+      "workload": "Compare all five native component formats against independently assembled literal bytes at four read widths.",
+      "invariant": "Framing and exact native field order remain independent of output chunk size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_images_preserve_constraints_and_partition_variants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Exercise optional metadata, independent identities, all partition kinds, action tags and CHECK/foreign/key flags.",
+      "invariant": "Declared order, absent fields, original bindings and inherited provenance survive native reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_retires_partial_invalid_and_unfunded_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata input admission",
+      "workload": "Reject every truncated prefix, invalid tags, trailing data, hostile counts and insufficient memory; accept the exact peak allowance.",
+      "invariant": "Private construction admits payloads before allocation and retires every failed component.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata interruption",
+      "workload": "Inject I/O failure, cancellation and unwinding during every component reconstruction.",
+      "invariant": "No partial component or retained memory escapes an interrupted construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_output_is_bounded_by_active_traversal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata bounded output",
+      "workload": "Stream original metadata including an eight-MiB parent name; deny scratch and cancel active readers.",
+      "invariant": "Reads emit at most 16 KiB with less than 16 KiB traversal allocation; failed readers remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_owns_deep_partition_scalars",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native partition scalar lifetime",
+      "workload": "Reconstruct and retire a 10000-node partition scalar and its truncated image on a 128-KiB stack.",
+      "invariant": "Deep successful and partial native ownership retires without recursive scalar stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_metadata_images_preserve_partition_constraints_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine table metadata images",
+      "workload": "Capture actual SQL partition keys, CHECK/foreign constraints and dropped slots; roll back DDL, replace the table and close its Engine before cross-thread reconstruction.",
+      "invariant": "Selected native generations and complete metadata survive source retirement without resolving names or running SQL.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
