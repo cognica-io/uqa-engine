@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -45960,6 +45960,58 @@
       "capability": "Committed memory catalog images",
       "workload": "Capture a self-removing validator, reuse its name, roll back and replace its wrapper, close Engine and encode on another thread.",
       "invariant": "The captured image preserves the original missing callback and wrapper identities without invoking or rebinding the replacement function.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_type_copies_and_retirement_use_constant_stack_and_exact_payload_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Copy 10,000 nested array/domain nodes on a 256 KiB stack through ordinary and admitted producers; compare native fields and count live heap ownership.",
+      "invariant": "Copies preserve every node and exact payload admission; retirement allocates no scratch and releases all owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_type_copy_failure_retires_every_admitted_partial_node",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Deny allocation at multiple points of a 10,000-node native type copy and retain the original type for independent inspection.",
+      "invariant": "Every failed prefix releases its native allocations and reservation without changing its source or exhausting the stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_array_modifier_removal_preserves_shape_and_domain_base_modifiers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Remove modifiers through 10,000 array nodes and compare against a mixed domain/array chain on a 256 KiB stack.",
+      "invariant": "Array shape remains exact; domain base modifiers remain bound to their original identity and all leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_composite_images_retire_on_success_invalid_input_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native type ownership",
+      "workload": "Decode 10,000 nested array nodes on a 256 KiB stack, then exercise successful retirement, invalid leaf input, denied admission and cancellation before the leaf.",
+      "invariant": "Images retain exact bytes; success and every partial failure retire admitted native ownership without recursive destruction.",
       "case_names": [
         ""
       ]

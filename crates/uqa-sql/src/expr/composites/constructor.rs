@@ -179,7 +179,7 @@ pub fn retain_argument_types(
     if binding.argument_types.is_some() {
         return Ok(false);
     }
-    let Some(ColumnType::Composite(reference)) = types.resolve_type_name(&binding.ty)? else {
+    let Some(ColumnType::Composite(ref reference)) = types.resolve_type_name(&binding.ty)? else {
         return Err(SQLError::Internal(
             "composite constructor type disappeared".into(),
         ));

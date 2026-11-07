@@ -102,3 +102,65 @@ fn structured_type_images_reject_invalid_nested_tags_options_and_field_masks() {
     );
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn deep_composite_images_retire_on_success_invalid_input_and_denied_admission() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut bytes = encode(&singleton("public.c", composite()));
+            assert_eq!(bytes.pop(), Some(1));
+            bytes.extend(std::iter::repeat_n(44, 10_000));
+            bytes.push(1);
+            let token = CancellationToken::new();
+            let memory = MemoryBudget::new(4 << 20);
+            let restored = StoredComposite::decode(&mut bytes.as_slice(), &memory, &token).unwrap();
+            assert_eq!(encode(&restored), bytes);
+            drop(restored);
+            assert_eq!(memory.used(), 0);
+
+            *bytes.last_mut().unwrap() = 255;
+            let error = StoredComposite::decode(&mut bytes.as_slice(), &memory, &token)
+                .err()
+                .unwrap();
+            assert_eq!(error.sqlstate(), Some("XX001"));
+            assert_eq!(memory.used(), 0);
+
+            let memory = MemoryBudget::new(400_000);
+            let error = StoredComposite::decode(&mut bytes.as_slice(), &memory, &token)
+                .err()
+                .unwrap();
+            assert_eq!(error.sqlstate(), Some("53200"));
+            assert!(memory.peak() > 300_000);
+            assert_eq!(memory.used(), 0);
+
+            struct CancelBeforeLeaf<'a> {
+                remaining: &'a [u8],
+                token: &'a CancellationToken,
+            }
+            impl Read for CancelBeforeLeaf<'_> {
+                fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                    let length = self.remaining.read(output)?;
+                    if self.remaining.len() == 1 {
+                        self.token.cancel();
+                    }
+                    Ok(length)
+                }
+            }
+            *bytes.last_mut().unwrap() = 1;
+            let memory = MemoryBudget::new(4 << 20);
+            let mut input = CancelBeforeLeaf {
+                remaining: &bytes,
+                token: &token,
+            };
+            let error = StoredComposite::decode(&mut input, &memory, &token)
+                .err()
+                .unwrap();
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert!(memory.peak() > 700_000);
+            assert_eq!(memory.used(), 0);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

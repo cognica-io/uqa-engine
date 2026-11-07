@@ -317,7 +317,7 @@ fn read_payload(
             .transpose()?
             .flatten()
         {
-            match ty {
+            match &ty {
                 crate::ColumnType::DeclaredRange(_) | crate::ColumnType::DeclaredMultirange(_) => {
                     return super::range::datum::read(bytes, &ty, catalog, control);
                 }
@@ -325,7 +325,7 @@ fn read_payload(
                 crate::ColumnType::Composite(_) => return records::read(bytes, catalog, control),
                 crate::ColumnType::Domain { base, .. } => {
                     return read_payload(
-                        crate::catalog::type_metadata::pg_type_oid(&base) as u32,
+                        crate::catalog::type_metadata::pg_type_oid(base) as u32,
                         bytes,
                         catalog,
                         control,

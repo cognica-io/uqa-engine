@@ -90,7 +90,7 @@ fn selected_btree_input_keys_share_array_and_record_image_owners() {
     };
     let ordinary = Value::Array(vector.as_array().clone());
     let key = btree_input_binary_key_with_catalog_and_control(
-        binding(&ColumnType::OidVector, "array_ops"),
+        binding(const { &ColumnType::OidVector }, "array_ops"),
         &value,
         None,
         &control,
@@ -118,7 +118,7 @@ fn selected_btree_input_keys_share_array_and_record_image_owners() {
             .unwrap(),
         )
     });
-    let selected = binding(&ColumnType::Record, "record_image_ops");
+    let selected = binding(const { &ColumnType::Record }, "record_image_ops");
     let keys = rows.each_ref().map(|row| {
         btree_input_binary_key_with_catalog_and_control(selected, row, None, &control).unwrap()
     });

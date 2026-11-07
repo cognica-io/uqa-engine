@@ -41,11 +41,12 @@ pub fn expression_composite_dependencies(
             return;
         };
         let result = (|| {
-            let Some(mut ty) = scalar_type_with_resolver(base, schema, params, types)? else {
+            let Some(ty) = scalar_type_with_resolver(base, schema, params, types)? else {
                 return Ok(None);
             };
+            let mut ty = &ty;
             while let ColumnType::Domain { base, .. } = ty {
-                ty = *base;
+                ty = base;
             }
             let ColumnType::Composite(reference) = ty else {
                 return Ok(None);

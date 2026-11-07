@@ -123,6 +123,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retire and copy deeply nested native SQL types with constant stack. Failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries.
+
 - Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
 
 - Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.

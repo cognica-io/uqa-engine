@@ -146,9 +146,10 @@ fn named_array_nodes_retain_physical_identity_across_catalog_changes() {
             .unwrap();
         check(&node, after_layout, &layout);
 
-        let mut ty = initial.named(&case.ty).unwrap();
+        let ty = initial.named(&case.ty).unwrap();
+        let mut ty = &ty;
         while let ColumnType::Domain { base, .. } = ty {
-            ty = *base;
+            ty = base;
         }
         let ty = ty.without_type_modifiers();
         let value = crate::expr::cast_value_with_type_resolution(

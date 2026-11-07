@@ -161,7 +161,7 @@ impl<'a> ColumnTypeSchema<'a> {
     }
 
     pub(crate) fn system_column_type(&self, name: &str) -> Option<&ColumnType> {
-        (self.relation.is_some() && name == "tableoid").then_some(&ColumnType::Oid)
+        (self.relation.is_some() && name == "tableoid").then_some(const { &ColumnType::Oid })
     }
 
     /// Original declarations, including stable attribute numbers and selected collations, borrowed from the same catalog generation as type lookup.

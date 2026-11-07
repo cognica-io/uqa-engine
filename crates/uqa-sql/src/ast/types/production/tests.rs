@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod deep;
+
 #[test]
 fn controlled_type_clones_hold_every_domain_and_array_allocation() {
     let ty = ColumnType::Domain {

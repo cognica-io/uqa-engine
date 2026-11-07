@@ -132,8 +132,8 @@ pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
             }
             Some(element)
         }
-        ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
-        ColumnType::OidVector => Some(&ColumnType::Oid),
+        ColumnType::Int2Vector => Some(const { &ColumnType::SmallInteger }),
+        ColumnType::OidVector => Some(const { &ColumnType::Oid }),
         _ => None,
     }
 }
