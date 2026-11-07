@@ -74,6 +74,9 @@ impl<'a> Fields<'a> {
     pub fn text(&mut self, value: &'a str) {
         self.blob(value.as_bytes());
     }
+    pub fn bytes(&mut self, value: &'a [u8]) {
+        self.push(Field::Bytes(value));
+    }
     pub fn blob(&mut self, value: &'a [u8]) {
         self.count(value.len());
         self.push(Field::Bytes(value));

@@ -47550,6 +47550,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_producer_matches_independent_values_wire",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests.rs",
+      "capability": "Native query wire framing",
+      "workload": "Compare literal VALUES image bytes under four output windows and cross-thread reads.",
+      "invariant": "The root envelope, original row counts and scalar records match independent wire bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_images_preserve_the_native_stored_projection_and_mutation_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests.rs",
+      "capability": "Stored query image composition",
+      "workload": "Stream relational, window, recursive and four data-modifying CTE fixtures before and after native stored capture.",
+      "invariant": "Original syntax fields and query arenas preserve the owning stored-copy projection across byte windows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "expression_plan_images_keep_the_complete_native_query_arena",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests.rs",
+      "capability": "Executable expression arena images",
+      "workload": "Encode a scalar query address with two independently framed query children.",
+      "invariant": "The scalar address and both ordered query records remain present.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_images_exclude_execution_projections_without_visiting_them",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/metadata.rs",
+      "capability": "Stored query transient exclusion",
+      "workload": "Attach analysis metadata, selected execution authority and an invalid cached execution query.",
+      "invariant": "Only established stored-copy exclusions disappear; relations_bound remains observable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_authorization_columns_use_native_order_and_original_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/metadata.rs",
+      "capability": "Native query privilege identities",
+      "workload": "Encode 1024 reverse-inserted qualified column identities and compare literal ordered field bytes.",
+      "invariant": "Qualifiers and names stay separate and complete, with native ordered traversal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_cte_images_preserve_private_rewrite_metadata_and_selected_roles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/metadata.rs",
+      "capability": "Stored mutation rewrite metadata",
+      "workload": "Capture original role incarnations, private DEFAULT-position sets and view input mappings.",
+      "invariant": "Native stored capture retains identical mutation image bytes and all original selected metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_preparation_and_borrowed_payload_do_not_copy_the_plan",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/resources.rs",
+      "capability": "Bounded query image output",
+      "workload": "Stream a one-MiB alias with measured zero-allocation preparation and payload continuation.",
+      "invariant": "Output stays within 16 KiB and admitted scratch stays below 16 KiB without copying the source payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_admission_and_cancellation_retire_the_active_reader",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/resources.rs",
+      "capability": "Admitted native query traversal",
+      "workload": "Deny exact peak minus one and cancel an active window/join image.",
+      "invariant": "Exact peak succeeds; denied and cancelled readers release all scratch and remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_rejects_runtime_sources_and_non_cte_commands_terminally",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/resources.rs",
+      "capability": "Stored query source eligibility",
+      "workload": "Try execution-scoped retained rows and a utility command as a query CTE.",
+      "invariant": "Invalid stored query sources fail without publication or retained traversal scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_traversal_keeps_constant_native_stack_through_deep_query_arenas",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/resources.rs",
+      "capability": "Deep native query images",
+      "workload": "Stream 10000 nested query arenas on a 128 KiB thread stack.",
+      "invariant": "Borrowed image traversal admits its continuation stack without native recursion through query depth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_image_constant_failure_and_unwind_retire_every_continuation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/plans/tests/resources.rs",
+      "capability": "Query image failure retirement",
+      "workload": "Reject unavailable retained constants and inject resident-observation unwinding.",
+      "invariant": "No external value read executes; failure retires every continuation and remains terminal.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

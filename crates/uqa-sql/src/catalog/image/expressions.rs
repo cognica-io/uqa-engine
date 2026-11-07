@@ -27,6 +27,7 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
+mod plans;
 mod scalars;
 pub(super) use scalars::MAGIC as SCALAR_MAGIC;
 mod tables;
@@ -41,6 +42,7 @@ pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
+    Plan(plans::Frame<'a>),
     Scalar(scalars::Part<'a>),
     Table(tables::Part<'a>),
     NextDomain,
@@ -81,7 +83,7 @@ enum State {
     Failed,
 }
 
-/// Stream captured scalar or table definitions without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
+/// Stream captured definitions and native query plans without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. AST query/window nodes remain outside the scalar-definition capture contract. Retained literals must expose their captured resident value.
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
     domains: Option<
