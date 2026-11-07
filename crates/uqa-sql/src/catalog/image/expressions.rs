@@ -27,6 +27,11 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
+mod tables;
+pub use tables::{
+    columns_image_reader, dropped_attributes_image_reader, foreign_keys_image_reader,
+    table_checks_image_reader, table_hierarchy_image_reader, table_keys_image_reader,
+};
 #[cfg(test)]
 mod tests;
 
@@ -34,6 +39,7 @@ pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
+    Table(tables::Part<'a>),
     NextDomain,
     DomainDefinition(&'a crate::ast::CreateDomain),
     DomainChecks(&'a [crate::ast::DomainCheck]),
@@ -72,7 +78,7 @@ enum State {
     Failed,
 }
 
-/// Stream one captured scalar definition without copying its syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
+/// Stream captured scalar or table definitions without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
     domains: Option<
@@ -118,12 +124,22 @@ impl<'a> DefinitionImageReader<'a> {
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
     ) -> Result<Self, SQLError> {
+        Self::start(Frame::Node(value), MAGIC, 1, memory, cancellation)
+    }
+
+    fn start(
+        first: Frame<'a>,
+        magic: [u8; 8],
+        count: usize,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+    ) -> Result<Self, SQLError> {
         cancellation.check()?;
         let mut fields = Fields::new();
-        fields.scalar(MAGIC);
-        fields.count(1);
+        fields.scalar(magic);
+        fields.count(count);
         Ok(Self {
-            first: Some(Frame::Node(value)),
+            first: Some(first),
             domains: None,
             frames: BudgetedVec::new(memory),
             fields,

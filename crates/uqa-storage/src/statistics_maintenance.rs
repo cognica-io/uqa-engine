@@ -9,6 +9,9 @@
 use crate::{CatalogFacade, StorageBackendResult};
 use serde::{Deserialize, Serialize};
 
+mod image;
+pub use image::StatisticsMaintenanceImageReader;
+
 const MAX_DIRTY_AGE_MS: u64 = 60_000;
 /// What a session may keep to itself of a small table, whose analysis threshold is fifty changes.
 const MIN_KEPT_CHANGES: u64 = 16;

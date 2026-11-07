@@ -72,6 +72,18 @@ impl BoundTableSecurity {
 }
 
 impl CapturedTablePrivileges {
+    pub(crate) fn from_image_fields(
+        role_owner: RoleIdentity,
+        acl: Option<Vec<BoundTableAclEntry>>,
+        column_acls: Vec<(String, Vec<BoundTableAclEntry>)>,
+    ) -> Self {
+        Self {
+            role_owner,
+            acl,
+            column_acls,
+        }
+    }
+
     pub fn acl(&self) -> Option<&[BoundTableAclEntry]> {
         self.acl.as_deref()
     }

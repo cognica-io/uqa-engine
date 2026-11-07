@@ -61,6 +61,15 @@ impl<'a> Builder<'a> {
         stats: Produced<ColumnStats>,
     ) -> Result<(), SQLError> {
         let name = self.control.copy_text(name)?;
+        self.insert_owned(name, stats)
+    }
+
+    pub(super) fn insert_owned(
+        &mut self,
+        name: Produced<String>,
+        stats: Produced<ColumnStats>,
+    ) -> Result<(), SQLError> {
+        self.control.check()?;
         match &mut self.columns {
             Map::Ordinary(columns) => {
                 columns.insert(

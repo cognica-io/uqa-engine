@@ -12,6 +12,7 @@ use crate::ast::{CompositeRowBinding, NullsOrder};
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn advance(&mut self, frame: Frame<'a>) -> Result<(), SQLError> {
         match frame {
+            Frame::Table(part) => self.table_part(part)?,
             Frame::NextDomain
             | Frame::DomainDefinition(_)
             | Frame::DomainChecks(_)
