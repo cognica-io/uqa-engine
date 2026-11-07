@@ -209,6 +209,18 @@ fn domain_images_keep_each_optional_field_and_constraint_validation_independent(
             .capture(&ProductionControl::new(&memory, &token, &token))
             .unwrap();
         let bytes = collect(captured.image_reader(&memory, &token).unwrap(), 29);
+        let decoded =
+            TypeDefinitions::<StoredDomain>::read_image(&mut bytes.as_slice(), &memory, &token)
+                .unwrap();
+        let restored = decoded
+            .capture(&ProductionControl::new(&memory, &token, &token))
+            .unwrap();
+        drop(decoded);
+        assert_eq!(
+            collect(restored.image_reader(&memory, &token).unwrap(), 31),
+            bytes
+        );
+        drop(restored);
         assert!(images.insert(bytes), "lost native domain field {change}");
         drop(captured);
         assert_eq!(memory.used(), 0);

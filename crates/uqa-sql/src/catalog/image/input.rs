@@ -23,6 +23,8 @@ use uqa_core::{
 mod authorities;
 mod callbacks;
 mod column_types;
+mod domains;
+mod expressions;
 mod foreign_servers;
 mod foreign_wrappers;
 mod functions;
@@ -35,6 +37,8 @@ mod sequences;
 mod structured_types;
 mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
+pub(super) use domains::domains;
+pub(super) use expressions::expression_image;
 pub(super) use foreign_servers::foreign_servers;
 pub(super) use foreign_wrappers::foreign_wrappers;
 pub(super) use functions::function_binding_image;
