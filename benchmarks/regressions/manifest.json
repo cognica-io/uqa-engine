@@ -46510,6 +46510,175 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_leaf_images_match_literal_tags_and_preserve_original_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Original reference names, structural attributes, parameters and exact evaluated scalar values including NaN bits.",
+      "invariant": "Literal format tags and Core value images preserve persistent fields without SQL interpretation; parser origins remain transient.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_container_images_preserve_child_order_and_written_flags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Every scalar container, comparison/arithmetic operation, CASE branch, null predicate and cast flag.",
+      "invariant": "Image order preserves operand positions, branch order, negation and implicit-cast syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "function_expression_images_keep_binding_arguments_order_and_filter_separate",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Selected function metadata with all written call forms, ordered arguments, null ordering and a filter.",
+      "invariant": "Nested native bindings, arguments, ordering expressions and filters retain separate exact positions at every read width.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_row_images_preserve_layout_positions_and_argument_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/metadata.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Composite constructors with changed field order, physical width and optional declaration metadata.",
+      "invariant": "Retain original attribute positions, layout flags and native type declarations independently of current catalog lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_literal_images_preserve_original_composite_source_and_dropped_layout",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/metadata.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "A typed negative-zero literal with its original tuple bytes, live attributes and dropped physical slots.",
+      "invariant": "Preserve exact datum representation and all original descriptor fields without reevaluating a cast.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_retained_literal_images_keep_native_type_and_declaration_independent",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/metadata.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "An admitted resident retained value with distinct native type, original declaration and collation.",
+      "invariant": "Export borrows the captured value and preserves both type forms without releasing or duplicating its source lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_domain_images_match_native_wire_and_survive_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/domains.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "A native domain with default, NOT NULL, unvalidated CHECK and grants after clearing the source registry.",
+      "invariant": "Literal domain bytes retain identities, authority and complete declarations; temporary domains remain excluded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_image_preparation_borrows_roots_and_legacy_absence_is_distinct",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/domains.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "A captured legacy domain and an empty catalog under a zero-byte output allowance at preparation.",
+      "invariant": "Preparation never enumerates or copies declarations; absent fields and empty-root framing remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_images_keep_each_optional_field_and_constraint_validation_independent",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/domains.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Sixteen individual variations of array identity/name, ACL, collation, defaults and constraint metadata.",
+      "invariant": "Every native field affects its own image; absence, empty values, explicit NULL and validation flags remain distinct.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_readers_admit_deep_continuations_and_retire_every_failed_read",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/retention.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "A 4,096-node binary chain under sufficient, exact-observed and insufficient traversal allowances.",
+      "invariant": "Admission precedes continuation allocation and a failed read immediately releases scratch and remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_export_is_iterative_on_small_stacks_and_borrows_large_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/retention.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "A 10,000-node binary tree on a 128 KiB thread stack and a large UTF-8 name with no output allowance.",
+      "invariant": "Traversal is iterative, large text stays borrowed, and each read returns no more than 16 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "definition_readers_retire_cancelled_state_and_keep_completion_terminal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/retention.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "Cancellation during a 10,000-child array, before construction and after completed output.",
+      "invariant": "Active cancellation releases scratch and fails permanently; completed output remains EOF without revisiting source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invalid_or_unwound_definition_sources_retire_without_executing_callbacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/retention.rs",
+      "capability": "Native domain and scalar image output",
+      "workload": "An uncaptured external literal, a resident-value unwind and a query-scoped window in scalar syntax.",
+      "invariant": "Output never invokes source reads or SQL callbacks, and errors or unwinding retire every continuation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -29,10 +29,12 @@ use std::io::{Read, Write};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod column_types;
+mod expressions;
 mod fields;
 mod function_dispatch;
 mod input;
 mod reader;
+pub use expressions::DefinitionImageReader;
 pub use reader::CatalogImageReader;
 use reader::Entries;
 
