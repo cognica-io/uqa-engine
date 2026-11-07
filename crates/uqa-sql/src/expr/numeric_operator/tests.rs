@@ -244,11 +244,14 @@ fn operator_identity_survives_lowering_serialization_and_display_name_changes() 
             crate::semantics::projection_label_at(&projection),
             sql.split('(').next().unwrap()
         );
-        let Expr::Func { binding, .. } = expr else {
+        let Expr::Func { binding, .. } = &expr else {
             panic!("ordinary function")
         };
         assert!(
-            binding.and_then(|binding| binding.dispatch).is_none(),
+            binding
+                .as_ref()
+                .and_then(|binding| binding.dispatch)
+                .is_none(),
             "{sql}"
         );
     }

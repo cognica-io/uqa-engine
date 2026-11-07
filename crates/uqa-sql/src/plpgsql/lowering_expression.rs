@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn expression_with_from_lowers_to_a_scalar_subquery() {
         let expression = compile_expression_text("max(a) FROM xacttest").unwrap();
-        let Expr::ScalarSubquery(query) = expression else {
+        let Expr::ScalarSubquery(query) = &expression else {
             panic!("PL/pgSQL query-shaped expression was not preserved as a scalar subquery");
         };
         assert_eq!(query.projections.len(), 1);

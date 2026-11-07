@@ -270,10 +270,7 @@ fn deep_column_expression_walks_use_bounded_heap_scratch_and_release_it() {
     assert_eq!(budget.used(), memory.bytes());
     drop(memory);
     assert_eq!(budget.used(), 0);
-    // Dispose the fixture iteratively too; its ordinary recursive destructor is unrelated to admission.
-    while let Expr::Not(inner) = expression {
-        expression = *inner;
-    }
+    drop(expression);
 }
 
 #[test]

@@ -110,10 +110,10 @@ pub(crate) fn discard_ast_clause(expression: &mut Expr) -> Result<bool, SQLError
     if ast_clause(expression)?.is_none() {
         return Ok(false);
     }
-    let Expr::Func { args, .. } = std::mem::replace(expression, Expr::Literal(Value::Null)) else {
+    let Expr::Func { args, .. } = expression else {
         unreachable!("validated collation clause");
     };
-    *expression = args
+    *expression = std::mem::take(args)
         .into_iter()
         .next()
         .expect("validated collation argument");

@@ -75,7 +75,7 @@ pub(super) enum Node<'a> {
     },
     InternalColumn(InternalColumnRef),
     Literal(Source<'a, Value>),
-    RetainedLiteral(Source<'a, Box<crate::ast::RetainedInputLiteral>>),
+    RetainedLiteral(crate::ir::RetainedScalarLiteral),
     TypedLiteral {
         value: Source<'a, Value>,
         ty: Source<'a, String>,
@@ -90,7 +90,7 @@ pub(super) enum Node<'a> {
         distinct: bool,
         order_by: Items<'a, OrderBy>,
         order_syntax: crate::ast::FunctionOrderSyntax,
-        filter: Option<Source<'a, Box<Expr>>>,
+        filter: Option<Source<'a, Expr>>,
     },
     Array(Items<'a, Expr>),
     Row(Items<'a, Expr>),
@@ -100,24 +100,24 @@ pub(super) enum Node<'a> {
     },
     Binary {
         op: BinaryOp,
-        lhs: Source<'a, Box<Expr>>,
-        rhs: Source<'a, Box<Expr>>,
+        lhs: Source<'a, Expr>,
+        rhs: Source<'a, Expr>,
     },
-    UnaryMinus(Source<'a, Box<Expr>>),
-    Not(Source<'a, Box<Expr>>),
+    UnaryMinus(Source<'a, Expr>),
+    Not(Source<'a, Expr>),
     And(Items<'a, Expr>),
     Or(Items<'a, Expr>),
     IsNull {
-        expr: Source<'a, Box<Expr>>,
+        expr: Source<'a, Expr>,
         negated: bool,
     },
     Between {
-        expr: Source<'a, Box<Expr>>,
-        low: Source<'a, Box<Expr>>,
-        high: Source<'a, Box<Expr>>,
+        expr: Source<'a, Expr>,
+        low: Source<'a, Expr>,
+        high: Source<'a, Expr>,
     },
     InList {
-        expr: Source<'a, Box<Expr>>,
+        expr: Source<'a, Expr>,
         list: Items<'a, Expr>,
         negated: bool,
     },
@@ -125,27 +125,27 @@ pub(super) enum Node<'a> {
         name: Source<'a, String>,
         args: Items<'a, Expr>,
         spec: Source<'a, WindowSpec>,
-        filter: Option<Source<'a, Box<Expr>>>,
+        filter: Option<Source<'a, Expr>>,
         modifiers: crate::ast::WindowCallModifiers,
     },
     Case {
-        base: Option<Source<'a, Box<Expr>>>,
+        base: Option<Source<'a, Expr>>,
         when: Items<'a, (Expr, Expr)>,
-        else_branch: Option<Source<'a, Box<Expr>>>,
+        else_branch: Option<Source<'a, Expr>>,
     },
     Cast {
         implicit: bool,
-        expr: Source<'a, Box<Expr>>,
+        expr: Source<'a, Expr>,
         ty: Source<'a, String>,
     },
-    ScalarSubquery(Source<'a, Box<SelectStmt>>),
+    ScalarSubquery(Source<'a, SelectStmt>),
     Exists {
-        body: Source<'a, Box<SelectStmt>>,
+        body: Source<'a, SelectStmt>,
         negated: bool,
     },
     InSubquery {
-        expr: Source<'a, Box<Expr>>,
-        body: Source<'a, Box<SelectStmt>>,
+        expr: Source<'a, Expr>,
+        body: Source<'a, SelectStmt>,
         negated: bool,
     },
 }
@@ -159,116 +159,8 @@ impl<'a> Source<'a, Expr> {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "exhaustive AST projection keeps every variant field together"
-)]
-fn owned(expression: Expr) -> Node<'static> {
-    match expression {
-        Expr::Star => Node::Star,
-        Expr::QualifiedStar(value) => Node::QualifiedStar(Source::Owned(value)),
-        Expr::Default => Node::Default,
-        Expr::Column(value) => Node::Column(Source::Owned(value)),
-        Expr::QualifiedColumn { qualifier, column } => Node::QualifiedColumn {
-            qualifier: Source::Owned(qualifier),
-            column: Source::Owned(column),
-        },
-        Expr::InternalColumn(value) => Node::InternalColumn(value),
-        Expr::Literal(value) => Node::Literal(Source::Owned(value)),
-        Expr::RetainedLiteral(value) => Node::RetainedLiteral(Source::Owned(value)),
-        Expr::TypedLiteral {
-            value,
-            ty,
-            collation_oid,
-            composite_source,
-        } => Node::TypedLiteral {
-            value: Source::Owned(value),
-            ty: Source::Owned(ty),
-            collation_oid,
-            composite_source: composite_source.map(Source::Owned),
-        },
-        Expr::Param(value) => Node::Param(value),
-        Expr::Func {
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            order_syntax,
-            filter,
-        } => Node::Func {
-            name: Source::Owned(name),
-            binding: binding.map(Source::Owned),
-            args: Items::Owned(args.into_iter()),
-            distinct,
-            order_by: Items::Owned(order_by.into_iter()),
-            order_syntax,
-            filter: filter.map(Source::Owned),
-        },
-        Expr::Array(value) => Node::Array(Items::Owned(value.into_iter())),
-        Expr::Row(value) => Node::Row(Items::Owned(value.into_iter())),
-        Expr::CompositeRow { items, binding } => Node::CompositeRow {
-            items: Items::Owned(items.into_iter()),
-            binding: Source::Owned(binding),
-        },
-        Expr::Binary { op, lhs, rhs } => Node::Binary {
-            op,
-            lhs: Source::Owned(lhs),
-            rhs: Source::Owned(rhs),
-        },
-        Expr::UnaryMinus(value) => Node::UnaryMinus(Source::Owned(value)),
-        Expr::Not(value) => Node::Not(Source::Owned(value)),
-        Expr::And(value) => Node::And(Items::Owned(value.into_iter())),
-        Expr::Or(value) => Node::Or(Items::Owned(value.into_iter())),
-        Expr::IsNull { expr, negated } => Node::IsNull {
-            expr: Source::Owned(expr),
-            negated,
-        },
-        Expr::Between { expr, low, high } => Node::Between {
-            expr: Source::Owned(expr),
-            low: Source::Owned(low),
-            high: Source::Owned(high),
-        },
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => Node::InList {
-            expr: Source::Owned(expr),
-            list: Items::Owned(list.into_iter()),
-            negated,
-        },
-        window @ Expr::WindowCall { .. } => owned_window_call(window),
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => Node::Case {
-            base: base.map(Source::Owned),
-            when: Items::Owned(when.into_iter()),
-            else_branch: else_branch.map(Source::Owned),
-        },
-        Expr::Cast { expr, ty, implicit } => Node::Cast {
-            implicit,
-            expr: Source::Owned(expr),
-            ty: Source::Owned(ty),
-        },
-        Expr::ScalarSubquery(value) => Node::ScalarSubquery(Source::Owned(value)),
-        Expr::Exists { body, negated } => Node::Exists {
-            body: Source::Owned(body),
-            negated,
-        },
-        Expr::InSubquery {
-            expr,
-            body,
-            negated,
-        } => Node::InSubquery {
-            expr: Source::Owned(expr),
-            body: Source::Owned(body),
-            negated,
-        },
-    }
-}
+mod owned;
+use owned::owned;
 
 #[expect(
     clippy::too_many_lines,
@@ -286,7 +178,7 @@ fn borrowed(expression: &Expr) -> Node<'_> {
         },
         Expr::InternalColumn(value) => Node::InternalColumn(*value),
         Expr::Literal(value) => Node::Literal(Source::Borrowed(value)),
-        Expr::RetainedLiteral(value) => Node::RetainedLiteral(Source::Borrowed(value)),
+        Expr::RetainedLiteral(value) => Node::RetainedLiteral(value.0.clone()),
         Expr::TypedLiteral {
             value,
             ty,
@@ -314,7 +206,7 @@ fn borrowed(expression: &Expr) -> Node<'_> {
             distinct: *distinct,
             order_by: Items::Borrowed(order_by.iter()),
             order_syntax: *order_syntax,
-            filter: filter.as_ref().map(Source::Borrowed),
+            filter: filter.as_deref().map(Source::Borrowed),
         },
         Expr::Array(value) => Node::Array(Items::Borrowed(value.iter())),
         Expr::Row(value) => Node::Row(Items::Borrowed(value.iter())),
@@ -355,9 +247,9 @@ fn borrowed(expression: &Expr) -> Node<'_> {
             when,
             else_branch,
         } => Node::Case {
-            base: base.as_ref().map(Source::Borrowed),
+            base: base.as_deref().map(Source::Borrowed),
             when: Items::Borrowed(when.iter()),
-            else_branch: else_branch.as_ref().map(Source::Borrowed),
+            else_branch: else_branch.as_deref().map(Source::Borrowed),
         },
         Expr::Cast { expr, ty, implicit } => Node::Cast {
             implicit: *implicit,
@@ -381,26 +273,6 @@ fn borrowed(expression: &Expr) -> Node<'_> {
     }
 }
 
-fn owned_window_call<'a>(window: Expr) -> Node<'a> {
-    let Expr::WindowCall {
-        name,
-        args,
-        spec,
-        filter,
-        modifiers,
-    } = window
-    else {
-        unreachable!("only window calls reach the window conversion")
-    };
-    Node::WindowCall {
-        name: Source::Owned(name),
-        args: Items::Owned(args.into_iter()),
-        spec: Source::Owned(*spec),
-        filter: filter.map(Source::Owned),
-        modifiers,
-    }
-}
-
 fn borrowed_window_call(window: &Expr) -> Node<'_> {
     let Expr::WindowCall {
         name,
@@ -416,7 +288,7 @@ fn borrowed_window_call(window: &Expr) -> Node<'_> {
         name: Source::Borrowed(name),
         args: Items::Borrowed(args.iter()),
         spec: Source::Borrowed(spec),
-        filter: filter.as_ref().map(Source::Borrowed),
+        filter: filter.as_deref().map(Source::Borrowed),
         modifiers: *modifiers,
     }
 }

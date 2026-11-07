@@ -46679,6 +46679,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_retirement_uses_constant_stack_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/ownership/tests.rs",
+      "capability": "Native scalar expression ownership",
+      "workload": "A 10,000-node native scalar tree retires on a 128 KiB thread stack.",
+      "invariant": "Retirement performs no traversal allocation and does not depend on recursive scalar depth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_retirement_releases_every_mixed_child_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/ownership/tests/mixed.rs",
+      "capability": "Native scalar expression ownership",
+      "workload": "Deep mixed scalar and window clauses retain independently observed constant resources.",
+      "invariant": "Every owned resource retires exactly once, without evaluating a constant or allocating traversal state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_retirement_retires_suspended_parents_after_resource_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/ownership/tests/mixed.rs",
+      "capability": "Native scalar expression ownership",
+      "workload": "A retained resource unwinds while deep mixed scalar parents remain suspended.",
+      "invariant": "Native ownership releases all remaining resources without recursive cleanup or leaked parent links.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_native_projection_transfers_original_buffers_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/source/owned/tests.rs",
+      "capability": "Native scalar expression ownership",
+      "workload": "An owned function expression transfers a large evaluated argument, name and filter into the native projection.",
+      "invariant": "The original buffers retain their identities and projection allocates no replacement storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_retained_literal_projection_preserves_native_payload_lease",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/source/owned/tests.rs",
+      "capability": "Native scalar expression ownership",
+      "workload": "An admitted retained literal transfers its shared value and collation through owned AST projection.",
+      "invariant": "Original value identity and memory admission survive until the final projected owner retires.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

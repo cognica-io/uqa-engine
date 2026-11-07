@@ -110,15 +110,16 @@ fn compile_table_function(call: &Node, column_definitions: &[Node]) -> Result<Ta
         .into_iter()
         .last()
         .ok_or_else(|| SQLError::Internal("RangeFunction has an empty name".into()))?;
-    let expr = compile_expr(call)?;
-    let (name, mut args) = match expr {
-        Expr::Func { name, args, .. } => (name, args),
+    let mut expr = compile_expr(call)?;
+    let (name, mut args) = match &mut expr {
+        Expr::Func { name, args, .. } => (std::mem::take(name), std::mem::take(args)),
         other => {
             return Err(SQLError::Unsupported(format!(
                 "RangeFunction body must be a function call, got {other:?}"
             )));
         }
     };
+    drop(expr);
     let relations = if crate::registry::is_operator_join_table_function(&name) {
         let left_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
             name: name.clone(),

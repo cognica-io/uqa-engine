@@ -195,7 +195,7 @@ fn added_check_binds_only_the_new_expression_and_retains_validation_state() {
     assert_eq!(check.name.as_deref(), Some("d_check1"));
     assert!(!check.validated);
     assert!(check.catalog_identity.is_none());
-    let Expr::Binary { lhs, .. } = check.expression else {
+    let Expr::Binary { lhs, .. } = &check.expression else {
         panic!("comparison");
     };
     assert!(matches!(lhs.as_ref(), Expr::Func { binding: Some(binding), .. } if binding.builtin));
@@ -258,7 +258,7 @@ fn unknown_check_literals_are_read_as_boolean_and_existing_not_null_is_retained(
         )
         .unwrap();
         assert!(
-            matches!(check.expression, Expr::TypedLiteral { value, ty, .. } if value == expected && ty == "pg_catalog.\"bool\"")
+            matches!(&check.expression, Expr::TypedLiteral { value, ty, .. } if *value == expected && ty == "pg_catalog.\"bool\"")
         );
     }
     let constraint = prepare_added_not_null(

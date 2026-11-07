@@ -90,7 +90,7 @@ fn trigger_condition_input_collations_match_postgresql_event_variables() {
             let expression = Expr::qualified_column(side, &columns[variable.attribute - 1].name);
             let Expr::TypedLiteral {
                 ty, collation_oid, ..
-            } = bind_expr(
+            } = &bind_expr(
                 &expression,
                 &mut TriggerConditionTypeResolver { columns: &columns },
             )
@@ -98,7 +98,7 @@ fn trigger_condition_input_collations_match_postgresql_event_variables() {
             else {
                 panic!("typed event field")
             };
-            let ty = ColumnType::from_sql_name(&ty).unwrap();
+            let ty = ColumnType::from_sql_name(ty).unwrap();
             assert_eq!(
                 crate::catalog::type_metadata::pg_type_oid(&ty),
                 i64::from(variable.type_oid)

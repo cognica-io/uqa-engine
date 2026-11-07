@@ -157,10 +157,7 @@ impl Lowering<'_> {
             },
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
-            Node::RetainedLiteral(value) => match value {
-                Source::Owned(value) => ScalarExpr::RetainedLiteral(value.0),
-                Source::Borrowed(value) => ScalarExpr::RetainedLiteral(value.0.clone()),
-            },
+            Node::RetainedLiteral(value) => ScalarExpr::RetainedLiteral(value),
             Node::TypedLiteral {
                 value,
                 ty,
@@ -313,22 +310,22 @@ impl Lowering<'_> {
 
     fn child(
         &mut self,
-        expression: Source<'_, Box<Expr>>,
+        expression: Source<'_, Expr>,
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut dyn QueryLowering,
     ) -> Result<Box<ScalarExpr>> {
-        self.boxed(|this| this.expression(expression.unbox(), aggregates, subqueries))
+        self.boxed(|this| this.expression(expression, aggregates, subqueries))
     }
 
     fn query(
         &self,
-        query: Source<'_, Box<crate::ast::SelectStmt>>,
+        query: Source<'_, crate::ast::SelectStmt>,
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut dyn QueryLowering,
     ) -> Result<usize> {
         self.check()?;
         match query {
-            Source::Owned(query) => subqueries.append_owned(*query, aggregates),
+            Source::Owned(query) => subqueries.append_owned(query, aggregates),
             Source::Borrowed(query) => subqueries.append_borrowed(query, aggregates),
         }
     }

@@ -29,9 +29,9 @@ pub enum IndexKey {
 impl IndexKey {
     #[must_use]
     pub fn from_expression(expression: Expr) -> Self {
-        match expression {
+        match &expression {
             Expr::Column(column) => Self::Column(column.to_string()),
-            other => Self::Expression(Box::new(other)),
+            _ => Self::Expression(Box::new(expression)),
         }
     }
 

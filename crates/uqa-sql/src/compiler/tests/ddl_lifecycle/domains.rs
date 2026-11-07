@@ -93,7 +93,7 @@ fn domain_check_ast_retains_legacy_dispatch_upgrade() {
         unreachable!();
     };
     assert!(matches!(
-        constraint.expression,
+        &constraint.expression,
         Expr::Func { binding: Some(binding), .. }
             if binding.dispatch == Some(FunctionDispatch::IsDistinct)
     ));

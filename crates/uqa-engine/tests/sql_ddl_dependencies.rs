@@ -232,7 +232,7 @@ fn typed_default_dependency_is_rewritten_and_drop_is_restricted() {
         .rename_column("defaults", "source", "source_new")
         .unwrap());
     assert!(matches!(
-        engine
+        &engine
             .column_default_expr("defaults", "derived")
             .unwrap(),
         Some(Expr::Column(column)) if column == "source_new"

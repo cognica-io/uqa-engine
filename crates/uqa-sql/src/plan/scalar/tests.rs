@@ -289,7 +289,7 @@ fn partial_ir_failure_releases_allocations_without_disturbing_other_results() {
     assert_eq!(budget.used(), held);
     assert!(budget.peak() > held);
     assert_eq!(*first, ScalarExpr::Literal(Value::Str("held".into())));
-    let Expr::Row(items) = source else {
+    let Expr::Row(items) = &source else {
         panic!("row source");
     };
     assert_eq!(items[1], Expr::Literal(Value::Bytes(vec![9; 16384])));
