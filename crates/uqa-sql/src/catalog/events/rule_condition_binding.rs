@@ -19,6 +19,29 @@ pub struct RuleConditionBinding {
 }
 
 impl RuleConditionBinding {
+    pub(crate) fn captured_parts(
+        &self,
+    ) -> (
+        &Option<InternalRelationId>,
+        &Option<InternalRelationId>,
+        &Vec<String>,
+    ) {
+        (&self.old_relation, &self.new_relation, &self.columns)
+    }
+
+    /// Transfer already admitted captured fields without allocating replacement row identities.
+    pub(crate) fn from_captured_parts(
+        old_relation: Option<InternalRelationId>,
+        new_relation: Option<InternalRelationId>,
+        columns: Vec<String>,
+    ) -> Self {
+        Self {
+            old_relation,
+            new_relation,
+            columns,
+        }
+    }
+
     pub fn for_event(columns: &[String], event: RuleEvent) -> Self {
         let old_relation = matches!(event, RuleEvent::Update | RuleEvent::Delete)
             .then(InternalRelationId::allocate);

@@ -25,7 +25,7 @@ use uqa_core::{
 };
 
 impl Input<'_> {
-    fn trigger_relation(
+    pub(super) fn event_relation(
         &mut self,
         previous: Option<&RelationIdentity>,
     ) -> Result<Budgeted<RelationIdentity>, SQLError> {
@@ -37,7 +37,7 @@ impl Input<'_> {
             || name.contains('\0')
             || is_temporary_schema_name(&schema)
         {
-            return Err(invalid("trigger relation identity"));
+            return Err(invalid("event relation identity"));
         }
         if let Some(previous) = previous {
             let mut order = self.compare_text(&previous.schema, &schema)?;
@@ -45,7 +45,7 @@ impl Input<'_> {
                 order = self.compare_text(&previous.name, &name)?;
             }
             if order != Ordering::Less {
-                return Err(invalid("trigger relation order"));
+                return Err(invalid("event relation order"));
             }
         }
         let (schema, mut memory) = schema.into_parts();
@@ -202,7 +202,7 @@ pub(in super::super) fn triggers(
     let mut constraints = Identities::new(memory);
     for _ in 0..count {
         cancellation.check()?;
-        let relation = input.trigger_relation(result.last_durable_key())?;
+        let relation = input.event_relation(result.last_durable_key())?;
         let count = input.binary.count()?;
         let mut entries = EventDefinitions::with_budget(memory);
         for _ in 0..count {

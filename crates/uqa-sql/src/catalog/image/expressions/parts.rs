@@ -14,6 +14,9 @@ impl<'a> DefinitionImageReader<'a> {
         match frame {
             Frame::Plan(frame) => self.plan_part(frame)?,
             Frame::NextView => self.next_view()?,
+            Frame::NextRuleRelation => self.next_rule_relation()?,
+            Frame::NextRule => self.next_rule()?,
+            Frame::NextRoutine => self.next_routine()?,
             Frame::Scalar(part) => self.scalar_part(part)?,
             Frame::Table(part) => self.table_part(part)?,
             Frame::NextDomain

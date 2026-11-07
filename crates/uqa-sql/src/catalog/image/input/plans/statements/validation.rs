@@ -54,7 +54,9 @@ pub(in super::super) fn validate(
         | Node::Insert(_)
         | Node::Update(_)
         | Node::Delete(_)
-        | Node::Merge(_) => 0,
+        | Node::Merge(_)
+        | Node::Routine(_)
+        | Node::Rule(_) => 0,
         Node::MultipleTargets(targets) => {
             if targets.targets.len() != targets.source_positions.len() {
                 return Err(invalid("stored multiple assignment positions"));

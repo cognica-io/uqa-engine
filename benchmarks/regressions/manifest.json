@@ -4,6 +4,97 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_rule_images_preserve_original_actions_conditions_and_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",
+      "capability": "Native rule declaration and dependency images",
+      "workload": "Round-trip original UPDATE actions, a bound condition, row identities, ordered dependency sets and empty durable relation membership; retain an independent entry after catalog retirement.",
+      "invariant": "Original syntax, enabled state, bound addresses, OIDs and dependency membership survive without rebinding, and each retained root owns its payload allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_images_reject_every_partial_catalog_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",
+      "capability": "Admitted native rule reconstruction",
+      "workload": "Reject every truncated prefix and fixed denied allowances while reconstructing a catalog with original and bound syntax.",
+      "invariant": "No failed prefix publishes a rule or leaks payload, tree nodes or decoder workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_images_match_independent_wire_and_reject_invalid_catalog_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",
+      "capability": "Independent rule image framing",
+      "workload": "Decode a literal rule image, re-encode exact bytes and reject declaration/relation mismatch and trailing input.",
+      "invariant": "Legacy optional fields, action order and enabled state retain their original representation; malformed membership is rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_images_retire_deep_original_and_bound_conditions_without_stack_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",
+      "capability": "Constant-stack rule image retirement",
+      "workload": "Decode 10000-level original and bound conditions on a 128 KiB stack, exhaust the allowance and retire full and partial owners.",
+      "invariant": "Retirement allocates no additional memory and returns every admitted payload without recursive forest destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_images_retire_interrupted_input_and_terminal_output",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests/resources.rs",
+      "capability": "Interrupted rule image ownership",
+      "workload": "Inject read errors, cancellation and panics at multiple input boundaries; deny and cancel active output.",
+      "invariant": "Unpublished native forests release all admission, and failed output remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_image_output_has_constant_preparation_and_bounded_payload_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests/resources.rs",
+      "capability": "Bounded rule image output",
+      "workload": "Capture and close a rule source with a 128 KiB NOTIFY payload; stream the retained original statements with 16 KiB scratch.",
+      "invariant": "Reader preparation performs no allocation or corpus traversal and emits the exact original bytes with bounded workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_rule_images_preserve_original_bindings_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/rules.rs",
+      "capability": "Captured Engine rule images",
+      "workload": "Capture real bound rules, change enable modes and routines, drop a rule and close Engine before image output and reconstruction.",
+      "invariant": "Original statements, bound OLD/NEW addresses, dependencies and OIDs survive replacement and source retirement; independently retained entries release their own allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "mutable_call_binding_keeps_unrelated_workspace_off_the_descent_stack",
       "cases": 1,
       "source": "crates/uqa-sql/src/type_resolution/introspection/owned/tests.rs",
@@ -48249,6 +48340,110 @@
       "capability": "native bound plan images retire deep owned roots without allocation",
       "workload": "Exercise original stored statement or bound body images, exact native fields and admitted complete or interrupted ownership.",
       "invariant": "Original syntax and local addresses survive valid input; invalid or unadmitted input releases its candidate, and retirement preserves bounded stack and memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_images_preserve_source_bound_bodies_and_original_authority",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests.rs",
+      "capability": "native routine images preserve source bound bodies and original authority",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_images_reject_every_truncated_prefix_without_retained_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests.rs",
+      "capability": "native routine images reject every truncated prefix without retained payloads",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_body_image_outlives_its_catalog_and_definition",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests.rs",
+      "capability": "native routine body image outlives its catalog and definition",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_image_output_borrows_large_source_and_has_terminal_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests.rs",
+      "capability": "native routine image output borrows large source and has terminal failure",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_images_match_independent_wire_and_reject_invalid_catalog_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/resources.rs",
+      "capability": "native routine images match independent wire and reject invalid catalog membership",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_images_retire_deep_original_and_bound_forests_without_stack_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/resources.rs",
+      "capability": "native routine images retire deep original and bound forests without stack growth",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_images_retire_partial_catalogs_after_io_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/resources.rs",
+      "capability": "native routine images retire partial catalogs after io cancellation and unwind",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_routine_images_preserve_published_bindings_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/routines.rs",
+      "capability": "memory routine images preserve published bindings after engine retirement",
+      "workload": "Capture and reconstruct native routine declarations and separately bound SQL bodies under admitted ownership, including original authority and independent body lifetime.",
+      "invariant": "Stored source and bound plans preserve their native observations; interrupted or invalid images release private ownership, and shared bodies retain their own allowance and iterative cleanup.",
       "case_names": [
         ""
       ]

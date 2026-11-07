@@ -6,7 +6,7 @@
 
 //! Independent catalog captures fund shared role payloads as well as the native query owner.
 
-use super::{empty_query, Input, Kind, Node, Owner, QueryPlan, SQLError};
+use super::{empty_query, Frame, Input, Kind, NativeNode, Node, Owner, QueryPlan, SQLError};
 use std::ops::{Deref, DerefMut};
 use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
 
@@ -45,16 +45,18 @@ impl DerefMut for PlanMemory {
     }
 }
 
-impl Owner {
+impl<N: NativeNode> Owner<N> {
     pub(in super::super) fn retained_bytes(&self) -> Result<usize, MemoryError> {
         self.frames
             .capacity()
-            .checked_mul(size_of::<super::Frame>())
+            .checked_mul(size_of::<Frame<N>>())
             .and_then(|bytes| bytes.checked_add(self.memory.bytes()))
             .and_then(|bytes| bytes.checked_add(self.memory.retained_children))
             .ok_or(MemoryError::SizeOverflow)
     }
+}
 
+impl Owner {
     /// Transfer only between an immutable catalog definition and its retained native retirement owner.
     pub(in super::super) fn exchange_query(&mut self, query: &mut QueryPlan) {
         match &mut self.root {

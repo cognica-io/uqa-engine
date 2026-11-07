@@ -9,30 +9,37 @@
 use super::{CompiledFunctionBody, RoutineBody, SQLUserFunction};
 use crate::{plan::copy::capture_stored_with_control, SQLError};
 use std::sync::Arc;
-use uqa_core::memory::{MemoryError, Produced, ProductionControl};
+use uqa_core::memory::{MemoryError, ProductionControl};
 
-pub type SQLRoutine = Arc<Produced<SQLUserFunction>>;
-pub type SharedRoutineBody = Arc<Produced<CompiledFunctionBody>>;
+mod retained;
+pub use retained::RetainedRoutineValue;
+
+pub type SQLRoutine = Arc<RetainedRoutineValue<SQLUserFunction>>;
+pub type SharedRoutineBody = Arc<RetainedRoutineValue<CompiledFunctionBody>>;
 
 impl CompiledFunctionBody {
     /// An ordinary session compilation keeps the same body with no catalog allowance.
     pub fn shared(self) -> SharedRoutineBody {
-        Arc::new(
+        RetainedRoutineValue::native(
             ProductionControl::uncontrolled()
                 .finish(self, None)
                 .expect("ordinary body sharing has no fallible admission"),
+            &ProductionControl::uncontrolled(),
         )
+        .expect("ordinary body sharing has no fallible admission")
     }
 }
 
 impl SQLUserFunction {
     /// An unpublished definition enters the native catalog through its admitted publication owner.
     pub fn shared(self) -> SQLRoutine {
-        Arc::new(
+        RetainedRoutineValue::native(
             ProductionControl::uncontrolled()
                 .finish(self, None)
                 .expect("ordinary routine sharing has no fallible admission"),
+            &ProductionControl::uncontrolled(),
         )
+        .expect("ordinary routine sharing has no fallible admission")
     }
 
     pub(super) fn copy_native(
@@ -55,18 +62,18 @@ impl SQLUserFunction {
                     RoutineBody::Bound(body.clone())
                 } else {
                     let (plans, memory) = capture_stored_with_control(plans, control)?.into_parts();
-                    RoutineBody::Bound(
-                        control
-                            .finish(CompiledFunctionBody::SQL(plans), memory)?
-                            .into_shared(control)?,
-                    )
+                    RoutineBody::Bound(RetainedRoutineValue::native(
+                        control.finish(CompiledFunctionBody::SQL(plans), memory)?,
+                        control,
+                    )?)
                 }
             }
         };
         let (definition, memory) = definition.into_parts();
-        Ok(control
-            .finish(Self::new(definition, body), memory)?
-            .into_shared(control)?)
+        RetainedRoutineValue::native(
+            control.finish(Self::new(definition, body), memory)?,
+            control,
+        )
     }
 }
 

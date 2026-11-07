@@ -42,6 +42,7 @@ pub(super) enum Part<'a> {
     Positions(&'a OwnedSet<usize>),
     StatementMap(&'a uqa_core::memory::OwnedMap<String, crate::ast::MergeTargetColumnBinding>),
     Oids(&'a OwnedSet<u32>),
+    RuleSet(rules::Set<'a>),
 }
 
 pub(super) enum Frame<'a> {
@@ -51,6 +52,7 @@ pub(super) enum Frame<'a> {
     Positions(Box<OwnedSetIter<'a, usize>>, MemoryReservation),
     StatementMap(Box<statements::ColumnCursor<'a>>, MemoryReservation),
     Oids(Box<OwnedSetIter<'a, u32>>, MemoryReservation),
+    RuleSet(Box<rules::Cursor<'a>>, MemoryReservation),
 }
 
 fn fields<'a>(position: usize, values: &[&'a dyn Node]) -> Option<Part<'a>> {
@@ -94,6 +96,8 @@ mod metadata;
 mod mutations;
 mod primitives;
 mod queries;
+mod routines;
+mod rules;
 mod sources;
 mod statements;
 #[cfg(test)]
@@ -138,6 +142,7 @@ impl crate::plan::ExpressionPlan {
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn plan_part(&mut self, frame: Frame<'a>) -> Result<(), SQLError> {
         match frame {
+            Frame::RuleSet(cursor, memory) => self.rule_set(cursor, memory)?,
             Frame::StatementMap(cursor, memory) => self.statement_columns(cursor, memory)?,
             Frame::Oids(mut values, memory) => {
                 if let Some(value) = values.next() {
@@ -171,6 +176,7 @@ impl<'a> DefinitionImageReader<'a> {
 
     fn plan_field(&mut self, part: Part<'a>) -> Result<(), SQLError> {
         match part {
+            Part::RuleSet(values) => self.start_rule_set(values)?,
             Part::StatementMap(values) => self.start_statement_columns(values)?,
             Part::Oids(values) => {
                 let memory = self.memory.reserve(size_of::<OwnedSetIter<'_, u32>>())?;

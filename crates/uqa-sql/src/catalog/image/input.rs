@@ -50,6 +50,7 @@ pub(super) use foreign_wrappers::foreign_wrappers;
 pub(super) use functions::function_binding_image;
 pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
+pub(super) use plans::{read_routines as routines, read_rules as rules};
 pub use plans::{CapturedExpressionPlan, CapturedPlan, CapturedQuery, CapturedStatement};
 pub(super) use roles::roles;
 pub(super) use scalars::scalar_image;

@@ -30,6 +30,7 @@ mod windows;
 
 pub use api::{CapturedExpressionPlan, CapturedQuery};
 pub use statements::CapturedStatement;
+pub(in crate::catalog::image) use statements::{read_routines, read_rules};
 pub use unified::CapturedPlan;
 
 use super::{invalid, Input};

@@ -54,7 +54,7 @@ impl std::fmt::Debug for RoutineCallDescriptions {
 pub struct RoutineCallDescription {
     scope: RoutineDescriptionScope,
     binding: Produced<FunctionBinding>,
-    function: Weak<uqa_core::memory::Produced<SQLUserFunction>>,
+    function: Weak<crate::routines::RetainedRoutineValue<SQLUserFunction>>,
     sources: Produced<Vec<Option<ColumnType>>>,
     arguments: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,
     parameters: Produced<Vec<OnceLock<Produced<RoutineValueDescription>>>>,

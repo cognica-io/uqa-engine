@@ -22,9 +22,14 @@ use fields::{Body, Empty, Field, Tree};
 #[macro_use]
 mod schema;
 mod expressions;
+#[macro_use]
 mod metadata;
 mod mutations;
 mod queries;
+mod rules;
+pub(in crate::catalog::image) use rules::read as read_rules;
+mod routines;
+pub(in crate::catalog::image) use routines::read as read_routines;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -43,6 +48,8 @@ syntax_nodes! {
     Projections: Vec<Projection>, Orders: Vec<OrderBy>, Functions: Vec<TableFunction>,
     Windows: Vec<WindowDefinition>, Assignments: Vec<(AssignmentTargets, Expr)>,
     TargetsList: Vec<AssignmentTarget>, Steps: Vec<AssignmentStep<Expr>>, MergeActions: Vec<MergeWhen>,
+    Rule: crate::ast::CreateRule, Routine: crate::ast::CreateFunction, RoutineParam: crate::ast::FunctionParam,
+    RoutineBody: crate::ast::FunctionBody, RoutineParams: Vec<crate::ast::FunctionParam>, Statements: Vec<Statement>,
 }
 
 syntax_members! {
@@ -54,6 +61,8 @@ syntax_members! {
     Vec<Expr>, Vec<Vec<Expr>>, Vec<CTE>, Vec<Projection>, Vec<OrderBy>, Vec<TableFunction>,
     Vec<WindowDefinition>, Vec<(AssignmentTargets, Expr)>, Vec<AssignmentTarget>,
     Vec<AssignmentStep<Expr>>, Vec<MergeWhen>,
+    crate::ast::CreateRule, crate::ast::CreateFunction, crate::ast::FunctionParam, crate::ast::FunctionBody,
+    Vec<crate::ast::FunctionParam>, Vec<Statement>,
 }
 
 fn construct<T: Tree>(memory: &mut PlanMemory) -> Result<Node, SQLError> {

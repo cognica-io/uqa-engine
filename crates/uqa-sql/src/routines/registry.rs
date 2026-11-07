@@ -39,12 +39,35 @@ impl CapturedRoutines {
     pub fn is_empty(&self) -> bool {
         self.definitions.is_empty()
     }
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Vec<SQLRoutine>)> {
+    pub fn iter(
+        &self,
+    ) -> crate::catalog::named_definitions::CapturedDefinitionIter<'_, String, Vec<SQLRoutine>>
+    {
         self.definitions.iter()
     }
 }
 
+impl<'a> IntoIterator for &'a CapturedRoutines {
+    type Item = (&'a String, &'a Vec<SQLRoutine>);
+    type IntoIter =
+        crate::catalog::named_definitions::CapturedDefinitionIter<'a, String, Vec<SQLRoutine>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl RoutineRegistry {
+    pub(crate) fn insert_image_entry(
+        &mut self,
+        name: uqa_core::memory::Budgeted<String>,
+        values: uqa_core::memory::Budgeted<Vec<SQLRoutine>>,
+    ) -> Result<(), SQLError> {
+        self.definitions.insert_image_entry(name, values)
+    }
+
+    pub(crate) fn last_durable_key(&self) -> Option<&String> {
+        self.definitions.last_durable_key()
+    }
     pub fn new() -> Self {
         Self::default()
     }

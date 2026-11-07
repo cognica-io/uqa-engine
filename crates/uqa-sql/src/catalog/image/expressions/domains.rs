@@ -31,6 +31,9 @@ impl CapturedTypeDefinitions<StoredDomain> {
         Ok(DefinitionImageReader {
             first: Some(Frame::NextDomain),
             statement_expressions: false,
+            routines: None,
+            rules: None,
+            rule_entries: None,
             domains: Some(self.iter()),
             views: None,
             frames: BudgetedVec::new(memory),

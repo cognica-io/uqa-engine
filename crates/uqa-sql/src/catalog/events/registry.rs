@@ -9,8 +9,8 @@
 use super::{StoredRule, StoredTrigger};
 use crate::{
     catalog::named_definitions::{
-        sealed, CapturedDefinitionIter, CapturedDefinitions, DefinitionIter, DefinitionRegistry,
-        StoredDefinition,
+        sealed, CapturedDefinitionIter, CapturedDefinitions, DefinitionEntry, DefinitionImage,
+        DefinitionIter, DefinitionRegistry, StoredDefinition,
     },
     plan::copy::SyntaxProduction,
     SQLError,
@@ -34,7 +34,7 @@ pub trait EventDefinition: sealed::Definition + Clone {
 }
 
 pub struct EventDefinitions<T> {
-    entries: RetainedMap<String, Budgeted<T>>,
+    entries: RetainedMap<String, DefinitionEntry<T>>,
 }
 
 impl<T> Clone for EventDefinitions<T> {
@@ -63,6 +63,18 @@ impl<T> EventDefinitions<T> {
         memory.absorb(key_memory);
         let value = Budgeted::new(value, memory);
         let bytes = value.reserved_bytes();
+        self.entries
+            .insert(name, DefinitionEntry::Native(value), bytes)?;
+        Ok(())
+    }
+
+    pub(crate) fn insert_owned_image<D: DefinitionImage<T> + 'static>(
+        &mut self,
+        name: Budgeted<String>,
+        value: D,
+    ) -> Result<(), SQLError> {
+        assert!(self.entries.budget().shares_allowance(name.budget()));
+        let (name, value, bytes) = DefinitionEntry::owned_image(name, value)?;
         self.entries.insert(name, value, bytes)?;
         Ok(())
     }
@@ -141,7 +153,8 @@ impl<T: EventDefinition> EventDefinitions<T> {
             .into_budgeted()
             .unwrap_or_else(|_| unreachable!("native events use admitted construction"));
         let bytes = value.reserved_bytes();
-        self.entries.insert(name, value, bytes)?;
+        self.entries
+            .insert(name, DefinitionEntry::Native(value), bytes)?;
         Ok(())
     }
     pub fn edit<R>(
@@ -404,7 +417,7 @@ impl<'a, T> IntoIterator for &'a CapturedEventCatalog<T> {
     }
 }
 
-pub struct EventIter<'a, T>(RetainedMapBidirectionalIter<'a, String, Budgeted<T>>);
+pub struct EventIter<'a, T>(RetainedMapBidirectionalIter<'a, String, DefinitionEntry<T>>);
 impl<'a, T> Iterator for EventIter<'a, T> {
     type Item = (&'a String, &'a T);
     fn next(&mut self) -> Option<Self::Item> {

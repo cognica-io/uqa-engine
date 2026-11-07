@@ -47,6 +47,9 @@ enum Frame<'a> {
     Table(tables::Part<'a>),
     NextDomain,
     NextView,
+    NextRoutine,
+    NextRuleRelation,
+    NextRule,
     DomainDefinition(&'a crate::ast::CreateDomain),
     DomainChecks(&'a [crate::ast::DomainCheck]),
     DomainNotNull(&'a crate::ast::DomainNotNull),
@@ -88,6 +91,21 @@ enum State {
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
     statement_expressions: bool,
+    rules: Option<
+        crate::catalog::named_definitions::CapturedDefinitionIter<
+            'a,
+            uqa_core::RelationIdentity,
+            crate::catalog::events::EventDefinitions<crate::catalog::events::StoredRule>,
+        >,
+    >,
+    rule_entries: Option<crate::catalog::events::EventIter<'a, crate::catalog::events::StoredRule>>,
+    routines: Option<
+        crate::catalog::named_definitions::CapturedDefinitionIter<
+            'a,
+            String,
+            Vec<crate::routines::SQLRoutine>,
+        >,
+    >,
     domains: Option<
         crate::catalog::named_definitions::CapturedDefinitionIter<
             'a,
@@ -155,6 +173,9 @@ impl<'a> DefinitionImageReader<'a> {
         Ok(Self {
             first: Some(first),
             statement_expressions: false,
+            routines: None,
+            rules: None,
+            rule_entries: None,
             domains: None,
             views: None,
             frames: BudgetedVec::new(memory),
@@ -242,6 +263,9 @@ impl<'a> DefinitionImageReader<'a> {
         self.first = None;
         self.domains = None;
         self.views = None;
+        self.routines = None;
+        self.rules = None;
+        self.rule_entries = None;
         self.child = None;
         self.frames = BudgetedVec::new(self.memory);
         self.fields = Fields::new();

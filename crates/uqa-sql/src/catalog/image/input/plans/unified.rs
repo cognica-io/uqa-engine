@@ -20,22 +20,40 @@ pub struct CapturedPlan {
 
 impl CapturedPlan {
     fn new(mut owner: Owner) -> Result<Self, SQLError> {
-        let value = match &mut owner.root {
+        let value = owner.unified_value()?;
+        Ok(Self { value, owner })
+    }
+}
+
+impl Owner {
+    pub(super) fn unified_value(&mut self) -> Result<UnifiedPlan, SQLError> {
+        Ok(match &mut self.root {
             Node::Query(query) => {
-                owner.memory.grow(size_of::<QueryPlan>())?;
+                self.memory.grow(size_of::<QueryPlan>())?;
                 let mut value = Box::new(empty_query());
                 std::mem::swap(query, value.as_mut());
                 UnifiedPlan::Query(value)
             }
             Node::Command(command) => {
-                owner.memory.grow(size_of::<CommandPlan>())?;
+                self.memory.grow(size_of::<CommandPlan>())?;
                 let mut value = Box::new(CommandPlan::Empty);
                 std::mem::swap(command, value.as_mut());
                 UnifiedPlan::Command(value)
             }
             _ => unreachable!("bound body query or mutation"),
-        };
-        Ok(Self { value, owner })
+        })
+    }
+
+    pub(super) fn exchange_unified(&mut self, value: &mut UnifiedPlan) {
+        match (value, &mut self.root) {
+            (UnifiedPlan::Query(value), Node::Query(query)) => {
+                std::mem::swap(value.as_mut(), query);
+            }
+            (UnifiedPlan::Command(value), Node::Command(command)) => {
+                std::mem::swap(value.as_mut(), command);
+            }
+            _ => unreachable!("immutable bound body owner"),
+        }
     }
 }
 
@@ -49,15 +67,7 @@ impl Deref for CapturedPlan {
 impl Drop for CapturedPlan {
     fn drop(&mut self) {
         // The native outer box is left empty before normal field destruction; its original subtree returns to the admitted retirement workspace.
-        match (&mut self.value, &mut self.owner.root) {
-            (UnifiedPlan::Query(value), Node::Query(query)) => {
-                std::mem::swap(value.as_mut(), query);
-            }
-            (UnifiedPlan::Command(value), Node::Command(command)) => {
-                std::mem::swap(value.as_mut(), command);
-            }
-            _ => unreachable!("immutable bound body owner"),
-        }
+        self.owner.exchange_unified(&mut self.value);
     }
 }
 
