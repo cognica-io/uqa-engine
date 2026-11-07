@@ -25,6 +25,110 @@ fn build(allowance: usize, carried: bool) -> ValueIndexCache {
 }
 
 #[test]
+fn resident_value_capture_retains_native_roots_without_visiting_or_copying_payloads() {
+    for count in [1, 4096] {
+        let read = StorageReadControl::with_limit(16 << 20);
+        let mut source = ValueIndexBuilder::from_values(
+            "stored",
+            false,
+            16 << 20,
+            (0..count).map(|id| (id, Value::Str(format!("{id:064}")))),
+            &read,
+        )
+        .unwrap();
+        assert!(!source.is_spilled());
+        let control = StorageReadControl::with_limit(16 << 20);
+        let mut captured = None;
+        let allocation = allocation_counter::measure(|| {
+            captured = Some(source.capture_values(&control).unwrap());
+        });
+        assert!(
+            allocation.bytes_total < 2048,
+            "{count} entries: {allocation:?}"
+        );
+        let captured = captured.unwrap();
+        assert_eq!(captured.len().unwrap(), count as usize);
+        assert!(std::ptr::eq(
+            captured.value(0).unwrap().unwrap(),
+            source.policy.stored_value(0).unwrap()
+        ));
+        let retained = control.memory().used();
+        assert!(retained >= count as usize * 64);
+        let exact = StorageReadControl::with_limit(retained);
+        drop(source.capture_values(&exact).unwrap());
+        assert_eq!(exact.memory().used(), 0);
+        let small = StorageReadControl::with_limit(retained - 1);
+        assert!(matches!(
+            source.capture_values(&small),
+            Err(StorageBackendError::Memory(_))
+        ));
+        assert_eq!(small.memory().used(), 0);
+        let mutation = allocation_counter::measure(|| {
+            source
+                .replace(0, Some(&Value::Str("replacement".into())), &read)
+                .unwrap();
+        });
+        assert!(
+            mutation.bytes_total < 32 * 1024,
+            "{count} entries: {mutation:?}"
+        );
+        if count > 1 {
+            assert!(std::ptr::eq(
+                captured.value(1).unwrap().unwrap(),
+                source.policy.stored_value(1).unwrap()
+            ));
+        }
+        source.set_use("carried", true);
+        source.clear();
+        drop(source);
+        assert_eq!(
+            captured.value(0).unwrap(),
+            Some(&Value::Str(format!("{:064}", 0)))
+        );
+        drop(captured);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn resident_value_capture_counts_complete_nested_payloads_before_root_retention() {
+    let read = StorageReadControl::with_limit(16 << 20);
+    let source = ValueIndexBuilder::from_values(
+        "carried",
+        true,
+        16 << 20,
+        [(
+            1,
+            Value::List(vec![Value::Str("x".repeat(2 << 20)), Value::Float(-0.0)]),
+        )],
+        &read,
+    )
+    .unwrap();
+    assert!(!source.is_spilled());
+    let small = StorageReadControl::with_limit(1 << 20);
+    assert!(matches!(
+        source.capture_values(&small),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(small.memory().used(), 0);
+    let full = StorageReadControl::with_limit(8 << 20);
+    let captured = source.capture_values(&full).unwrap();
+    assert!(std::ptr::eq(
+        captured.value(1).unwrap().unwrap(),
+        source.policy.stored_value(1).unwrap()
+    ));
+    drop(source);
+    let Value::List(values) = captured.value(1).unwrap().unwrap() else {
+        panic!("stored list")
+    };
+    assert_eq!(values[1], Value::Float(-0.0));
+    full.cancellation().cancel();
+    assert!(captured.value(1).is_err());
+    drop(captured);
+    assert_eq!(full.memory().used(), 0);
+}
+
+#[test]
 fn captured_value_indexes_preserve_resident_and_spilled_keys_after_source_loss() {
     for allowance in [0, 1 << 20] {
         for carried in [false, true] {

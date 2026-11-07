@@ -48876,6 +48876,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_value_capture_retains_native_roots_without_visiting_or_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Resident evaluated-key capture",
+      "workload": "Capture one and 4,096 resident evaluated keys, update one key, change its role, and retire every live owner.",
+      "invariant": "Capture allocates less than 2 KiB, admits every reachable payload without visiting it, updates allocate less than 32 KiB, unchanged values share their original addresses, and all snapshot leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_value_capture_counts_complete_nested_payloads_before_root_retention",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Resident evaluated-key capture",
+      "workload": "Retain a resident nested evaluated value with a 2 MiB payload under independently small and sufficient capture allowances.",
+      "invariant": "Insufficient admission publishes no captured owner; successful root retention preserves the original carrier address and nested payload, observes cancellation, and releases all admission.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.
+
 - Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
 
 - Native rewrite-rule images preserve original SQL, bound conditions, OLD/NEW identities and dependency membership through independently retained event owners. Complete memory Engine backup and public restore remain in progress.

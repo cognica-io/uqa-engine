@@ -12,7 +12,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap, BudgetedString},
+    memory::{Budgeted, BudgetedMap, BudgetedString, RetainedMapSnapshot},
     DocId, Value, ValueRetentionError,
 };
 use uqa_storage::{
@@ -63,8 +63,13 @@ pub struct CapturedValueIndexPolicy {
 pub struct CapturedValueIndex {
     field: BudgetedString,
     policy: CapturedValueIndexPolicy,
-    values: BudgetedMap<DocId, Budgeted<Value>>,
+    values: CapturedValues,
     control: StorageReadControl,
+}
+
+enum CapturedValues {
+    Resident(Budgeted<RetainedMapSnapshot<DocId, Value>>),
+    Copied(BudgetedMap<DocId, Budgeted<Value>>),
 }
 
 impl ValueIndexCache {
@@ -75,29 +80,21 @@ impl ValueIndexCache {
         control.check()?;
         let memory = control.memory().reserve(size_of::<CapturedValueIndex>())?;
         let field = copy_text(&self.field, control)?;
-        let mut values = BudgetedMap::new(control.memory());
-        let mut insert = |id, value| -> StorageBackendResult<()> {
-            control.check()?;
-            if values.insert(id, value)?.is_some() {
-                return Err(StorageBackendError::Other(
-                    "duplicate captured value-index identity".into(),
-                ));
-            }
-            Ok(())
-        };
-        if let Some(retained) = &self.retained {
+        let values = if let Some(retained) = &self.retained {
+            let mut values = BudgetedMap::new(control.memory());
             retained.visit_values_owned(control, &mut |id, value| {
-                insert(id, value)?;
+                control.check()?;
+                if values.insert(id, value)?.is_some() {
+                    return Err(StorageBackendError::Other(
+                        "duplicate captured value-index identity".into(),
+                    ));
+                }
                 Ok(true)
             })?;
+            CapturedValues::Copied(values)
         } else {
-            for (&id, value) in &self.policy.values {
-                let value = value
-                    .clone_budgeted(control.memory(), control.cancellation())
-                    .map_err(value_error)?;
-                insert(id, value)?;
-            }
-        }
+            CapturedValues::Resident(self.policy.values.capture(control.memory())?)
+        };
         control.check()?;
         Ok(Budgeted::new(
             CapturedValueIndex {
@@ -133,18 +130,23 @@ impl CapturedValueIndex {
 
     pub fn len(&self) -> StorageBackendResult<usize> {
         self.control.check()?;
-        Ok(self.values.len())
+        Ok(match &self.values {
+            CapturedValues::Resident(values) => values.len(),
+            CapturedValues::Copied(values) => values.len(),
+        })
     }
 
     pub fn is_empty(&self) -> StorageBackendResult<bool> {
-        self.control.check()?;
-        Ok(self.values.is_empty())
+        Ok(self.len()? == 0)
     }
 
     /// Absence and an evaluated SQL NULL remain distinct. The returned borrow cannot outlive its admitted source owner.
     pub fn value(&self, id: DocId) -> StorageBackendResult<Option<&Value>> {
         self.control.check()?;
-        Ok(self.values.get(&id).map(|value| &**value))
+        Ok(match &self.values {
+            CapturedValues::Resident(values) => values.get(&id),
+            CapturedValues::Copied(values) => values.get(&id).map(|value| &**value),
+        })
     }
 
     /// Visit exact stored representations in document identity order. Cancellation is observed between callbacks and after the final callback.
@@ -153,9 +155,22 @@ impl CapturedValueIndex {
         visitor: &mut dyn FnMut(DocId, &Value) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         self.control.check()?;
-        for (&id, value) in &self.values {
+        let mut visit = |id, value: &Value| {
             self.control.check()?;
             visitor(id, value)?;
+            self.control.check()
+        };
+        match &self.values {
+            CapturedValues::Resident(values) => {
+                for (&id, value) in values.iter() {
+                    visit(id, value)?;
+                }
+            }
+            CapturedValues::Copied(values) => {
+                for (&id, value) in values {
+                    visit(id, value)?;
+                }
+            }
         }
         self.control.check()
     }
