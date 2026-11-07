@@ -16,44 +16,20 @@ use crate::{
         pages::DiskANNMemorySource,
         DiskANNCanonicalCounts,
     },
-    image_io::{ImageInput, ImageOutput},
-    vector_index::image::{floats, invalid, read_floats},
+    image_io::ImageInput,
+    vector_index::image::{invalid, read_floats},
     StorageBackendResult,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
-impl Canonical {
-    pub(in crate::diskann_index::memory) fn write_image(
-        &self,
-        output: &mut ImageOutput<'_>,
-        generation: DiskANNGeneration,
-        physical: &DiskANNMemorySource,
-    ) -> StorageBackendResult<()> {
-        self.validate_image(physical, generation, output.control)?;
-        match self.revision {
-            Some(revision) => {
-                output.bytes(&[1])?;
-                output.bytes(&DiskANNChangeIdentity::new(0, revision).encode())?;
-            }
-            None => output.bytes(&[0])?,
-        }
-        output.bytes(&self.counts.current_vectors().to_le_bytes())?;
-        output.bytes(&self.counts.changed_vectors().to_le_bytes())?;
-        output.count(self.documents.len())?;
-        for (&document, tensor) in &self.documents {
-            output.bytes(&document.to_le_bytes())?;
-            output.bytes(&tensor.origin.encode())?;
-            for vector in &*tensor.values {
-                floats(output, vector)?;
-            }
-        }
-        output.count(self.changes.len())?;
-        for (&document, &version) in &self.changes {
-            output.bytes(&DiskANNChangeIdentity::new(document, version).encode())?;
-        }
-        output.control.check()
-    }
+mod stream;
+#[cfg(test)]
+mod tests;
+mod validation;
+pub(in crate::diskann_index::memory) use stream::CanonicalImageCursor;
+pub(in crate::diskann_index::memory) use validation::CanonicalImageValidation;
 
+impl Canonical {
     pub(in crate::diskann_index::memory) fn read_image(
         input: &mut ImageInput<'_>,
         dimensions: u32,
@@ -131,68 +107,8 @@ impl Canonical {
         generation: DiskANNGeneration,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.control.check()?;
-        control.check()?;
-        if self.covered_generation != Some(generation) {
-            return Err(invalid());
-        }
-        let mut current = 0_u64;
-        let mut changed = 0_u64;
-        let mut revision_seen = self.revision.is_none() && self.documents.is_empty();
-        for (&document, tensor) in &self.documents {
-            control.check()?;
-            if tensor.origin.dimensions() != self.dimensions
-                || tensor.origin.count() != tensor.values.len() as u64
-            {
-                return Err(invalid());
-            }
-            current = current
-                .checked_add(tensor.origin.count())
-                .ok_or(MemoryError::SizeOverflow)?;
-            if let Some(version) = self.changes.get(&document) {
-                if *version != tensor.origin.version() {
-                    return Err(invalid());
-                }
-                changed = changed
-                    .checked_add(tensor.origin.count())
-                    .ok_or(MemoryError::SizeOverflow)?;
-            }
-            revision_seen |= Some(tensor.origin.version()) == self.revision;
-        }
-        if !revision_seen || self.counts != DiskANNCanonicalCounts::new(current, changed)? {
-            return Err(invalid());
-        }
-        for (document, _) in &self.changes {
-            control.check()?;
-            if self.documents.get(document).is_none() {
-                return Err(invalid());
-            }
-        }
-        let mut documents = self.documents.iter().peekable();
-        physical.visit_image_origins(control, &mut |base| {
-            while documents
-                .peek()
-                .is_some_and(|(document, _)| **document < base.document())
-            {
-                let (document, _) = documents.next().expect("peeked document");
-                if self.changes.get(document).is_none() {
-                    return Err(invalid());
-                }
-            }
-            let (document, tensor) = documents.next().ok_or_else(invalid)?;
-            let uncovered = tensor.origin != base.origin();
-            if *document != base.document() || uncovered != self.changes.get(document).is_some() {
-                return Err(invalid());
-            }
-            Ok(())
-        })?;
-        for (document, _) in documents {
-            control.check()?;
-            if self.changes.get(document).is_none() {
-                return Err(invalid());
-            }
-        }
-        self.control.check()?;
-        control.check()
+        let mut validation = CanonicalImageValidation::new(self, physical, generation)?;
+        while !validation.advance(128, control)?.ready {}
+        Ok(())
     }
 }

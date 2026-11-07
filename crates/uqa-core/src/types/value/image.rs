@@ -14,7 +14,10 @@ use crate::{
 };
 
 mod read;
+mod stream;
 mod write;
+
+pub use stream::ValueImageReader;
 
 const MAGIC: &[u8; 8] = b"UQAVAL01";
 const MAX_DEPTH: usize = 128;
@@ -51,16 +54,7 @@ pub fn write_value_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> ValueImageResult<u64> {
-    let mut writer = write::Writer {
-        output,
-        memory,
-        cancellation,
-        written: 0,
-    };
-    writer.bytes(MAGIC)?;
-    writer.value(value, 0)?;
-    cancellation.check()?;
-    Ok(writer.written)
+    write::copy(ValueImageReader::new(value, memory, cancellation), output)
 }
 
 /// Write the same map image from an owner's borrowed ordered fields, without constructing another field map. Keys must be strictly increasing and the iterator must report its exact length.
@@ -70,17 +64,10 @@ pub fn write_fields_image<'a>(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> ValueImageResult<u64> {
-    let mut writer = write::Writer {
+    write::copy(
+        ValueImageReader::from_fields(fields, memory, cancellation),
         output,
-        memory,
-        cancellation,
-        written: 0,
-    };
-    writer.bytes(MAGIC)?;
-    writer.bytes(&[17])?;
-    writer.fields_payload(fields, 0)?;
-    cancellation.check()?;
-    Ok(writer.written)
+    )
 }
 
 /// Read exactly one versioned value, leaving subsequent stream bytes to the enclosing format. Every decoded allocation is admitted before construction and remains charged with the returned owner. The codec bounds nesting to 128 containers. Source storage and native B-tree allocator slack retain their existing ownership boundaries.

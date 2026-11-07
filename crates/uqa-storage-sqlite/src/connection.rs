@@ -135,6 +135,7 @@ struct SessionState {
     cleanup_failure: Mutex<Option<String>>,
     logical: OnceLock<Arc<logical::BoundRecordSession>>,
     native_restore: Mutex<Option<native_restore::NativeRestore>>,
+    native_image_source: Option<std::sync::Weak<OnceLock<ManagedConnection>>>,
     snapshot_branch: Mutex<Arc<()>>,
 }
 
@@ -153,6 +154,7 @@ impl SessionState {
             cleanup_failure: Mutex::new(None),
             logical: OnceLock::new(),
             native_restore: Mutex::new(None),
+            native_image_source: None,
             snapshot_branch: Mutex::new(Arc::new(())),
         }
     }

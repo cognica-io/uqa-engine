@@ -14,6 +14,14 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        super::image::reader(self, doc_id, control)
+    }
+
     fn write_image_document(
         &self,
         doc_id: DocId,

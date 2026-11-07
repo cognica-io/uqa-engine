@@ -7,37 +7,44 @@
 //! Exact tensors stream from the retained ordered root without its legacy full-map export.
 
 use super::{
-    floats, header, invalid, read_floats, Budgeted, BudgetedVec, ImageInput, ImageOutput,
-    MemoryError, StorageBackendResult, StorageReadControl, VectorIndex,
+    invalid, read_floats, Budgeted, BudgetedVec, ImageInput, ImageOutput, MemoryError,
+    StorageBackendResult, StorageReadControl, VectorIndex,
 };
-use crate::vector_index::{memory_state::MemoryVectorState, MemoryVectorIndex};
+use crate::{
+    image_io::{ImageRead, ImageReader},
+    vector_index::{memory_state::MemoryVectorState, MemoryVectorIndex},
+};
 use uqa_core::{memory::OwnedMap, DocId};
+
+mod stream;
+#[cfg(test)]
+mod tests;
+
+pub(in crate::vector_index) fn reader<'a>(
+    index: &'a MemoryVectorIndex,
+    control: &'a StorageReadControl,
+) -> StorageBackendResult<ImageReader<'a>> {
+    ImageReader::new(stream::ExactImageCursor::new(index, control)?, control)
+}
 
 pub(in crate::vector_index) fn write(
     index: &MemoryVectorIndex,
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
+    let mut cursor = stream::ExactImageCursor::new(index, control)?;
     let mut out = ImageOutput {
         writer,
         control,
         written: 0,
     };
-    header(&mut out, 0, index.dimensions)?;
-    out.count(index.state.vectors.len())?;
-    out.count(index.count()?)?;
-    for (&document, vectors) in &index.state.vectors {
-        out.bytes(&document.to_le_bytes())?;
-        if vectors.is_empty() {
-            return Err(invalid());
+    let mut buffer = [0; 4096];
+    loop {
+        let count = cursor.read(&mut buffer)?;
+        if count == 0 {
+            break;
         }
-        out.count(vectors.len())?;
-        for vector in vectors {
-            if vector.len() as u64 != u64::from(index.dimensions) {
-                return Err(invalid());
-            }
-            floats(&mut out, vector)?;
-        }
+        out.bytes(&buffer[..count])?;
     }
     control.check()?;
     Ok(out.written)

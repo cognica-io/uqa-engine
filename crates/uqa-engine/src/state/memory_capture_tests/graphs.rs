@@ -61,6 +61,51 @@ fn committed_graph_capture_keeps_original_membership_after_rename_and_retirement
     assert_eq!(control.memory().used(), 0);
 }
 
+#[test]
+fn committed_graph_image_reader_owns_its_source_after_engine_and_cut_retirement() {
+    let engine = Engine::new();
+    engine
+        .add_graph_vertex(Vertex::new(1, "selected"), "g")
+        .unwrap();
+    let original_source = Arc::downgrade(&engine.durable.graphs.read()["g"]);
+    let original = StorageReadControl::with_limit(4 << 20);
+    let invoking = StorageReadControl::with_limit(256 << 10);
+    let cut = engine.capture_committed_memory(&original).unwrap();
+    let graphs = cut.resources.graphs.captured(&cut.cut).unwrap();
+    let selected = graphs.get().unwrap().image("g").unwrap().unwrap();
+    let mut reader = selected.into_image_reader(&invoking).unwrap();
+    engine
+        .add_graph_vertex(Vertex::new(2, "later"), "g")
+        .unwrap();
+    drop((graphs, cut, engine));
+    assert!(original_source.upgrade().is_some());
+    let bytes = std::thread::spawn(move || {
+        while !reader.prepare(1).unwrap().ready {}
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 17];
+        loop {
+            let count = reader.read(&mut buffer).unwrap();
+            if count == 0 {
+                return bytes;
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+    })
+    .join()
+    .unwrap();
+    assert!(original_source.upgrade().is_none());
+    assert_eq!(original.memory().used(), 0);
+    assert_eq!(invoking.memory().used(), 0);
+    let destination = StorageReadControl::with_limit(1 << 20);
+    let graph =
+        uqa_graph::MemoryGraphStore::read_image(&mut bytes.as_slice(), &destination).unwrap();
+    assert_eq!(graph.vertex_ids_in_graph("g").unwrap(), [1].into());
+    assert_eq!(graph.get_vertex(1).unwrap().label, "selected");
+    assert!(graph.get_vertex(2).is_none());
+    drop(graph);
+    assert_eq!(destination.memory().used(), 0);
+}
+
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]

@@ -56,6 +56,27 @@ impl GraphStoreHandle {
 }
 
 impl GraphImageSnapshot {
+    /// Transfer this captured source into an independently owned, movable image reader. The source remains retained until EOF, error, unwind or reader drop.
+    pub fn into_image_reader(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'static>> {
+        uqa_storage::image_io::ImageReader::from_owner(self, control)
+    }
+
+    /// Borrow a resumable image while preserving both the captured source and invoking cancellation owners. Preparation visits bounded native validation positions before any bytes are returned.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        let GraphStoreHandle::Memory(source) = self.0.source.as_ref() else {
+            unreachable!("only memory graph sources can be captured");
+        };
+        source
+            .image_reader(control)?
+            .with_source_control(Some(&self.0.control), control)
+    }
+
     pub(crate) const fn wrapper_bytes() -> usize {
         size_of::<RetainedGraph>()
     }
@@ -83,6 +104,15 @@ impl GraphImageSnapshot {
         uqa_storage::image_io::with_retained_control(output, Some(&self.0.control), |output| {
             source.write_image(output, control)
         })
+    }
+}
+
+impl uqa_storage::image_io::ImageOwner for GraphImageSnapshot {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        Self::image_reader(self, control)
     }
 }
 

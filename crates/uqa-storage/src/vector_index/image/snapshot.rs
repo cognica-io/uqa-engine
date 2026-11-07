@@ -6,11 +6,25 @@
 
 //! Export-only handles cannot run queries that mutate evaluated physical state.
 
-use crate::{read_control::StorageReadControl, StorageBackendResult, VectorIndex};
+use crate::{
+    image_io::{ImageOwner, ImageReader},
+    read_control::StorageReadControl,
+    StorageBackendError, StorageBackendResult, VectorIndex,
+};
 use std::sync::Arc;
 use uqa_core::memory::MemoryReservation;
 
 pub(crate) trait VectorImageSource: Send + Sync {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "resumable vector image output is not supported by this backend".into(),
+        ))
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,
@@ -21,6 +35,13 @@ pub(crate) trait VectorImageSource: Send + Sync {
 struct IndexImage(Arc<dyn VectorIndex>);
 
 impl VectorImageSource for IndexImage {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.0.image_reader(control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,
@@ -37,6 +58,16 @@ struct Retained<T> {
 }
 
 impl<T: VectorImageSource> VectorImageSource for Retained<T> {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.control.check()?;
+        self.source
+            .image_reader(control)?
+            .with_source_control(Some(&self.control), control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,
@@ -55,6 +86,22 @@ pub struct VectorImageSnapshot {
 }
 
 impl VectorImageSnapshot {
+    /// Borrow this selected source's resumable codec, retaining its original cancellation. Capability follows the concrete codec; no full-image output buffer is created for unsupported owners.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        self.source.image_reader(control)
+    }
+
+    /// Transfer this selected source into an independent movable reader. Codec opening is lazy; unsupported codecs fail on the first preparation or nonempty read and release the source.
+    pub fn into_image_reader(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'static>> {
+        ImageReader::from_owner(self, control)
+    }
+
     pub fn write_image(
         &self,
         output: &mut dyn std::io::Write,
@@ -83,5 +130,14 @@ impl VectorImageSnapshot {
                 _memory: memory,
             }),
         })
+    }
+}
+
+impl ImageOwner for VectorImageSnapshot {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        Self::image_reader(self, control)
     }
 }

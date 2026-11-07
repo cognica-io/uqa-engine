@@ -5,6 +5,10 @@
 //
 
 use super::*;
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod repository;
+mod stream;
 use crate::{store::GraphStore, types::Direction};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -496,7 +500,7 @@ fn memory_graph_images_stream_large_borrowed_properties_with_bounded_io() {
         sink.written as u64
     );
     assert!(sink.written > 2 << 20);
-    assert_eq!(sink.largest, 16 << 10);
+    assert!(sink.largest <= 16 << 10);
     assert_eq!(control.memory().peak(), 0);
     let bytes = encode(&source);
     let small = StorageReadControl::with_limit(64 << 10);

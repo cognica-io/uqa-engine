@@ -10,7 +10,7 @@ use std::{io::Write, path::Path};
 
 use rusqlite::{params, Connection};
 use uqa_storage::{
-    backup::{BackupError, BackupLease, BackupResult, BackupRoot, ImageProvider},
+    backup::{BackupError, BackupLeaseInput, BackupResult, BackupRoot, ImageProvider},
     key_value::{KeyValueImageImportReader, KeyValueImageStep, KeyValueImportUnit},
     mvcc::{BackupCursorKey, DatabaseRestore},
     read_control::StorageReadControl,
@@ -55,7 +55,7 @@ pub struct SQLiteKeyValueBackupImport<'a> {
 impl<'a> SQLiteKeyValueBackupImport<'a> {
     pub fn new(
         path: &Path,
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         request: DatabaseRestore,
         options: SQLiteBackupImportOptions,
         control: &StorageReadControl,
@@ -64,6 +64,7 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
         if options.maximum_value_bytes == 0 {
             return Err(BackupError::Invalid("zero SQLite import value limit"));
         }
+        let lease = lease.into();
         let root = lease.root();
         if request.source() != root.cut().source || request.target().as_bytes() == [0; 16] {
             return Err(BackupError::Invalid("SQLite import restore identity"));

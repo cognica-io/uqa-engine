@@ -87,6 +87,14 @@ impl VectorIndex for ExclusiveVectorCapture {
             .read_with_control(control)?
             .capture_image_with_control(control)
     }
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        self.capture_image_with_control(control)?
+            .into_image_reader(control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

@@ -279,8 +279,13 @@ fn owner_authorization_rebinds_after_retaining_the_table_generation() {
     let engine = Engine::new();
     engine.sql("CREATE ROLE target; CREATE TABLE items(id integer); CREATE TABLE replacement(other text); ALTER TABLE replacement OWNER TO target", &[]).unwrap();
     let retained = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
-    let replacement =
-        engine.storage.tables.read()[&RelationIdentity::new("public", "replacement")].clone();
+    let replacement = engine
+        .storage
+        .tables
+        .write()
+        .remove(&RelationIdentity::new("public", "replacement"))
+        .unwrap()
+        .unwrap();
     let tables = ReplacingTables {
         engine: &engine,
         replacement,

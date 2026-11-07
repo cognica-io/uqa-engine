@@ -167,6 +167,19 @@ impl DiskANNMemoryIndex {
 }
 
 impl VectorIndex for DiskANNMemoryIndex {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        image::reader(
+            &self.index,
+            &self.physical,
+            self.options,
+            &self.control,
+            control,
+        )
+    }
+
     fn into_memory_capture(
         self: Box<Self>,
         registry: &crate::memory_capture::MemoryCaptureRegistry,

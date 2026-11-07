@@ -37,6 +37,8 @@
 //! remains available through [`uqa_engine::Engine::sql`].
 
 pub mod arrow_export;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub mod backup;
 pub mod query_builder;
 
 pub use query_builder::{Order, QueryBuilder};

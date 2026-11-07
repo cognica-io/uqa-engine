@@ -19,6 +19,52 @@ pub(super) struct NativeRestore {
 }
 
 impl ManagedConnection {
+    /// The initial native transition publishes an independent committed-image owner to its provider. The weak publication target cannot retain the provider or form a session cycle.
+    pub(crate) fn new_native_initial_session(
+        &self,
+        source: std::sync::Weak<std::sync::OnceLock<Self>>,
+    ) -> Self {
+        let _gate = self.session.gate.read();
+        let mut session = super::SessionState::new();
+        session.native_image_source = Some(source);
+        if let Some(logical) = self.session.logical.get() {
+            let _ = session.logical.set(Arc::new(
+                logical.new_session_with_cancellation(&session.write_cancellation),
+            ));
+        }
+        let connection = Self {
+            pool: Arc::clone(&self.pool),
+            session: Arc::new(session),
+            record_access: self.record_access,
+        };
+        if let Some(logical) = connection.session.logical.get() {
+            connection.publish_native_image_source(logical);
+        }
+        connection
+    }
+
+    fn publish_native_image_source(&self, logical: &BoundRecordSession) {
+        let Some(source) = self
+            .session
+            .native_image_source
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+        else {
+            return;
+        };
+        source.get_or_init(|| {
+            let session = super::SessionState::new();
+            let _ = session.logical.set(Arc::new(
+                logical.new_session_with_cancellation(&session.write_cancellation),
+            ));
+            Self {
+                pool: Arc::clone(&self.pool),
+                session: Arc::new(session),
+                record_access: self.record_access,
+            }
+        });
+    }
+
     pub(crate) fn begin_native_initial_restore(&self) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
@@ -89,6 +135,12 @@ impl ManagedConnection {
         assert!(
             self.session.logical.set(logical).is_ok(),
             "initial native session was already bound"
+        );
+        self.publish_native_image_source(
+            self.session
+                .logical
+                .get()
+                .expect("installed native binding"),
         );
     }
 }
@@ -165,6 +217,85 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn native_initial_commit_publishes_an_independent_image_owner() {
+        for mode in 0..4 {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("source");
+            let base = match mode {
+                0 => ManagedConnection::open(&path),
+                1 => ManagedConnection::open_encrypted(&path, "image-owner"),
+                2 => ManagedConnection::open_compressed(
+                    &path,
+                    crate::SQLiteCompressionOptions::default(),
+                ),
+                _ => ManagedConnection::open_compressed_encrypted(
+                    &path,
+                    "image-owner",
+                    crate::SQLiteCompressionOptions::default(),
+                ),
+            }
+            .unwrap();
+            let source = Arc::new(std::sync::OnceLock::new());
+            let weak = Arc::downgrade(&source);
+            let initial = base.new_native_initial_session(weak.clone());
+            initial.begin_native_initial_restore().unwrap();
+            let catalog = Catalog::open(initial.clone()).unwrap();
+            catalog.set_metadata("image", "rolled back").unwrap();
+            initial.rollback_transaction().unwrap();
+            assert!(source.get().is_none());
+            drop(catalog);
+            initial.begin_native_initial_restore().unwrap();
+            let catalog = Catalog::open(initial.clone()).unwrap();
+            catalog.set_metadata("image", "committed").unwrap();
+            initial.commit_transaction().unwrap();
+            assert!(
+                !base.is_native_record_session(),
+                "source publication does not bind the unrelated factory session"
+            );
+            let published = source.get().unwrap();
+            assert!(published.is_native_record_session());
+            initial.begin_transaction().unwrap();
+            catalog.set_metadata("image", "private").unwrap();
+            initial.write_cancellation().cancel();
+            let source_catalog = Catalog::open(published.clone()).unwrap();
+            assert_eq!(
+                source_catalog.get_metadata("image").unwrap().as_deref(),
+                Some("committed")
+            );
+            initial.rollback_transaction().unwrap();
+            drop((source_catalog, catalog, initial, base));
+            let control = StorageReadControl::with_limit(1 << 20);
+            let image = crate::SQLiteNativeBackupImage::capture(published, &control).unwrap();
+            drop(source);
+            assert!(
+                weak.upgrade().is_none(),
+                "published image owners do not retain their publication cell"
+            );
+            drop(image);
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+
+    #[test]
+    fn failed_native_initial_conversion_does_not_publish_an_image_owner() {
+        let base = ManagedConnection::open_in_memory().unwrap();
+        let source = Arc::new(std::sync::OnceLock::new());
+        let initial = base.new_native_initial_session(Arc::downgrade(&source));
+        initial.begin_native_initial_restore().unwrap();
+        let catalog = Catalog::open(initial.clone()).unwrap();
+        catalog.set_metadata("initial", "private").unwrap();
+        initial.with(|sqlite| {
+            sqlite.execute_batch("CREATE TRIGGER reject_baseline BEFORE UPDATE ON _metadata WHEN NEW.key = 'schema_version' AND NEW.value = '49' BEGIN SELECT RAISE(ABORT, 'injected baseline failure'); END")?;
+            Ok(())
+        }).unwrap();
+        assert!(initial.commit_transaction().is_err());
+        assert!(source.get().is_none());
+        initial.rollback_transaction().unwrap();
+        assert!(source.get().is_none());
+        assert!(!base.is_native_record_session());
     }
 
     #[test]

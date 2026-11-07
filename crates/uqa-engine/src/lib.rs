@@ -74,6 +74,8 @@
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub mod backup;
 pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;

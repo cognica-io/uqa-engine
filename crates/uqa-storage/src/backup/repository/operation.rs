@@ -10,7 +10,10 @@ mod capture;
 mod copy;
 mod pack;
 mod retire;
-pub use capture::{BackupCaptureReport, BackupImageStatistics};
+pub use capture::{
+    BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
+    BackupImageCapture, BackupImageStatistics,
+};
 pub use copy::BackupCopyReport;
 pub use pack::{BackupPack, PackObject, PackRange};
 
@@ -27,7 +30,7 @@ use super::super::{
     SnapshotId,
 };
 use super::directory;
-use super::{BackupLease, LocalRepository};
+use super::{BackupLease, LocalRepository, VerifiedBackupImage};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Intent {
@@ -92,11 +95,18 @@ impl Intent {
 #[derive(Clone, Copy)]
 enum State {
     Capturing,
+    Imaging,
     Prepared(BackupRoot),
     Complete(BackupRoot),
     Cancelling,
     Cancelled,
     Failed,
+}
+
+#[derive(Clone, Copy)]
+struct Preparation {
+    root: BackupRoot,
+    removal_generation: [u8; 16],
 }
 
 /// Repository capture ownership. A failed capture cannot append or publish. A fully prepared image can finish publication after source loss; uncertain publication keeps its exact root for idempotent resolution.
@@ -312,12 +322,15 @@ impl BackupOperation<'_> {
         if !matches!(self.state, State::Capturing) {
             return Err(BackupError::Finished);
         }
-        let result = self.prepare_inner(inventory, summary, files, control);
-        match result {
-            Ok(root) => {
-                self.state = State::Prepared(root);
-                Ok(())
-            }
+        let candidate = self.begin_preparation(inventory, summary, control)?;
+        let remaining = FileBudget::new(self.maximum - self.used);
+        let verified = self.repository.verify_root_with_files(
+            candidate.root,
+            files.unwrap_or(&remaining),
+            control,
+        );
+        match verified {
+            Ok(verified) => self.finish_preparation(candidate, verified, control),
             Err(error) => {
                 self.state = State::Failed;
                 Err(error)
@@ -325,57 +338,85 @@ impl BackupOperation<'_> {
         }
     }
 
-    fn prepare_inner(
+    fn begin_preparation(
         &mut self,
         inventory: ObjectSpan,
         summary: InventorySummary,
-        files: Option<&FileBudget>,
         control: &StorageReadControl,
-    ) -> BackupResult<BackupRoot> {
-        let root = BackupRoot::new(
-            self.repository.id,
-            self.intent.backup,
-            self.intent.parent,
-            self.intent.cut,
-            inventory,
-            summary,
-        )?;
-        let context = self.repository.root_context(self.intent.backup);
-        self.reserve_staging(encoded_bytes(
-            context,
-            &self.repository.protection,
-            BackupRoot::ENCODED_BYTES,
-        )?)?;
-        let generation = {
+    ) -> BackupResult<Preparation> {
+        if !matches!(self.state, State::Capturing | State::Imaging) {
+            return Err(BackupError::Finished);
+        }
+        let result = (|| {
+            let root = BackupRoot::new(
+                self.repository.id,
+                self.intent.backup,
+                self.intent.parent,
+                self.intent.cut,
+                inventory,
+                summary,
+            )?;
+            let context = self.repository.root_context(self.intent.backup);
+            self.reserve_staging(encoded_bytes(
+                context,
+                &self.repository.protection,
+                BackupRoot::ENCODED_BYTES,
+            )?)?;
             let _admission = self.repository.admission(control)?;
-            self.repository.removal_generation(control)?
+            Ok(Preparation {
+                root,
+                removal_generation: self.repository.removal_generation(control)?,
+            })
+        })();
+        if result.is_err() {
+            self.state = State::Failed;
+        }
+        result
+    }
+
+    fn finish_preparation(
+        &mut self,
+        candidate: Preparation,
+        verified: VerifiedBackupImage,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        if !matches!(self.state, State::Capturing | State::Imaging) {
+            return Err(BackupError::Finished);
+        }
+        let result = (|| {
+            if verified.root() != candidate.root {
+                return Err(BackupError::Integrity);
+            }
+            #[cfg(test)]
+            if let Some(observe) = ON_PREPARED_VERIFIED.with(|slot| slot.borrow_mut().take()) {
+                observe();
+            }
+            let _admission = self.repository.admission(control)?;
+            if self.repository.removal_generation(control)? != candidate.removal_generation {
+                return Err(BackupError::Busy);
+            }
+            self.repository.advance_generation(control)?;
+            let mut prepared = directory::create_file(&self.directory, "prepared")?;
+            write_frame(
+                &mut prepared,
+                self.repository.root_context(self.intent.backup),
+                &self.repository.protection,
+                &candidate.root.encode(),
+                self.repository.limits,
+                control,
+            )?;
+            #[cfg(test)]
+            self.repository.before(super::Fault::PreparedSync)?;
+            prepared.sync_all()?;
+            directory::synchronize(&self.directory)?;
+            Ok(())
+        })();
+        self.state = if result.is_ok() {
+            State::Prepared(candidate.root)
+        } else {
+            State::Failed
         };
-        let remaining = FileBudget::new(self.maximum - self.used);
-        self.repository
-            .verify_root_with_files(root, files.unwrap_or(&remaining), control)?;
-        #[cfg(test)]
-        if let Some(observe) = ON_PREPARED_VERIFIED.with(|slot| slot.borrow_mut().take()) {
-            observe();
-        }
-        let _admission = self.repository.admission(control)?;
-        if self.repository.removal_generation(control)? != generation {
-            return Err(BackupError::Busy);
-        }
-        self.repository.advance_generation(control)?;
-        let mut prepared = directory::create_file(&self.directory, "prepared")?;
-        write_frame(
-            &mut prepared,
-            context,
-            &self.repository.protection,
-            &root.encode(),
-            self.repository.limits,
-            control,
-        )?;
-        #[cfg(test)]
-        self.repository.before(super::Fault::PreparedSync)?;
-        prepared.sync_all()?;
-        directory::synchronize(&self.directory)?;
-        Ok(root)
+        result
     }
 
     /// Resolve an existing matching root before consulting cancellation. A lost completion reply cannot turn a durable backup into a cancelled operation.

@@ -16,7 +16,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation};
 
 mod exact;
 mod snapshot;
-pub(super) use exact::write as write_exact;
+pub(super) use exact::{reader as read_exact, write as write_exact};
 pub use snapshot::VectorImageSnapshot;
 pub(crate) use snapshot::VectorImageSource;
 
@@ -91,16 +91,6 @@ pub(crate) fn boxed<T: VectorIndex + 'static>(
     Budgeted::new(Box::new(value), memory)
 }
 
-pub(crate) fn header(
-    out: &mut ImageOutput<'_>,
-    kind: u8,
-    dimensions: u32,
-) -> StorageBackendResult<()> {
-    out.bytes(MAGIC)?;
-    out.bytes(&[kind])?;
-    out.bytes(&dimensions.to_le_bytes())
-}
-
 pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> StorageBackendResult<()> {
     memory.grow(
         count
@@ -110,20 +100,18 @@ pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> Storag
     Ok(())
 }
 
-pub(crate) fn floats(out: &mut ImageOutput<'_>, values: &[f32]) -> StorageBackendResult<()> {
-    out.count(values.len())?;
-    let mut buffer = [0_u8; 4096];
-    for chunk in values.chunks(buffer.len() / 4) {
-        out.control.check()?;
-        for (value, bytes) in chunk.iter().zip(buffer.chunks_exact_mut(4)) {
-            if !value.is_finite() {
-                return Err(invalid());
-            }
-            bytes.copy_from_slice(&value.to_bits().to_le_bytes());
+pub(crate) fn coordinate_bytes(
+    values: &mut std::slice::Iter<'_, f32>,
+    output: &mut [u8],
+) -> StorageBackendResult<usize> {
+    let count = values.len().min(output.len() / 4);
+    for (bytes, value) in output[..count * 4].chunks_exact_mut(4).zip(values) {
+        if !value.is_finite() {
+            return Err(invalid());
         }
-        out.bytes(&buffer[..chunk.len() * 4])?;
+        bytes.copy_from_slice(&value.to_bits().to_le_bytes());
     }
-    Ok(())
+    Ok(count * 4)
 }
 
 pub(crate) fn read_floats(

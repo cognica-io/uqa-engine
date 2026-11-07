@@ -14,6 +14,9 @@ use super::{
 use crate::{hnsw_index::types::HNSWVector, StorageBackendResult};
 use uqa_core::memory::MemoryError;
 
+mod view;
+pub(in crate::hnsw_index) use view::VectorRead;
+
 impl Record for HNSWVector {
     fn memory_bytes(&self) -> StorageBackendResult<usize> {
         Ok(size_of::<Self>()

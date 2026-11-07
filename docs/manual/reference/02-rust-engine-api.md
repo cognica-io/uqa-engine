@@ -18,6 +18,30 @@ The `uqa` facade is the primary application dependency and re-exports the `uqa-e
 
 Use `Engine::close()` when the application needs an explicit close boundary. It rolls back open transactions, then removes the session's temporary objects and their dependents in a separately completed cleanup transaction. Cancellation and read-only session defaults do not prevent finalization, and the original cancellation signal remains set. A failed completion retains its transaction receipt and returns an error so the caller can retry close; successful close is idempotent. Session timeouts use the same finalization owner, including temporary-object cleanup before explicit close. Drop attempts the same cleanup before releasing the physical owner, but cannot report a failure. Do not submit new work after successful close.
 
+## Capture a persistent backup
+
+`Engine::backup_capabilities()` reports connected export, import and snapshot-fingerprint capabilities. `Engine::begin_backup(repository, options, control)` starts a full export or an incremental export when `options.parent` names a completed compatible root. The same entry point is available as `uqa_api::backup::begin_backup(engine, repository, options, control)`; its types are re-exported by that module and `uqa_engine::backup`.
+
+Export supports native SQLite, SQLite Key/Value and redb on native filesystem targets, including all four SQLite source file modes. The effective SQL role must be a superuser because an image includes security metadata and every owned relation. The existing direct-query admission boundary rejects failed transactions and preserves active private state; the provider cut selects committed state and excludes temporary objects. After construction, neither the source Engine nor its statement gate is retained by the job. `Engine::new()` reports unsupported export until its complete memory image is connected. Public Engine restore activation and snapshot-certified source-read reduction also remain unsupported.
+
+Create or open a `LocalRepository` with explicit `Protection` and `BackupLimits`. `BackupOptions::new(maximum_encoded_bytes, maximum_workspace_bytes)` requires positive encoded-output and staging limits; the supplied `StorageReadControl` owns retained-source and working-memory admission and cancellation. An encrypted source requires an encrypted repository by default. Set `allow_plaintext_export: true` only when an unencrypted archive is intended; source encryption never encrypts the repository automatically.
+
+```rust
+use uqa_engine::{Engine, backup::{
+    BackupCaptureStep, BackupOptions, BackupRoot, LocalRepository, StorageReadControl,
+}};
+
+fn capture(engine: &Engine, repository: &LocalRepository,
+           control: &StorageReadControl) -> Result<BackupRoot, Box<dyn std::error::Error>> {
+    let options = BackupOptions::new(1 << 30, 1 << 30);
+    let mut job = engine.begin_backup(repository, options, control)?;
+    while job.advance(128, 16 * 1024)? == BackupCaptureStep::Pending {}
+    Ok(job.publish()?)
+}
+```
+
+`advance` performs one bounded source, payload, frame or verification step; filesystem synchronization may wait independently. `progress`, `report`, `id`, `cut` and `completed` expose the existing repository state and actual work counters. `publish` requires complete verification and resolves a repeated completed publication without rewriting it. `cancel` retires unfinished source/workspace ownership; dropping a job releases its leases. Use the job's original cancellation token after source retirement. Source admission errors use `SQLError` with typed backup causes; later job errors use `BackupError`. The [repository contract](../internals/03-storage.md) describes root verification, retirement and independent incremental references.
+
 ## Execute SQL
 
 The central method is:

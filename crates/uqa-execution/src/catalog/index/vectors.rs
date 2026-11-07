@@ -64,7 +64,7 @@ pub fn detach_for_column_rename(
     indexes: &mut uqa_storage::vector_index::VectorIndexes,
     field: &str,
 ) -> StorageBackendResult<Option<ColumnVectorRename>> {
-    let Some(mut index) = indexes.live_mut()?.remove(field) else {
+    let Some(mut index) = indexes.live_mut()?.remove(field)? else {
         return Ok(None);
     };
     let dimensions = index.dimensions();
@@ -87,7 +87,7 @@ pub fn prepare_column_rewrite(
     mut canonical: Box<dyn VectorIndex>,
 ) -> StorageBackendResult<()> {
     let mut indexes = indexes.live_mut()?;
-    if let Some(mut old) = indexes.remove(field) {
+    if let Some(mut old) = indexes.remove(field)? {
         if old.index_kind() != "diskann" {
             old.clear()?;
         }

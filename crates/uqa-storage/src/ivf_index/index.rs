@@ -35,6 +35,14 @@ impl VectorIndex for IVFIndex {
         self.data.read_with_control(control)?.freeze(control)
     }
 
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        self.capture_image_with_control(control)?
+            .into_image_reader(control)
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

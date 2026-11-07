@@ -12,6 +12,8 @@ use crate::{
     vector_index::image::{read_vector_image, read_vector_image_with_temporary, tests::encode},
 };
 
+mod stream;
+
 fn populated(control: &StorageReadControl) -> DiskANNMemoryIndex {
     let mut source = new(control);
     source

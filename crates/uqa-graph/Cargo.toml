@@ -28,6 +28,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 allocation-counter = "=0.8.1"
+tempfile = "3.13"
 proptest = { workspace = true }
 criterion = { workspace = true }
 

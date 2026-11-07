@@ -20,6 +20,7 @@ mod capture;
 mod input;
 mod output;
 mod retention;
+mod stream;
 #[cfg(test)]
 mod tests;
 mod validation;
@@ -31,6 +32,17 @@ fn invalid() -> StorageBackendError {
 }
 
 impl MemoryGraphStore {
+    /// Open an admitted borrowed image reader without visiting graph entities. `prepare` validates bounded positions before output; synchronous `read` completes any remaining preparation. The selected immutable source must outlive the reader.
+    pub fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::image_io::ImageReader<'a>> {
+        uqa_storage::image_io::ImageReader::new(
+            stream::GraphImageCursor::new(self, control),
+            control,
+        )
+    }
+
     /// Stream the complete primary graph state, including unattached entities, graph memberships, label tombstones and unused allocated identities. Evaluated properties use Core's exact value codec; derived adjacency/label indexes are validated before output and reconstructed by their owner on import. The caller must retain an immutable committed source independently of this encoding operation.
     pub fn write_image(
         &self,

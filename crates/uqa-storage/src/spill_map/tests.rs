@@ -7,6 +7,8 @@
 use super::*;
 use std::collections::BTreeMap;
 
+mod records;
+
 fn entries(map: &Map<u64>) -> Vec<(u128, u64)> {
     let mut output = Vec::new();
     let mut after = None;

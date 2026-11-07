@@ -19,6 +19,7 @@ mod seal;
 mod statistics;
 
 pub use memory::{DiskANNMemoryBuilder, DiskANNMemorySource};
+pub(super) use memory::{ImageOrigins, PhysicalImageCursor};
 pub use origins::DiskANNOriginReader;
 pub use reader::{DiskANNPageLease, DiskANNReader};
 pub use seal::{DiskANNArtifactSeal, DiskANNArtifactSealer};

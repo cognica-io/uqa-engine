@@ -175,7 +175,7 @@ fn sqlite_kv_backup_image_preserves_live_artifacts_and_writer_progress_in_every_
             } else {
                 None
             };
-            let length = unit.decoded_bytes as usize;
+            let length = unit.decoded_bytes.expect("record image length") as usize;
             let mut offset = 0;
             while offset < length {
                 let copied = image.read_current(&mut output).unwrap();

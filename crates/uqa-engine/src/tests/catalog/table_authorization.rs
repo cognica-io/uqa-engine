@@ -118,19 +118,22 @@ fn bound_authorization_retains_the_selected_table_generation_after_registry_repl
             &[],
         )
         .unwrap();
-    let name = RelationIdentity::new("public", "original");
     let (_, selected) = engine
         .table_authorization_context()
         .bound_table_for_security("public.original")
         .unwrap();
-    let replacement =
-        engine.storage.tables.read()[&RelationIdentity::new("public", "replacement")].clone();
+    drop(
+        engine
+            .storage
+            .tables
+            .try_write()
+            .expect("binding must release the actual registry guard"),
+    );
     engine
-        .storage
-        .tables
-        .try_write()
-        .expect("binding must release the actual registry guard")
-        .insert(name, replacement)
+        .sql(
+            "DROP TABLE original; ALTER TABLE replacement RENAME TO original",
+            &[],
+        )
         .unwrap();
     assert_eq!(selected.column_names(), ["id"]);
     assert_eq!(

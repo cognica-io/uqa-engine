@@ -21,6 +21,7 @@ mod incremental;
 mod integrity;
 mod resources;
 mod retention;
+mod scheduled;
 mod streaming;
 
 fn control() -> StorageReadControl {

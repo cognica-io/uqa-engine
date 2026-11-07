@@ -44,6 +44,7 @@ pub(super) struct Image {
     statistics: BackupSourceStatistics,
     pub dropped: Arc<AtomicBool>,
     pub length_delta: u64,
+    pub streaming_length: bool,
     pub cancel: Option<CancellationToken>,
 }
 
@@ -60,6 +61,7 @@ impl Image {
             statistics: BackupSourceStatistics::default(),
             dropped: Arc::new(AtomicBool::new(false)),
             length_delta: 0,
+            streaming_length: false,
             cancel: None,
         }
     }
@@ -101,7 +103,8 @@ impl BackupImageSource for Image {
                 key: &self.key,
             },
             kind: value.kind,
-            decoded_bytes: value.data.len() as u64 + self.length_delta,
+            decoded_bytes: (!self.streaming_length)
+                .then_some(value.data.len() as u64 + self.length_delta),
         })
     }
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {

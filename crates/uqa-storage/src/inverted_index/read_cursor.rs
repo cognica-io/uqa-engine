@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{clustered_postings::PostingReadCursor, read_control::StorageReadControl};
 use std::ops::Bound;
-use uqa_core::memory::{BudgetedString, OwnedMap};
+use uqa_core::{
+    memory::{BudgetedString, OwnedMap},
+    CancellationToken,
+};
 
 pub(super) struct MemoryPostingReadCursor<'a> {
     index: &'a MemoryInvertedIndex,
@@ -20,7 +23,7 @@ pub(super) struct MemoryPostingReadCursor<'a> {
     postings: Option<&'a OwnedMap<DocId, MemoryPosting>>,
     current: Option<PostingScore>,
     frequency: u64,
-    control: Option<StorageReadControl>,
+    cancellation: Option<CancellationToken>,
 }
 
 impl<'a> MemoryPostingReadCursor<'a> {
@@ -40,14 +43,14 @@ impl<'a> MemoryPostingReadCursor<'a> {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         let postings = controlled_postings(index, field, term, control)?;
-        Self::from_postings(index, field, postings, Some(control.clone()))
+        Self::from_postings(index, field, postings, Some(control.cancellation().clone()))
     }
 
     fn from_postings(
         index: &'a MemoryInvertedIndex,
         field: &'a str,
         postings: Option<&'a OwnedMap<DocId, MemoryPosting>>,
-        control: Option<StorageReadControl>,
+        cancellation: Option<CancellationToken>,
     ) -> StorageBackendResult<Self> {
         let frequency = usize_to_u64(postings.map_or(0, OwnedMap::len), "document frequency")?;
         let mut cursor = Self {
@@ -56,7 +59,7 @@ impl<'a> MemoryPostingReadCursor<'a> {
             postings,
             current: None,
             frequency,
-            control,
+            cancellation,
         };
         cursor.seek(Bound::Unbounded)?;
         Ok(cursor)
@@ -64,8 +67,8 @@ impl<'a> MemoryPostingReadCursor<'a> {
 
     fn check(&self) -> StorageBackendResult<()> {
         self.index.check_retained_read()?;
-        if let Some(control) = &self.control {
-            control.check()?;
+        if let Some(cancellation) = &self.cancellation {
+            cancellation.check()?;
         }
         Ok(())
     }
@@ -168,7 +171,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let budget = MemoryBudget::new(1 << 20);
         let other = budget.reserve(7).unwrap();
-        let control = StorageReadControl::new(&budget, &cancellation);
+        let control = StorageReadControl::new(&budget, &cancellation).with_temporary_limit(0);
         let mut cursor = index
             .posting_read_cursor_key_budgeted("body", &term, &control)
             .unwrap();
@@ -184,6 +187,7 @@ mod tests {
         );
         let retained = budget.used();
         let current = cursor.current();
+        drop(control);
         cancellation.cancel();
         assert!(matches!(
             cursor.advance(),
@@ -194,7 +198,12 @@ mod tests {
             Err(crate::StorageBackendError::Cancelled(_))
         ));
         assert!(matches!(
-            index.get_occurrences_budgeted(0, "body", &term, &control),
+            index.get_occurrences_budgeted(
+                0,
+                "body",
+                &term,
+                &StorageReadControl::new(&budget, &cancellation),
+            ),
             Err(crate::StorageBackendError::Cancelled(_))
         ));
         assert_eq!(cursor.current(), current);

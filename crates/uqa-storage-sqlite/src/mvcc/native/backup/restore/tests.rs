@@ -146,9 +146,14 @@ fn native_backup_import_preserves_projection_history_artifacts_and_allocators(
     let destination = directory.path().join("destination");
     empty(&destination);
     let mut import =
-        SQLiteNativeBackupImport::new(&destination, &lease, request, options(mode), &control)
+        SQLiteNativeBackupImport::new(&destination, lease, request, options(mode), &control)
             .unwrap();
+    assert!(matches!(
+        repository.remove_backup(root.backup(), &control),
+        Err(BackupError::Busy)
+    ));
     complete(&mut import);
+    repository.remove_backup(root.backup(), &control).unwrap();
     assert_eq!(import.imported_records(), expected.len() as u64);
     assert_eq!(control.memory().used(), 0);
     let restored = open(&destination, mode).unwrap();

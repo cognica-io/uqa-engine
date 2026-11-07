@@ -16,6 +16,7 @@ use crate::diskann_index::format::{DiskANNGeneration, DiskANNManifest, PAGE_BYTE
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 mod image;
+pub(in crate::diskann_index) use image::{ImageOrigins, PhysicalImageCursor};
 
 struct Records {
     records: BudgetedMap<DiskANNRecordKey, BudgetedVec<u8>>,

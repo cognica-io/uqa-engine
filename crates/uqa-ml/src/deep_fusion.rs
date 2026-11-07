@@ -243,8 +243,8 @@ use tensor_layers::{
     apply_batch_norm, apply_dense, apply_dropout, apply_embed, apply_flatten, apply_global_pool,
     apply_signal, apply_softmax,
 };
-pub(crate) use validation::validate_model;
 use validation::{validate_layers, validate_state};
+pub(crate) use validation::{validate_model, ModelValidation};
 
 #[cfg(test)]
 mod tests;

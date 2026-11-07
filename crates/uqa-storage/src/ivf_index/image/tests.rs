@@ -13,6 +13,8 @@ use crate::{
 };
 use std::time::Duration;
 
+mod stream;
+
 fn restore(bytes: &[u8], control: &StorageReadControl) -> Budgeted<IVFIndex> {
     let mut bytes = &bytes[13..];
     let mut input = ImageInput {
@@ -24,8 +26,7 @@ fn restore(bytes: &[u8], control: &StorageReadControl) -> Budgeted<IVFIndex> {
     result
 }
 
-#[test]
-fn independent_stale_training_fixture_preserves_exact_values_and_defers_training() {
+fn stale_fixture() -> Vec<u8> {
     let mut bytes = b"UQAVEC01\x01\x02\x00\x00\x00".to_vec();
     for value in [1_u64, 3, 2] {
         bytes.extend(value.to_le_bytes());
@@ -48,6 +49,12 @@ fn independent_stale_training_fixture_preserves_exact_values_and_defers_training
     bytes.extend(2.0_f32.to_bits().to_le_bytes());
     bytes.push(1);
     bytes.extend(0_u64.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn independent_stale_training_fixture_preserves_exact_values_and_defers_training() {
+    let bytes = stale_fixture();
     let control = StorageReadControl::with_limit(1 << 20);
     let restored = restore(&bytes, &control);
     assert_eq!(restored.state(), IVFState::Stale);

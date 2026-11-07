@@ -8,11 +8,14 @@
 
 mod builder;
 mod disk;
+mod scratch;
 #[cfg(test)]
 mod tests;
 mod workspace;
 
 pub(crate) use builder::Builder;
+pub(crate) use disk::RecordBytes;
+pub(crate) use scratch::Scratch;
 
 use std::{ops::Deref, sync::Arc};
 use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, MemoryReservation};
@@ -31,6 +34,12 @@ pub(crate) enum Read<'a, V> {
     Owned(Budgeted<V>),
 }
 
+/// Immutable resident values and authenticated spilled extents share the same selected root.
+pub(crate) enum RecordRead<'a, V> {
+    Resident(&'a V),
+    Spilled(RecordBytes<'a>),
+}
+
 impl<V> Deref for Read<'_, V> {
     type Target = V;
     fn deref(&self) -> &V {
@@ -42,7 +51,7 @@ impl<V> Deref for Read<'_, V> {
 }
 
 enum Root<V> {
-    Memory(BudgetedSharedMap<u128, Option<Arc<Budgeted<V>>>>),
+    Memory(BudgetedSharedMap<u128, Arc<Budgeted<V>>>),
     Disk(disk::Map),
 }
 
@@ -144,7 +153,7 @@ impl<V: Record> Map<V> {
 
     pub(crate) fn contains_key(&self, key: u128) -> StorageBackendResult<bool> {
         match &self.root {
-            Root::Memory(map) => Ok(map.get(&key).is_some_and(Option::is_some)),
+            Root::Memory(map) => Ok(map.get(&key).is_some()),
             Root::Disk(map) => map.contains_key(key),
         }
     }
@@ -159,12 +168,24 @@ impl<V: Record> Map<V> {
         memory: &MemoryBudget,
     ) -> StorageBackendResult<Option<Read<'_, V>>> {
         match &self.root {
-            Root::Memory(map) => Ok(map
-                .get(&key)
-                .and_then(Option::as_ref)
-                .map(|value| Read::Borrowed(&***value))),
+            Root::Memory(map) => Ok(map.get(&key).map(|value| Read::Borrowed(&***value))),
             Root::Disk(map) => map.get(key, memory).map(|value| value.map(Read::Owned)),
         }
+    }
+
+    /// Borrow a selected record without decoding or copying its complete spilled payload.
+    pub(crate) fn read_record(
+        &self,
+        key: u128,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<RecordRead<'_, V>>> {
+        control.check()?;
+        let record = match &self.root {
+            Root::Memory(map) => map.get(&key).map(|value| RecordRead::Resident(&***value)),
+            Root::Disk(map) => map.record(key)?.map(RecordRead::Spilled),
+        };
+        control.check()?;
+        Ok(record)
     }
 
     pub(crate) fn next(
@@ -186,11 +207,8 @@ impl<V: Record> Map<V> {
                         .as_ref()
                         .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
                 )
-                .find_map(|(key, value)| {
-                    value
-                        .as_ref()
-                        .map(|value| (*key, Read::Borrowed(&***value)))
-                })),
+                .next()
+                .map(|(key, value)| (*key, Read::Borrowed(&***value)))),
             Root::Disk(map) => map
                 .next(after, memory)
                 .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
@@ -210,7 +228,8 @@ impl<V: Record> Map<V> {
                         .as_ref()
                         .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
                 )
-                .find_map(|(key, value)| value.as_ref().map(|_| *key))),
+                .next()
+                .map(|(key, _)| *key)),
             Root::Disk(map) => map.next_key(after, memory),
         }
     }
@@ -254,7 +273,7 @@ impl<V: Record> Map<V> {
             match map.budget().reserve(bytes) {
                 Ok(memory) => {
                     let value = Arc::new(Budgeted::new(value, memory));
-                    match map.try_insert(key, Some(Arc::clone(&value))) {
+                    match map.try_insert(key, Arc::clone(&value)) {
                         Ok(()) => {
                             self.max_encoded_bytes = encoded_bytes;
                             self.retain_spill_workspace(workspace);
@@ -356,8 +375,9 @@ impl<V: Record> Map<V> {
             None
         };
         if let Root::Memory(map) = &mut self.root {
-            match map.try_insert(key, None) {
-                Ok(()) => {
+            match map.with_remove(&key) {
+                Ok(candidate) => {
+                    *map = candidate;
                     self.len -= 1;
                     self.retain_spill_workspace(workspace);
                     return Ok(());
@@ -382,20 +402,9 @@ impl<V: Record> Map<V> {
 
     pub(crate) fn last(&self) -> StorageBackendResult<Option<(u128, Read<'_, V>)>> {
         match &self.root {
-            Root::Memory(map) => {
-                let mut before = None;
-                while let Some((key, value)) = map.last_before(
-                    before
-                        .as_ref()
-                        .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
-                ) {
-                    if let Some(value) = value {
-                        return Ok(Some((*key, Read::Borrowed(&***value))));
-                    }
-                    before = Some(*key);
-                }
-                Ok(None)
-            }
+            Root::Memory(map) => Ok(map
+                .last_before(std::ops::Bound::Unbounded)
+                .map(|(key, value)| (*key, Read::Borrowed(&***value)))),
             Root::Disk(map) => map
                 .last(&self.memory)
                 .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
@@ -418,9 +427,7 @@ impl<V: Record> Map<V> {
         )?;
         for (key, value) in resident {
             check(control)?;
-            if let Some(value) = value {
-                disk.push(*key, &***value, &self.memory)?;
-            }
+            disk.push(*key, &***value, &self.memory)?;
         }
         let root = disk.finish()?;
         check(control)?;

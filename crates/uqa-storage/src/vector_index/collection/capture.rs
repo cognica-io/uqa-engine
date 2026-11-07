@@ -6,11 +6,11 @@
 
 //! Collection membership and individual vector state use separate capture identities.
 
-use super::{copy_field, Contents, LiveIndexes, VectorIndexes};
+use super::{native::NativeVectorSources, Contents, LiveIndexes, VectorIndexes};
 use crate::{
     memory_capture::{
-        MemoryCapture, MemoryCaptureIdentity, MemoryCaptureKey, MemoryCaptureRegistry,
-        MemoryCaptureSource, MemoryCaptureSources,
+        MemoryCapture, MemoryCaptureIdentity, MemoryCaptureKey, MemoryCaptureMember,
+        MemoryCaptureRegistry, MemoryCaptureSource, MemoryCaptureSources,
     },
     read_control::StorageReadControl,
     vector_index::{image::VectorImageSnapshot, VectorIndex},
@@ -18,15 +18,20 @@ use crate::{
 };
 use std::{borrow::Borrow, sync::Arc};
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap},
+    memory::{Budgeted, MemoryBudget, Produced, RetainedMap, RetainedMapSnapshot},
     FieldName,
 };
 
 impl VectorIndexes {
     pub fn memory(registry: &MemoryCaptureRegistry) -> Self {
+        Self::memory_with_budget(registry, &MemoryBudget::new(usize::MAX))
+    }
+
+    /// Construct the native field owner under its own allowance. Captures independently admit its immutable root and cached key footprint.
+    pub fn memory_with_budget(registry: &MemoryCaptureRegistry, memory: &MemoryBudget) -> Self {
         Self(Contents::Live {
             indexes: LiveIndexes::new(),
-            registry: Some(registry.clone()),
+            capture: Some(NativeVectorSources::new(registry, memory)),
         })
     }
 
@@ -36,20 +41,50 @@ impl VectorIndexes {
         sources: &MemoryCaptureSources,
     ) -> StorageBackendResult<MemoryCaptureSources> {
         let mut selected = sources.clone();
-        for (_, index) in self {
-            let owner = index.memory_capture().ok_or_else(|| {
-                StorageBackendError::Other("vector owner lacks memory capture admission".into())
-            })?;
-            selected = selected.with_source(&owner.key()?)?;
+        if let Contents::Live {
+            capture: Some(capture),
+            ..
+        } = &self.0
+        {
+            selected = selected.with_sources(&capture.sources)?;
+        } else if !self.is_empty() {
+            return Err(StorageBackendError::Other(
+                "vector owner lacks memory capture admission".into(),
+            ));
         }
         Ok(selected)
+    }
+
+    /// Borrow the native source-publication adapter before publishing its enclosing table membership. Binding the resulting address is infallible and does not change physical index state.
+    pub fn source_publication(&mut self) -> StorageBackendResult<VectorSourcePublication<'_>> {
+        match &mut self.0 {
+            Contents::Live {
+                capture: Some(capture),
+                ..
+            } => Ok(VectorSourcePublication(capture)),
+            _ => Err(StorageBackendError::Other(
+                "vector collection has no native source publication".into(),
+            )),
+        }
+    }
+}
+
+pub struct VectorSourcePublication<'a>(&'a mut NativeVectorSources);
+
+impl VectorSourcePublication<'_> {
+    pub fn sources(&self) -> &MemoryCaptureSources {
+        &self.0.sources
+    }
+
+    pub fn bind(self, member: MemoryCaptureMember) {
+        self.0.member = Some(member);
     }
 }
 
 /// Mutation access cannot replace a registered owner without preserving its selected cuts. New owners join the same domain before collection publication; rejected registration leaves the existing collection unchanged.
 pub struct LiveVectorIndexesMut<'a> {
     pub(super) indexes: &'a mut LiveIndexes,
-    pub(super) registry: &'a Option<MemoryCaptureRegistry>,
+    pub(super) capture: &'a mut Option<NativeVectorSources>,
 }
 
 fn retire(index: &dyn VectorIndex) {
@@ -64,24 +99,48 @@ impl LiveVectorIndexesMut<'_> {
         field: FieldName,
         index: Box<dyn VectorIndex>,
     ) -> StorageBackendResult<Option<Box<dyn VectorIndex>>> {
-        let index = match self.registry {
-            Some(registry) => index.into_memory_capture(registry)?,
+        let index = match self.capture.as_ref() {
+            Some(capture) => index.into_memory_capture(&capture.registry)?,
             None => index,
         };
+        let capture = self
+            .capture
+            .as_ref()
+            .map(|capture| capture.with_index(&field, index.as_ref()))
+            .transpose()?;
+        if let (Some(previous), Some(next)) = (self.capture.as_ref(), &capture) {
+            previous.publish_field(&field, next)?;
+        }
         if let Some(old) = self.indexes.get(&field) {
             retire(old.as_ref());
         }
-        Ok(self.indexes.insert(field, index))
+        let previous = self.indexes.insert(field, index);
+        *self.capture = capture;
+        Ok(previous)
     }
 
-    pub fn remove<Q: Ord + ?Sized>(&mut self, field: &Q) -> Option<Box<dyn VectorIndex>>
+    pub fn remove<Q: Ord + ?Sized>(
+        &mut self,
+        field: &Q,
+    ) -> StorageBackendResult<Option<Box<dyn VectorIndex>>>
     where
         FieldName: Borrow<Q>,
     {
-        if let Some(old) = self.indexes.get(field) {
-            retire(old.as_ref());
+        let Some((name, old)) = self.indexes.get_key_value(field) else {
+            return Ok(None);
+        };
+        let capture = self
+            .capture
+            .as_ref()
+            .map(|capture| capture.without_index(name))
+            .transpose()?;
+        if let (Some(previous), Some(next)) = (self.capture.as_ref(), &capture) {
+            previous.publish_field(name, next)?;
         }
-        self.indexes.remove(field)
+        retire(old.as_ref());
+        let previous = self.indexes.remove(field);
+        *self.capture = capture;
+        Ok(previous)
     }
 
     pub fn get_mut<Q: Ord + ?Sized>(
@@ -109,28 +168,36 @@ impl LiveVectorIndexesMut<'_> {
     }
 
     pub fn replace(&mut self, indexes: LiveIndexes) -> StorageBackendResult<()> {
-        let indexes = match self.registry {
-            Some(registry) => indexes
-                .into_iter()
-                .map(|(field, index)| {
-                    index
-                        .into_memory_capture(registry)
-                        .map(|index| (field, index))
-                })
-                .collect::<StorageBackendResult<LiveIndexes>>()?,
-            None => indexes,
+        let (indexes, mut capture) = if let Some(previous) = self.capture.as_ref() {
+            let mut capture =
+                NativeVectorSources::new(&previous.registry, previous.fields.budget());
+            let mut registered = LiveIndexes::new();
+            for (field, index) in indexes {
+                let index = index.into_memory_capture(&capture.registry)?;
+                capture = capture.with_index(&field, index.as_ref())?;
+                registered.insert(field, index);
+            }
+            (registered, Some(capture))
+        } else {
+            (indexes, None)
         };
+        if let (Some(previous), Some(next)) = (self.capture.as_ref(), capture.as_mut()) {
+            previous.publish_all(next)?;
+        }
         for index in self.indexes.values() {
             retire(index.as_ref());
         }
         *self.indexes = indexes;
+        *self.capture = capture;
         Ok(())
     }
 }
 
 /// Immutable field-to-source identities preserve replaced, renamed and dropped indexes without retaining their mutable owners. Each image is admitted by its own source on first read, first mutation or retirement.
 pub struct CapturedVectorIndexes {
-    indexes: BudgetedMap<FieldName, Budgeted<MemoryCaptureKey<VectorImageSnapshot>>>,
+    indexes: Budgeted<
+        RetainedMapSnapshot<Produced<FieldName>, Budgeted<MemoryCaptureKey<VectorImageSnapshot>>>,
+    >,
     control: StorageReadControl,
     identity: MemoryCaptureIdentity,
 }
@@ -149,16 +216,18 @@ impl MemoryCaptureSource for VectorIndexes {
         identity: &MemoryCaptureIdentity,
     ) -> StorageBackendResult<Self::Frozen> {
         control.check()?;
-        let mut indexes = BudgetedMap::new(control.memory());
-        for (field, index) in self {
-            let capture = index.memory_capture().ok_or_else(|| {
-                StorageBackendError::Other("vector owner lacks memory capture admission".into())
-            })?;
-            let key = capture.key()?;
-            let (field, mut memory) = copy_field(field, control)?;
-            memory.grow(key.retained_source_bytes())?;
-            indexes.insert(field, Budgeted::new(key, memory))?;
-        }
+        let indexes = match &self.0 {
+            Contents::Live {
+                capture: Some(capture),
+                ..
+            } => capture.fields.capture(control.memory())?,
+            _ if self.is_empty() => RetainedMap::new(control.memory()).capture(control.memory())?,
+            _ => {
+                return Err(StorageBackendError::Other(
+                    "vector owner lacks memory capture admission".into(),
+                ))
+            }
+        };
         control.check()?;
         Ok(CapturedVectorIndexes {
             indexes,
@@ -171,7 +240,10 @@ impl MemoryCaptureSource for VectorIndexes {
 impl CapturedVectorIndexes {
     pub fn fields(&self) -> StorageBackendResult<impl ExactSizeIterator<Item = &str>> {
         self.control.check()?;
-        Ok(self.indexes.iter().map(|(field, _)| field.as_str()))
+        Ok(self
+            .indexes
+            .iter_bidirectional()
+            .map(|(field, _)| field.as_str()))
     }
 
     /// Resolve a field through its selected source identity without borrowing current membership. A removed owner preserves its image before unpublication; the same field's replacement can never supply bytes for the old identity.
@@ -212,11 +284,8 @@ mod tests {
         let control = StorageReadControl::with_limit(1 << 20);
         let cut = registry.capture(&control).unwrap();
         let captured = source.captured(&cut).unwrap();
-        for (name, key) in &captured.indexes {
-            assert_eq!(
-                key.reserved_bytes(),
-                name.capacity() + key.retained_source_bytes()
-            );
+        for (_, key) in captured.indexes.iter() {
+            assert_eq!(key.reserved_bytes(), key.retained_source_bytes());
             assert!(key.retained_source_bytes() > 0);
             assert!(key.retained(&cut).unwrap().is_none());
         }

@@ -7,6 +7,8 @@
 //! Persistent binary Patricia roots have at most 128 branch steps for a u128 key.
 
 mod cache;
+mod record;
+pub(crate) use record::RecordBytes;
 
 use super::{
     invalid, io,
@@ -294,6 +296,29 @@ impl Map {
             return Ok(None);
         }
         file.value(leaf, memory).map(Some)
+    }
+
+    pub(super) fn record(&self, key: u128) -> StorageBackendResult<Option<RecordBytes<'_>>> {
+        if self.root == 0 {
+            return Ok(None);
+        }
+        let mut file = self.file.lock();
+        let (_, leaf) = file.leaf(self.root, key)?;
+        if leaf.key != key {
+            return Ok(None);
+        }
+        let end = leaf
+            .left
+            .checked_add(leaf.length)
+            .ok_or(MemoryError::SizeOverflow)?;
+        if end > file.file.metadata().map_err(io)?.len() {
+            return Err(invalid("record extent exceeds its file"));
+        }
+        Ok(Some(RecordBytes {
+            file: &self.file,
+            offset: leaf.left,
+            length: usize::try_from(leaf.length).map_err(|_| MemoryError::SizeOverflow)?,
+        }))
     }
 
     pub(super) fn last<V: Record>(

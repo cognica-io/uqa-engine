@@ -8,17 +8,47 @@
 
 use super::{invalid, DiskANNMemoryBuilder, DiskANNMemorySource, DiskANNRecordKey};
 use crate::{
-    diskann_index::format::{DiskANNManifest, DiskANNOriginEntry, DiskANNOriginLayout, PAGE_BYTES},
-    image_io::{ImageInput, ImageOutput},
+    diskann_index::format::{DiskANNManifest, DiskANNOriginBatch, DiskANNOriginLayout, PAGE_BYTES},
+    image_io::ImageInput,
+    read_control::StorageReadControl,
     StorageBackendResult,
 };
+use uqa_core::memory::{BudgetedMapIter, BudgetedVec};
+
+mod stream;
+pub(in crate::diskann_index) use stream::PhysicalImageCursor;
+
+/// Sealed origin records have at most 64 entries; each call decodes one fixed-capacity batch.
+pub(in crate::diskann_index) struct ImageOrigins<'a> {
+    source: &'a DiskANNMemorySource,
+    layout: DiskANNOriginLayout,
+    first: u64,
+    documents: u64,
+}
+
+impl<'a> ImageOrigins<'a> {
+    pub(in crate::diskann_index) fn next_batch(
+        &mut self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNOriginBatch<'a>>> {
+        control.check()?;
+        if self.first == self.documents {
+            return Ok(None);
+        }
+        let bytes = self
+            .source
+            .records
+            .records
+            .get(&DiskANNRecordKey::Origins(self.first))
+            .ok_or_else(|| invalid("missing image origin batch"))?;
+        let batch = self.layout.decode(self.first, bytes, control)?;
+        self.first += batch.len() as u64;
+        Ok(Some(batch))
+    }
+}
 
 impl DiskANNMemorySource {
-    pub(in crate::diskann_index) fn visit_image_origins(
-        &self,
-        control: &crate::read_control::StorageReadControl,
-        visit: &mut dyn FnMut(DiskANNOriginEntry) -> StorageBackendResult<()>,
-    ) -> StorageBackendResult<()> {
+    pub(in crate::diskann_index) fn image_origins(&self) -> StorageBackendResult<ImageOrigins<'_>> {
         let manifest = self.seal.manifest();
         let summary = manifest
             .origins()
@@ -28,41 +58,12 @@ impl DiskANNMemorySource {
             manifest.input().dimensions,
             summary.documents(),
         )?;
-        for (key, bytes) in &self.records.records {
-            if let DiskANNRecordKey::Origins(first) = key {
-                let batch = layout.decode(*first, bytes, control)?;
-                for index in 0..batch.len() {
-                    control.check()?;
-                    visit(batch.entry(index).expect("validated origin batch"))?;
-                }
-            }
-        }
-        control.check()
-    }
-
-    pub(in crate::diskann_index) fn write_image(
-        &self,
-        output: &mut ImageOutput<'_>,
-    ) -> StorageBackendResult<()> {
-        output.count(self.records.records.len() - 1)?;
-        for (key, bytes) in &self.records.records {
-            let (tag, first) = match key {
-                DiskANNRecordKey::Manifest => continue,
-                DiskANNRecordKey::Codebook => (0, 0),
-                DiskANNRecordKey::Codes(first) => (1, *first),
-                DiskANNRecordKey::Side(first) => (2, *first),
-                DiskANNRecordKey::Origins(first) => (3, *first),
-            };
-            output.bytes(&[tag])?;
-            output.bytes(&first.to_le_bytes())?;
-            output.sized(bytes)?;
-        }
-        output.count(self.records.graph.len())?;
-        for (id, bytes) in &self.records.graph {
-            output.bytes(&id.to_le_bytes())?;
-            output.bytes(bytes)?;
-        }
-        output.control.check()
+        Ok(ImageOrigins {
+            source: self,
+            layout,
+            first: 0,
+            documents: summary.documents(),
+        })
     }
 
     pub(in crate::diskann_index) fn read_image(

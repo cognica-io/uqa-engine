@@ -163,7 +163,7 @@ pub fn drop_column(
     state.remove_text_field(column);
     {
         let mut vectors = state.write_vector_indexes();
-        if let Some(mut index) = vectors.live_mut()?.remove(column) {
+        if let Some(mut index) = vectors.live_mut()?.remove(column)? {
             if index.index_kind() != "diskann" {
                 index.clear()?;
             }

@@ -160,3 +160,69 @@ fn denied_path_capture_preserves_ordinary_updates_and_independent_cuts() {
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
 }
+
+#[test]
+fn memory_path_image_reader_survives_replacement_and_engine_closure() {
+    let engine = Engine::new();
+    graph(&engine);
+    let sequences: Vec<_> = expected()
+        .paths
+        .into_iter()
+        .map(|path| path.sequence)
+        .collect();
+    engine.build_path_index("saved", "g", &sequences).unwrap();
+    let key = engine.durable.path_indexes.key().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    engine
+        .add_graph_edge(Edge::new(3, 3, 1, "edge"), "g")
+        .unwrap();
+    engine.build_path_index("saved", "g", &sequences).unwrap();
+    assert_ne!(
+        engine
+            .get_path_index("saved", "g")
+            .unwrap()
+            .unwrap()
+            .lookup(&sequences[1])
+            .unwrap()
+            .unwrap(),
+        [(1, 3)].into()
+    );
+    drop(engine);
+    let saved = key.retained(&cut).unwrap().unwrap();
+    let image = saved.get().unwrap().image("g::saved").unwrap().unwrap();
+    let invoking = StorageReadControl::with_limit(64 << 10);
+    let mut reader = image.into_image_reader(&invoking).unwrap();
+    drop((saved, cut));
+    assert!(control.memory().used() > 0);
+    let progress = reader.prepare(1).unwrap();
+    assert!(progress.ready);
+    assert_eq!(progress.positions, 0);
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 7];
+    loop {
+        let count = reader.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(invoking.memory().used(), 0);
+    let imported = StorageReadControl::with_limit(1 << 20);
+    let restored = uqa_graph::PathIndex::read_image(&mut bytes.as_slice(), &imported).unwrap();
+    for path in expected().paths {
+        assert_eq!(
+            restored.lookup(&path.sequence).unwrap().unwrap(),
+            path.pairs.into_iter().collect()
+        );
+    }
+    drop(restored);
+    assert_eq!(imported.memory().used(), 0);
+}

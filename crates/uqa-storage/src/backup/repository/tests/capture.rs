@@ -95,7 +95,7 @@ impl BackupImageSource for Image {
                 key: &self.key,
             },
             kind: UnitKind::Record,
-            decoded_bytes: length,
+            decoded_bytes: Some(length),
         })
     }
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {

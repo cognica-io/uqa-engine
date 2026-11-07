@@ -55,6 +55,81 @@ impl Write for ObjectWriter {
     }
 }
 
+/// Whole-object hashing advances through the same bounded owner during capture and restore verification.
+pub(super) struct ObjectVerification {
+    file: File,
+    expected: ImageDigest,
+    remaining: u64,
+    hash: Sha256,
+    bytes: u64,
+    complete: bool,
+}
+
+impl ObjectVerification {
+    pub(super) fn new(file: File, expected: ImageDigest, bytes: u64) -> BackupResult<Self> {
+        if file.metadata()?.len() != bytes {
+            return Err(BackupError::Integrity);
+        }
+        Ok(Self {
+            file,
+            expected,
+            remaining: bytes,
+            hash: Sha256::new(),
+            bytes: 0,
+            complete: false,
+        })
+    }
+
+    pub(super) fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    pub(super) fn advance(
+        &mut self,
+        maximum: usize,
+        control: &StorageReadControl,
+    ) -> BackupResult<bool> {
+        if self.complete {
+            return Ok(true);
+        }
+        control.check()?;
+        if maximum == 0 {
+            return Err(BackupError::Invalid("zero object verification window"));
+        }
+        let mut buffer = [0; 16 * 1024];
+        let size = self.remaining.min(buffer.len().min(maximum) as u64) as usize;
+        let read = match self.file.read(&mut buffer[..size]) {
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if read == 0 && self.remaining != 0 {
+            return Err(BackupError::Integrity);
+        }
+        self.hash.update(&buffer[..read]);
+        self.remaining -= read as u64;
+        self.bytes = self
+            .bytes
+            .checked_add(read as u64)
+            .ok_or(BackupError::Invalid("object byte count overflow"))?;
+        if self.remaining == 0 {
+            super::super::frame::require_end(&mut self.file, control)?;
+            if ImageDigest::from_bytes(self.hash.clone().finalize().into()) != self.expected {
+                return Err(BackupError::Integrity);
+            }
+            self.complete = true;
+        }
+        Ok(self.complete)
+    }
+
+    fn into_file(self) -> BackupResult<File> {
+        if !self.complete {
+            return Err(BackupError::Finished);
+        }
+        Ok(self.file)
+    }
+}
+
 pub(super) struct SpanReader<'a> {
     file: File,
     repository: &'a LocalRepository,
@@ -83,27 +158,10 @@ impl LocalRepository {
             return Err(BackupError::Integrity);
         }
         if verify_object {
-            let mut hash = Sha256::new();
-            let mut buffer = [0; 16 * 1024];
-            let mut remaining = span.object_bytes();
-            while remaining != 0 {
-                control.cancellation().check()?;
-                let count = remaining.min(buffer.len() as u64) as usize;
-                let read = match file.read(&mut buffer[..count]) {
-                    Ok(read) => read,
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => return Err(error.into()),
-                };
-                if read == 0 {
-                    return Err(BackupError::Integrity);
-                }
-                hash.update(&buffer[..read]);
-                remaining -= read as u64;
-            }
-            if ImageDigest::from_bytes(hash.finalize().into()) != span.digest() {
-                return Err(BackupError::Integrity);
-            }
-            super::super::frame::require_end(&mut file, control)?;
+            let mut verification =
+                ObjectVerification::new(file, span.digest(), span.object_bytes())?;
+            while !verification.advance(16 * 1024, control)? {}
+            file = verification.into_file()?;
         }
         file.seek(SeekFrom::Start(span.offset()))?;
         Ok(SpanReader {

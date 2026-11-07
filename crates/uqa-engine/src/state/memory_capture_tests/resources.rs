@@ -205,6 +205,8 @@ fn memory_resource_children_keep_original_cancellation_after_registry_and_engine
 #[test]
 fn committed_model_capture_and_native_publication_share_unrelated_weights() {
     let engine = Engine::new();
+    // Keep registration admission live while checking that later writes do not change the retained payload charge.
+    let registry = engine.storage.memory_capture.as_ref().unwrap().clone();
     let original = model(0.25);
     engine.save_model("large", &original).unwrap();
     let small = DeepModel {
@@ -245,6 +247,7 @@ fn committed_model_capture_and_native_publication_share_unrelated_weights() {
     );
     drop(engine);
     assert_eq!(control.memory().used(), retained);
+    drop(registry);
     assert_eq!(captured.get().unwrap().len(), 65);
     assert!(captured.get().unwrap().image("later").unwrap().is_none());
     assert_eq!(model_image(&saved), expected);

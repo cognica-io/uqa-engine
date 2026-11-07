@@ -7,7 +7,7 @@
 //! Framing for one resolved descriptor and its exact immutable dictionary closure.
 
 use crate::{
-    image_io::{ImageInput, ImageOutput},
+    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
@@ -22,6 +22,7 @@ use uqa_analysis::{
 use uqa_core::memory::BudgetedVec;
 
 mod capture;
+mod stream;
 pub use capture::AnalyzerImageSnapshot;
 
 const MAGIC: &[u8; 8] = b"UQAANA01";
@@ -46,31 +47,40 @@ pub fn write_analyzer_image(
 }
 
 fn write_parts<'a>(
-    descriptor: &str,
+    descriptor: &'a str,
     count: usize,
-    resources: impl Iterator<Item = AnalyzerResource<'a>>,
+    resources: impl Iterator<Item = AnalyzerResource<'a>> + Send,
     writer: &mut dyn Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
+    let mut cursor = stream::AnalyzerImageCursor::new(descriptor, count, resources, control)?;
     let mut output = ImageOutput {
         writer,
         control,
         written: 0,
     };
-    output.bytes(MAGIC)?;
-    output.sized(descriptor.as_bytes())?;
-    output.count(count)?;
-    for resource in resources {
-        let kind = match resource.kind() {
-            AnalyzerResourceKind::Nori => 0,
-            AnalyzerResourceKind::Kuromoji => 1,
-        };
-        output.bytes(&[kind])?;
-        output.bytes(&resource.sha256())?;
-        output.sized(resource.bytes())?;
+    let mut buffer = [0; 4096];
+    loop {
+        let count = cursor.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.bytes(&buffer[..count])?;
     }
     control.check()?;
     Ok(output.written)
+}
+
+fn reader_parts<'a>(
+    descriptor: &'a str,
+    count: usize,
+    resources: impl Iterator<Item = AnalyzerResource<'a>> + Send + 'a,
+    control: &'a StorageReadControl,
+) -> StorageBackendResult<ImageReader<'a>> {
+    ImageReader::new(
+        stream::AnalyzerImageCursor::new(descriptor, count, resources, control)?,
+        control,
+    )
 }
 
 /// Reconstruct one complete private revision from its supplied artifacts. Encoded dictionaries retain their original input allowance through the final compiled owner. Descriptor preparation and decoded models use the destination Analysis owner's independent validation/resource limits.

@@ -139,7 +139,7 @@ impl<M: BackupRecordMapping> MappedRecordBackupImage<M> {
                 key,
             },
             kind,
-            decoded_bytes,
+            decoded_bytes: Some(decoded_bytes),
         })
     }
 

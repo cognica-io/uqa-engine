@@ -169,8 +169,12 @@ fn sqlite_backup_import_preserves_artifacts_revisions_and_allocators_after_sourc
         let lease = repository.open_backup(root.backup(), &control).unwrap();
         empty_file(&target_path);
         let mut import =
-            SQLiteKeyValueBackupImport::new(&target_path, &lease, request, options(mode), &control)
+            SQLiteKeyValueBackupImport::new(&target_path, lease, request, options(mode), &control)
                 .unwrap();
+        assert!(matches!(
+            repository.remove_backup(root.backup(), &setup),
+            Err(BackupError::Busy)
+        ));
         let waiting = StorageReadControl::with_limit(128 << 10);
         let _deadline = waiting.cancellation().deadline(
             std::time::Duration::from_millis(20),
@@ -181,6 +185,7 @@ fn sqlite_backup_import_preserves_artifacts_revisions_and_allocators_after_sourc
             Err(crate::SQLiteError::Cancelled(_))
         ));
         complete(&mut import);
+        repository.remove_backup(root.backup(), &setup).unwrap();
         assert_eq!(import.imported_records(), wanted.len() as u64);
         assert_eq!(control.memory().used(), 0);
         assert!(control.memory().peak() <= 128 << 10);

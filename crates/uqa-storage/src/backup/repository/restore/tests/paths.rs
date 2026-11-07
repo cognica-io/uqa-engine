@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod scheduled;
+
 #[test]
 fn restore_provider_path_requires_regular_installed_names_and_retires_memory() {
     let temporary = tempfile::tempdir().unwrap();

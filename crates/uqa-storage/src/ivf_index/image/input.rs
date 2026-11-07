@@ -9,7 +9,7 @@
 use super::super::IVFIndex;
 use super::{
     entries, invalid, read_floats, validation, Budgeted, BudgetedVec, IVFData, IVFState,
-    ImageInput, MemoryReservation, StorageBackendResult, StoredVector, VectorKey, View,
+    ImageInput, MemoryReservation, StorageBackendResult, StoredVector, VectorKey,
 };
 use uqa_core::memory::MemoryError;
 
@@ -49,7 +49,7 @@ pub(crate) fn read(
     index.centroids = centroids;
     read_vectors(input, &mut index, &mut memory)?;
     restore_lists(&mut index, &mut memory, input.control)?;
-    validation::validate(&View::new(&index, input.control)?, input.control)?;
+    validation::validate(&index, input.control)?;
     Ok(IVFIndex::from_budgeted(Budgeted::new(index, memory)))
 }
 

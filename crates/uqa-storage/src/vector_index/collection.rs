@@ -18,7 +18,8 @@ use crate::{
 };
 
 mod capture;
-pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut};
+pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut, VectorSourcePublication};
+mod native;
 
 type LiveIndexes = BTreeMap<FieldName, Box<dyn VectorIndex>>;
 type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>>>;
@@ -29,7 +30,7 @@ pub struct VectorIndexes(Contents);
 enum Contents {
     Live {
         indexes: LiveIndexes,
-        registry: Option<crate::memory_capture::MemoryCaptureRegistry>,
+        capture: Option<native::NativeVectorSources>,
     },
     Retained {
         indexes: Option<RetainedIndexes>,
@@ -47,7 +48,7 @@ impl From<LiveIndexes> for VectorIndexes {
     fn from(indexes: LiveIndexes) -> Self {
         Self(Contents::Live {
             indexes,
-            registry: None,
+            capture: None,
         })
     }
 }
@@ -55,7 +56,7 @@ impl From<LiveIndexes> for VectorIndexes {
 impl VectorIndexes {
     pub fn live_mut(&mut self) -> StorageBackendResult<LiveVectorIndexesMut<'_>> {
         match &mut self.0 {
-            Contents::Live { indexes, registry } => Ok(LiveVectorIndexesMut { indexes, registry }),
+            Contents::Live { indexes, capture } => Ok(LiveVectorIndexesMut { indexes, capture }),
             Contents::Retained { control, .. } => {
                 control.check()?;
                 Err(StorageBackendError::Other(

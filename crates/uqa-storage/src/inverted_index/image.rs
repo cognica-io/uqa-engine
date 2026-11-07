@@ -16,6 +16,7 @@ use uqa_core::memory::Budgeted;
 
 mod input;
 mod output;
+mod stream;
 #[cfg(test)]
 pub(super) mod tests;
 
@@ -23,6 +24,22 @@ const MAGIC: &[u8; 8] = b"UQATXT01";
 
 fn invalid() -> StorageBackendError {
     StorageBackendError::Other("invalid evaluated text document image".into())
+}
+
+pub(super) fn reader<'a>(
+    index: &'a MemoryInvertedIndex,
+    id: DocId,
+    control: &'a StorageReadControl,
+) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+    index.check_retained_read()?;
+    control.check()?;
+    let Some(document) = index.state.document(id)? else {
+        return Ok(None);
+    };
+    let cursor = stream::TextImageCursor::new(index, id, document, control)?;
+    crate::image_io::ImageReader::new(cursor, control)?
+        .with_source_control(index.read_control.as_ref(), control)
+        .map(Some)
 }
 
 pub(super) fn write(

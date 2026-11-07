@@ -4,26 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::io::{Seek, SeekFrom};
-
 use uqa_core::memory::BudgetedVec;
 
 use crate::{
     backup::{
         BackupError, BackupImageSource, BackupLimits, BackupResult, BackupSourceStatistics,
-        BackupSourceStep, FrameKind, ImageDigest, InventoryEntry, InventorySummary,
-        InventoryWriter, NamespaceId, ObjectSpan, UnitAddress, UnitKind,
+        ImageDigest, InventoryEntry, InventorySummary, NamespaceId, ObjectSpan, UnitAddress,
+        UnitKind,
     },
     read_control::StorageReadControl,
-    temporary_file::{FileBudget, FileLimit, TemporaryFile},
+    temporary_file::{FileBudget, FileLimit},
 };
 
 use super::{BackupOperation, PackObject, PackRange, State};
-use parent::ParentInventory;
-use selected::{SelectedImage, SelectedUnit};
 
+mod job;
 mod parent;
-mod selected;
+pub use job::{BackupCapturePhase, BackupCaptureProgress, BackupCaptureStep, BackupImageCapture};
 
 /// Logical capture work. Payload counters exclude repository framing and parent-inventory verification; written object bytes include new packs and the complete child inventory, not the publication descriptor.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,7 +36,6 @@ pub struct BackupImageStatistics {
 
 impl BackupImageStatistics {
     fn payload(&mut self, bytes: u64, reused: bool) -> BackupResult<()> {
-        add(&mut self.hashed_payload_bytes, bytes)?;
         if reused {
             add(&mut self.reused_units, 1)?;
             add(&mut self.reused_payload_bytes, bytes)
@@ -74,6 +70,15 @@ struct UnitMetadata {
 }
 
 impl UnitMetadata {
+    fn address(&self) -> UnitAddress<'_> {
+        UnitAddress {
+            namespace: self.namespace,
+            generation: self.generation,
+            family: self.family,
+            key: &self.key,
+        }
+    }
+
     fn charge(&self) -> BackupResult<usize> {
         self.key
             .len()
@@ -89,12 +94,7 @@ impl UnitMetadata {
         control: &StorageReadControl,
     ) -> BackupResult<InventoryEntry> {
         InventoryEntry::new(
-            UnitAddress {
-                namespace: self.namespace,
-                generation: self.generation,
-                family: self.family,
-                key: &self.key,
-            },
+            self.address(),
             self.kind,
             self.bytes,
             digest,
@@ -142,12 +142,10 @@ impl BackupOperation<'_> {
         if !matches!(self.state, State::Capturing) {
             return Err(BackupError::Finished);
         }
-        let result = self.capture_image(
-            source,
-            &FileBudget::new(maximum_workspace_bytes),
-            None,
-            control,
-        );
+        let result = (|| {
+            let files = workspace(control, maximum_workspace_bytes)?;
+            self.capture_image(source, &files, None, &control.with_file_budget(&files))
+        })();
         if result.is_err() {
             self.state = State::Failed;
         }
@@ -156,105 +154,38 @@ impl BackupOperation<'_> {
 
     pub(super) fn capture_image(
         &mut self,
-        mut source: impl BackupImageSource,
+        source: impl BackupImageSource,
         files: &FileBudget,
         expected: Option<InventorySummary>,
         control: &StorageReadControl,
     ) -> BackupResult<BackupCaptureReport> {
-        control.cancellation().check()?;
-        if source.cut() != self.cut() {
-            return Err(BackupError::Invalid(
-                "image source differs from capture cut",
-            ));
-        }
-        let repository = self.repository;
-        let limits = repository.limits;
-        let mut parent = self
-            .parent_lease
-            .as_ref()
-            .map(|lease| ParentInventory::new(repository, lease.root(), control))
-            .transpose()?;
-        let spool = TemporaryFile::with_file_budget(files)?;
-        let mut inventory = InventoryWriter::new(spool, self.cut().format, limits, control)?;
-        let mut statistics = BackupImageStatistics::default();
-        let mut selected = select(&mut source, control)?;
-        while selected {
-            let mut unit = SelectedUnit::new(&mut source, parent.as_mut(), files, limits, control)?;
-            if let SelectedImage::Reused { digest, span } = &unit.image {
-                inventory.append(&unit.metadata.entry(*digest, *span, limits, control)?)?;
-                statistics.payload(unit.metadata.bytes, true)?;
-                selected = select(&mut source, control)?;
-                continue;
-            }
-            let mut pack = self.begin_pack(control)?;
-            let mut pending = BudgetedVec::new(control.memory());
-            let retention_limit = (control.memory().available() / 4).min(64 * 1024);
-            let mut retained = 0_usize;
-            let mut decoded = 0_u64;
-            loop {
-                pending.reserve(1)?;
-                retained = retained
-                    .checked_add(unit.metadata.charge()?)
-                    .ok_or(BackupError::Invalid("image metadata size overflow"))?;
-                decoded = decoded
-                    .checked_add(unit.metadata.bytes)
-                    .ok_or(BackupError::Invalid("pack size overflow"))?;
-                pending.push(unit.append(&mut pack, &mut source, &mut statistics, control)?)?;
-                selected = select(&mut source, control)?;
-                if !selected || pending.len() >= 32 || decoded >= 64 * 1024 {
-                    break;
-                }
-                let charge = source
-                    .current_unit()
-                    .ok_or(BackupError::Invalid("source has no selected image unit"))?
-                    .address
-                    .key
-                    .len()
-                    .checked_add(size_of::<Pending>())
-                    .ok_or(BackupError::Invalid("image metadata size overflow"))?;
-                if charge > retention_limit.saturating_sub(retained) {
-                    break;
-                }
-                unit = SelectedUnit::new(&mut source, parent.as_mut(), files, limits, control)?;
-            }
-            let object = pack.finish(control)?;
-            add(&mut statistics.written_object_bytes, object.encoded_bytes())?;
-            for unit in pending.iter() {
-                inventory.append(&unit.entry(object, limits, control)?)?;
-            }
-        }
-        let source_statistics = source.statistics();
-        drop(source);
-        statistics.parent_units = parent.map_or(Ok(0), ParentInventory::finish)?;
-        let (mut spool, summary) = inventory.finish()?;
-        if expected.is_some_and(|expected| expected != summary) {
-            return Err(BackupError::Integrity);
-        }
-        spool.seek(SeekFrom::Start(0))?;
-        let span = self.write_object(FrameKind::Inventory, &mut spool, control)?;
-        add(&mut statistics.written_object_bytes, span.object_bytes())?;
-        drop(spool);
-        self.prepare_with_files(span, summary, Some(files), control)?;
-        Ok(BackupCaptureReport {
-            inventory: summary,
-            source: source_statistics,
-            image: statistics,
-        })
+        job::run(self, source, files, expected, control)
     }
 }
 
-fn select(source: &mut impl BackupImageSource, control: &StorageReadControl) -> BackupResult<bool> {
-    loop {
-        control.cancellation().check()?;
-        match source.advance(128)? {
-            BackupSourceStep::Unit => return Ok(true),
-            BackupSourceStep::Pending => (),
-            BackupSourceStep::Complete => return Ok(false),
-        }
+fn workspace(control: &StorageReadControl, maximum: u64) -> BackupResult<FileBudget> {
+    match control.file_budget() {
+        Some(files) if files.limit() <= maximum => Ok(files.clone()),
+        Some(_) => Err(BackupError::Invalid(
+            "source temporary limit exceeds capture workspace limit",
+        )),
+        None => Ok(FileBudget::new(maximum)),
     }
 }
 
 pub(super) fn workspace_error(error: BackupError) -> BackupError {
+    if let BackupError::Limit {
+        resource: "verification workspace",
+        required,
+        limit,
+    } = error
+    {
+        return BackupError::Limit {
+            resource: "capture workspace",
+            required,
+            limit,
+        };
+    }
     if let BackupError::Io(io) = &error {
         if let Some(limit) = io
             .get_ref()

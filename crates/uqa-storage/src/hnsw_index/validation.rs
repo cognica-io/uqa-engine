@@ -4,15 +4,36 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Structural validation streams nodes and spills reachability workspaces.
+//! One resumable structural validator preserves identity, edge and reachability diagnostic order.
 
-use super::{
-    prepare::{check, Control},
-    store::Map,
-    types::HNSWIndex,
+use super::{prepare::Control, store::NodeRead, types::HNSWIndex};
+use crate::{
+    image_io::ImagePreparation, read_control::StorageReadControl, StorageBackendError,
+    StorageBackendResult,
 };
-use crate::{StorageBackendError, StorageBackendResult};
-use uqa_core::memory::BudgetedVec;
+
+mod edges;
+mod reachability;
+#[cfg(test)]
+pub(super) mod tests;
+
+enum Stage {
+    Counts,
+    Identities,
+    Entry,
+    Edges,
+    Reachability,
+    Complete,
+}
+
+pub(super) struct Validation<'a> {
+    index: &'a HNSWIndex,
+    stage: Stage,
+    edges: Option<edges::Edges<'a>>,
+    reachability: Option<reachability::Reachability<'a>>,
+    after: Option<u128>,
+    computed_max: usize,
+}
 
 impl HNSWIndex {
     pub fn validate_invariants(&self) -> StorageBackendResult<()> {
@@ -20,141 +41,128 @@ impl HNSWIndex {
     }
 
     pub(super) fn validate_controlled(&self, control: Control<'_>) -> StorageBackendResult<()> {
-        check(control)?;
-        let memory = control.map_or(&self.memory, |control| control.memory());
-        if self.raw_vectors.len() != self.nodes.len()
-            || self.normalized_vectors.len() != self.nodes.len()
-        {
-            return Err(corrupt("graph and vector identity counts differ"));
-        }
-        let mut computed_max = 0;
-        for entry in self.nodes.iter_with_memory(memory) {
-            check(control)?;
-            let (key, node) = entry?;
-            if key != u128::from(node.id)
-                || !self.raw_vectors.contains_key(key)?
-                || !self.normalized_vectors.contains_key(key)?
-            {
-                return Err(corrupt("graph and vector identities differ"));
-            }
-            computed_max = computed_max.max(node.level);
-            if node.id >= self.next_node_id {
-                return Err(corrupt("next node id does not exceed persisted node ids"));
-            }
-        }
-        if self.nodes.is_empty() {
-            if self.entry_point.is_some() || self.max_level != 0 {
-                return Err(corrupt("empty graph has an entry point or non-zero level"));
-            }
+        let fallback;
+        let control = if let Some(control) = control {
+            control
         } else {
-            let id = self
-                .entry_point
-                .ok_or_else(|| corrupt("non-empty graph has no valid entry point"))?;
-            let entry = self
-                .nodes
-                .get_with_memory(u128::from(id), memory)?
-                .ok_or_else(|| corrupt("non-empty graph has no valid entry point"))?;
-            if self.max_level != computed_max || entry.level != self.max_level {
-                return Err(corrupt(&format!(
-                    "entry/max level mismatch: entry={}, metadata={}, computed={computed_max}",
-                    entry.level, self.max_level
-                )));
-            }
+            fallback = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
+            &fallback
+        };
+        let mut validation = Validation::new(self);
+        while !validation.advance(128, control)?.ready {}
+        Ok(())
+    }
+}
+
+impl<'a> Validation<'a> {
+    pub(super) fn new(index: &'a HNSWIndex) -> Self {
+        Self {
+            index,
+            stage: Stage::Counts,
+            edges: None,
+            reachability: None,
+            after: None,
+            computed_max: 0,
         }
-        self.validate_edges(control)?;
-        self.validate_reachability(control)
     }
 
-    fn validate_edges(&self, control: Control<'_>) -> StorageBackendResult<()> {
-        let memory = control.map_or(&self.memory, |control| control.memory());
-        for entry in self.nodes.iter_with_memory(memory) {
-            check(control)?;
-            let (_, node) = entry?;
-            if node.neighbors.len() != node.level + 1 {
-                return Err(corrupt(&format!(
-                    "node {} adjacency layer count does not match its level",
-                    node.id
-                )));
-            }
-            for (layer, neighbors) in node.neighbors.iter().enumerate() {
-                let mut unique = BudgetedVec::new(memory);
-                unique.extend_from_slice(neighbors)?;
-                unique.sort_unstable();
-                if unique.windows(2).any(|pair| pair[0] == pair[1])
-                    || unique.binary_search(&node.id).is_ok()
+    pub(super) fn advance(
+        &mut self,
+        maximum: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<ImagePreparation> {
+        control.check()?;
+        let mut positions = 0;
+        while positions < maximum && !matches!(self.stage, Stage::Complete) {
+            control.check()?;
+            self.step(control)?;
+            positions += 1;
+        }
+        control.check()?;
+        Ok(ImagePreparation {
+            positions,
+            ready: matches!(self.stage, Stage::Complete),
+        })
+    }
+
+    fn step(&mut self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        match &mut self.stage {
+            Stage::Counts => {
+                if self.index.raw_vectors.len() != self.index.nodes.len()
+                    || self.index.normalized_vectors.len() != self.index.nodes.len()
                 {
-                    return Err(corrupt(&format!(
-                        "node {} layer {layer} contains duplicate or self edges",
-                        node.id
-                    )));
+                    return Err(corrupt("graph and vector identity counts differ"));
                 }
-                if neighbors.len() > self.max_connections(layer) {
-                    return Err(corrupt(&format!(
-                        "node {} layer {layer} exceeds the degree bound",
-                        node.id
-                    )));
-                }
-                for neighbor_id in neighbors {
-                    check(control)?;
-                    let neighbor = self
-                        .nodes
-                        .get_with_memory(u128::from(*neighbor_id), memory)?
-                        .ok_or_else(|| {
-                            corrupt(&format!(
-                                "node {} layer {layer} references missing node {neighbor_id}",
-                                node.id
-                            ))
-                        })?;
-                    if neighbor.level < layer || !neighbor.neighbors[layer].contains(&node.id) {
-                        return Err(corrupt(&format!(
-                            "edge {} <-> {neighbor_id} is invalid at layer {layer}",
-                            node.id
-                        )));
+                self.stage = Stage::Identities;
+            }
+            Stage::Identities => {
+                if let Some(key) = self.index.nodes.next_key(self.after, control.memory())? {
+                    let node = NodeRead::open(&self.index.nodes, key, control)?
+                        .ok_or_else(|| corrupt("graph identity disappeared"))?;
+                    if key != u128::from(node.id)
+                        || !self.index.raw_vectors.contains_key(key)?
+                        || !self.index.normalized_vectors.contains_key(key)?
+                    {
+                        return Err(corrupt("graph and vector identities differ"));
                     }
+                    self.computed_max = self.computed_max.max(node.level);
+                    if node.id >= self.index.next_node_id {
+                        return Err(corrupt("next node id does not exceed persisted node ids"));
+                    }
+                    self.after = Some(key);
+                } else {
+                    self.stage = Stage::Entry;
                 }
             }
+            Stage::Entry => {
+                self.entry(control)?;
+                self.edges = Some(edges::Edges::new(self.index));
+                self.stage = Stage::Edges;
+            }
+            Stage::Edges => {
+                if self
+                    .edges
+                    .as_mut()
+                    .expect("active edge validation")
+                    .advance(control)?
+                {
+                    self.edges = None;
+                    self.reachability = Some(reachability::Reachability::new(self.index));
+                    self.stage = Stage::Reachability;
+                }
+            }
+            Stage::Reachability => {
+                if self
+                    .reachability
+                    .as_mut()
+                    .expect("active reachability validation")
+                    .advance(control)?
+                {
+                    self.reachability = None;
+                    self.stage = Stage::Complete;
+                }
+            }
+            Stage::Complete => (),
         }
         Ok(())
     }
 
-    fn validate_reachability(&self, control: Control<'_>) -> StorageBackendResult<()> {
-        let memory = control.map_or(&self.memory, |control| control.memory());
-        let Some(entry_point) = self.entry_point else {
-            return Ok(());
-        };
-        let mut reachable = Map::new(memory, memory.limit() / 32);
-        let mut pending = Map::new(memory, memory.limit() / 32);
-        reachable.insert(u128::from(entry_point), 0_u64, control)?;
-        pending.insert(0, entry_point, control)?;
-        let mut sequence = 1_u128;
-        let mut cursor = None;
-        loop {
-            check(control)?;
-            let next = pending.next(cursor)?.map(|(key, value)| (key, *value));
-            let Some((key, node_id)) = next else {
-                break;
-            };
-            pending.remove(key, control)?;
-            cursor = Some(key);
-            let node = self
-                .nodes
-                .get_with_memory(u128::from(node_id), memory)?
-                .ok_or_else(|| corrupt("reachability references missing node"))?;
-            for neighbor in &node.neighbors[0] {
-                check(control)?;
-                if reachable.get(u128::from(*neighbor))?.is_none() {
-                    reachable.insert(u128::from(*neighbor), 0, control)?;
-                    pending.insert(sequence, *neighbor, control)?;
-                    sequence += 1;
-                }
+    fn entry(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        if self.index.nodes.is_empty() {
+            if self.index.entry_point.is_some() || self.index.max_level != 0 {
+                return Err(corrupt("empty graph has an entry point or non-zero level"));
             }
-        }
-        if reachable.len() != self.nodes.len() {
-            return Err(corrupt(&format!(
-                "layer-zero graph reaches {} of {} nodes from entry point {entry_point}",
-                reachable.len(),
-                self.nodes.len()
-            )));
+        } else {
+            let missing = || corrupt("non-empty graph has no valid entry point");
+            let id = self.index.entry_point.ok_or_else(missing)?;
+            let entry =
+                NodeRead::open(&self.index.nodes, u128::from(id), control)?.ok_or_else(missing)?;
+            if self.index.max_level != self.computed_max || entry.level != self.index.max_level {
+                return Err(corrupt(&format!(
+                    "entry/max level mismatch: entry={}, metadata={}, computed={}",
+                    entry.level, self.index.max_level, self.computed_max
+                )));
+            }
         }
         Ok(())
     }

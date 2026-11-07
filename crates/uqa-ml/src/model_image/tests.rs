@@ -10,6 +10,7 @@ use std::io::Cursor;
 
 mod capture;
 mod fixtures;
+mod stream;
 
 fn model(layers: Vec<DeepLayerSpec>) -> DeepModel {
     DeepModel {

@@ -31,6 +31,21 @@ impl ReadOnlySnapshot<dyn DocumentStore> {
 }
 
 impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        self.0
+            .image_document_reader(doc_id, control)?
+            .map(|reader| reader.with_source_control(self.2.as_ref(), control))
+            .transpose()
+    }
+
     fn write_image_document(
         &self,
         doc_id: DocId,

@@ -10,7 +10,7 @@ use uqa_core::memory::BudgetedVec;
 
 use crate::{
     backup::{
-        BackupCut, BackupError, BackupImageReader, BackupLease, BackupReadStep, BackupResult,
+        BackupCut, BackupError, BackupImageReader, BackupLeaseInput, BackupReadStep, BackupResult,
         BackupRoot, BackupSourceStep, ImageFormat, NamespaceId, UnitKind,
     },
     mvcc::{CommitSequence, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE},
@@ -58,11 +58,12 @@ pub struct MappedRecordImageImportReader<'a, M: BackupRecordImportMapping> {
 
 impl<'a, M: BackupRecordImportMapping> MappedRecordImageImportReader<'a, M> {
     pub fn new(
-        lease: &'a BackupLease<'_>,
+        lease: impl Into<BackupLeaseInput<'a>>,
         mapping: M,
         maximum_workspace_bytes: u64,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
+        let lease = lease.into();
         let root = lease.root();
         let cut = root.cut();
         if cut.format != mapping.format() || cut.sequence.is_none() || mapping.header_bytes() == 0 {

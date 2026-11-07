@@ -30,9 +30,9 @@ mod resource_capture;
 mod table_capture;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
+pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 #[cfg(test)]
 pub(crate) use table_membership::SnapshotTableCut;
-pub(crate) use table_membership::TableRegistrySnapshot;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};

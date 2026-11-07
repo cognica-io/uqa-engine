@@ -14,6 +14,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add repository-owned restore jobs that advance provider import and validation before publishing a new destination. Owned image readers retain archive leases across steps; failure, cancellation and unwinding close active work, and recovery uses the original durable request. Complete public Engine restore remains under implementation.
+
+- Add native role, membership, schema, database, built-in routine and system relation authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Whole-Engine memory backup and restore remain under implementation.
+
+- Add exact materialized path-index images for memory backups. Borrowed and owned readers stream original label sequences and evaluated vertex pairs with fixed state, preserving selected data after graph changes and source closure. Import validates complete framing and canonical order before publication and retains decoded memory admission through native clones and captures. Complete memory Engine backup and restore remain under implementation.
+
+- Add resumable stored-model and analyzer image readers. Models retain bounded shape and numeric validation before output; analyzers borrow exact resolved descriptors and dictionary artifacts. Borrowed and independently owned readers preserve source cancellation and bytes after source closure, and synchronous output shares the same encoders. Complete memory Engine backup remains under implementation.
+
+- Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Resumable HNSW preparation and output preserve node/layer order, structural diagnostics and tombstone reachability with bounded work and shared temporary-file admission. Borrowed, independently owned and synchronous readers use the same codec; complete memory Engine backup remains under implementation.
+
+- Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.
+
+- Add resumable IVF image validation and output over frozen training generations. Preparation counts coordinate windows and empty membership boundaries, preserves absolute coordinate diagnostics and rejects invalid state before output; captured readers survive live retraining and source retirement without copying complete encoded images.
+
+- Add resumable exact-vector image reads over retained tensor coordinates. Borrowed and independently owned readers preserve exact coordinate bits, tensor order and original cancellation with bounded output and admitted fixed scratch; synchronous output uses the same encoder. Complete memory Engine backup remains under implementation.
+
+- Add resumable memory graph image reads with bounded pre-output validation and exact progress counts. Readers preserve evaluated properties, memberships, label registries and allocation state while retaining both source and invoking cancellation; synchronous graph output shares the same encoder. Captured graphs can transfer their source into an independent movable reader that survives Engine closure and releases retained memory on completion or failure. Complete memory Engine backup and restore remain under implementation.
+
+- Add public Rust persistent backup jobs through `Engine::begin_backup` and `uqa_api::backup`. Effective-role authorization and transaction admission precede capture; encrypted sources require repository protection or explicit plaintext export. Jobs retain independent provider cuts and expose bounded progress, cancellation, verification and publication. Native SQLite initialization now publishes its independent image source at the successful initialization transition. Memory Engine images and public restore activation remain under implementation.
+
+- Add resumable evaluated-value, memory-document and evaluated text-index image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata, raw token keys, occurrence graph edges and historical field metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Repository capture accepts streams whose length is established at EOF, records exact final lengths and preserves declared-length checks and incremental reuse without pre-encoding source values. Complete Engine backup and restore remain under implementation.
+
+- Add scheduled repository image capture with bounded source, payload, parent-inventory and verification steps. Jobs retain their original cancellation and memory controls, report actual work, release source/workspace ownership on failure and permit publication only after complete verification. Full and incremental preparation share this state machine; complete memory Engine backup and public restore activation remain under implementation.
+
+- Expose the existing native SQLite, SQLite Key/Value and redb committed image streams through the common persistent-provider interface. The independently owned stream retains its original cut, cancellation and memory allowance after the provider or Engine closes; unsupported providers reject capture without opening a session. Complete memory-image restoration and public Engine restore activation remain under implementation.
+
 - Retain materialized memory path indexes and their registration catalogs as immutable native generations. Captures admit cached complete footprints without copying label sequences or evaluated pairs; selected children preserve their original memory and cancellation controls after source closure. Failed registration admission preserves prior path definitions and materializations across all storage providers. Complete Engine backup remains under implementation.
 
 - Retain named and historical field analyzer catalogs as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors, dictionaries or table membership, and does not retain executable pipelines or decoded models. Temporary field bindings remain outside the durable encoded root; failed native publication preserves previous catalogs and stored definitions. Complete Engine backup integration remains in progress.
@@ -90,6 +116,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
+
+- Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
 
 - Preserve encrypted compressed SQLite connection-pool growth after trusted-anchor admission and subsequent writes. Physical connections share authenticated publication state, including compaction and later synchronization failures, while explicit reopen retains exact external-anchor validation.
 

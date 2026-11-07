@@ -302,7 +302,7 @@ impl Engine {
         latest: &Engine,
         target_versions: CatalogVersions,
     ) -> StorageBackendResult<()> {
-        let previous_tables = self.storage.tables.snapshot();
+        let previous_tables = self.storage.tables.persistent_snapshot()?;
         let (merged_tables, latest_baseline) =
             self.merged_latest_fixed_snapshot_table_catalog(latest, previous_tables.tables())?;
         let previous_durable = self.durable.snapshot();
@@ -312,7 +312,7 @@ impl Engine {
         self.rebind_graph_stores()?;
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
-            self.storage.tables.restore(&previous_tables);
+            previous_tables.restore();
             self.durable.restore(&previous_durable);
             self.store_seen_catalog_versions(previous_versions);
             self.clear_regtype_output_cache();

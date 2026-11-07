@@ -17,13 +17,28 @@ use crate::{
         pages::{DiskANNMemorySource, DiskANNReadLimits},
         RetainedDiskANNIndex,
     },
-    image_io::{ImageInput, ImageOutput},
+    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
-    vector_index::image::{header, invalid, VectorImageSnapshot, VectorImageSource},
+    vector_index::image::{invalid, VectorImageSnapshot, VectorImageSource},
     StorageBackendResult,
 };
 use std::sync::Arc;
 use uqa_core::memory::Budgeted;
+
+mod stream;
+
+pub(super) fn reader<'a>(
+    index: &'a RetainedDiskANNIndex<Canonical>,
+    physical: &'a DiskANNMemorySource,
+    options: DiskANNMemoryOptions,
+    original: &'a StorageReadControl,
+    control: &'a StorageReadControl,
+) -> StorageBackendResult<ImageReader<'a>> {
+    ImageReader::new(
+        stream::DiskANNImageCursor::new(index, physical, options, original, control)?,
+        control,
+    )
+}
 
 pub(super) fn write(
     index: &RetainedDiskANNIndex<Canonical>,
@@ -33,37 +48,22 @@ pub(super) fn write(
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
+    let mut cursor = stream::DiskANNImageCursor::new(index, physical, options, original, control)?;
+    while !cursor.prepare(128)?.ready {}
     crate::image_io::with_retained_control(writer, Some(original), |writer| {
-        let manifest = index.manifest();
-        let generation = manifest.input().generation;
         let mut out = ImageOutput {
             writer,
             control,
             written: 0,
         };
-        header(&mut out, 3, manifest.input().dimensions)?;
-        out.bytes(&generation.database())?;
-        for value in [
-            generation.table(),
-            generation.index(),
-            generation.generation(),
-        ] {
-            out.bytes(&value.to_le_bytes())?;
+        let mut buffer = [0; 4096];
+        loop {
+            let count = cursor.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            out.bytes(&buffer[..count])?;
         }
-        out.sized(&manifest.encode(control)?)?;
-        for value in [
-            options.read.resident_bytes,
-            options.read.cache_bytes,
-            options.read.max_in_flight_page_bytes,
-            options.read.max_record_bytes,
-            options.generation.max_record_bytes,
-        ] {
-            out.count(value)?;
-        }
-        physical.write_image(&mut out)?;
-        index
-            .canonical()
-            .write_image(&mut out, generation, physical)?;
         control.check()?;
         Ok(out.written)
     })
@@ -164,6 +164,19 @@ struct Captured {
 }
 
 impl VectorImageSource for Captured {
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<ImageReader<'a>> {
+        reader(
+            &self.index,
+            &self.physical,
+            self.options,
+            &self.original,
+            control,
+        )
+    }
+
     fn write_image(
         &self,
         output: &mut dyn std::io::Write,

@@ -51,7 +51,7 @@ fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] pro
         "ALTER FUNCTION identity_value(integer) RENAME TO renamed_value",
     ] {
         let original = engine.durable.catalog_indexes.snapshot();
-        let tables = engine.storage.tables.snapshot();
+        let tables = engine.storage.tables.live_snapshot();
         let used = memory.used();
         let occupied = memory.reserve(memory.available()).unwrap();
         let error = engine.sql(statement, &[]).unwrap_err();
@@ -73,11 +73,11 @@ fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] pro
             );
         }
         drop(indexes);
-        let after = engine.storage.tables.snapshot();
-        assert_eq!(tables.tables().len(), after.tables().len());
-        for (name, table) in tables.tables() {
+        let after = engine.storage.tables.live_snapshot();
+        assert_eq!(tables.len(), after.len());
+        for (name, table) in tables.iter() {
             assert!(
-                Arc::ptr_eq(table, &after.tables()[name]),
+                Arc::ptr_eq(table, &after[name]),
                 "{provider:?}, {statement}: original table {name:?}"
             );
         }

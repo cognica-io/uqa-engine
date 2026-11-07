@@ -12,11 +12,14 @@ use super::{DocumentMetadata, StoredDocument};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use uqa_core::{
     memory::Budgeted,
-    value_image::{read_value_image, write_fields_image, ValueImageError},
+    value_image::{read_value_image, ValueImageError},
     Value,
 };
 
 const MAGIC: &[u8; 8] = b"UQADOC01";
+
+mod stream;
+pub(super) use stream::DocumentImageCursor;
 
 pub(super) fn write<'a>(
     fields: impl ExactSizeIterator<Item = (&'a str, &'a Value)>,
@@ -24,32 +27,20 @@ pub(super) fn write<'a>(
     output: &mut dyn Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    control.check()?;
-    let mut header = [0; 13];
-    header[..8].copy_from_slice(MAGIC);
-    header[8] = u8::from(metadata.tuple_xmin().is_some());
-    let length = if let Some(xmin) = metadata.tuple_xmin() {
-        header[9..].copy_from_slice(&xmin.to_le_bytes());
-        13
-    } else {
-        9
+    let mut reader = DocumentImageCursor::new(fields, metadata, control);
+    let mut buffer = [0; 16 * 1024];
+    let mut writer = crate::image_io::ImageOutput {
+        writer: output,
+        control,
+        written: 0,
     };
-    let mut remaining = &header[..length];
-    while !remaining.is_empty() {
-        control.check()?;
-        match output.write(remaining) {
-            Ok(0) => return Err(io_error(std::io::ErrorKind::WriteZero.into())),
-            Ok(count) => remaining = &remaining[count..],
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(io_error(error)),
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(writer.written);
         }
+        writer.bytes(&buffer[..count])?;
     }
-    let written = write_fields_image(fields, output, control.memory(), control.cancellation())
-        .map_err(value_error)?;
-    control.check()?;
-    written
-        .checked_add(length as u64)
-        .ok_or_else(|| uqa_core::memory::MemoryError::SizeOverflow.into())
 }
 
 /// Decode exactly one versioned tuple, leaving following input to its enclosing image. The result owns its complete decoded field allowance. Document identity belongs to the enclosing image address; no SQL, analyzer or callback is invoked here.

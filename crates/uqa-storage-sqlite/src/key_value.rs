@@ -625,6 +625,23 @@ impl SQLiteKeyValueStorage {
 }
 
 impl PersistentStorageProvider for SQLiteKeyValueStorage {
+    fn backup_capabilities(&self) -> uqa_storage::backup::BackupCapabilities {
+        uqa_storage::backup::BackupCapabilities {
+            export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            snapshot_fingerprints: false,
+        }
+    }
+
+    fn capture_backup_image(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<uqa_storage::backup::OwnedBackupImage> {
+        uqa_storage::backup::OwnedBackupImage::capture(control, || {
+            SQLiteKeyValueStorage::capture_backup_image(self, control)
+        })
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.store.conn.auxiliary_encryption_key()
     }

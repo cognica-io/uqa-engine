@@ -26,10 +26,13 @@ mod types;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
-    BackupCaptureReport, BackupCollectionReport, BackupCopyReport, BackupImageReader,
-    BackupImageStatistics, BackupLease, BackupListing, BackupOperation, BackupPack, BackupReadStep,
-    BackupRestoreImporter, BackupRestoreOperation, LocalRepository, PackObject, PackRange,
-    RestoreDirectory, RestoredDatabase, VerifiedBackupImage,
+    BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
+    BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
+    BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing, BackupOperation,
+    BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob,
+    BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep,
+    LocalRepository, PackObject, PackRange, RestoreDirectory, RestoreFileWork, RestoredDatabase,
+    VerifiedBackupImage,
 };
 
 pub use error::{BackupError, BackupResult};
@@ -40,7 +43,9 @@ pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, Inventory
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
-pub use source::{BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit};
+pub use source::{
+    BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, OwnedBackupImage,
+};
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,
     NamespaceId, ObjectId, ObjectSpan, ProtectionId, RepositoryId, RestoreId, SnapshotId,
