@@ -267,11 +267,11 @@ fn scalar_domain_base_input_and_explicit_text_do_not_invoke_array_input() {
     let inputs = Inputs::default();
     let mut parameters = ParameterTypes::with_input_constants(&[], None, None, Some(&inputs));
     let mut expression = ScalarExpr::Literal(Value::Str("0".into()));
-    let ColumnType::Array(domain) = domain_array() else {
+    let ColumnType::Array(ref domain) = domain_array() else {
         unreachable!()
     };
     let mut inferred = ExpressionType::unknown_literal(&expression, "0".into());
-    parameters.coerce_unknown(&mut inferred, &domain).unwrap();
+    parameters.coerce_unknown(&mut inferred, domain).unwrap();
     assert_eq!(inferred.ty.as_deref(), Some(domain.as_ref()));
     parameters
         .take_input_constants()

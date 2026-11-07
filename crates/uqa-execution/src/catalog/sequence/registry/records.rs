@@ -32,6 +32,26 @@ pub(super) struct SequenceRecords {
 }
 
 impl SequenceRecords {
+    pub(super) fn last_durable_key(&self) -> Option<&RelationIdentity> {
+        self.durable
+            .last_before::<RelationIdentity>(std::ops::Bound::Unbounded)
+            .map(|(key, _)| key)
+    }
+
+    /// Move validated private image payloads into the native root without copying names or replacing their original allowance.
+    pub(super) fn insert_image_entry(
+        &mut self,
+        relation: Budgeted<RelationIdentity>,
+        record: SequenceRecord,
+    ) -> Result<(), SQLError> {
+        assert!(self.budget().shares_allowance(relation.budget()));
+        let (relation, memory) = relation.into_parts();
+        let bytes = memory.bytes();
+        self.durable
+            .insert(relation, Budgeted::new(record, memory), bytes)?;
+        Ok(())
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self {
             durable: RetainedMap::new(memory),

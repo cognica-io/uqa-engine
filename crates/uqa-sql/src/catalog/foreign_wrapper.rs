@@ -137,6 +137,19 @@ pub fn native_wrappers() -> ForeignWrappers {
     .expect("fixed native foreign-wrapper catalog")
 }
 
+impl ForeignWrapperFunction {
+    /// Stored catalog callbacks carry a resolved routine identity, independently of whether it still exists.
+    pub(super) fn has_valid_identity(&self) -> bool {
+        let function = &self.binding;
+        self.oid != 0
+            && (function.builtin || self.oid >= super::oids::FIRST_NORMAL_OBJECT_ID)
+            && !function.name.is_empty()
+            && function.resolution_error.is_none()
+            && function.dispatch.is_none()
+            && (function.builtin || function.object_id.is_some_and(|id| id != [0; 16]))
+    }
+}
+
 /// A missing callback is a valid retained reference; a live callback must agree with its saved OID and incarnation.
 pub fn validate_functions(
     wrappers: &ForeignWrappers,
@@ -226,14 +239,7 @@ pub fn validate_wrappers(
             _ => None,
         };
         for reference in handler.into_iter().chain(wrapper.validator.as_ref()) {
-            let function = &reference.binding;
-            if reference.oid == 0
-                || (!function.builtin && reference.oid < super::oids::FIRST_NORMAL_OBJECT_ID)
-                || function.name.is_empty()
-                || function.resolution_error.is_some()
-                || function.dispatch.is_some()
-                || (!function.builtin && function.object_id.is_none_or(|id| id == [0; 16]))
-            {
+            if !reference.has_valid_identity() {
                 return Err(invalid(name, "invalid bound function identity"));
             }
         }

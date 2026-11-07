@@ -35,7 +35,7 @@ fn range() -> StoredRange {
     }
 }
 
-fn fixture(engine: &Engine) {
+pub(super) fn fixture(engine: &Engine) {
     sql(engine, "CREATE DOMAIN retained_domain AS text DEFAULT 'original' CONSTRAINT nonempty CHECK(VALUE <> ''); CREATE TYPE retained_enum AS ENUM('first','last'); ALTER TYPE retained_enum ADD VALUE 'middle' BEFORE 'last'; CREATE TYPE retained_composite AS (removed integer, kept text); ALTER TYPE retained_composite DROP ATTRIBUTE removed; CREATE TYPE retained_shell");
     engine
         .durable

@@ -4,36 +4,57 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! One bounded cursor covers native security catalog images.
+//! One bounded cursor covers native catalog images.
 
 use super::fields::{Field, Fields};
 use crate::{
-    ast::ObjectAclEntry,
+    ast::{ColumnType, ObjectAclEntry},
     catalog::{
+        composite_type::StoredComposite,
+        enum_type::StoredEnum,
+        foreign_server::ForeignServerDefinition,
+        foreign_wrapper::ForeignWrapperDefinition,
+        graph_oids::GraphCatalogOids,
         named_definitions::CapturedDefinitionIter,
+        range_type::StoredRange,
         roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
         security::{
             builtin_routines::BuiltinRoutineSecurity,
             database::{BoundDatabaseSecurity, DatabasePrivileges},
+            sequence_registry::SequenceAuthority,
             system_relations::{SystemAcl, SystemRelationSecurity},
             BoundSchemaSecurity,
         },
+        shell_type::StoredShellType,
     },
     SQLError,
 };
+
+mod foreign_wrappers;
+mod metadata;
+use metadata::Tail;
 use std::{io::Write, slice::Iter};
 use uqa_core::{
     catalog_acl::TablePrivileges, catalog_role::BoundAclEntry, catalog_schema::SchemaPrivileges,
-    image_io::ImageOutput, memory::BudgetedMapIter, CancellationToken, RelationIdentity,
+    catalog_sequence::SequencePrivileges, image_io::ImageOutput, memory::BudgetedMapIter,
+    CancellationToken, RelationIdentity,
 };
 
 pub(super) enum Entries<'a> {
+    SequenceAuthorities(CapturedDefinitionIter<'a, RelationIdentity, SequenceAuthority>),
     Roles(CapturedDefinitionIter<'a, String, RoleDefinition>),
     Memberships(CapturedDefinitionIter<'a, RoleMembershipKey, RoleMembership>),
     Schemas(CapturedDefinitionIter<'a, String, BoundSchemaSecurity>),
     Database(Option<&'a BoundDatabaseSecurity>),
     BuiltinRoutines(CapturedDefinitionIter<'a, u32, BuiltinRoutineSecurity>),
     SystemRelations(CapturedDefinitionIter<'a, RelationIdentity, SystemRelationSecurity>),
+    Composites(CapturedDefinitionIter<'a, String, StoredComposite>),
+    Ranges(CapturedDefinitionIter<'a, String, StoredRange>),
+    Enums(CapturedDefinitionIter<'a, String, StoredEnum>),
+    Shells(CapturedDefinitionIter<'a, String, StoredShellType>),
+    ForeignServers(CapturedDefinitionIter<'a, String, ForeignServerDefinition>),
+    ForeignWrappers(CapturedDefinitionIter<'a, String, ForeignWrapperDefinition>),
+    GraphOids(CapturedDefinitionIter<'a, String, GraphCatalogOids>),
 }
 enum Acl<'a> {
     None,
@@ -41,6 +62,12 @@ enum Acl<'a> {
     Database(Iter<'a, BoundAclEntry<DatabasePrivileges>>),
     Object(Iter<'a, ObjectAclEntry>),
     Table(Iter<'a, BoundAclEntry<TablePrivileges>>),
+    Sequence(Iter<'a, BoundAclEntry<SequencePrivileges>>),
+}
+enum Columns<'a> {
+    None,
+    System(BudgetedMapIter<'a, String, SystemAcl>),
+    Graph(BudgetedMapIter<'a, String, u32>),
 }
 
 enum State {
@@ -53,7 +80,9 @@ enum State {
 pub struct CatalogImageReader<'a> {
     entries: Entries<'a>,
     acl: Acl<'a>,
-    columns: Option<BudgetedMapIter<'a, String, SystemAcl>>,
+    columns: Columns<'a>,
+    tail: Tail<'a>,
+    column_type: Option<&'a ColumnType>,
     fields: Fields<'a>,
     field: Field<'a>,
     offset: usize,
@@ -75,7 +104,9 @@ impl<'a> CatalogImageReader<'a> {
         Ok(Self {
             entries,
             acl: Acl::None,
-            columns: None,
+            columns: Columns::None,
+            tail: Tail::None,
+            column_type: None,
             fields,
             field: Field::Bytes(&[]),
             offset: 0,
@@ -85,6 +116,12 @@ impl<'a> CatalogImageReader<'a> {
     }
     fn next_acl(&mut self) -> bool {
         match &mut self.acl {
+            Acl::Sequence(acl) => {
+                if let Some(entry) = acl.next() {
+                    self.fields.acl(entry);
+                    return true;
+                }
+            }
             Acl::Schema(acl) => {
                 if let Some(entry) = acl.next() {
                     self.fields.acl(entry);
@@ -120,61 +157,85 @@ impl<'a> CatalogImageReader<'a> {
         self.fields.count(acl.len());
         self.acl = Acl::Table(acl.iter());
     }
-    fn next_record(&mut self) -> bool {
-        self.fields = Fields::new();
+    fn next_column(&mut self) -> bool {
+        match &mut self.columns {
+            Columns::System(columns) => {
+                if let Some((name, value)) = columns.next() {
+                    self.fields.text(name);
+                    self.system_acl(value);
+                    return true;
+                }
+            }
+            Columns::Graph(columns) => {
+                if let Some((name, oid)) = columns.next() {
+                    self.fields.text(name);
+                    self.fields.scalar(oid.to_le_bytes());
+                    return true;
+                }
+            }
+            Columns::None => {}
+        }
+        self.columns = Columns::None;
+        false
+    }
+    fn next_child(&mut self) -> Result<bool, SQLError> {
         if self.next_acl() {
-            return true;
+            return Ok(true);
         }
-        if let Some((name, value)) = self.columns.as_mut().and_then(Iterator::next) {
-            self.fields.text(name);
-            self.system_acl(value);
-            return true;
+        if let Some(value) = self.column_type.take() {
+            self.column_type = self.fields.column_type(value);
+            return Ok(true);
         }
-        self.columns = None;
+        if self.next_column() {
+            return Ok(true);
+        }
+        if self
+            .tail
+            .next_fields(&mut self.fields, &mut self.columns, &mut self.column_type)?
+        {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    fn next_record(&mut self) -> Result<bool, SQLError> {
+        self.fields = Fields::new();
+        if self.next_child()? {
+            return Ok(true);
+        }
         match &mut self.entries {
+            Entries::SequenceAuthorities(entries) => {
+                let Some((relation, authority)) = entries.next() else {
+                    return Ok(false);
+                };
+                self.fields.sequence_authority(relation, authority)?;
+                if let Some(acl) = &authority.security().acl {
+                    self.acl = Acl::Sequence(acl.iter());
+                }
+            }
             Entries::Roles(entries) => {
                 let Some((key, role)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 self.fields.role(key, role);
             }
             Entries::Memberships(entries) => {
                 let Some((key, membership)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 self.fields.membership(key, membership);
             }
             Entries::Schemas(entries) => {
                 let Some((key, schema)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
-                let BoundSchemaSecurity {
-                    tuple,
-                    role_owner,
-                    acl,
-                } = schema;
-                self.fields.text(key);
-                self.fields.flag(tuple.is_some());
-                if let Some(tuple) = tuple {
-                    let uqa_core::catalog_schema::SchemaTupleIdentity {
-                        oid,
-                        object_id,
-                        revision,
-                    } = tuple;
-                    self.fields.scalar(oid.to_le_bytes());
-                    self.fields.scalar(*object_id);
-                    self.fields.scalar(*revision);
-                }
-                self.fields.identity(*role_owner);
-                self.fields.flag(acl.is_some());
-                if let Some(acl) = acl {
-                    self.fields.count(acl.len());
+                self.fields.schema(key, schema);
+                if let Some(acl) = &schema.acl {
                     self.acl = Acl::Schema(acl.iter());
                 }
             }
             Entries::Database(entry) => {
                 let Some(database) = entry.take() else {
-                    return false;
+                    return Ok(false);
                 };
                 let BoundDatabaseSecurity { role_owner, acl } = database;
                 self.fields.identity(*role_owner);
@@ -186,7 +247,7 @@ impl<'a> CatalogImageReader<'a> {
             }
             Entries::BuiltinRoutines(entries) => {
                 let Some((oid, value)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 let BuiltinRoutineSecurity {
                     revision,
@@ -199,7 +260,7 @@ impl<'a> CatalogImageReader<'a> {
             }
             Entries::SystemRelations(entries) => {
                 let Some((key, value)) = entries.next() else {
-                    return false;
+                    return Ok(false);
                 };
                 let RelationIdentity { schema, name } = key;
                 let SystemRelationSecurity { table, columns } = value;
@@ -207,13 +268,20 @@ impl<'a> CatalogImageReader<'a> {
                 self.fields.text(name);
                 self.fields.count(columns.len());
                 self.fields.flag(table.is_some());
-                self.columns = Some(columns.iter());
+                self.columns = Columns::System(columns.iter());
                 if let Some(table) = table {
                     self.system_acl(table);
                 }
             }
+            Entries::Composites(_)
+            | Entries::Ranges(_)
+            | Entries::Enums(_)
+            | Entries::Shells(_)
+            | Entries::ForeignWrappers(_)
+            | Entries::ForeignServers(_)
+            | Entries::GraphOids(_) => return Ok(self.next_metadata()),
         }
-        true
+        Ok(true)
     }
     /// Empty output consumes no fields. Errors permanently retire this cursor; partially written artifacts must be discarded.
     pub fn read(&mut self, output: &mut [u8]) -> Result<usize, SQLError> {
@@ -250,7 +318,7 @@ impl<'a> CatalogImageReader<'a> {
             } else if let Some(field) = self.fields.next() {
                 self.field = field;
                 self.offset = 0;
-            } else if !self.next_record() {
+            } else if !self.next_record()? {
                 break;
             }
         }

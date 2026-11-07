@@ -654,9 +654,13 @@ impl Preparation<'_> {
         if matches!(name, "cypher" | "ag_catalog.cypher") {
             let agtype = resolve_type_name(self.routines, "ag_catalog.agtype", &control)?;
             output.reserve(types.len().min(3))?;
-            for ty in [&ColumnType::Name, &ColumnType::Text, &*agtype]
-                .into_iter()
-                .take(types.len())
+            for ty in [
+                const { &ColumnType::Name },
+                const { &ColumnType::Text },
+                &*agtype,
+            ]
+            .into_iter()
+            .take(types.len())
             {
                 output.push_produced(optional_type(
                     Some(ty.clone_with_control(&control)?),
@@ -834,7 +838,7 @@ impl Preparation<'_> {
                     .unwrap_or_else(|| modifiers.order_types[position].as_deref());
                 (&order.expr, ty)
             }))
-            .chain(filter.map(|filter| (filter, Some(&ColumnType::Boolean))));
+            .chain(filter.map(|filter| (filter, Some(const { &ColumnType::Boolean }))));
         let inputs = crate::type_resolution::CallInputTypes::new_with_control(
             input,
             observations,

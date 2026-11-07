@@ -60,8 +60,8 @@ fn element_type(value: &UQAValue) -> Option<&ColumnType> {
         ty = base;
     }
     match ty {
-        ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
-        ColumnType::OidVector => Some(&ColumnType::Oid),
+        ColumnType::Int2Vector => Some(const { &ColumnType::SmallInteger }),
+        ColumnType::OidVector => Some(const { &ColumnType::Oid }),
         _ => ty.array_element_type(),
     }
 }

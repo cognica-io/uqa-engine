@@ -22,6 +22,21 @@ pub struct ArraySliceBounds {
 }
 
 impl ArraySliceBounds {
+    /// Preserve both native masks, including unused stored positions, without reinterpreting syntax.
+    pub(crate) const fn stored_masks(self) -> [u8; 2] {
+        let Self {
+            omitted_lower,
+            omitted_upper,
+        } = self;
+        [omitted_lower, omitted_upper]
+    }
+    pub(crate) const fn from_stored_masks([omitted_lower, omitted_upper]: [u8; 2]) -> Self {
+        Self {
+            omitted_lower,
+            omitted_upper,
+        }
+    }
+
     pub fn omit(&mut self, dimension: usize, lower: bool, upper: bool) {
         // An excessive rank must reach ordered type analysis before its rank error.
         if dimension < MAX_ARRAY_SUBSCRIPT_DIMENSIONS {

@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -45427,6 +45427,826 @@
       "capability": "Native security catalog images",
       "workload": "Capture actual SQL grants, roll changes back, revoke and replace a role, close the Engine and decode the original authority images.",
       "invariant": "Original tuple revisions and role incarnations remain exact and valid; source/capture/import resources retire independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_metadata_images_preserve_options_acl_paths_and_legacy_graph_companions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Round-trip optional legacy companions, repeated ACL paths, signed-zero enum positions and separately ordered server options.",
+      "invariant": "Exact native metadata and option absence remain distinguishable without invoking SQL or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_import_admits_exact_native_payload_and_retains_shared_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/retention.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Measure bounded native output and exact payload admission, cancel partial input, retain clones/captures and exclude temporary roots.",
+      "invariant": "Readers allocate no workspace; admission remains with native payloads until final retirement and denied or cancelled input publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_metadata_import_retires_partial_vectors_maps_and_validation_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/retention.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Measure bounded native output and exact payload admission, cancel partial input, retain clones/captures and exclude temporary roots.",
+      "invariant": "Readers allocate no workspace; admission remains with native payloads until final retirement and denied or cancelled input publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_readers_stream_large_native_children_without_allocation_or_preparation_scan",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/retention.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Measure bounded native output and exact payload admission, cancel partial input, retain clones/captures and exclude temporary roots.",
+      "invariant": "Readers allocate no workspace; admission remains with native payloads until final retirement and denied or cancelled input publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "type_images_exclude_native_temporary_roots_and_keep_quoted_canonical_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/retention.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Measure bounded native output and exact payload admission, cancel partial input, retain clones/captures and exclude temporary roots.",
+      "invariant": "Readers allocate no workspace; admission remains with native payloads until final retirement and denied or cancelled input publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_images_reject_all_truncations_trailing_bytes_bad_utf8_and_duplicate_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_images_reject_aliasing_names_identities_labels_and_invalid_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shell_images_reject_invalid_names_oids_incarnations_and_boolean_tags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_server_images_reject_metadata_aliases_and_inconsistent_option_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_images_reject_duplicate_claims_zero_addresses_and_label_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_images_preserve_empty_roots_and_reject_reversed_child_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/validation.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Truncate every byte, corrupt local identifiers and order, and decode empty catalogs.",
+      "invariant": "Invalid framing or local structure cannot return a registry and releases all partial admission; empty roots retain canonical framing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_image_matches_literal_identities_keys_and_float4_bits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/wire.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Decode independent literal frames and drain native captures through one-byte, partial and large windows.",
+      "invariant": "Versioned field order, original identities, options and nested bytes remain exact for every output window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shell_image_matches_literal_identity_and_explicit_empty_acl",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/wire.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Decode independent literal frames and drain native captures through one-byte, partial and large windows.",
+      "invariant": "Versioned field order, original identities, options and nested bytes remain exact for every output window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_server_image_matches_literal_optional_fields_and_declaration_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/wire.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Decode independent literal frames and drain native captures through one-byte, partial and large windows.",
+      "invariant": "Versioned field order, original identities, options and nested bytes remain exact for every output window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_image_matches_literal_nested_companions_and_column_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/wire.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Decode independent literal frames and drain native captures through one-byte, partial and large windows.",
+      "invariant": "Versioned field order, original identities, options and nested bytes remain exact for every output window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_type_images_preserve_original_identities_labels_and_authority_after_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Capture actual Engine metadata, roll back changes, replace same-name objects and close the source before image decoding.",
+      "invariant": "Original definitions and references remain valid against the captured catalogs; independently owned capture and import memory are fully released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_server_and_graph_images_preserve_bound_metadata_after_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Native type and catalog metadata images",
+      "workload": "Capture actual Engine metadata, roll back changes, replace same-name objects and close the source before image decoding.",
+      "invariant": "Original definitions and references remain valid against the captured catalogs; independently owned capture and import memory are fully released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_reject_all_truncations_bad_counts_and_duplicate_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_images_reject_invalid_identity_attribute_order_and_unresolved_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_images_reject_identity_aliases_support_errors_and_companion_name_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_image_matches_literal_type_and_attribute_number_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_image_matches_literal_support_and_independent_multirange_identity_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_structured_type_images_are_complete_empty_native_registries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/wire.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_images_preserve_every_native_type_modifier_reference_and_dropped_attribute",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_images_preserve_moved_multiranges_selected_support_and_acl_paths",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_retain_exact_native_admission_after_clone_and_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_image_readers_bound_nested_types_and_large_attributes_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_structured_type_import_retires_partial_boxed_types_and_attributes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_composite_and_range_images_preserve_native_definitions_after_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata_images.rs",
+      "capability": "Committed native type images",
+      "workload": "Capture native type roots, roll back and replace live definitions, close Engine, transfer the retained roots to another thread and reconstruct their images.",
+      "invariant": "Captured identities, attribute numbers, bound types, support OIDs and authority remain original after live-state retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_images_reject_invalid_nested_tags_options_and_field_masks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native composite and range images",
+      "workload": "Stream captured native types and decode complete private registries, including literal frames, malformed input, cancellation and constrained admission.",
+      "invariant": "Original type fields, dropped attribute numbers, selected support identities and allocation ownership survive without rebinding or callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_reject_truncation_trailing_bytes_duplicate_keys_and_invalid_native_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_reject_corrupt_callback_identities_flags_collations_and_contract_tags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "invalid_native_callback_sources_fail_and_retire_the_shared_image_cursor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/validation.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_match_literal_none_and_native_handler_tags_with_ordered_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_callback_image_matches_literal_original_function_identity_and_contract_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_callback_contract_and_assignment_match_literal_fields_and_slice_masks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/wire.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_images_preserve_complete_invocation_value_bindings_and_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_import_retains_exact_callback_option_and_box_admission_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrapper_readers_bound_large_options_and_empty_contract_sequences_without_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "cancelled_or_unwound_wrapper_import_retires_partial_callback_and_option_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers.rs",
+      "capability": "Native foreign-wrapper images",
+      "workload": "Stream original wrapper callbacks, options and invocation/value metadata; reconstruct native catalogs under constrained admission and malformed input.",
+      "invariant": "Original identities and complete bindings survive without callback execution or name resolution; bounded cursors and native allocations retire on failure, cancellation and source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "wrapper_images_keep_self_removed_callback_identity_after_name_reuse_and_engine_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Committed memory catalog images",
+      "workload": "Capture a self-removing validator, reuse its name, roll back and replace its wrapper, close Engine and encode on another thread.",
+      "invariant": "The captured image preserves the original missing callback and wrapper identities without invoking or rebinding the replacement function.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_type_copies_and_retirement_use_constant_stack_and_exact_payload_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Copy 10,000 nested array/domain nodes on a 256 KiB stack through ordinary and admitted producers; compare native fields and count live heap ownership.",
+      "invariant": "Copies preserve every node and exact payload admission; retirement allocates no scratch and releases all owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_type_copy_failure_retires_every_admitted_partial_node",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Deny allocation at multiple points of a 10,000-node native type copy and retain the original type for independent inspection.",
+      "invariant": "Every failed prefix releases its native allocations and reservation without changing its source or exhausting the stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_array_modifier_removal_preserves_shape_and_domain_base_modifiers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/tests/deep.rs",
+      "capability": "Native type ownership",
+      "workload": "Remove modifiers through 10,000 array nodes and compare against a mixed domain/array chain on a 256 KiB stack.",
+      "invariant": "Array shape remains exact; domain base modifiers remain bound to their original identity and all leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_composite_images_retire_on_success_invalid_input_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/validation.rs",
+      "capability": "Native type ownership",
+      "workload": "Decode 10,000 nested array nodes on a 256 KiB stack, then exercise successful retirement, invalid leaf input, denied admission and cancellation before the leaf.",
+      "invariant": "Images retain exact bytes; success and every partial failure retire admitted native ownership without recursive destruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_image_matches_literal_identity_and_absent_acl",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Compare the versioned authority image with literal bytes and distinguish absent from empty ACLs.",
+      "invariant": "Native identity, persistence and optional ACL state survive unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_image_preserves_all_grant_bits_and_original_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Encode every SELECT, UPDATE and USAGE bit with PUBLIC and original role incarnations.",
+      "invariant": "Grantee, grantor and privilege masks survive without name rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_image_rejects_bad_tags_names_order_and_partial_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Truncate every image prefix and corrupt names, flags, privilege masks and key order.",
+      "invariant": "Every malformed image fails without publishing authority or retaining memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_capture_excludes_temporary_members_and_keeps_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture a large temporary authority beside one permanent record and exhaust each insufficient allowance.",
+      "invariant": "Temporary capacity stays absent and every failed or cancelled import releases its reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_matches_independent_wire_and_native_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Compare all fixed native fields against a literal binary fixture and reconstruct the complete catalog.",
+      "invariant": "The original allocation generation, OIDs, owners, position and definition survive bit-for-bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_images_keep_all_numeric_boundaries_types_persistence_and_owner_modes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Round-trip integer boundaries with each sequence type, permanent/unlogged persistence and both owner dependencies.",
+      "invariant": "Native type, optional OID, absent/empty ACL and current/called state remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_retains_selected_autonomous_position_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture an autonomous position, replace it, close the source and decode its two images.",
+      "invariant": "Only the originally selected object and definition supply the restored allocation position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_preparation_and_fragmented_output_allocate_no_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Stream a 64 KiB quoted relation through one-byte to oversized output buffers after source loss.",
+      "invariant": "Preparation and output allocate no payloads and no read emits more than 16 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_rejects_truncation_invalid_tags_identities_and_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Truncate every metadata and authority prefix and corrupt all native discriminants and required identities.",
+      "invariant": "Invalid input fails before catalog publication and releases every charged destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_requires_exact_authority_membership_and_persistence",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Pair record images with renamed or differently persisted authorities and exercise the empty pair.",
+      "invariant": "Both catalogs must describe exactly the same durable relations and persistence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_failure_and_cancellation_release_every_admitted_destination",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Try each memory allowance through first success and cancel input before reconstruction.",
+      "invariant": "Failed admission and cancellation retain no native records, authority or scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_reader_is_terminal_after_cancellation_write_failure_or_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Cancel a reader and inject writer errors and panics after selection.",
+      "invariant": "Each failed reader remains terminal without caller-side repair.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_rejects_duplicate_names_objects_and_effective_oids",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Corrupt the second of two records with a preceding name, object identity or OID.",
+      "invariant": "A complete candidate cannot contain repeated relation, incarnation or effective catalog identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_interruptions_during_input_retire_partial_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/validation.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Inject cancellation and I/O failures after multiple partial metadata boundaries.",
+      "invariant": "Every partially constructed native catalog retires with all reservations released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_sequence_images_preserve_positions_authority_and_owners_after_source_loss",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/sequences.rs",
+      "capability": "Native sequence backup images",
+      "workload": "Capture during private sequence DDL, complete with COMMIT or ROLLBACK, replace the source objects and close the Engine.",
+      "invariant": "Original durable positions, allocation owners and authority survive; private and temporary definitions remain absent.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_image_native_clones_and_captures_retain_decoded_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests.rs",
+      "capability": "Native sequence image retention",
+      "workload": "Clone an imported catalog, capture it with an independent allowance, close the decoded source and re-encode the retained generation.",
+      "invariant": "Both native and capture allowances remain held through their actual payload lifetimes and retire completely after the final captured owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_image_validation_walks_deep_type_chains_without_recursion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/deep_types.rs",
+      "capability": "Constant-stack range image validation",
+      "workload": "Import and retire 10000-level array, domain and mixed subtypes on a 256 KiB stack, including denied memory admission.",
+      "invariant": "Decoded images re-encode byte-for-byte and release all native allowances without a depth cap or recursive type validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_subtypes_preserve_each_domain_and_array_identity_without_recursive_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/range_type/tests.rs",
+      "capability": "Linear native range subtype and array OID observation",
+      "workload": "Observe 10000-level array chains ending in builtin, domain, unresolved and invalid-identity types on a 256 KiB stack.",
+      "invariant": "Every represented domain and array identity retains its original acceptance and OID; observation allocates no heap scratch.",
       "case_names": [
         ""
       ]

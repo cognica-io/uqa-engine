@@ -8,6 +8,7 @@
 
 use super::{fields::Privileges, invalid};
 use crate::{
+    ast::ObjectAclEntry,
     catalog::roles::{identity::RoleBinding, RoleIdentity},
     SQLError,
 };
@@ -20,13 +21,28 @@ use uqa_core::{
 };
 
 mod authorities;
+mod callbacks;
+mod column_types;
+mod foreign_servers;
+mod foreign_wrappers;
+mod graph_oids;
 mod memberships;
+mod metadata;
 mod roles;
 mod security;
+mod sequences;
+mod structured_types;
+mod types;
 pub(super) use authorities::{builtin_routines, system_relations};
+pub(super) use foreign_servers::foreign_servers;
+pub(super) use foreign_wrappers::foreign_wrappers;
+pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
 pub(super) use roles::roles;
 pub(super) use security::{database, schemas};
+pub(super) use sequences::sequence_authorities;
+pub(super) use structured_types::{composites, ranges};
+pub(super) use types::{enums, shells};
 
 struct Input<'a> {
     binary: ImageInput<'a>,
@@ -151,6 +167,26 @@ impl<'a> Input<'a> {
         }
         let (entries, memory) = entries.into_parts();
         Ok(Budgeted::new(entries, memory))
+    }
+    fn object_acl(&mut self) -> Result<Budgeted<Vec<ObjectAclEntry>>, SQLError> {
+        let count = self.binary.count()?;
+        let mut entries = BudgetedVec::new(self.binary.memory);
+        entries.reserve(count)?;
+        for _ in 0..count {
+            self.binary.cancellation.check()?;
+            let role = if self.flag()? {
+                Some(self.identity()?)
+            } else {
+                None
+            };
+            entries.push(ObjectAclEntry {
+                role,
+                grantor: self.identity()?,
+                grant_option: self.flag()?,
+            })?;
+        }
+        let (entries, reservation) = entries.into_parts();
+        Ok(Budgeted::new(entries, reservation))
     }
 }
 

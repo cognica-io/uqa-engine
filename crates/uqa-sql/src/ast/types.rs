@@ -13,6 +13,7 @@ mod display;
 mod identity;
 mod modifiers;
 mod names;
+mod ownership;
 mod parsing;
 mod production;
 mod references;
@@ -22,7 +23,7 @@ pub use identity::{UserTypeIdentity, UserTypeKind};
 
 pub(crate) use modifiers::split_type_modifier_with_control;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
     /// A declaration awaiting catalog type resolution. This variant is never a stored column type.
     Named(String),
@@ -227,10 +228,13 @@ impl ColumnType {
 
     /// Whether modifier removal changes this type; a domain retains its declared base.
     pub(crate) fn has_type_modifiers(&self) -> bool {
-        match self {
+        let mut element = self;
+        while let Self::Array(child) = element {
+            element = child;
+        }
+        match element {
             Self::Varchar(length) | Self::Bit(length) | Self::VarBit(length) => length.is_some(),
             Self::Numeric { precision, scale } => precision.is_some() || scale.is_some(),
-            Self::Array(element) => element.has_type_modifiers(),
             Self::Character(_)
             | Self::TimePrecision(_)
             | Self::TimeTzPrecision(_)
@@ -267,11 +271,11 @@ impl ColumnType {
     #[must_use]
     pub const fn without_temporal_modifiers(&self) -> &Self {
         match self {
-            Self::IntervalWithFields { .. } => &Self::Interval,
-            Self::TimePrecision(_) => &Self::Time,
-            Self::TimeTzPrecision(_) => &Self::TimeTz,
-            Self::TimestampPrecision(_) => &Self::Timestamp,
-            Self::TimestampTzPrecision(_) => &Self::TimestampTz,
+            Self::IntervalWithFields { .. } => const { &ColumnType::Interval },
+            Self::TimePrecision(_) => const { &ColumnType::Time },
+            Self::TimeTzPrecision(_) => const { &ColumnType::TimeTz },
+            Self::TimestampPrecision(_) => const { &ColumnType::Timestamp },
+            Self::TimestampTzPrecision(_) => const { &ColumnType::TimestampTz },
             other => other,
         }
     }

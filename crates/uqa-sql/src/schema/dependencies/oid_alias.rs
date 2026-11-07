@@ -89,9 +89,12 @@ fn alias_type(ty: &str) -> Option<(ColumnType, bool)> {
     {
         return None;
     }
-    match ColumnType::from_sql_name(ty).ok()? {
-        ColumnType::Array(element) if is_alias(&element) => Some((*element, true)),
-        element if is_alias(&element) => Some((element, false)),
+    let mut ty = ColumnType::from_sql_name(ty).ok()?;
+    match &mut ty {
+        ColumnType::Array(element) if is_alias(element) => {
+            Some((std::mem::replace(element.as_mut(), ColumnType::Void), true))
+        }
+        element if is_alias(element) => Some((ty, false)),
         _ => None,
     }
 }

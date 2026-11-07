@@ -213,7 +213,7 @@ impl SQLValueCatalog for Reference {
             .unwrap()
         {
             let name = row[0].as_str().unwrap();
-            let range = self.range_type(name);
+            let mut range = self.range_type(name);
             if oid == integer(&row[1]) {
                 return Ok(Some(range));
             }
@@ -222,13 +222,19 @@ impl SQLValueCatalog for Reference {
             }
             let array_oid = row.get(7).map(integer).unwrap_or(0);
             if oid == integer(&row[6]) || (array_oid != 0 && oid == array_oid) {
-                let ColumnType::DeclaredRange(mut reference) = range else {
+                let ColumnType::DeclaredRange(reference) = &mut range else {
                     unreachable!()
                 };
                 reference.oid = integer(&row[6]);
                 reference.name.push_str("_multirange");
                 reference.array_oid = array_oid;
-                let ty = ColumnType::DeclaredMultirange(reference);
+                let ty = ColumnType::DeclaredMultirange(crate::ast::RangeTypeReference {
+                    schema: std::mem::take(&mut reference.schema),
+                    name: std::mem::take(&mut reference.name),
+                    oid: reference.oid,
+                    array_oid: reference.array_oid,
+                    alignment: reference.alignment,
+                });
                 return Ok(Some(if oid == array_oid {
                     ColumnType::Array(Box::new(ty))
                 } else {

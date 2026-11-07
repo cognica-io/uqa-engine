@@ -14,6 +14,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add native sequence metadata and authority images for memory backup assembly. Bounded readers retain original allocation generations, reserved positions, owners, persistence and grants after source retirement. Import validates matching membership and preserves admitted native ownership; complete memory Engine backup and public restore remain under implementation.
+
+- Add native foreign-wrapper images that preserve original handler and validator identities, complete invocation and value bindings, and option order without executing callbacks. Bounded streaming and admitted reconstruction survive callback removal, name reuse and source closure; complete memory Engine restore remains under implementation.
+
+- Add native composite and range catalog images that preserve dropped attributes, complete type modifiers and bindings, selected support OIDs and independently named multiranges. Bounded streaming and admitted private reconstruction retain original metadata after source closure without SQL replay; complete memory Engine restore remains under implementation.
+
+- Add native enum, shell-type, foreign-server and graph catalog OID image codecs. Bounded readers preserve original identities, enum order keys and sort bits, ordered options, ACL paths and optional metadata; private import validates local structure and retains decoded memory through native clones and captures. Complete memory Engine backup and restore remain under implementation.
+
 - Add repository-owned restore jobs that advance provider import and validation before publishing a new destination. Owned image readers retain archive leases across steps; failure, cancellation and unwinding close active work, and recovery uses the original durable request. Complete public Engine restore remains under implementation.
 
 - Add native role, membership, schema, database, built-in routine and system relation authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Whole-Engine memory backup and restore remain under implementation.
@@ -116,6 +124,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Reclaim derived benchmark build output before controlled performance compilation exhausts disk space, preserving retained reference executables and measurement records.
+
+- Retire, copy and validate deeply nested native SQL types with constant stack. Range-subtype validation and array-OID projection visit each nested node once; failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries. Rust matches that extract payload fields must now borrow `ColumnType` because it implements `Drop`.
 
 - Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
 

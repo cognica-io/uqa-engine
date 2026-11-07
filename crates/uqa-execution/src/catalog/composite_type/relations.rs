@@ -57,27 +57,11 @@ fn definitions(
         )
 }
 
-fn column_type(identity: &RelationIdentity, oids: RelationCatalogOids) -> Option<ColumnType> {
-    oids.row_type_reference(identity).map(ColumnType::Composite)
-}
-
 pub(crate) fn array_element(catalog: &CatalogReadView, oid: u32) -> Option<u32> {
     definitions(catalog).find_map(|(_, oids, _)| {
         (oids.array_type == Some(oid))
             .then_some(oids.row_type)
             .flatten()
-    })
-}
-
-pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> {
-    definitions(catalog).find_map(|(identity, oids, _)| {
-        if oids.row_type == Some(oid) {
-            column_type(identity, oids)
-        } else if oids.array_type == Some(oid) {
-            column_type(identity, oids).map(|ty| ColumnType::Array(Box::new(ty)))
-        } else {
-            None
-        }
     })
 }
 
@@ -225,21 +209,22 @@ fn descriptor_in(
     catalog: &CatalogReadView,
     oid: u32,
 ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
-    let Some(ColumnType::Composite(reference)) = by_oid(catalog, oid) else {
+    let Some((identity, oids, _)) =
+        definitions(catalog).find(|(_, oids, _)| oids.row_type == Some(oid))
+    else {
         return Ok(None);
     };
-    let identity = RelationIdentity::new(reference.schema, reference.name);
     let snapshot = catalog.snapshot();
     let dropped =
         snapshot
             .tables
-            .get(&identity)
+            .get(identity)
             .map(|table| table.dropped_attributes.as_slice())
             .or_else(|| {
                 snapshot
                     .definitions
                     .foreign_tables
-                    .get(&identity)
+                    .get(identity)
                     .map(|table| table.dropped_attributes.as_slice())
             })
             .unwrap_or_default()
@@ -256,13 +241,13 @@ fn descriptor_in(
             .collect::<Result<_, SQLError>>()?;
     let declared = snapshot
         .tables
-        .get(&identity)
+        .get(identity)
         .map(|table| table.columns.as_slice())
         .or_else(|| {
             snapshot
                 .definitions
                 .foreign_tables
-                .get(&identity)
+                .get(identity)
                 .map(|table| table.columns.as_slice())
         });
     let columns = if let Some(columns) = declared {
@@ -277,7 +262,7 @@ fn descriptor_in(
                 )
             })
             .collect::<Vec<_>>()
-    } else if let Some(view) = snapshot.definitions.views.get(&identity) {
+    } else if let Some(view) = snapshot.definitions.views.get(identity) {
         let schema = context.stored_view_schema_with_catalog(
             view,
             catalog.clone(),
@@ -320,7 +305,7 @@ fn descriptor_in(
     Ok(Some(Arc::new(CompositeTypeDescriptor {
         dropped,
         type_oid: oid,
-        relation_oid: reference.relation_oid,
+        relation_oid: oids.relation,
         attributes,
     })))
 }

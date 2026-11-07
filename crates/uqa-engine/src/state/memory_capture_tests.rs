@@ -16,6 +16,7 @@ mod foreign;
 mod graphs;
 mod identities;
 mod metadata;
+mod metadata_images;
 mod paths;
 mod relation_authority;
 mod resources;

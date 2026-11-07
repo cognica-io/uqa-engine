@@ -23,7 +23,7 @@ impl Input<'_> {
                 parameter.scalar_value().expect("binary field is scalar"),
                 parameter
                     .declared_scalar_type()
-                    .unwrap_or(&ColumnType::Text),
+                    .unwrap_or(const { &ColumnType::Text }),
             ),
         }
     }
@@ -107,7 +107,7 @@ impl Encoder<'_, '_> {
                 if matches!(field.scalar_value(), Some(Value::Null)) {
                     return self.write(&(-1_i32).to_be_bytes());
                 }
-                validate_type(ty.unwrap_or(&ColumnType::Text), &self.control)?;
+                validate_type(ty.unwrap_or(const { &ColumnType::Text }), &self.control)?;
                 let start = self.bytes.len();
                 self.write(&[0; 4])?;
                 stack.push(Frame::Finish(start))?;

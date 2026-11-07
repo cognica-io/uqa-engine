@@ -10,6 +10,7 @@ use uqa_storage::SequenceOwner;
 pub mod capture;
 mod decode;
 mod definition;
+pub mod image;
 
 pub use definition::altered_sequence_state;
 

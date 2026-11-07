@@ -32,7 +32,7 @@ pub fn encode_postgres_row_with_control<'v>(
     if format == ResultFormat::Binary {
         for (_, ty) in fields.clone() {
             control.check()?;
-            super::binary::validate_type(ty.unwrap_or(&ColumnType::Text), control)?;
+            super::binary::validate_type(ty.unwrap_or(const { &ColumnType::Text }), control)?;
         }
     }
     let mut output = ProductionVec::new(*control);
@@ -47,7 +47,7 @@ pub fn encode_postgres_row_with_control<'v>(
         .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog);
     for (value, ty) in fields {
         control.check()?;
-        let ty = ty.unwrap_or(&ColumnType::Text);
+        let ty = ty.unwrap_or(const { &ColumnType::Text });
         let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
             output.extend_from_slice(&(-1_i32).to_be_bytes())?;
             continue;

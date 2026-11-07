@@ -131,12 +131,12 @@ impl ExpressionContext<'_> {
         let ty = self
             .expression_type(&Expr::Array(elements.to_vec()))?
             .or_else(|| expected.cloned());
-        let Some(ColumnType::Array(element)) = ty else {
+        let Some(ColumnType::Array(element)) = &ty else {
             return Err(SQLError::TypeMismatch(
                 "cannot determine type of empty array".into(),
             ));
         };
-        self.array_typed(elements, &element)
+        self.array_typed(elements, element)
     }
 
     fn array_typed(&self, elements: &[Expr], element: &ColumnType) -> Result<TypedNode, SQLError> {
@@ -186,12 +186,12 @@ impl ExpressionContext<'_> {
     ) -> Result<TypedNode, SQLError> {
         let left = self.expression_type(lhs)?;
         let right = self.expression_type(rhs)?;
-        let Some(ColumnType::Array(element)) = right else {
+        let Some(ColumnType::Array(element)) = &right else {
             return Err(SQLError::TypeMismatch(
                 "op ANY/ALL (array) requires array on right side".into(),
             ));
         };
-        let [left, element, _] = binary_operator_types(op, left.as_ref(), Some(&element))?;
+        let [left, element, _] = binary_operator_types(op, left.as_ref(), Some(element))?;
         let lhs = self.encode(lhs, Some(&left))?;
         let rhs = self.encode(rhs, Some(&ColumnType::Array(Box::new(element.clone()))))?;
         scalar_array_node(op, lhs, rhs, &element, use_or)

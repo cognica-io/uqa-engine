@@ -71,7 +71,7 @@ impl CatalogIndexRelation {
                 // and direct-API declarations need not store key_types.
                 .or_else(|| {
                     (!columns_declared && table_columns.is_empty() && key.column().is_some())
-                        .then_some(&uqa_sql::ast::ColumnType::Text)
+                        .then_some(const { &uqa_sql::ast::ColumnType::Text })
                 })
                 .cloned()
                 .ok_or_else(|| {
@@ -86,7 +86,7 @@ impl CatalogIndexRelation {
                 .map(|column| &column.ty)
                 .or_else(|| {
                     (!columns_declared && table_columns.is_empty())
-                        .then_some(&uqa_sql::ast::ColumnType::Text)
+                        .then_some(const { &uqa_sql::ast::ColumnType::Text })
                 })
                 .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
             let attribute_name = self

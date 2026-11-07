@@ -29,11 +29,12 @@ struct RegclassBinding<'a> {
 }
 impl RegclassBinding<'_> {
     fn regclass_base_type(&self, name: &str) -> bool {
-        let Some(mut ty) = self.types.resolve_catalog_column_type(name) else {
+        let Some(ty) = self.types.resolve_catalog_column_type(name) else {
             return false;
         };
+        let mut ty = &ty;
         while let ColumnType::Domain { base, .. } = ty {
-            ty = *base;
+            ty = base;
         }
         matches!(ty, ColumnType::Regclass)
     }

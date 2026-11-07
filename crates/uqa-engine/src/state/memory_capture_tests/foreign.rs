@@ -122,3 +122,80 @@ fn denied_foreign_capture_keeps_ordinary_ddl_and_independent_cuts_usable() {
     assert_eq!(small.memory().used(), 0);
     assert_eq!(good.memory().used(), 0);
 }
+
+#[test]
+fn wrapper_images_keep_self_removed_callback_identity_after_name_reuse_and_engine_closure() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_sql::catalog::foreign_wrapper::{validate_wrappers, ForeignWrappers};
+
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP FUNCTION orphan_validator(text[],oid)'; RETURN 1; END $$; CREATE FOREIGN DATA WRAPPER orphan_fdw VALIDATOR orphan_validator OPTIONS (z 'original', a '')");
+        let roles = engine.durable.roles.snapshot();
+        let wrappers = engine.durable.foreign_wrappers.snapshot();
+        let original = wrappers["orphan_fdw"].validator.as_ref().unwrap();
+        let key = engine.durable.foreign_wrappers.key().unwrap();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        sql(
+            &engine,
+            "CREATE FUNCTION orphan_validator(text[],oid) RETURNS integer LANGUAGE SQL RETURN 7",
+        );
+        let error = engine
+            .sql(
+                "CREATE SERVER orphan_server FOREIGN DATA WRAPPER orphan_fdw",
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert_eq!(
+            error.to_string(),
+            format!("cache lookup failed for function {}", original.oid)
+        );
+        if mutate {
+            sql(&engine, "BEGIN; DROP FOREIGN DATA WRAPPER orphan_fdw; SAVEPOINT removed; CREATE FOREIGN DATA WRAPPER private_fdw; ROLLBACK TO removed; ROLLBACK");
+            assert_eq!(
+                engine.durable.foreign_wrappers.read()["orphan_fdw"].validator,
+                wrappers["orphan_fdw"].validator
+            );
+            sql(&engine, "DROP FOREIGN DATA WRAPPER orphan_fdw; CREATE FOREIGN DATA WRAPPER orphan_fdw VALIDATOR orphan_validator");
+            assert_ne!(
+                engine.durable.foreign_wrappers.read()["orphan_fdw"].identity,
+                wrappers["orphan_fdw"].identity
+            );
+        }
+        drop(engine);
+        let saved = key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let image = std::thread::spawn(move || {
+            let mut image = Vec::new();
+            saved
+                .get()
+                .unwrap()
+                .write_image(&mut image, &CancellationToken::new())
+                .unwrap();
+            image
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let memory = MemoryBudget::new(1 << 20);
+        let restored =
+            ForeignWrappers::read_image(&mut image.as_slice(), &memory, &CancellationToken::new())
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap(),
+            serde_json::to_value(&*wrappers).unwrap()
+        );
+        assert_eq!(restored["orphan_fdw"].validator.as_ref(), Some(original));
+        validate_wrappers(&restored, &roles).unwrap();
+        drop(restored);
+        assert_eq!(memory.used(), 0);
+    }
+}
