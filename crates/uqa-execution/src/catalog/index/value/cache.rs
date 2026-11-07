@@ -19,6 +19,7 @@ mod builder;
 mod capture;
 pub use capture::{
     CapturedValue, CapturedValueIndex, CapturedValueIndexPolicy, ValueIndexComparison,
+    ValueIndexImageMetadata,
 };
 mod collection;
 pub use collection::{CapturedValueIndexes, ValueIndexes};

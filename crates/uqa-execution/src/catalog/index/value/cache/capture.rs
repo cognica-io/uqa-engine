@@ -17,6 +17,9 @@ use uqa_storage::{
     read_control::StorageReadControl, StorageBackendError, StorageBackendResult,
 };
 
+mod image;
+pub use image::ValueIndexImageMetadata;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueIndexComparison {
     Ordered,

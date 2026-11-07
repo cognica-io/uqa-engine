@@ -49058,6 +49058,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_metadata_preserves_independent_wire_and_historical_policy",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index metadata images",
+      "workload": "Compare explicit wire bytes, historical eligibility and exact field text, then reject every truncated prefix, unknown flags and insufficient field admission.",
+      "invariant": "The metadata inverse preserves native policy and counts; failed input releases every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_value_images_preserve_exact_carriers_and_deleted_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index image identity selection",
+      "workload": "Capture resident and spilled NULL/negative-zero values after deletion, mutate and retire the source, then enumerate physical positions and decode exact bytes.",
+      "invariant": "Both representations emit identical live carriers, while spilled tombstones are counted as individual positions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_images_stream_wide_values_with_independent_bounded_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Bounded evaluated-index images",
+      "workload": "Stream a two-MiB value from resident and spilled captures after source closure using independent 128-KiB output admission and one-position preparation.",
+      "invariant": "Spilled output never decodes the population, output scratch remains bounded, and the original value reconstructs exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_image_readers_keep_both_controls_and_release_failed_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index image cancellation",
+      "workload": "Open metadata and value readers, consume a prefix and cancel either original capture or invoking output.",
+      "invariant": "Both controls remain effective after opening, failure is terminal and all cursor workspace is released.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

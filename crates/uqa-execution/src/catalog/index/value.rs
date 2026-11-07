@@ -17,7 +17,7 @@ mod values;
 pub use cache::{
     apply_cached_values, visit_stored_fields, CapturedValue, CapturedValueIndex,
     CapturedValueIndexPolicy, CapturedValueIndexes, ValueIndexBuilder, ValueIndexCache,
-    ValueIndexComparison, ValueIndexes,
+    ValueIndexComparison, ValueIndexImageMetadata, ValueIndexes,
 };
 use values::StoredValues;
 
