@@ -49110,6 +49110,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_payload_footprints_share_controlled_and_ordinary_counting",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests.rs",
+      "capability": "Native value footprint construction",
+      "workload": "Count scalar and nested native payloads through ordinary and admitted construction, denied workspace and both cancellation scopes.",
+      "invariant": "Construction observes the unchanged retained payload without cloning it; ordinary flat observation allocates nothing and failed controlled traversal releases its workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_shares_native_roots_without_population_work_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Immutable statistics capture",
+      "workload": "Capture 2,048 native distributions, replace their source and retire its owner.",
+      "invariant": "Independent capture allocates no population storage, retains original addresses and exact values, and releases the complete cached payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_independently_admits_ordinary_produced_and_decoded_generations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Statistics generation retention",
+      "workload": "Retain ordinary, admitted and image-decoded distributions with exact and one-byte-short independent budgets.",
+      "invariant": "Every source representation retains the original generation, rejects insufficient admission and releases both producer and capture reservations after final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_footprints_follow_replacement_capacity_and_both_controls",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Statistics publication footprint",
+      "workload": "Insert and replace ordinary distributions before and after sharing, then cancel each capture scope.",
+      "invariant": "Cached capacity follows the actual published generation; source and invoking cancellation reject capture without retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_statistics_capture_preserves_native_distributions_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed statistics source retention",
+      "workload": "Capture a committed table with a one-MiB distribution, replace live statistics and retire the Engine.",
+      "invariant": "Capture uses less than 64 KiB allocation workspace while retaining and charging the original distribution; cancellation and final retirement preserve the original control.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

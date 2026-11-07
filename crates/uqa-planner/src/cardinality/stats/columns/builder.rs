@@ -89,11 +89,17 @@ impl<'a> Builder<'a> {
         Ok(match self.columns {
             Map::Ordinary(columns) => columns.into(),
             Map::Admitted(columns) if columns.is_empty() => ColumnStatistics::default(),
-            Map::Admitted(columns) => ColumnStatistics(Columns::Admitted(
-                self.control
-                    .finish(columns, self.control.empty_reservation())?
-                    .into_shared(&self.control)?,
-            )),
+            Map::Admitted(columns) => {
+                let bytes = super::footprint::admitted(&columns, &self.control)?;
+                ColumnStatistics(
+                    Columns::Admitted(
+                        self.control
+                            .finish(columns, self.control.empty_reservation())?
+                            .into_shared(&self.control)?,
+                    ),
+                    Ok(bytes),
+                )
+            }
         })
     }
 }

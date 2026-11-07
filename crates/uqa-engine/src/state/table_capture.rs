@@ -50,11 +50,10 @@ impl StorageContext {
             control.finish(*value, control.empty_reservation())?
         ));
         capture!(security, super::BoundTableSecurity::capture_security);
-        capture!(column_stats, |value, control| {
-            let copied =
-                value.with_replacements(&uqa_planner::ColumnStatistics::default(), *control)?;
-            Ok(control.finish(copied, control.empty_reservation())?)
-        });
+        capture!(
+            column_stats,
+            uqa_planner::ColumnStatistics::capture_with_control
+        );
         capture!(analyzer, |value, control| {
             let copied = value
                 .encode_configuration_budgeted(

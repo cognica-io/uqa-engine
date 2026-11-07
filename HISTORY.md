@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Committed memory captures retain original Planner statistics under independent cached-footprint admission without copying their distribution population.
+
 - Stream original evaluated-index policies and value images from committed memory captures, including spilled keys, without reevaluation. Complete memory inventory and Engine restore remain under implementation.
 
 - Retain immutable named-index membership separately from evaluated child values. Live publication and rollback preserve exact child identities through name reuse, deletion and source retirement without scanning values when capturing the name root. Complete memory backup and public restore remain under implementation.

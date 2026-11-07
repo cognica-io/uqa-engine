@@ -7,6 +7,64 @@
 use super::*;
 use crate::{ArrayValue, DecimalValue};
 
+#[test]
+fn native_payload_footprints_share_controlled_and_ordinary_counting() {
+    let scalar = Value::Str(text(8192));
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(
+            scalar
+                .retained_payload_bytes_with_control(&ProductionControl::uncontrolled())
+                .unwrap(),
+            8192
+        );
+    });
+    assert_eq!(allocation.count_total, 0, "{allocation:?}");
+    let nested = Value::List(vec![
+        scalar,
+        Value::Row(vec![Value::Bytes(Vec::with_capacity(4096))].into()),
+    ]);
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let expected = nested.retained_payload_bytes(&memory, &original).unwrap();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&memory, &original, &invoking),
+    ] {
+        assert_eq!(
+            nested
+                .retained_payload_bytes_with_control(&control)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(memory.used(), 0);
+    }
+    let denied = MemoryBudget::new(0);
+    assert!(matches!(
+        nested.retained_payload_bytes_with_control(&ProductionControl::new(
+            &denied, &original, &invoking
+        )),
+        Err(ValueRetentionError::Memory(_))
+    ));
+    assert_eq!(denied.used(), 0);
+    for cancel_original in [true, false] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert!(matches!(
+            nested.retained_payload_bytes_with_control(&ProductionControl::new(
+                &memory, &original, &invoking
+            )),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
 fn text(capacity: usize) -> String {
     let mut text = String::with_capacity(capacity);
     text.push('x');

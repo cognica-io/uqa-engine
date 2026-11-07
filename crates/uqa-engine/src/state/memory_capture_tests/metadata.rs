@@ -8,6 +8,57 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn committed_memory_statistics_capture_preserves_native_distributions_without_copying() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE saved(payload text)");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.column_stats.write() = [(
+        "payload".into(),
+        uqa_planner::ColumnStats {
+            row_count: 2,
+            distinct_count: 1,
+            mcv_values: vec![crate::Value::Str("x".repeat(1 << 20))],
+            mcv_frequencies: vec![1.0],
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let original = {
+        let statistics = table.column_stats.read();
+        std::ptr::from_ref(&statistics["payload"])
+    };
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 1 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(
+        &raw const retained.column_stats.get().unwrap()["payload"],
+        original
+    );
+    *table.column_stats.write() = uqa_planner::ColumnStatistics::default();
+    drop((table, engine));
+    let stats = retained.column_stats.get().unwrap();
+    assert_eq!(stats["payload"].mcv_frequencies, [1.0]);
+    let crate::Value::Str(value) = &stats["payload"].mcv_values[0] else {
+        panic!("original text")
+    };
+    assert_eq!(value.len(), 1 << 20);
+    control.cancellation().cancel();
+    assert!(retained.column_stats.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn captured_table_statistics_images_keep_distributions_and_maintenance_after_retirement() {
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     use uqa_planner::ColumnStatistics;

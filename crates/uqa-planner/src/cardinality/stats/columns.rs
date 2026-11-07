@@ -11,6 +11,7 @@ use uqa_sql::SQLError;
 
 mod builder;
 mod copy;
+mod footprint;
 mod image;
 pub(crate) use builder::Builder;
 use builder::ColumnName;
@@ -21,8 +22,14 @@ mod tests;
 type AdmittedColumns = BudgetedMap<ColumnName, Produced<ColumnStats>>;
 
 /// Column statistics shared by cost estimators, relation descriptors and catalog readers. Empty collections allocate nothing. Captured catalog generations keep their original ownership, including producer reservations for newly collected distributions.
-#[derive(Clone, Default)]
-pub struct ColumnStatistics(Columns);
+#[derive(Clone)]
+pub struct ColumnStatistics(Columns, Result<usize, Arc<SQLError>>);
+
+impl Default for ColumnStatistics {
+    fn default() -> Self {
+        Self(Columns::Empty, Ok(0))
+    }
+}
 
 #[derive(Clone, Default)]
 enum Columns {
@@ -37,14 +44,16 @@ impl From<BTreeMap<String, ColumnStats>> for ColumnStatistics {
         if columns.is_empty() {
             Self::default()
         } else {
-            Self(Columns::Ordinary(Arc::new(columns)))
+            Self::from(Arc::new(columns))
         }
     }
 }
 
 impl From<Arc<BTreeMap<String, ColumnStats>>> for ColumnStatistics {
     fn from(columns: Arc<BTreeMap<String, ColumnStats>>) -> Self {
-        Self(Columns::Ordinary(columns))
+        let bytes =
+            footprint::ordinary(&columns, &ProductionControl::uncontrolled()).map_err(Arc::new);
+        Self(Columns::Ordinary(columns), bytes)
     }
 }
 
@@ -55,6 +64,17 @@ impl FromIterator<(String, ColumnStats)> for ColumnStatistics {
 }
 
 impl ColumnStatistics {
+    /// Independently retain the immutable generation using its publication-time footprint. Capture never visits columns or distribution values and never copies the population.
+    pub fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        control.check()?;
+        let bytes = self.1.as_ref().map_err(|error| (**error).clone())?;
+        let memory = control.reserve(*bytes)?;
+        Ok(control.finish(self.clone(), memory)?)
+    }
+
     pub fn len(&self) -> usize {
         match &self.0 {
             Columns::Empty => 0,
@@ -142,12 +162,33 @@ impl ColumnStatistics {
     /// Standalone statistics builders detach before changing a shared generation. Native publication uses the admitted producer.
     pub(super) fn insert(&mut self, name: String, stats: ColumnStats) {
         if !matches!(self.0, Columns::Ordinary(_)) {
-            self.0 = Columns::Ordinary(Arc::new(self.to_owned_map()));
+            *self = Self::from(Arc::new(self.to_owned_map()));
         }
         let Columns::Ordinary(columns) = &mut self.0 else {
             unreachable!()
         };
-        Arc::make_mut(columns).insert(name, stats);
+        let detached = Arc::strong_count(columns) != 1;
+        let columns = Arc::make_mut(columns);
+        if let Some(bytes) = self.1.as_ref().ok().copied().filter(|_| !detached) {
+            use std::collections::btree_map::Entry;
+            self.1 = match columns.entry(name) {
+                Entry::Occupied(mut entry) => {
+                    let bytes =
+                        footprint::replacement(bytes, entry.key(), Some(entry.get()), &stats);
+                    entry.insert(stats);
+                    bytes
+                }
+                Entry::Vacant(entry) => {
+                    let bytes = footprint::replacement(bytes, entry.key(), None, &stats);
+                    entry.insert(stats);
+                    bytes
+                }
+            }
+            .map_err(Arc::new);
+            return;
+        }
+        columns.insert(name, stats);
+        self.1 = footprint::ordinary(columns, &ProductionControl::uncontrolled()).map_err(Arc::new);
     }
 }
 

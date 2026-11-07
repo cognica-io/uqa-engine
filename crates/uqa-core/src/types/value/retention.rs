@@ -8,9 +8,12 @@
 
 use super::Value;
 use crate::{
-    memory::{BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
+    memory::{MemoryBudget, MemoryError, MemoryReservation, ProductionControl},
     CancellationToken, QueryCancelled,
 };
+
+mod stack;
+use stack::Stack;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValueRetentionError {
@@ -90,13 +93,39 @@ impl Value {
         Ok(total)
     }
 
+    /// Count the same native payload during owner construction. Ordinary builders use ordinary traversal scratch; controlled producers admit that scratch and preserve both cancellation scopes. No payload is copied or reserved by this observation.
+    pub fn retained_payload_bytes_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<usize, ValueRetentionError> {
+        let mut total = 0_usize;
+        self.visit_retained_payload(
+            control.budget(),
+            || control.check_cancellation(),
+            |bytes| {
+                total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+                Ok(())
+            },
+        )?;
+        Ok(total)
+    }
+
     pub(crate) fn visit_retained_payload_with_check(
         &self,
         budget: &MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled>,
+        visit: impl FnMut(usize) -> Result<(), MemoryError>,
+    ) -> Result<(), ValueRetentionError> {
+        self.visit_retained_payload(Some(budget), check, visit)
+    }
+
+    fn visit_retained_payload(
+        &self,
+        budget: Option<&MemoryBudget>,
         mut check: impl FnMut() -> Result<(), QueryCancelled>,
         mut visit: impl FnMut(usize) -> Result<(), MemoryError>,
     ) -> Result<(), ValueRetentionError> {
-        let mut stack = BudgetedVec::new(budget);
+        let mut stack = Stack::new(budget);
         let mut current = Some((self, 0));
         loop {
             check()?;

@@ -8,6 +8,8 @@ use super::*;
 use crate::RelationStats;
 use uqa_core::Value;
 
+mod capture;
+
 #[test]
 fn empty_statistics_and_handle_clones_do_not_allocate() {
     let allocation = allocation_counter::measure(|| {
