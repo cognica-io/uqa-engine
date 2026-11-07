@@ -8,6 +8,120 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn captured_table_statistics_images_keep_distributions_and_maintenance_after_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_planner::ColumnStatistics;
+    use uqa_storage::statistics_maintenance::StatisticsMaintenance;
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE metrics(id integer, value text); INSERT INTO metrics VALUES(1,'old'),(2,'old'),(3,'last'); ANALYZE metrics; INSERT INTO metrics VALUES(4,'pending')");
+    let table = engine.table("metrics").unwrap().unwrap();
+    let expected = table.column_stats.snapshot();
+    assert!(!expected.is_empty());
+    let expected_maintenance = table.statistics_maintenance.snapshot();
+    assert!(expected_maintenance.dirty());
+    let statistics = table.column_stats.key().unwrap();
+    let maintenance = table.statistics_maintenance.key().unwrap();
+    let control = StorageReadControl::with_limit(4 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; UPDATE metrics SET value='private'; ANALYZE metrics; ROLLBACK; DROP TABLE metrics; CREATE TABLE metrics(replacement text)");
+    drop((table, engine));
+    let (stat_bytes, maintenance_bytes) = std::thread::spawn(move || {
+        let saved = statistics.retained(&cut).unwrap().unwrap();
+        let maintained = maintenance.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let mut stat_bytes = Vec::new();
+        saved
+            .get()
+            .unwrap()
+            .image_reader(&memory, &token)
+            .unwrap()
+            .write_to(&mut stat_bytes)
+            .unwrap();
+        assert_eq!(memory.used(), 0);
+        let mut maintenance_bytes = Vec::new();
+        maintained
+            .get()
+            .unwrap()
+            .image_reader(&token)
+            .unwrap()
+            .write_to(&mut maintenance_bytes)
+            .unwrap();
+        (stat_bytes, maintenance_bytes)
+    })
+    .join()
+    .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let restored =
+        ColumnStatistics::read_image(&mut stat_bytes.as_slice(), &memory, &token).unwrap();
+    let restored_maintenance =
+        StatisticsMaintenance::read_image(&mut maintenance_bytes.as_slice(), &memory, &token)
+            .unwrap();
+    assert_eq!(restored_maintenance, *expected_maintenance);
+    assert_column_statistics(&restored, &expected);
+    drop(restored);
+    assert_eq!(memory.used(), 0);
+}
+
+fn assert_column_statistics(
+    actual: &uqa_planner::ColumnStatistics,
+    expected: &uqa_planner::ColumnStatistics,
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (name, expected) in expected.iter() {
+        let actual = actual.get(name).unwrap();
+        assert_eq!(
+            (actual.row_count, actual.null_count, actual.distinct_count),
+            (
+                expected.row_count,
+                expected.null_count,
+                expected.distinct_count
+            )
+        );
+        assert_eq!(
+            actual
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>()
+        );
+        for (actual, expected) in [
+            (&actual.min_value, &expected.min_value),
+            (&actual.max_value, &expected.max_value),
+        ] {
+            assert_eq!(actual.is_some(), expected.is_some());
+            if let (Some(actual), Some(expected)) = (actual, expected) {
+                assert!(actual.has_same_representation(expected));
+            }
+        }
+        for (actual, expected) in [
+            (&actual.histogram, &expected.histogram),
+            (&actual.mcv_values, &expected.mcv_values),
+        ] {
+            assert_eq!(actual.len(), expected.len());
+            assert!(actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.has_same_representation(expected)));
+        }
+    }
+}
+
+#[test]
 fn captured_table_authority_images_keep_acl_incarnations_after_engine_retirement() {
     use uqa_core::{
         memory::{MemoryBudget, ProductionControl},

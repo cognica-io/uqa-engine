@@ -47251,6 +47251,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_images_match_independent_distribution_bytes",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_images_preserve_optional_values_and_frequency_bits",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_input_rejects_invalid_order_and_retires_denied_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_output_borrows_payloads_and_retires_active_value_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "native_column_statistics_writer_failure_retires_active_traversal",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests.rs",
+      "capability": "Native column statistics images",
+      "workload": "Stream independent native distribution records; reconstruct optional values, frequency bits and admitted ownership; exercise malformed input and interrupted readers/writers.",
+      "invariant": "Exact distribution bytes and planner observations survive; active traversal and reconstructed payloads retain and retire their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_images_match_independent_inline_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_images_preserve_absence_and_all_counter_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_input_rejects_malformed_and_truncated_records",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_statistics_maintenance_output_failure_and_cancellation_are_terminal",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests.rs",
+      "capability": "Native statistics maintenance images",
+      "workload": "Exercise independent fixed records, all optional fields and counter widths, truncated input, cancellation and writer failure.",
+      "invariant": "All inline state is preserved without allocation or eligibility recomputation; malformed framing fails and output failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_statistics_images_keep_distributions_and_maintenance_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine statistics images",
+      "workload": "Capture analyzed distributions and pending maintenance, roll back a new analysis, replace the relation and emit the old capture after Engine retirement on another thread.",
+      "invariant": "Original complete distributions and maintenance state survive rollback, replacement and source retirement with no retained allowance leak.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
