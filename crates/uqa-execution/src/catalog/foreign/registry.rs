@@ -24,6 +24,8 @@ use uqa_sql::{
     SQLError,
 };
 
+mod image;
+
 #[derive(Clone)]
 pub struct ForeignTables {
     durable: RetainedMap<RelationIdentity, Budgeted<StoredForeignTable>>,
@@ -81,16 +83,16 @@ impl ForeignTables {
     ) -> Result<(), SQLError> {
         let cancellation = CancellationToken::new();
         let control = ProductionControl::new(self.budget(), &cancellation, &cancellation);
-        let table = super::capture::native_table(&table, &control)?
-            .into_budgeted()
-            .unwrap_or_else(|_| {
-                unreachable!("native foreign definitions use admitted construction")
-            });
+        let (table, children) = super::capture::native_table(&table, &control)?;
+        let table = table.into_budgeted().unwrap_or_else(|_| {
+            unreachable!("native foreign definitions use admitted construction")
+        });
         let bytes = relation
             .schema
             .capacity()
             .checked_add(relation.name.capacity())
             .and_then(|bytes| bytes.checked_add(table.reserved_bytes()))
+            .and_then(|bytes| bytes.checked_add(children))
             .ok_or(MemoryError::SizeOverflow)?;
         let mut durable = self.durable.clone();
         let mut temporary = self.temporary.clone();

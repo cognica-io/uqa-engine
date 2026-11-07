@@ -16,19 +16,20 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl};
 
-/// Preserve all native column bindings and expression ownership during catalog publication.
+/// Preserve native columns and return their separately retained child footprint for independent catalog admission.
 pub fn stored_columns(
     values: &Vec<crate::ast::ColumnDef>,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<crate::ast::ColumnDef>>, SQLError> {
-    crate::plan::copy::capture_stored_with_control(values, control)
+) -> Result<(Produced<Vec<crate::ast::ColumnDef>>, usize), SQLError> {
+    crate::plan::copy::capture_stored_with_footprint(values, control)
 }
 
+/// Preserve native checks and return their separately retained child footprint.
 pub fn stored_checks(
     values: &Vec<crate::ast::TableCheck>,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<crate::ast::TableCheck>>, SQLError> {
-    crate::plan::copy::capture_stored_with_control(values, control)
+) -> Result<(Produced<Vec<crate::ast::TableCheck>>, usize), SQLError> {
+    crate::plan::copy::capture_stored_with_footprint(values, control)
 }
 
 pub fn stored_options(

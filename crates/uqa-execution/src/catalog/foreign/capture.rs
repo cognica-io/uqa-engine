@@ -95,7 +95,7 @@ fn table(
 pub(super) fn native_table(
     value: &StoredForeignTable,
     control: &ProductionControl<'_>,
-) -> Result<Produced<StoredForeignTable>, SQLError> {
+) -> Result<(Produced<StoredForeignTable>, usize), SQLError> {
     let StoredForeignTable {
         name,
         persistence,
@@ -118,6 +118,15 @@ pub(super) fn native_table(
             value
         }};
     }
+    let (columns, column_children) = definition_capture::foreign::stored_columns(columns, control)?;
+    let (columns, column_memory) = columns.into_parts();
+    memory = control.combine(memory, column_memory);
+    let (checks, check_children) = definition_capture::foreign::stored_checks(checks, control)?;
+    let (checks, check_memory) = checks.into_parts();
+    memory = control.combine(memory, check_memory);
+    let children = column_children
+        .checked_add(check_children)
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
     let value = StoredForeignTable {
         name: take!(control.copy_text(name)),
         persistence: *persistence,
@@ -129,20 +138,18 @@ pub(super) fn native_table(
         )),
         server_name: take!(control.copy_text(server_name)),
         server_reference: *server_reference,
-        columns: take!(definition_capture::foreign::stored_columns(
-            columns, control
-        )),
+        columns,
         dropped_attributes: take!(definition_capture::dropped_attributes(
             dropped_attributes,
             control
         )),
-        checks: take!(definition_capture::foreign::stored_checks(checks, control)),
+        checks,
         options: take!(definition_capture::foreign::stored_options(
             options, control
         )),
         option_order: take!(definition_capture::names(option_order, control)),
     };
-    Ok(control.finish(value, memory)?)
+    Ok((control.finish(value, memory)?, children))
 }
 
 pub fn tables(

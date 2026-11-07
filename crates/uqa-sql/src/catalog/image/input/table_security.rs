@@ -9,17 +9,48 @@
 use super::{expressions::payload, invalid, Input};
 use crate::{
     catalog::security::table_binding::{
-        BoundTableAclEntry, CapturedTablePrivileges, CapturedTableSecurity,
+        BoundTableAclEntry, BoundTableSecurity, CapturedTablePrivileges, CapturedTableSecurity,
     },
     SQLError,
 };
 use std::io::Read;
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation},
+    catalog_acl::RelationAclRevisions,
+    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, OwnedMap},
     CancellationToken,
 };
 
 impl Input<'_> {
+    fn native_authority_map<T>(
+        &mut self,
+        count: usize,
+        memory: &mut MemoryReservation,
+        mut decode: impl FnMut(&mut Self) -> Result<Budgeted<T>, SQLError>,
+    ) -> Result<OwnedMap<String, T>, SQLError> {
+        fn publish<T>(
+            values: &mut OwnedMap<String, T>,
+            entry: (Budgeted<String>, Budgeted<T>),
+            memory: &mut MemoryReservation,
+        ) -> Result<(), SQLError> {
+            memory.grow(OwnedMap::<String, T>::entry_bytes())?;
+            values.insert(payload(entry.0, memory), payload(entry.1, memory));
+            Ok(())
+        }
+        let mut values = OwnedMap::new();
+        let mut pending: Option<(Budgeted<String>, Budgeted<T>)> = None;
+        for _ in 0..count {
+            let name = self.ordered_name(pending.as_ref().map(|(name, _)| &**name))?;
+            let value = decode(self)?;
+            if let Some(previous) = pending.replace((name, value)) {
+                publish(&mut values, previous, memory)?;
+            }
+        }
+        if let Some(last) = pending {
+            publish(&mut values, last, memory)?;
+        }
+        Ok(values)
+    }
+
     fn table_column_acls(
         &mut self,
         count: usize,
@@ -54,6 +85,41 @@ impl Input<'_> {
         memory.absorb(reservation);
         Ok(values)
     }
+}
+
+pub(in super::super) fn bound_table_security(
+    reader: &mut dyn Read,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<Budgeted<BoundTableSecurity>, SQLError> {
+    let mut input = Input::new(reader, memory, cancellation);
+    if input.header(super::super::TABLE_SECURITY)? != 1 {
+        return Err(invalid("table authority count"));
+    }
+    let role_owner = input.identity()?;
+    let relation = input.optional_incarnation()?;
+    let acl_count = input.binary.count()?;
+    let revision_count = input.binary.count()?;
+    let mut reservation = memory.empty_reservation();
+    let acl = payload(input.acl()?, &mut reservation);
+    let column_acls =
+        input.native_authority_map(acl_count, &mut reservation, |input| input.acl_entries())?;
+    let columns = input.native_authority_map(revision_count, &mut reservation, |input| {
+        Ok(Budgeted::new(
+            input.object_id()?,
+            input.binary.memory.empty_reservation(),
+        ))
+    })?;
+    input.binary.end()?;
+    Ok(Budgeted::new(
+        BoundTableSecurity {
+            role_owner,
+            acl,
+            column_acls,
+            acl_revisions: RelationAclRevisions { relation, columns },
+        },
+        reservation,
+    ))
 }
 
 pub(in super::super) fn table_security(

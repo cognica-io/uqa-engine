@@ -4,6 +4,201 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_column_constructor_and_image_preserve_separate_literal_footprints",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/ownership.rs",
+      "capability": "Retained SQL definition footprint",
+      "workload": "Capture and decode a native column with an evaluated retained default and independent type/declaration metadata.",
+      "invariant": "The constructor reports every separately retained payload lease; independent capture cannot omit child storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_capture_funds_retained_literal_children_before_and_after_image_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Complete foreign catalog capture admission",
+      "workload": "Capture native and decoded foreign definitions with a four MiB retained default or CHECK under a 64 KiB allowance.",
+      "invariant": "Both independent captures reject insufficient funding and ample captures keep original payloads until their final owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_authority_images_preserve_existing_wire_and_admitted_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority map images",
+      "workload": "Preserve native ACL maps and revisions against existing image bytes, malformed prefixes, strict admission and large borrowed maps.",
+      "invariant": "Native authority reconstruction preserves complete fields and transfers admitted payload/node ownership without a copied projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_authority_images_reject_partial_unordered_and_cancelled_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority map images",
+      "workload": "Preserve native ACL maps and revisions against existing image bytes, malformed prefixes, strict admission and large borrowed maps.",
+      "invariant": "Native authority reconstruction preserves complete fields and transfers admitted payload/node ownership without a copied projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_authority_output_borrows_large_native_maps_without_projection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority map images",
+      "workload": "Preserve native ACL maps and revisions against existing image bytes, malformed prefixes, strict admission and large borrowed maps.",
+      "invariant": "Native authority reconstruction preserves complete fields and transfers admitted payload/node ownership without a copied projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "framed_owner_images_have_canonical_independent_bytes_and_exact_child_eof",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests.rs",
+      "capability": "Canonical bounded owner-image composition",
+      "workload": "Compose independent child bytes across partial reads, canonical chunk boundaries, denial, cancellation and unwinding.",
+      "invariant": "Framing is deterministic, bounded and terminal on failure; exact child EOF leaves following parent bytes untouched.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "framed_owner_inputs_reject_truncation_noncanonical_chunks_and_resume_after_interrupt",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests.rs",
+      "capability": "Canonical bounded owner-image composition",
+      "workload": "Compose independent child bytes across partial reads, canonical chunk boundaries, denial, cancellation and unwinding.",
+      "invariant": "Framing is deterministic, bounded and terminal on failure; exact child EOF leaves following parent bytes untouched.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "framed_owner_cursors_enforce_admission_cancellation_and_unwind_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests.rs",
+      "capability": "Canonical bounded owner-image composition",
+      "workload": "Compose independent child bytes across partial reads, canonical chunk boundaries, denial, cancellation and unwinding.",
+      "invariant": "Framing is deterministic, bounded and terminal on failure; exact child EOF leaves following parent bytes untouched.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_images_validate_paired_membership_and_preserve_empty_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_images_preserve_original_paired_fields_and_independent_generations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_images_reject_every_truncation_trailing_data_and_denied_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_images_preserve_absence_unlogged_persistence_and_reject_invalid_options",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_image_output_has_fixed_payload_workspace_and_terminal_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_image_input_retires_partial_owners_after_io_cancellation_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests.rs",
+      "capability": "Paired native foreign catalog images",
+      "workload": "Retain complete original foreign definitions and matching authority, reject malformed or interrupted private input, and bound large-payload output.",
+      "invariant": "Private native reconstruction preserves durable membership, original declarations and identity references without SQL replay or external source access.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_foreign_images_retain_paired_authority_after_rollback_replacement_and_closure",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/foreign.rs",
+      "capability": "Retained Engine foreign catalog image lifetime",
+      "workload": "Create foreign SQL metadata and column grants, capture committed state, roll back and replace definitions, close Engine, and reconstruct the captured pair on another thread.",
+      "invariant": "Captured definitions and original authority remain paired through source replacement and closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_rule_images_preserve_original_actions_conditions_and_dependencies",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",

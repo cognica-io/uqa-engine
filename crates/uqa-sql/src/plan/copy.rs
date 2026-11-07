@@ -230,16 +230,25 @@ pub(crate) fn capture_stored_with_control<T: syntax::SyntaxCopy>(
     value: &T,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<T>> {
+    Ok(capture_stored_with_footprint(value, control)?.0)
+}
+
+pub(crate) fn capture_stored_with_footprint<T: syntax::SyntaxCopy>(
+    value: &T,
+    control: &ProductionControl<'_>,
+) -> Result<(Produced<T>, usize)> {
     control.check()?;
     let mut copying = Copying::capture(*control, CopyPurpose::Stored);
     let value = value.copy_syntax(&mut copying)?;
-    copying.finish(value)
+    let children = copying.retained_children;
+    Ok((copying.finish(value)?, children))
 }
 
 pub(crate) struct Copying<'a> {
     control: ProductionControl<'a>,
     purpose: CopyPurpose,
     memory: Option<MemoryReservation>,
+    retained_children: usize,
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
@@ -264,6 +273,7 @@ impl<'a> Copying<'a> {
             control,
             purpose,
             memory: control.empty_reservation(),
+            retained_children: 0,
             fields: None,
             scalar_items: None,
             parameters: None,

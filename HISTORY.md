@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
+
 - Native rewrite-rule images preserve original SQL, bound conditions, OLD/NEW identities and dependency membership through independently retained event owners. Complete memory Engine backup and public restore remain in progress.
 
 - Nested scalar type binding no longer retains unrelated constructor and call-coercion workspace across recursive argument descent, preventing default-thread stack overflow in collation-aware expressions.
@@ -21,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Complete memory backup and public Engine restore remain in progress.
+
+- Add bounded native foreign-table catalog images preserving original declarations, server references, option order and matching relation authority without contacting foreign data sources. Complete memory backup assembly and public Engine restore remain under implementation.
 
 - Add native routine catalog images preserving original declarations, unexamined source bodies, separately bound SQL plans and execution authority. Restored definitions and shared bodies retain independent memory and cleanup ownership; complete memory backup and public Engine restore remain under implementation.
 

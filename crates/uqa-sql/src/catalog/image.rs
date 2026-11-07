@@ -43,9 +43,10 @@ pub use expressions::{
     DefinitionImageReader,
 };
 pub use input::{
-    read_columns_image, read_dropped_attributes_image, read_foreign_keys_image,
-    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image,
-    CapturedExpressionPlan, CapturedPlan, CapturedQuery, CapturedScalar, CapturedStatement,
+    read_columns_image, read_columns_image_with_footprint, read_dropped_attributes_image,
+    read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
+    read_table_hierarchy_image, read_table_keys_image, CapturedExpressionPlan, CapturedPlan,
+    CapturedQuery, CapturedScalar, CapturedStatement,
 };
 pub use reader::CatalogImageReader;
 use reader::Entries;
@@ -68,6 +69,30 @@ const FOREIGN_SERVERS: [u8; 8] = *b"UQAFSR01";
 const GRAPH_OIDS: [u8; 8] = *b"UQAGOI01";
 const SEQUENCE_AUTHORITIES: [u8; 8] = *b"UQASQA01";
 const TABLE_SECURITY: [u8; 8] = *b"UQATSA01";
+
+impl crate::catalog::security::BoundTableSecurity {
+    /// Borrow native table authority directly, preserving ACL paths and tuple revisions without a copied projection.
+    pub fn image_reader<'a>(
+        &'a self,
+        cancellation: &'a CancellationToken,
+    ) -> Result<CatalogImageReader<'a>, SQLError> {
+        CatalogImageReader::new(
+            Entries::NativeTableSecurity(Some(self)),
+            TABLE_SECURITY,
+            1,
+            cancellation,
+        )
+    }
+
+    /// Reconstruct unpublished native maps with their payload and node allowances. The enclosing catalog validates role and relation references before publication.
+    pub fn read_image(
+        reader: &mut dyn Read,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<uqa_core::memory::Budgeted<Self>, SQLError> {
+        input::bound_table_security(reader, memory, cancellation)
+    }
+}
 
 impl crate::catalog::security::table_binding::CapturedTableSecurity {
     /// Borrow exact table and column authority with original ACL tuple revisions. Reads are bounded and do not resolve roles or allocate payloads.

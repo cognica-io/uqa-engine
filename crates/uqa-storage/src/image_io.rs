@@ -10,9 +10,11 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 use std::io::{Read, Write};
 use uqa_core::memory::{Budgeted, MemoryError};
 
+mod framed;
 mod owned;
 mod reader;
 mod retained;
+pub use framed::{framed_image_reader, FramedImageInput};
 pub use owned::ImageOwner;
 pub use reader::{ImagePreparation, ImageRead, ImageReader};
 pub use retained::with_retained_control;

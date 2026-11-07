@@ -16,7 +16,7 @@ use crate::{
     SQLError,
 };
 use uqa_core::{
-    memory::{MemoryBudget, Produced, ProductionControl},
+    memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
     RelationIdentity,
 };
 
@@ -27,6 +27,10 @@ pub struct ForeignTableAuthority {
 }
 
 impl ForeignTableAuthority {
+    pub const fn persistence(&self) -> RelationPersistence {
+        self.persistence
+    }
+
     pub fn security(&self) -> &BoundTableSecurity {
         &self.security
     }
@@ -103,6 +107,25 @@ impl ForeignTableSecurities {
                 persistence,
                 security,
             },
+        )
+    }
+    /// Transfer already admitted native authority into an unpublished registry without copying its maps or payloads. The paired foreign catalog owns membership and publication.
+    pub fn insert_image_entry(
+        &mut self,
+        relation: Budgeted<RelationIdentity>,
+        persistence: RelationPersistence,
+        security: Budgeted<BoundTableSecurity>,
+    ) -> Result<(), SQLError> {
+        let (security, memory) = security.into_parts();
+        self.0.insert_image_entry(
+            relation,
+            Budgeted::new(
+                ForeignTableAuthority {
+                    persistence,
+                    security,
+                },
+                memory,
+            ),
         )
     }
     pub fn remove(&mut self, relation: &RelationIdentity) -> Result<bool, SQLError> {

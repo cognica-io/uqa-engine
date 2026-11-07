@@ -8,6 +8,63 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_execution::catalog::foreign::{registry::CapturedForeignTables, ForeignTables};
 use uqa_sql::catalog::foreign_server::{CapturedForeignServers, ForeignServers};
 
+#[test]
+fn memory_foreign_images_retain_paired_authority_after_rollback_replacement_and_closure() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE ROLE reader; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE remote_rows(gone integer, payload text DEFAULT 'original', CONSTRAINT valid CHECK(length(payload)>0)) SERVER remote OPTIONS(z 'first',a 'second'); ALTER FOREIGN TABLE remote_rows DROP gone; GRANT SELECT(payload) ON remote_rows TO reader WITH GRANT OPTION");
+    let original = engine.durable.foreign_catalog.snapshot();
+    let key = engine.durable.foreign_catalog.key().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; REVOKE SELECT(payload) ON remote_rows FROM reader; DROP FOREIGN TABLE remote_rows; ROLLBACK; DROP FOREIGN TABLE remote_rows; CREATE FOREIGN TABLE remote_rows(replacement integer) SERVER remote");
+    drop(engine);
+    let saved = key.retained(&cut).unwrap().unwrap();
+    let bytes = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let output_control = StorageReadControl::with_limit(64 << 10);
+                let mut source = saved.get().unwrap().image_reader(&output_control).unwrap();
+                let mut buffer = [0; 4096];
+                let mut bytes = Vec::new();
+                loop {
+                    let count = source.read(&mut buffer).unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                bytes
+            })
+            .join()
+            .unwrap()
+    });
+    let restored_control = StorageReadControl::with_limit(1 << 20);
+    let restored = uqa_execution::catalog::foreign::ForeignCatalog::read_image(
+        &mut bytes.as_slice(),
+        &restored_control,
+    )
+    .unwrap();
+    assert_eq!(restored.security(), original.security());
+    let token = uqa_core::CancellationToken::new();
+    let capture = restored
+        .capture(&uqa_core::memory::ProductionControl::new(
+            restored_control.memory(),
+            &token,
+            &token,
+        ))
+        .unwrap();
+    same_tables(&capture.tables, original.tables());
+    drop((capture, restored, original, saved, cut));
+    assert_eq!(restored_control.memory().used(), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn same_servers(saved: &CapturedForeignServers, source: &ForeignServers) {
     assert_eq!(saved.len(), source.len());
     for ((name, value), (original_name, original)) in saved.iter().zip(source) {

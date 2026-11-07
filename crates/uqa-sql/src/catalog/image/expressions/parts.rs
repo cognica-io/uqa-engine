@@ -50,22 +50,8 @@ impl<'a> DefinitionImageReader<'a> {
                     self.push(Frame::Node(condition))?;
                 }
             }
-            Frame::Binding(value) => {
-                let memory = self
-                    .memory
-                    .reserve(size_of::<super::CatalogImageReader<'_>>())?;
-                self.child = Some(Child::Binding {
-                    reader: Box::new(value.image_reader(self.cancellation)?),
-                    _memory: memory,
-                });
-            }
-            Frame::Value(value) => {
-                let memory = self.memory.reserve(size_of::<ValueImageReader<'_, '_>>())?;
-                self.child = Some(Child::Value {
-                    reader: Box::new(ValueImageReader::new(value, self.memory, self.cancellation)),
-                    _memory: memory,
-                });
-            }
+            Frame::Binding(value) => self.binding_child(value)?,
+            Frame::Value(value) => self.value_child(value)?,
             Frame::Type(value) => {
                 if let Some(child) = self.fields.column_type(value) {
                     self.push(Frame::Type(child))?;
@@ -85,6 +71,27 @@ impl<'a> DefinitionImageReader<'a> {
             }
             other => self.composite_parts(other)?,
         }
+        Ok(())
+    }
+
+    // Child constructors have substantial fixed workspace. Keep it outside ordinary plan traversal frames while retaining admission before allocation.
+    fn binding_child(&mut self, value: &'a crate::ast::FunctionBinding) -> Result<(), SQLError> {
+        let memory = self
+            .memory
+            .reserve(size_of::<super::CatalogImageReader<'_>>())?;
+        self.child = Some(Child::Binding {
+            reader: Box::new(value.image_reader(self.cancellation)?),
+            _memory: memory,
+        });
+        Ok(())
+    }
+
+    fn value_child(&mut self, value: &'a uqa_core::Value) -> Result<(), SQLError> {
+        let memory = self.memory.reserve(size_of::<ValueImageReader<'_, '_>>())?;
+        self.child = Some(Child::Value {
+            reader: Box::new(ValueImageReader::new(value, self.memory, self.cancellation)),
+            _memory: memory,
+        });
         Ok(())
     }
 
