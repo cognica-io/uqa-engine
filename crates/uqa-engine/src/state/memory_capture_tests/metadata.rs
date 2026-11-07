@@ -8,6 +8,71 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn captured_table_authority_images_keep_acl_incarnations_after_engine_retirement() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::catalog::security::table_binding::CapturedTableSecurity;
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine,"CREATE ROLE reader; CREATE TABLE docs(id integer, payload text); GRANT SELECT ON docs TO reader WITH GRANT OPTION; GRANT UPDATE(payload) ON docs TO reader");
+        let table = engine.table("docs").unwrap().unwrap();
+        let expected = table
+            .security
+            .snapshot()
+            .capture_security(&ProductionControl::uncontrolled())
+            .unwrap()
+            .into_uncontrolled()
+            .unwrap();
+        assert!(expected.privileges.acl().is_some());
+        assert!(!expected.privileges.column_acls().is_empty());
+        let key = table.security.key().unwrap();
+        let control = StorageReadControl::with_limit(4 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine,"BEGIN; REVOKE SELECT ON docs FROM reader; ROLLBACK; DROP TABLE docs; DROP ROLE reader; CREATE ROLE reader; CREATE TABLE docs(replacement text)");
+        }
+        drop((table, engine));
+        let saved = key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let bytes = std::thread::spawn(move || {
+            let token = CancellationToken::new();
+            let mut reader = saved.get().unwrap().image_reader(&token).unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 127];
+            loop {
+                let count = reader.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+            }
+            bytes
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let memory = MemoryBudget::new(1 << 20);
+        let decoded = CapturedTableSecurity::read_image(
+            &mut bytes.as_slice(),
+            &memory,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(*decoded, expected);
+        drop(decoded);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn captured_table_metadata_images_preserve_partition_constraints_after_retirement() {
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     use uqa_sql::catalog::image;

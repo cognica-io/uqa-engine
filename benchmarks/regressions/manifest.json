@@ -47173,6 +47173,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_images_match_independent_acl_and_revision_bytes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority wire format",
+      "workload": "Compare native owner, optional ACL, ordered column grants and independent revision fields against literal bytes at four read widths.",
+      "invariant": "Original authority fields and wire order are independent of chunk size.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_images_preserve_optional_acl_paths_and_all_privileges",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority preservation",
+      "workload": "Exercise all 256 privilege combinations, grant options, absent/empty ACLs and optional tuple revisions.",
+      "invariant": "Role incarnations, public grantees, grantor paths and absence remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_input_rejects_invalid_order_and_partial_or_denied_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority input admission",
+      "workload": "Reject every truncated prefix, invalid flags/counts, unordered or duplicate columns and insufficient memory; accept the exact peak allowance.",
+      "invariant": "No partial authority escapes and native buffers remain admitted until retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_output_borrows_large_columns_and_keeps_terminal_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority bounded output",
+      "workload": "Stream an eight-MiB column name and cancel a partial reader.",
+      "invariant": "Preparation and output allocate no payload; reads emit at most 16 KiB and failure remains terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_input_retires_io_cancellation_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table authority interrupted input",
+      "workload": "Inject I/O failure, cancellation and unwinding at header, payload and terminal boundaries.",
+      "invariant": "All unfinished authority buffers and reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "captured_table_authority_images_keep_acl_incarnations_after_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Captured Engine authority images",
+      "workload": "Capture actual relation/column grants, roll back REVOKE, replace the table and role, then emit on another thread after Engine closure.",
+      "invariant": "Original ACL paths, role incarnations and revision metadata survive source retirement without name resolution.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
