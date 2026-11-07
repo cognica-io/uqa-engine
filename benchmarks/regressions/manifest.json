@@ -38483,7 +38483,7 @@
       "cases": 8,
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/relation_locks.rs",
       "capability": "Native relation-lock discovery ownership",
-      "workload": "Four MiB CTE names and stored view literals, 64 KiB available, all four providers.",
+      "workload": "Four MiB CTE names and stored view literals, 64 KiB available, all four providers, with automatic statistics paused to retain the same catalog view.",
       "invariant": "Discover and lock the original relations with less than 256 KiB attempted allocation, propagate both cancellations, and release all planning scratch.",
       "case_names": [
         "case_1_memory_cte",
@@ -38494,6 +38494,21 @@
         "case_6_sqlite_kv_view",
         "case_7_redb_cte",
         "case_8_redb_view"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "relation_lock_discovery_observes_committed_statistics_before_borrowing",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/tests/queries/planning_memory/relation_locks.rs",
+      "capability": "Committed catalog refresh and relation-lock borrowing",
+      "workload": "Native SQLite, SQLite Key/Value and redb; an explicit peer ANALYZE commits after BEGIN while a four MiB view is retained.",
+      "invariant": "The real lock boundary advances to the committed catalog view, then borrowing needs less than 256 KiB allocation with 64 KiB available; original output and resource release are preserved.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     },
     {
