@@ -30,7 +30,7 @@ mod parts;
 #[cfg(test)]
 mod tests;
 
-const MAGIC: [u8; 8] = *b"UQAEXP01";
+pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
@@ -93,6 +93,15 @@ pub struct DefinitionImageReader<'a> {
 }
 
 impl Expr {
+    /// Reconstruct one stored scalar without resolving names or executing its values. Native allocations remain charged to the returned owner; malformed or interrupted input retires partial trees with constant scalar stack.
+    pub fn read_image(
+        reader: &mut dyn std::io::Read,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<uqa_core::memory::Budgeted<Self>, SQLError> {
+        super::input::expression_image(reader, memory, cancellation)
+    }
+
     /// Borrow captured scalar syntax and its native metadata; every read is bounded and traversal scratch remains admitted.
     pub fn image_reader<'a>(
         &'a self,
@@ -220,7 +229,7 @@ impl Drop for Advance<'_, '_> {
     }
 }
 
-fn value_error(error: ValueImageError) -> SQLError {
+pub(super) fn value_error(error: ValueImageError) -> SQLError {
     match error {
         ValueImageError::Invalid(message) => invalid(message),
         ValueImageError::Memory(error) => error.into(),

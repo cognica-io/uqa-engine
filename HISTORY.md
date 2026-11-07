@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Add bounded native domain and scalar-definition image output, retaining original defaults, constraints, authority, function bindings and evaluated literal metadata. Traversal and nested encoders use the supplied memory allowance; native reconstruction and complete Engine restore remain under implementation.
+- Add bounded native domain and scalar-definition images with admitted native reconstruction, retaining original defaults, constraints, authority, function bindings and evaluated literal metadata. Input retires deep partial trees on malformed data, denied memory, cancellation or unwinding. Complete Engine restore remains under implementation.
 
 - Add native function-binding images that preserve selected operations, argument and type metadata, collations and deferred diagnostics with bounded output and admitted reconstruction. Existing foreign-callback image bytes remain unchanged; complete stored-expression backup and public Engine restore remain under implementation.
 

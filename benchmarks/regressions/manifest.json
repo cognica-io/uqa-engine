@@ -20598,7 +20598,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -46741,6 +46741,110 @@
       "capability": "Native scalar expression ownership",
       "workload": "An admitted retained literal transfers its shared value and collation through owned AST projection.",
       "invariant": "Original value identity and memory admission survive until the final projected owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_matches_literal_wire_and_rejects_malformed_framing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests.rs",
+      "capability": "Native scalar input framing",
+      "workload": "Decode a literal independent scalar wire fixture and reject every truncated prefix, invalid tag, flag, count and trailing byte.",
+      "invariant": "The native expression retains exact syntax and all rejected input releases admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_admits_original_payloads_and_exact_peak",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests.rs",
+      "capability": "Native scalar input memory",
+      "workload": "Reconstruct wide native text and value payloads with zero, insufficient, exact and ample allowances.",
+      "invariant": "Native allocations are admitted before construction and all leases retire with their owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_reconstructs_and_retires_deep_trees_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests.rs",
+      "capability": "Deep native scalar input",
+      "workload": "Decode and re-emit a 10000-node tree on a 128 KiB stack, including truncated deep prefixes.",
+      "invariant": "Input and retirement use constant scalar call stack with exact child order and no leaked admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "interrupted_native_scalar_input_retires_partial_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests.rs",
+      "capability": "Interrupted native scalar input",
+      "workload": "Inject reader I/O failure, cancellation and unwinding at header, payload, child and EOF boundaries.",
+      "invariant": "No partial expression escapes and all native allocations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "decoded_retained_literals_keep_their_native_lease_after_expression_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests.rs",
+      "capability": "Decoded retained literal ownership",
+      "workload": "Decode captured value and type metadata, clone its native retained handle and retire the containing expression.",
+      "invariant": "Shared native payload and metadata remain admitted until the final handle retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_input_preserves_literal_metadata_and_captured_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/domains.rs",
+      "capability": "Native domain image input",
+      "workload": "Decode an independent domain wire fixture, observe original constraints and re-emit a captured root after registry retirement.",
+      "invariant": "Original declaration order, identifiers, absence and validation flags survive source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_input_rejects_partial_duplicate_and_mismatched_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/domains.rs",
+      "capability": "Native domain input framing",
+      "workload": "Reject every truncated prefix, repeated membership and constraint identities, invalid incarnation, mismatched key and trailing input.",
+      "invariant": "No incomplete native catalog escapes and all construction leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_input_retires_denied_cancelled_and_unwound_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/domains.rs",
+      "capability": "Native domain input resource ownership",
+      "workload": "Apply exact memory thresholds and inject I/O failure, cancellation and unwinding throughout native catalog construction.",
+      "invariant": "Admission precedes construction and partial private catalogs release every native owner.",
       "case_names": [
         ""
       ]

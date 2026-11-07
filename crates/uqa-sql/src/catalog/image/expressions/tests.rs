@@ -33,6 +33,13 @@ fn encode(value: &Expr) -> Vec<u8> {
     let token = CancellationToken::new();
     let result = collect(value.image_reader(&memory, &token).unwrap(), 17);
     assert_eq!(memory.used(), 0);
+    let restored = Expr::read_image(&mut result.as_slice(), &memory, &token).unwrap();
+    assert_eq!(
+        collect(restored.image_reader(&memory, &token).unwrap(), 13),
+        result
+    );
+    drop(restored);
+    assert_eq!(memory.used(), 0);
     result
 }
 

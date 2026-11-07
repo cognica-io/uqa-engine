@@ -43,6 +43,17 @@ impl CapturedTypeDefinitions<StoredDomain> {
     }
 }
 
+impl crate::catalog::type_definitions::TypeDefinitions<StoredDomain> {
+    /// Reconstruct an unpublished domain catalog with original metadata and admitted native scalar definitions. Cross-catalog identity, authority and dependency validation remains with the enclosing restore owner.
+    pub fn read_image(
+        reader: &mut dyn std::io::Read,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        super::super::input::domains(reader, memory, cancellation)
+    }
+}
+
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn domain_part(&mut self, frame: Frame<'a>) -> Result<(), SQLError> {
         match frame {
