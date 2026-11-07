@@ -27,7 +27,47 @@ mod windows;
 #[derive(Debug)]
 pub struct CapturedScalar {
     expression: ScalarExpr,
-    _memory: MemoryReservation,
+    memory: MemoryReservation,
+    references: References,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct References {
+    pub query: Option<usize>,
+    pub window: Option<usize>,
+}
+
+impl References {
+    fn observe(&mut self, value: &ScalarExpr) {
+        match value {
+            ScalarExpr::ScalarSubquery(query)
+            | ScalarExpr::Exists {
+                subquery: query, ..
+            }
+            | ScalarExpr::InSubquery {
+                subquery: query, ..
+            } => self.query = self.query.max(Some(*query)),
+            ScalarExpr::WindowCall { spec, .. } => self.window = self.window.max(spec.definition),
+            _ => {}
+        }
+    }
+
+    pub(super) fn absorb(&mut self, other: Self) {
+        self.query = self.query.max(other.query);
+        self.window = self.window.max(other.window);
+    }
+}
+
+impl CapturedScalar {
+    /// Only the enclosing native image constructor may transfer this tree, its lease and its scope references into an already owned parent slot.
+    pub(super) fn into_native_parts(mut self) -> (ScalarExpr, MemoryReservation, References) {
+        let empty = self.memory.budget().empty_reservation();
+        (
+            std::mem::replace(&mut self.expression, ScalarExpr::Star),
+            std::mem::replace(&mut self.memory, empty),
+            self.references,
+        )
+    }
 }
 
 impl std::ops::Deref for CapturedScalar {
@@ -58,12 +98,14 @@ impl Input<'_> {
     pub(super) fn native_scalar(&mut self) -> Result<CapturedScalar, SQLError> {
         let mut memory = self.binary.memory.empty_reservation();
         let mut parents = BudgetedVec::new(self.binary.memory);
+        let mut references = References::default();
         let mut frame = Frame {
             value: self.native_scalar_node(&mut memory)?,
             cursor: 0,
         };
         loop {
             self.binary.cancellation.check()?;
+            references.observe(&frame.value);
             if frame.prepare_child(self)? {
                 parents.push(frame)?;
                 frame = Frame {
@@ -78,7 +120,8 @@ impl Input<'_> {
             } else {
                 return Ok(CapturedScalar {
                     expression: std::mem::replace(&mut frame.value, ScalarExpr::Star),
-                    _memory: memory,
+                    memory,
+                    references,
                 });
             }
         }

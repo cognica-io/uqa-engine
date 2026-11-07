@@ -47693,6 +47693,188 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_matches_independent_wire_and_rejects_framing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests.rs",
+      "capability": "Native query reconstruction framing",
+      "workload": "Decode independently specified VALUES bytes and malformed root counts, constructors and trailing bytes.",
+      "invariant": "The original native root is recovered and invalid framing retains no memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_preserves_compiler_queries_sources_and_mutation_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests.rs",
+      "capability": "Native stored query reconstruction",
+      "workload": "Compare reconstructed native fields against fourteen compiler-produced query/source/mutation fixtures.",
+      "invariant": "Selected syntax, bindings, order, nested arenas and all four mutation CTE constructors survive exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_releases_every_truncated_native_parent",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests.rs",
+      "capability": "Partial native query retirement",
+      "workload": "Truncate a query with a mutation CTE, assignments, derived source and set operation at every byte.",
+      "invariant": "Every partial native parent retires its payload and continuation allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_retains_selected_roles_columns_and_rewrite_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests.rs",
+      "capability": "Native query authority and rewrite ownership",
+      "workload": "Restore structured privilege names, bound roles, private VALUES flags and a separate rule RETURNING arena.",
+      "invariant": "Native fields remain equal and a cloned role retains its own admitted name after plan retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_keeps_source_and_nested_query_namespaces_separate",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/scopes.rs",
+      "capability": "Native query arena ownership",
+      "workload": "Restore source and derived-query subqueries, then remove the derived arena while retaining an outer address zero.",
+      "invariant": "Direct sources use their owning arena and nested queries cannot borrow an outer arena accidentally.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_rejects_dangling_query_and_window_addresses",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/scopes.rs",
+      "capability": "Native query address validation",
+      "workload": "Decode absent, out-of-range and maximum-width query addresses and a window call without its definition.",
+      "invariant": "Invalid arena addresses fail before publishing a reconstructed plan and release all allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_rejects_invalid_window_inheritance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/scopes.rs",
+      "capability": "Native window address validation",
+      "workload": "Use self, future and maximum-width inherited window addresses.",
+      "invariant": "Inherited windows must address an earlier named definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_plan_input_preserves_original_arena_addresses",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/scopes.rs",
+      "capability": "Native expression query arenas",
+      "workload": "Decode independently specified expression bytes addressing the second of two query members.",
+      "invariant": "The complete arena and original address survive; an out-of-range address is rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_retires_deep_full_and_partial_forests_without_stack_or_allocation_growth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/resources.rs",
+      "capability": "Deep native query reconstruction",
+      "workload": "Read 10000 nested query arenas and a 10000-node scalar on a 128 KiB stack, including truncated input.",
+      "invariant": "Full and partial retirement uses constant native stack; full retirement allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_admits_exact_peak_and_releases_exhausted_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/resources.rs",
+      "capability": "Native query reconstruction admission",
+      "workload": "Test exact peak, denied peak minus one and retirement with the entire remaining allowance reserved.",
+      "invariant": "Exact admission succeeds; denied construction leaks nothing and retirement allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_releases_partial_owners_on_io_cancel_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/resources.rs",
+      "capability": "Native query failure ownership",
+      "workload": "Interrupt a deep query/scalar image with I/O errors, cancellation and reader unwinding.",
+      "invariant": "Every partial forest and temporary scalar field releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_owns_cross_thread_payloads_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/resources.rs",
+      "capability": "Reconstructed query lifetime",
+      "workload": "Retire the original plan and wire bytes, then consume and retire the reconstructed owner on another thread.",
+      "invariant": "The immutable query retains all native payloads independently of source and decoding scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_keeps_source_bindings_and_internal_value_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/sources.rs",
+      "capability": "Native query source metadata",
+      "workload": "Restore original selected table-function bindings and internal VALUES relation/type/collation descriptors.",
+      "invariant": "Native source metadata and private identities survive without catalog lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_input_retires_deep_required_source_placeholders",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/sources.rs",
+      "capability": "Deep native source ownership",
+      "workload": "Read 10000 nested joins on a 128 KiB stack and truncate before required child population.",
+      "invariant": "Retirement of full and partial required-child forests reuses admitted frames without allocating.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

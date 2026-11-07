@@ -27,7 +27,7 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
-mod plans;
+pub(super) mod plans;
 mod scalars;
 pub(super) use scalars::MAGIC as SCALAR_MAGIC;
 mod tables;

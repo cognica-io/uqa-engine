@@ -13,8 +13,8 @@ use uqa_core::{
     CancellationToken,
 };
 
-const MAGIC: [u8; 8] = *b"UQAQRY01";
-const EXPRESSION_MAGIC: [u8; 8] = *b"UQAXPL01";
+pub(in super::super) const MAGIC: [u8; 8] = *b"UQAQRY01";
+pub(in super::super) const EXPRESSION_MAGIC: [u8; 8] = *b"UQAXPL01";
 
 pub(super) trait Node: Sync {
     fn part(&self, position: usize) -> Result<Option<Part<'_>>, SQLError>;
