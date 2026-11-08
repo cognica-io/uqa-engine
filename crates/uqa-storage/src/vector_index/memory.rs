@@ -147,7 +147,19 @@ impl VectorIndex for MemoryVectorIndex {
         self: Box<Self>,
         registry: &crate::memory_capture::MemoryCaptureRegistry,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
-        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry)
+        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry, None)
+    }
+
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(
+            self,
+            registry,
+            Some(control),
+        )
     }
 
     fn image_reader<'a>(

@@ -108,3 +108,55 @@ fn admitted_registration_observes_cancellation_while_publication_is_blocked() {
     drop(cell);
     assert_eq!(fresh.memory().used(), 0);
 }
+
+#[test]
+fn imported_ivf_payload_admission_follows_promoted_native_source_readers() {
+    use crate::vector_index::{
+        image::read_vector_image, image::tests::encode, MemoryVectorIndexesBuilder, VectorIndex,
+    };
+    use uqa_core::memory::BudgetedString;
+    let mut original = crate::IVFIndex::with_params(1024, 1, 1, 2);
+    original.add(7, vec![1.0; 1024]).unwrap();
+    original.add(9, vec![-1.0; 1024]).unwrap();
+    let expected = encode(&original);
+    drop(original);
+
+    let registry = MemoryCaptureRegistry::new();
+    let input = StorageReadControl::with_limit(1 << 20);
+    let restored = read_vector_image(&mut expected.as_slice(), &input).unwrap();
+    let payload_bytes = input.memory().used();
+    assert!(payload_bytes > 4096);
+    let mut field = BudgetedString::new(input.memory());
+    field.push_str("embedding").unwrap();
+    let (field, memory) = field.into_parts();
+    let indexes = MemoryVectorIndexesBuilder::new(&registry, &input)
+        .add_index(Budgeted::new(field, memory), restored)
+        .unwrap()
+        .finish()
+        .unwrap();
+    let key = indexes
+        .get("embedding")
+        .unwrap()
+        .memory_capture()
+        .unwrap()
+        .key()
+        .unwrap();
+    let promoted = key.source.upgrade().unwrap();
+    let output = StorageReadControl::with_limit(1 << 20);
+    let cut = registry.capture(&output).unwrap();
+    drop(indexes);
+    assert_eq!(
+        input.memory().used(),
+        payload_bytes + key.retained_source_bytes()
+    );
+    let saved = promoted.captured(&cut).unwrap();
+    drop(promoted);
+    assert_eq!(input.memory().used(), 0);
+    let working = StorageReadControl::with_limit(1 << 20);
+    let mut actual = Vec::new();
+    saved.write_image(&mut actual, &working).unwrap();
+    assert_eq!(actual, expected);
+    drop((saved, cut));
+    assert_eq!(output.memory().used(), 0);
+    assert_eq!(working.memory().used(), 0);
+}

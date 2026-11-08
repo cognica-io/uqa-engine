@@ -55,6 +55,7 @@ pub(super) struct IVFData {
     pub(super) inverted_lists: Vec<Vec<VectorKey>>,
     pub(super) trained_size: usize,
     pub(super) deletes_since_train: usize,
+    pub(super) image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl IVFData {
@@ -84,6 +85,7 @@ impl IVFData {
             inverted_lists: Vec::new(),
             trained_size: 0,
             deletes_since_train: 0,
+            image_memory: None,
         }
     }
 

@@ -44,7 +44,8 @@ impl MemoryVectorIndexesBuilder {
         if self.indexes.contains_key(field.as_str()) {
             return Err(invalid("vector image repeats a field registration"));
         }
-        let index = index.into_memory_capture(&self.capture.registry)?;
+        let index =
+            index.into_memory_capture_with_control(&self.capture.registry, &self.control)?;
         self.control.check()?;
         let capture = self.capture.with_index(&field, index.as_ref())?;
         self.indexes.insert_admitted_key(field, index)?;

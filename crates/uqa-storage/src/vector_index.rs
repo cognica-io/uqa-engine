@@ -181,6 +181,17 @@ pub trait VectorIndex: Send + Sync {
         ))
     }
 
+    /// Register a private native image while admitting every new source allocation under its input allowance. The completed owner does not retain input cancellation for ordinary mutations.
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        _registry: &crate::memory_capture::MemoryCaptureRegistry,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "controlled memory capture registration is not supported by this vector owner".into(),
+        ))
+    }
+
     fn memory_capture(&self) -> Option<&dyn VectorIndexCapture> {
         None
     }

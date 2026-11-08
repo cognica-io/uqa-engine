@@ -145,6 +145,7 @@ impl IVFData {
             inverted_lists,
             trained_size: snapshot.trained_size,
             deletes_since_train: snapshot.deletes_since_train,
+            image_memory: None,
         })
     }
 }

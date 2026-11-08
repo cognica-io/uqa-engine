@@ -18,7 +18,10 @@ use crate::{
     StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::{memory::Budgeted, DocId, PostingList};
+use uqa_core::{
+    memory::{Budgeted, MemoryReservation},
+    DocId, PostingList,
+};
 
 /// Read the selected image, or preserve it before the live registration leaves its collection. Implementations own all logical mutations, including changes made through shared query references.
 pub trait VectorIndexCapture: Send + Sync {
@@ -33,15 +36,25 @@ pub trait VectorIndexCapture: Send + Sync {
 /// Adapter for concrete memory owners whose logical mutations require `&mut self`. IVF supplies its own boundary because queries can train it through a shared reference.
 pub(crate) struct ExclusiveVectorCapture {
     index: MemoryCaptureCell<Box<dyn VectorIndex>>,
+    _image_memory: Option<MemoryReservation>,
 }
 
 impl ExclusiveVectorCapture {
     pub(crate) fn register(
         index: Box<dyn VectorIndex>,
         registry: &MemoryCaptureRegistry,
+        control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        let (index, memory) = if let Some(control) = control {
+            control.check()?;
+            let memory = control.memory().reserve(size_of::<Self>())?;
+            (registry.cell_with_control(index, control)?, Some(memory))
+        } else {
+            (registry.cell(index)?, None)
+        };
         Ok(Box::new(Self {
-            index: registry.cell(index)?,
+            index,
+            _image_memory: memory,
         }))
     }
 }
@@ -74,6 +87,14 @@ impl VectorIndex for ExclusiveVectorCapture {
         registry: &MemoryCaptureRegistry,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         self.index.register(registry)?;
+        Ok(self)
+    }
+    fn into_memory_capture_with_control(
+        mut self: Box<Self>,
+        registry: &MemoryCaptureRegistry,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.index.register_with_control(registry, control)?;
         Ok(self)
     }
     fn memory_capture(&self) -> Option<&dyn VectorIndexCapture> {

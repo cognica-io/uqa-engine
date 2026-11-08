@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
 
-- Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; evaluated-index reconstruction uses this ownership boundary.
+- Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; vector and evaluated-index reconstruction use this ownership boundary, including exclusive vector adapters and IVF payload lifetime.
 
 - Native SQL and Execution catalog image readers can assign a separate destination mutation budget while preserving original input reservations through retained generations, including paired foreign definitions and authority, secondary-index metadata and comments.
 

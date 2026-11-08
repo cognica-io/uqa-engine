@@ -24,6 +24,15 @@ impl VectorIndex for IVFIndex {
         Ok(self)
     }
 
+    fn into_memory_capture_with_control(
+        mut self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.data.register_with_control(registry, control)?;
+        Ok(self)
+    }
+
     fn memory_capture(&self) -> Option<&dyn crate::vector_index::VectorIndexCapture> {
         Some(self)
     }

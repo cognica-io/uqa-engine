@@ -50997,6 +50997,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_registration_admits_exact_headers_and_retires_failed_inputs",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "backup native source ownership",
+      "workload": "Register exact, IVF, HNSW and DiskANN decoded owners under zero, short and exact header allowances, repeat the original registration and reject a different capture domain.",
+      "invariant": "Every new source and exclusive adapter is admitted before publication; rejection releases all consumed input allocations and repeated registration preserves the original identity and reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_sources_preserve_original_cuts_after_input_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "backup native source ownership",
+      "workload": "Capture each decoded native vector kind, cancel construction, perform ordinary writes and query-triggered training, then retire the mutable source.",
+      "invariant": "Completed mutation remains independent of input cancellation, the retained image preserves the exact original bytes, and every input, capture and output allowance retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_ivf_payload_admission_follows_promoted_native_source_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Build a named IVF registration, promote its native source reader and retire the complete collection while retaining an independent captured image.",
+      "invariant": "The builder admits the source header, decoded payload and header reservations survive the public collection until the promoted reader retires, and the independent image retains the original exact bytes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
