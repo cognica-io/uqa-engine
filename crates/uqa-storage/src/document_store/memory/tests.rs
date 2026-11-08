@@ -288,7 +288,9 @@ fn shared_projection_reuses_the_stored_value_vector() {
         ]),
     )
     .unwrap();
-    let stored = Arc::clone(&s.state.documents[&1].values);
+    let SharedDocumentValues::Ordinary(stored) = s.state.documents[&1].values.clone() else {
+        panic!("ordinary row owner");
+    };
 
     let mut rows = s
         .get_shared_fields(&[1], &["zulu", "missing", "alpha"])
@@ -431,7 +433,7 @@ fn stable_borrowed_shared_cursor_keeps_slots_and_never_acquires_row_ownership() 
     let mut actual = Vec::new();
     assert_eq!(
         store.for_each_next_shared_fields_borrowed(Some(1), 8, &fields, &mut |id, values| {
-            assert_eq!(Arc::strong_count(&store.state.documents[&id].values), 1);
+            assert!(!store.state.documents[&id].values.is_shared());
             actual.push((id, values.iter().copied().cloned().collect::<Vec<_>>()));
             true
         }),

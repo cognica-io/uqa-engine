@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_sql::ColumnType;
 
 mod constants;
+mod document_ownership;
 mod materialization;
 
 #[test]

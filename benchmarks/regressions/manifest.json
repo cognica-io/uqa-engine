@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -50313,6 +50313,149 @@
       "capability": "Writable text publication admission",
       "workload": "Exhaust final header admission, cancel private publication and unwind after native adoption.",
       "invariant": "No rejected destination escapes; payload and binding owners release their original admission on every failure path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "lower_bound_ranges_match_ordered_reference_without_allocating_or_retaining_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/ranges.rs",
+      "capability": "Native ordered document traversal",
+      "workload": "Compare inclusive, exclusive and unbounded lower bounds with BTreeMap including zero and the maximum identity.",
+      "invariant": "Exact ordered membership, fused exhaustion and zero traversal allocations preserve all live node leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_document_images_preserve_exact_input_and_native_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Writable native document input",
+      "workload": "Adopt an independent wire fixture and original payloads, then apply native writes, patches, deletes and snapshots.",
+      "invariant": "Original field/value allocations and private tuple metadata survive; ordinary mutations preserve snapshot contents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_document_rows_retain_original_payload_after_all_store_roots_retire",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Escaping document ownership",
+      "workload": "Retain projected aliases after clearing and dropping their source store.",
+      "invariant": "The original payload stays charged and byte-identical until the last native reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_document_snapshots_keep_image_names_and_values_through_copy_on_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Native document snapshot ownership",
+      "workload": "Clone, independently capture and mutate a restored document corpus.",
+      "invariant": "Selected names and values retain their original leases through copy-on-write and release every allowance on final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_document_publication_rejects_partial_foreign_duplicate_and_cancelled_corpora",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Atomic document input admission",
+      "workload": "Reject foreign, incomplete and exhausted allowances, duplicate identities, cancellation and unwinding.",
+      "invariant": "No partially constructed corpus escapes and every allocation lease is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_document_import_is_writable_after_input_cancellation_and_legacy_export",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Completed document input lifecycle",
+      "workload": "Cancel the input after publication, mutate native storage and export a fresh document image.",
+      "invariant": "Completed native owners remain writable, independently exported values remain correct and source leases retire exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_physical_readers_retain_input_through_projection_and_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Physical document lifetime",
+      "workload": "Project, join and prefix retained input, then retire every source store and predecessor.",
+      "invariant": "Original selected payload pointers and NULL projection remain correct with admission retained through the final fragment.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_selected_output_moves_original_payload_after_row_aliases_retire",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Selected native result ownership",
+      "workload": "Materialize one selected field from joined aliases and a large unused payload.",
+      "invariant": "The selected original allocation moves without copying unused values; output allocation stays within the unchanged 8192-byte bound.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_selected_output_keeps_unconsumed_input_admitted_during_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Failed native result consumer",
+      "workload": "Panic while consuming a selected value after source retirement.",
+      "invariant": "Unconsumed values remain charged during the callback and all original leases retire during unwinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_cached_physical_projection_has_no_per_row_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Cached native projection allocation",
+      "workload": "Create 128 physical readers from one cached nonidentity projection.",
+      "invariant": "Every reader shares original values and slots with zero per-row allocation and complete final allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_document_identity_collection_allocates_only_its_complete_output_buffer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Exact native document collection capacity",
+      "workload": "Collect all identities from ordinary and admitted 1024-row corpora and advance each complete native iterator.",
+      "invariant": "Exact ordered identities allocate only the output buffer, iterator size hints remain exact and original admission retires completely.",
       "case_names": [
         ""
       ]

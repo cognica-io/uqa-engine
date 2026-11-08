@@ -243,13 +243,7 @@ impl LocalTableRowSource {
                     .copied()
                     .zip(shared)
                     .filter_map(|(id, row)| {
-                        row.map(|row| {
-                            let (values, projection) = row.into_parts();
-                            (
-                                id,
-                                crate::PhysicalRow::from_shared_values(values, projection),
-                            )
-                        })
+                        row.map(|row| (id, crate::PhysicalRow::from_document_row(row)))
                     })
                     .collect());
             }

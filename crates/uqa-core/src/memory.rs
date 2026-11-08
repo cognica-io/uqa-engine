@@ -31,8 +31,8 @@ pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
     BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter,
-    BudgetedSharedMapIter, BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet,
-    OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry, PreparedSharedMapInsert,
+    BudgetedSharedMapIter, BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedMapRange,
+    OwnedSet, OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry, PreparedSharedMapInsert,
 };
 pub use observation::{AllocationObserver, AllocationUsage, ObserveAllocations};
 pub use production::{

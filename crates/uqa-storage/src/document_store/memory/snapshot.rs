@@ -41,6 +41,7 @@ impl Clone for MemoryDocumentState {
             layouts: self.layouts.clone(),
             row_payload_bytes: self.row_payload_bytes,
             retention: crate::retained_memory::RetainedMemory::default(),
+            _image_memory: None,
         }
     }
 }
@@ -49,8 +50,7 @@ impl MemoryDocumentState {
     pub(super) fn retained_bytes(&self) -> u128 {
         size_of::<Self>() as u128
             + self.row_payload_bytes
-            + self.documents.len() as u128
-                * size_of::<(uqa_core::DocId, super::MemoryDocumentRow)>() as u128
+            + self.documents.retained_bytes()
             + self.layouts.retained_bytes()
     }
 }

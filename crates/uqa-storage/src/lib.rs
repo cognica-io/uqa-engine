@@ -79,9 +79,9 @@ pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
 };
 pub use document_store::{
-    DocumentMetadata, DocumentStore, MemoryDocumentStore, RetainedDocumentFields,
-    RetainedDocumentPage, RetainedDocumentStore, RetainedDocumentStoreBuilder,
-    RetainedStoredDocument, SharedDocumentRow, StoredDocument,
+    DocumentMetadata, DocumentStore, MemoryDocumentStore, MemoryDocumentStoreBuilder,
+    RetainedDocumentFields, RetainedDocumentPage, RetainedDocumentStore,
+    RetainedDocumentStoreBuilder, RetainedStoredDocument, SharedDocumentRow, StoredDocument,
 };
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;

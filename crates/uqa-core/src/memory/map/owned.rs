@@ -16,7 +16,7 @@ pub use set::{OwnedSet, OwnedSetIntoIter, OwnedSetIter};
 
 use std::{borrow::Borrow, ops::Bound};
 
-use super::{tree, BudgetedMapIter, Link, Node, OwnedNode, MAX_HEIGHT};
+use super::{tree, BudgetedMapIter, Link, MapCursor, Node, OwnedNode, MAX_HEIGHT};
 use crate::memory::{MemoryBudget, MemoryError};
 
 /// A mutable ordered map with exact node ownership. Ordinary insertion leaves admission to its enclosing owner; `insert_budgeted` admits and retains each new node under the supplied allowance. An enclosing controlled producer may instead reserve `entry_bytes()` before ordinary insertion and retain that lease until the node is dropped. Separately allocated key/value payloads require their own reservations.
@@ -240,7 +240,47 @@ impl<K: Ord, V> OwnedMap<K, V> {
         }
         candidate
     }
+
+    /// Seek a lower bound once, then visit ordered successors without allocating traversal scratch. The bound is borrowed only during the initial logarithmic seek.
+    pub fn range_from<Q: Ord + ?Sized>(&self, start: Bound<&Q>) -> OwnedMapRange<'_, K, V>
+    where
+        K: Borrow<Q>,
+    {
+        OwnedMapRange {
+            cursor: MapCursor::from_bound(&self.root, start),
+            remaining_upper: self.len,
+        }
+    }
 }
+
+/// An allocation-free lower-bound traversal. Unlike a complete map iterator, the number of remaining entries is not known without visiting them.
+pub struct OwnedMapRange<'a, K, V> {
+    cursor: MapCursor<'a, K, V>,
+    remaining_upper: usize,
+}
+
+impl<'a, K, V> Iterator for OwnedMapRange<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.cursor.next()?;
+        self.remaining_upper -= 1;
+        Some((&node.key, &node.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (
+            0,
+            Some(if self.cursor.depth == 0 {
+                0
+            } else {
+                self.remaining_upper
+            }),
+        )
+    }
+}
+
+impl<K, V> std::iter::FusedIterator for OwnedMapRange<'_, K, V> {}
 
 impl<K: Ord + Borrow<Q>, V, Q: Ord + ?Sized> std::ops::Index<&Q> for OwnedMap<K, V> {
     type Output = V;
