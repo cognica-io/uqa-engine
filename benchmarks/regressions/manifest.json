@@ -49790,8 +49790,8 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/memory/address/tests.rs",
       "capability": "Canonical memory image addresses",
-      "workload": "Exercise prefixes, embedded NUL, UTF-8, complete object and storage identities, every table component and denied address construction.",
-      "invariant": "The mapping preserves native tuple order and all identity bytes without aliasing; failed construction releases its original allowance.",
+      "workload": "Reject resource address allocation with a one-byte allowance and empty address construction after cancellation.",
+      "invariant": "Both rejected constructors return errors and release all admission; neither leaves a live address.",
       "case_names": [
         ""
       ]
