@@ -50867,6 +50867,45 @@
       "capability": "backup native catalog ownership",
       "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
       "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_registration_failure_keeps_the_original_source_usable",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Reject a fixed source header one byte below its allocation, then register and mutate the same original source under an exact allowance.",
+      "invariant": "Failed registration leaves the source unregistered and usable; completed ownership survives input exhaustion/cancellation and preserves the original capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_source_headers_live_until_promoted_readers_retire",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Promote an existing weak source reader, retire its public owner and retain an independent captured image.",
+      "invariant": "The original header reservation remains owned until the last promoted source reader retires; surviving frozen values retain their separate allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_registration_observes_cancellation_while_publication_is_blocked",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Hold exclusive publication admission while an incoming source registers under a cancellable allowance.",
+      "invariant": "Cancellation terminates the blocked registration without consuming its value or publishing an identity; later native registration and mutation remain valid.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

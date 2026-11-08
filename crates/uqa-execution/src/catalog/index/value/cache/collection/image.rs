@@ -47,7 +47,11 @@ impl MemoryValueIndexesBuilder {
         if self.indexes.contains_key(&*key) {
             return Err(invalid("evaluated index image repeats a registration"));
         }
-        let entry = Entry::Captured(self.native.registry.cell(value)?);
+        let entry = Entry::Captured(
+            self.native
+                .registry
+                .cell_with_control(value, &self.control)?,
+        );
         let next = self.native.with_entry(&key, &entry)?;
         self.indexes.insert_admitted_key(key, entry)?;
         self.native = next;

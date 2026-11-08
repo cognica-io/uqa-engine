@@ -8,6 +8,7 @@ use super::*;
 use std::{collections::BTreeMap, sync::atomic::AtomicUsize, sync::mpsc, thread};
 use uqa_core::{memory::MemoryError, Value};
 
+mod admission;
 mod keys;
 mod selection;
 

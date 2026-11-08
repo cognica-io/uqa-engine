@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; evaluated-index reconstruction uses this ownership boundary.
+
 - Native SQL and Execution catalog image readers can assign a separate destination mutation budget while preserving original input reservations through retained generations, including paired foreign definitions and authority, secondary-index metadata and comments.
 
 - Table authority images retain original ACL payloads and native map-node admission through shared catalog and privilege readers, rollback and Engine retirement.
