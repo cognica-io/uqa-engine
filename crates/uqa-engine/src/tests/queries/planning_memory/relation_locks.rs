@@ -15,6 +15,14 @@ fn query(sql: &str) -> Box<QueryPlan> {
     query
 }
 
+fn pause_automatic_statistics(engine: &Engine) {
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, std::sync::atomic::Ordering::Release);
+}
+
 #[rstest::rstest]
 #[case::memory_cte(Provider::Memory, "cte")]
 #[case::memory_view(Provider::Memory, "view")]
@@ -30,6 +38,8 @@ fn native_relation_lock_discovery_borrows_cte_names_and_view_bodies(
 ) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("relation-lock-discovery.db"));
+    // Measure borrowing from the same catalog view. The refresh fixture below explicitly commits independent statistics before discovering locks.
+    pause_automatic_statistics(&engine);
     let payload = "x".repeat(4 << 20);
     let plan = if input == "cte" {
         let mut plan = query("WITH seed AS (SELECT 1 AS id) SELECT id FROM seed");
@@ -86,6 +96,71 @@ fn native_relation_lock_discovery_borrows_cte_names_and_view_bodies(
             Value::Int(1)
         );
     }
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(memory.used(), 0);
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn relation_lock_discovery_observes_committed_statistics_before_borrowing(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("relation-lock-refresh.db"));
+    pause_automatic_statistics(&engine);
+    engine
+        .sql(
+            "CREATE TABLE lock_origin(id integer); INSERT INTO lock_origin VALUES(1)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            &format!(
+                "CREATE VIEW lock_wide_view AS SELECT id, '{}'::text AS body FROM lock_origin",
+                "x".repeat(4 << 20)
+            ),
+            &[],
+        )
+        .unwrap();
+    let plan = query("SELECT id FROM lock_wide_view");
+    engine.sql("BEGIN", &[]).unwrap();
+    let backend = engine.storage.backend.as_ref().unwrap();
+    let previous = backend.read_view_revision().unwrap().unwrap();
+    let peer = engine.new_session().unwrap();
+    pause_automatic_statistics(&peer);
+    peer.sql("ANALYZE lock_origin", &[]).unwrap();
+    peer.close().unwrap();
+
+    let resources = engine.query_retention_control().unwrap();
+    let memory = resources.memory();
+    let context = engine.row_lock_context();
+    let discover = || uqa_execution::query::locking::lock_query_relations(context, &plan);
+    // Refresh through the real locking boundary. Providers may decode their durable catalog here before borrowing from the new view.
+    discover().unwrap();
+    let current = backend.read_view_revision().unwrap().unwrap();
+    assert!(!current.same_committed_state(&previous), "{provider:?}");
+    let baseline = memory.used();
+    let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| result = Some(discover()));
+    assert!(
+        allocation.bytes_total < 256 << 10,
+        "{provider:?}: {allocation:?}"
+    );
+    result.unwrap().unwrap();
+    assert_eq!(memory.used(), baseline + occupied.bytes());
+    drop(occupied);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let result = engine
+        .sql("SELECT id, length(body) FROM lock_wide_view", &[])
+        .unwrap();
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(result.value_at(0, 1), Some(&Value::Int(4 << 20)));
+    drop(result);
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);
