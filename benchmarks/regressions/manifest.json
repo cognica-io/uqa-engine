@@ -50459,6 +50459,126 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_keys_keep_original_buffers_and_leases_through_native_map_mutations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Adopt a string key, replace its value under a different allowance, mutate in sorted order and transfer its node.",
+      "invariant": "Original key pointer and complete key/node reservation survive replacement and extraction; mutable traversal allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_key_node_rejection_releases_input_without_changing_the_map",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Use a fully occupied key allowance before native node admission.",
+      "invariant": "Node rejection retires the incoming key and preserves the original map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_import_retains_original_field_buffers_and_writable_capture",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Import an evaluated exact-vector registration, retain a cut, cancel input and mutate live indexes before source retirement.",
+      "invariant": "The original field buffer is adopted; the retained image matches its original bytes and every allowance releases after the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_import_rejects_duplicate_foreign_short_and_cancelled_names",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Add duplicate, foreign-allowance, under-admitted and cancelled field registrations after a valid first index.",
+      "invariant": "Each rejected consuming transition retires all partial membership and input payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_registration_admission_failure_retires_all_partial_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Exhaust remaining admission before adding a second decoded native index.",
+      "invariant": "No partial collection escapes; only the independently held blocker reservation survives rejection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_authority_metadata_keeps_native_acl_buffers_and_nested_node_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Adopt a native authority image, retain shared readers, detach a mutation and release the source.",
+      "invariant": "Original ACL/name buffers and complete native map-node admission survive until the final reader; exact capture admission includes nested nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_authority_metadata_rejects_header_exhaustion_and_cancelled_adoption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Exhaust the remaining sharing-header allowance or cancel after native authority decoding.",
+      "invariant": "Adoption returns no generation and releases every decoded payload and node reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_metadata_mutation_after_input_cancellation_recounts_native_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Cancel the completed input and mutate the adopted ACL and revision maps through the existing metadata write owner.",
+      "invariant": "The detached native generation remains writable; old image admission retires and surviving tuple revisions are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_table_authority_survives_sql_rollback_and_retained_reader_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/table_authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Adopt an authority generation, retain a privilege reader, cancel input, revoke with rollback and finally revoke/drop across all four providers.",
+      "invariant": "Rollback restores the original ACL bytes; the independent reader preserves original buffers through Engine closure and releases the final input allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

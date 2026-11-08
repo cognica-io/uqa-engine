@@ -6,7 +6,7 @@
 
 //! Collection membership and individual vector state use separate capture identities.
 
-use super::{native::NativeVectorSources, Contents, LiveIndexes, VectorIndexes};
+use super::{native::NativeVectorSources, Contents, LiveIndexes, NativeIndexes, VectorIndexes};
 use crate::{
     memory_capture::{
         MemoryCapture, MemoryCaptureIdentity, MemoryCaptureKey, MemoryCaptureMember,
@@ -30,7 +30,7 @@ impl VectorIndexes {
     /// Construct the native field owner under its own allowance. Captures independently admit its immutable root and cached key footprint.
     pub fn memory_with_budget(registry: &MemoryCaptureRegistry, memory: &MemoryBudget) -> Self {
         Self(Contents::Live {
-            indexes: LiveIndexes::new(),
+            indexes: NativeIndexes::new(),
             capture: Some(NativeVectorSources::new(registry, memory)),
         })
     }
@@ -83,7 +83,7 @@ impl VectorSourcePublication<'_> {
 
 /// Mutation access cannot replace a registered owner without preserving its selected cuts. New owners join the same domain before collection publication; rejected registration leaves the existing collection unchanged.
 pub struct LiveVectorIndexesMut<'a> {
-    pub(super) indexes: &'a mut LiveIndexes,
+    pub(super) indexes: &'a mut NativeIndexes,
     pub(super) capture: &'a mut Option<NativeVectorSources>,
 }
 
@@ -171,7 +171,7 @@ impl LiveVectorIndexesMut<'_> {
         let (indexes, mut capture) = if let Some(previous) = self.capture.as_ref() {
             let mut capture =
                 NativeVectorSources::new(&previous.registry, previous.fields.budget());
-            let mut registered = LiveIndexes::new();
+            let mut registered = NativeIndexes::new();
             for (field, index) in indexes {
                 let index = index.into_memory_capture(&capture.registry)?;
                 capture = capture.with_index(&field, index.as_ref())?;
@@ -179,7 +179,7 @@ impl LiveVectorIndexesMut<'_> {
             }
             (registered, Some(capture))
         } else {
-            (indexes, None)
+            (indexes.into_iter().collect(), None)
         };
         if let (Some(previous), Some(next)) = (self.capture.as_ref(), capture.as_mut()) {
             previous.publish_all(next)?;

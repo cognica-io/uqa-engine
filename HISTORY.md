@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Table authority images retain original ACL payloads and native map-node admission through shared catalog and privilege readers, rollback and Engine retirement.
+
+- Native vector registration imports retain decoded field buffers and admit ordered membership before publication; later writes and captured snapshots preserve those original owners.
+
 - Decoded memory documents can enter writable native storage while preserving tuple metadata and original payload admission through snapshots, physical query readers and source retirement. Complete Engine restore remains under implementation.
 
 - Evaluated memory text images can become writable native indexes without reanalysis. Original corpus and analyzer owners survive shared snapshots, subsequent mutations and source retirement.

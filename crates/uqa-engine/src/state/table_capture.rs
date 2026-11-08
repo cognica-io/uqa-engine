@@ -36,7 +36,7 @@ impl StorageContext {
         capture!(columns_declared, |value, control| Ok(
             control.finish(*value, control.empty_reservation())?
         ));
-        capture!(security, super::BoundTableSecurity::capture_security);
+        table.security = table.security.capture_source(registry)?;
         capture!(
             column_stats,
             uqa_planner::ColumnStatistics::capture_with_control

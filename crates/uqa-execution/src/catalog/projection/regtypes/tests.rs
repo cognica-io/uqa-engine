@@ -65,7 +65,7 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
             object_id: [7; 16],
             catalog_oids: oids,
             row_type_array_name: None,
-            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
+            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)).into(),
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),

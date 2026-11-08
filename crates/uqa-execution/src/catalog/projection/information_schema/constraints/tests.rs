@@ -202,13 +202,12 @@ fn table_constraint_visibility_distinguishes_read_and_write_privileges() {
                 privileges: privilege.mask(),
                 grant_options: uqa_core::catalog_acl::TablePrivileges::default(),
             };
-            let security = Arc::make_mut(
-                &mut snapshot
-                    .tables
-                    .get_mut(&RelationIdentity::new("public", "items"))
-                    .unwrap()
-                    .security,
-            );
+            let security = snapshot
+                .tables
+                .get_mut(&RelationIdentity::new("public", "items"))
+                .unwrap()
+                .security
+                .make_mut();
             if let Some(column) = column {
                 security.column_acls.insert(column.into(), vec![entry]);
             } else {

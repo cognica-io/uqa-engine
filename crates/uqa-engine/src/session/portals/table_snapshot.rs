@@ -160,7 +160,7 @@ impl Engine {
         std::sync::Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
-            security: crate::state::CatalogCell::new(metadata.security()),
+            security: crate::state::TableMetadataCell::new(metadata.security()),
             storage_generation: crate::state::CatalogCell::new(metadata.storage_generation()),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(document_store),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inverted_index),

@@ -575,7 +575,7 @@ struct TableDataSnapshot {
     persistence: uqa_sql::ast::RelationPersistence,
     on_commit: uqa_sql::ast::OnCommitAction,
     security: state::CatalogSnapshot<
-        state::BoundTableSecurity,
+        uqa_sql::catalog::table_metadata::TableMetadata<state::BoundTableSecurity>,
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,
     storage_generation: state::CatalogSnapshot<[u8; 16]>,
@@ -634,7 +634,7 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<
+    security: state::TableMetadataCell<
         state::BoundTableSecurity,
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,

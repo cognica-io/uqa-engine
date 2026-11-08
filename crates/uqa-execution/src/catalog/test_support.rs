@@ -32,7 +32,8 @@ pub(crate) fn table_snapshot(
         row_type_array_name: constraints.row_type_array_name,
         security: Arc::new(super::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
+        ))
+        .into(),
         columns: columns.into(),
         columns_declared: true,
         checks: constraints.checks.into(),

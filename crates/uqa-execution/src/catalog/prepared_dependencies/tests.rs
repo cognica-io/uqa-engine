@@ -86,7 +86,8 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
             catalog_oids: oids,
             security: Arc::new(super::super::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
+            ))
+            .into(),
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),

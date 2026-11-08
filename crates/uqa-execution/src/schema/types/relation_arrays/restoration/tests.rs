@@ -20,7 +20,8 @@ fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> Cat
         row_type_array_name: name.map(str::to_owned),
         security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
+        ))
+        .into(),
         columns: SharedTableDefinition::default(),
         columns_declared: true,
         checks: SharedTableDefinition::default(),

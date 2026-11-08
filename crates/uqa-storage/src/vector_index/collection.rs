@@ -8,7 +8,7 @@
 
 use std::{borrow::Borrow, collections::BTreeMap, sync::Arc};
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap, BudgetedMapIter, BudgetedString, MemoryReservation},
+    memory::{Budgeted, BudgetedMap, BudgetedMapIter, BudgetedString, MemoryReservation, OwnedMap},
     FieldName,
 };
 
@@ -19,9 +19,12 @@ use crate::{
 
 mod capture;
 pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut, VectorSourcePublication};
+mod image;
 mod native;
+pub use image::MemoryVectorIndexesBuilder;
 
 type LiveIndexes = BTreeMap<FieldName, Box<dyn VectorIndex>>;
+type NativeIndexes = OwnedMap<FieldName, Box<dyn VectorIndex>>;
 type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>>>;
 
 /// A table's vector registrations. Retained collections own controlled ordered-map nodes and share their names, index handles and original allowance with nested captures. Live mutation requires an explicit fallible borrow; a retained collection never converts itself to an uncharged writable map.
@@ -29,7 +32,7 @@ pub struct VectorIndexes(Contents);
 
 enum Contents {
     Live {
-        indexes: LiveIndexes,
+        indexes: NativeIndexes,
         capture: Option<native::NativeVectorSources>,
     },
     Retained {
@@ -47,7 +50,7 @@ impl Default for VectorIndexes {
 impl From<LiveIndexes> for VectorIndexes {
     fn from(indexes: LiveIndexes) -> Self {
         Self(Contents::Live {
-            indexes,
+            indexes: indexes.into_iter().collect(),
             capture: None,
         })
     }
@@ -101,10 +104,8 @@ impl VectorIndexes {
 
     pub fn iter(&self) -> VectorIndexesIter<'_> {
         VectorIndexesIter(match &self.0 {
-            Contents::Live { indexes, .. } => Entries::Live(indexes.iter()),
-            Contents::Retained { indexes, .. } => indexes
-                .as_ref()
-                .map_or(Entries::Empty, |indexes| Entries::Retained(indexes.iter())),
+            Contents::Live { indexes, .. } => Some(indexes.iter()),
+            Contents::Retained { indexes, .. } => indexes.as_ref().map(|indexes| indexes.iter()),
         })
     }
 
@@ -154,36 +155,20 @@ where
     }
 }
 
-pub struct VectorIndexesIter<'a>(Entries<'a>);
-
-#[expect(
-    clippy::large_enum_variant,
-    reason = "fixed iterator stack avoids unadmitted heap scratch"
-)]
-enum Entries<'a> {
-    Empty,
-    Live(std::collections::btree_map::Iter<'a, FieldName, Box<dyn VectorIndex>>),
-    Retained(BudgetedMapIter<'a, FieldName, Box<dyn VectorIndex>>),
-}
+pub struct VectorIndexesIter<'a>(Option<BudgetedMapIter<'a, FieldName, Box<dyn VectorIndex>>>);
 
 impl<'a> Iterator for VectorIndexesIter<'a> {
     type Item = (&'a FieldName, &'a (dyn VectorIndex + 'static));
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = match &mut self.0 {
-            Entries::Empty => None,
-            Entries::Live(iter) => iter.next(),
-            Entries::Retained(iter) => iter.next(),
-        };
-        next.map(|(field, index)| (field, index.as_ref()))
+        self.0
+            .as_mut()?
+            .next()
+            .map(|(field, index)| (field, index.as_ref()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.0 {
-            Entries::Empty => (0, Some(0)),
-            Entries::Live(iter) => iter.size_hint(),
-            Entries::Retained(iter) => iter.size_hint(),
-        }
+        self.0.as_ref().map_or((0, Some(0)), Iterator::size_hint)
     }
 }
 

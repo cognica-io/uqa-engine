@@ -36,7 +36,7 @@ impl<T: TableMetadataValue> SharedTableMetadata<T> {
     pub(super) fn retained_bytes(&self) -> Option<usize> {
         match &self.0 {
             Owner::Native(value) => footprint::retained(&**value),
-            Owner::Admitted(value) => Some(value.reserved_bytes()),
+            Owner::Admitted(value) => footprint::admitted(value),
         }
     }
 

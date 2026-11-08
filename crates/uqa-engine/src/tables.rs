@@ -10,7 +10,7 @@ use super::{
     MemoryVectorIndex, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
     TableSchema, TableState, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
-use crate::state::{BoundTableSecurity, CatalogCell};
+use crate::state::{BoundTableSecurity, CatalogCell, TableMetadataCell};
 use crate::statistics::MaintenanceState;
 use uqa_execution::catalog::definition_revision::TablePublicationKind;
 
@@ -319,7 +319,7 @@ impl Engine {
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            security: CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
+            security: TableMetadataCell::new(BoundTableSecurity::owner(owner.identity())),
             storage_generation: CatalogCell::new(crate::new_table_storage_generation()?),
             document_store: self.storage.memory_cell(docs, persistence)?,
             inverted_index: self.storage.memory_cell(inv, persistence)?,

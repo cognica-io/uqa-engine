@@ -227,7 +227,7 @@ impl Engine {
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
-            security: CatalogCell::new(security),
+            security: crate::state::TableMetadataCell::new(security),
             storage_generation: CatalogCell::new(schema.storage_generation),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv),

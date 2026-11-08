@@ -51,7 +51,8 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
             ),
             security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
+            ))
+            .into(),
             columns: columns.clone().into(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),

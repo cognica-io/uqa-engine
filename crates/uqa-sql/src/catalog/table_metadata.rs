@@ -25,6 +25,7 @@ mod tests;
 
 /// Metadata with exclusively owned, non-executable payloads. SQL seals this set so shared execution sources cannot enter an immutable generation without their own capture boundary.
 pub trait TableMetadataValue: footprint::Payload + Clone + Send + Sync + 'static {}
+impl TableMetadataValue for crate::catalog::security::BoundTableSecurity {}
 impl TableMetadataValue for Vec<String> {}
 impl TableMetadataValue for Option<String> {}
 impl TableMetadataValue for Vec<crate::ast::ForeignKey> {}
@@ -58,7 +59,7 @@ impl<T: TableMetadataValue> TableMetadata<T> {
     ) -> Result<Self, SQLError> {
         cancellation.check()?;
         let value = value.into_shared()?;
-        let bytes = Some(value.reserved_bytes());
+        let bytes = footprint::admitted(&value);
         cancellation.check()?;
         Ok(Self {
             value: SharedTableMetadata::admitted(value),
