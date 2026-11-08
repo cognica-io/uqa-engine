@@ -6,7 +6,7 @@
 
 //! Strict metadata images move their decoded payload and admission into one shared owner.
 
-use super::{SharedTableMetadata, TableMetadata};
+use super::TableMetadata;
 use crate::{ast, catalog::image, catalog::relation_attributes::DroppedAttribute, SQLError};
 use std::io::Read;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
@@ -21,14 +21,7 @@ macro_rules! metadata_image {
                 cancellation: &CancellationToken,
             ) -> Result<Self, SQLError> {
                 let value = image::$read(reader, memory, cancellation)?;
-                cancellation.check()?;
-                let value = value.into_shared()?;
-                let bytes = Some(value.reserved_bytes());
-                cancellation.check()?;
-                Ok(Self {
-                    value: SharedTableMetadata::admitted(value),
-                    bytes,
-                })
+                Self::from_admitted(value, cancellation)
             }
         }
     };

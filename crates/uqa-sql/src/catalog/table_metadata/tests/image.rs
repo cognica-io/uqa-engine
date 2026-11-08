@@ -260,3 +260,69 @@ fn restored_table_metadata_releases_failed_input_and_shared_owner_admission() {
     .is_err());
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn admitted_table_names_transfer_original_payloads_and_retain_shared_consumers() {
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(2 << 20);
+    let names = vec!["n".repeat(1 << 20), String::new(), "한글".into()];
+    let buffer = names.as_ptr();
+    let payload = names[0].as_ptr();
+    let bytes =
+        names.capacity() * size_of::<String>() + names.iter().map(String::capacity).sum::<usize>();
+    let admitted = Budgeted::new(names, memory.reserve(bytes).unwrap());
+    let mut native = None;
+    let allocations = allocation_counter::measure(|| {
+        native = Some(TableMetadata::from_admitted(admitted, &token).unwrap());
+    });
+    assert!(allocations.bytes_total < 4096, "{allocations:?}");
+    let native = native.unwrap();
+    assert_eq!(native.as_ptr(), buffer);
+    assert_eq!(native[0].as_ptr(), payload);
+    assert_eq!(memory.used(), bytes + size_of::<Budgeted<Vec<String>>>());
+    capture_bytes(&native, memory.used());
+    let selected = native.snapshot();
+    drop(native);
+    assert!(memory.used() > 1 << 20);
+    std::thread::spawn(move || {
+        assert_eq!(selected[0].len(), 1 << 20);
+        assert!(selected[1].is_empty());
+        assert_eq!(selected[2], "한글");
+    })
+    .join()
+    .unwrap();
+    assert_eq!(memory.used(), 0);
+    for name in [None, Some(String::new()), Some("original".into())] {
+        let bytes = name.as_ref().map_or(0, String::capacity);
+        let pointer = name.as_ref().map(|name| name.as_ptr());
+        let native = TableMetadata::from_admitted(
+            Budgeted::new(name, memory.reserve(bytes).unwrap()),
+            &token,
+        )
+        .unwrap();
+        assert_eq!(native.as_ref().map(|name| name.as_ptr()), pointer);
+        capture_bytes(&native, bytes + size_of::<Budgeted<Option<String>>>());
+        drop(native);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn admitted_table_names_release_inputs_on_cancellation_and_header_admission_failure() {
+    for cancelled in [false, true] {
+        let name = Some("original".to_string());
+        let bytes = name.as_ref().unwrap().capacity();
+        let memory = MemoryBudget::new(bytes + size_of::<Budgeted<Option<String>>>() - 1);
+        let value = Budgeted::new(name, memory.reserve(bytes).unwrap());
+        let token = CancellationToken::new();
+        if cancelled {
+            token.cancel();
+        }
+        let error = TableMetadata::from_admitted(value, &token).unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(if cancelled { "57014" } else { "53200" })
+        );
+        assert_eq!(memory.used(), 0);
+    }
+}

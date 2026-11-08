@@ -11,7 +11,10 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use uqa_core::memory::{MemoryError, Produced, ProductionControl};
+use uqa_core::{
+    memory::{Budgeted, MemoryError, Produced, ProductionControl},
+    CancellationToken,
+};
 
 mod footprint;
 mod image;
@@ -46,6 +49,21 @@ impl<T: TableMetadataValue> TableMetadata<T> {
             value: value.into(),
             bytes,
         }
+    }
+
+    /// Adopt decoded native allocations and their original reservation. The input owner must account for every payload allocation; sharing admits only the fixed owner header and never copies the population.
+    pub fn from_admitted(
+        value: Budgeted<T>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        cancellation.check()?;
+        let value = value.into_shared()?;
+        let bytes = Some(value.reserved_bytes());
+        cancellation.check()?;
+        Ok(Self {
+            value: SharedTableMetadata::admitted(value),
+            bytes,
+        })
     }
 
     pub fn snapshot(&self) -> SharedTableMetadata<T> {

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native table image import retains decoded field names, optional array names, constraints and definitions with their original memory admission through shared catalog consumers. Complete Engine restore remains under implementation.
+
 - Table column, CHECK and partition definitions retain independent immutable generations and complete evaluated-literal ownership across committed memory capture, query readers and transaction rollback.
 
 - Committed memory captures share immutable table field names, foreign and key constraints, row-array names and dropped-attribute metadata under independent capacity admission; publication and rollback preserve original generations.

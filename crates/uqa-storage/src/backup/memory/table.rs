@@ -55,9 +55,9 @@ pub struct MemoryTableMetadata<'a> {
 /// Privately reconstructed properties. Every variable payload and collection node retains its decoding allowance; publication and cross-catalog validation remain with the restored table owner.
 pub struct DecodedMemoryTableMetadata {
     pub properties: MemoryTableProperties,
-    pub fts_fields: BudgetedVec<Budgeted<String>>,
+    pub fts_fields: Budgeted<Vec<String>>,
     pub analyzer: Budgeted<Vec<u8>>,
-    pub row_type_array_name: Option<Budgeted<String>>,
+    pub row_type_array_name: Budgeted<Option<String>>,
 }
 
 fn invalid() -> StorageBackendError {
@@ -270,16 +270,23 @@ pub fn read_memory_table_metadata(
         next_id: u128::from_le_bytes(input.array()?),
     };
     let count = input.count()?;
+    let mut field_payloads = control.memory().empty_reservation();
     let mut fts_fields = BudgetedVec::new(control.memory());
     fts_fields.reserve(count)?;
     for _ in 0..count {
-        fts_fields.push(input.text()?)?;
+        let (field, memory) = input.text()?.into_parts();
+        fts_fields.push(field)?;
+        field_payloads.absorb(memory);
     }
+    let (fields, mut fields_memory) = fts_fields.into_parts();
+    fields_memory.absorb(field_payloads);
+    let fts_fields = Budgeted::new(fields, fields_memory);
     let analyzer = input.bytes()?;
     let row_type_array_name = if flag(&mut input)? {
-        Some(input.text()?)
+        let (name, memory) = input.text()?.into_parts();
+        Budgeted::new(Some(name), memory)
     } else {
-        None
+        Budgeted::new(None, control.memory().empty_reservation())
     };
     input.end()?;
     Ok(Budgeted::new(

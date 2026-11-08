@@ -76,14 +76,11 @@ fn memory_table_metadata_preserves_independent_wire_and_native_optional_values()
     assert!(decoded
         .fts_fields
         .iter()
-        .map(|field| field.as_str())
+        .map(String::as_str)
         .eq(["body", "한글"]));
     assert_eq!(**decoded.analyzer, [0, 1, 255]);
     assert_eq!(
-        decoded
-            .row_type_array_name
-            .as_ref()
-            .map(|name| name.as_str()),
+        decoded.row_type_array_name.as_ref().map(String::as_str),
         Some("")
     );
     drop(decoded);
@@ -98,10 +95,7 @@ fn memory_table_metadata_preserves_independent_wire_and_native_optional_values()
         assert_eq!(decoded.properties.catalog_oids, None);
         assert_eq!(decoded.properties.next_id, u128::MAX);
         assert_eq!(
-            decoded
-                .row_type_array_name
-                .as_ref()
-                .map(|name| name.as_str()),
+            decoded.row_type_array_name.as_ref().map(String::as_str),
             name
         );
         assert!(decoded.fts_fields.is_empty());
@@ -205,4 +199,52 @@ fn memory_table_metadata_cancellation_and_unwind_release_private_payloads() {
         Err(StorageBackendError::Memory(_))
     ));
     assert_eq!(denied.memory().used(), 0);
+}
+
+#[test]
+fn memory_table_metadata_names_keep_native_allocations_after_parent_retirement() {
+    let fields = vec!["x".repeat(1 << 20), "second".into()];
+    let mut value = metadata(&fields, &[1, 2, 3]);
+    value.row_type_array_name = Some("saved_array");
+    let bytes = encode(value, 8192);
+    drop(fields);
+    let control = StorageReadControl::with_limit(2 << 20);
+    let mut decoded = None;
+    let allocations = allocation_counter::measure(|| {
+        decoded = Some(read_memory_table_metadata(&mut bytes.as_slice(), &control).unwrap());
+    });
+    assert!(
+        allocations.bytes_total < (1 << 20) + 4096,
+        "{allocations:?}"
+    );
+    let (decoded, parent_memory) = decoded.unwrap().into_parts();
+    let DecodedMemoryTableMetadata {
+        fts_fields,
+        row_type_array_name,
+        analyzer,
+        ..
+    } = decoded;
+    assert_eq!(
+        fts_fields.reserved_bytes(),
+        fts_fields.capacity() * size_of::<String>()
+            + fts_fields.iter().map(String::capacity).sum::<usize>()
+    );
+    assert_eq!(
+        row_type_array_name.reserved_bytes(),
+        row_type_array_name.as_ref().unwrap().capacity()
+    );
+    drop((parent_memory, analyzer, bytes));
+    assert_eq!(
+        control.memory().used(),
+        fts_fields.reserved_bytes() + row_type_array_name.reserved_bytes()
+    );
+    std::thread::spawn(move || {
+        assert_eq!(fts_fields[0].len(), 1 << 20);
+        assert!(fts_fields[0].bytes().all(|byte| byte == b'x'));
+        assert_eq!(fts_fields[1], "second");
+        assert_eq!(row_type_array_name.as_deref(), Some("saved_array"));
+    })
+    .join()
+    .unwrap();
+    assert_eq!(control.memory().used(), 0);
 }

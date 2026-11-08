@@ -50056,6 +50056,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_names_keep_native_allocations_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Decode megabyte field names and an optional array name, retire the input and outer metadata, then move the native owners across threads.",
+      "invariant": "Exact decoded string and vector allocations retain independent original admission without a second population copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_table_names_transfer_original_payloads_and_retain_shared_consumers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Adopt megabyte native names and absent/empty/present array names, retain shared consumers after parent retirement and independently recapture them.",
+      "invariant": "Original buffer and string addresses remain unchanged; capture admits the full cached footprint and shared consumers retain the original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_table_names_release_inputs_on_cancellation_and_header_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Cancel adoption and deny the fixed shared-owner header after admitting the original optional-name payload.",
+      "invariant": "Failed private adoption releases all input admission and preserves cancellation or memory SQLSTATE.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

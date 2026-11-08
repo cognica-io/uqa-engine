@@ -192,7 +192,7 @@ fn table_bytes(table: &tables::TableOwner) -> Vec<Vec<u8>> {
 #[test]
 fn memory_table_units_preserve_native_properties_and_bound_metadata_after_retirement() {
     let engine = Engine::new();
-    engine.sql("CREATE UNLOGGED TABLE saved(id integer PRIMARY KEY, body text DEFAULT 'original' CHECK(length(body)>0)); INSERT INTO saved VALUES(1,'original'); ANALYZE saved", &[]).unwrap();
+    engine.sql("CREATE UNLOGGED TABLE saved(id integer PRIMARY KEY, body text DEFAULT 'original' CHECK(length(body)>0)); CREATE INDEX saved_text ON saved USING gin(body); INSERT INTO saved VALUES(1,'original'); ANALYZE saved", &[]).unwrap();
     let control = StorageReadControl::with_limit(8 << 20);
     let cut = engine.capture_committed_memory(&control).unwrap();
     let (_, value) = cut.next_table(None).unwrap().unwrap();
@@ -217,14 +217,32 @@ fn memory_table_units_preserve_native_properties_and_bound_metadata_after_retire
         properties.analyzer.as_slice(),
         table.analyzer.get().unwrap().as_bytes()
     );
-    drop(properties);
-    assert_eq!(input.memory().used(), 0);
+    let (properties, parent_memory) = properties.into_parts();
+    let fields = uqa_sql::catalog::table_metadata::TableMetadata::from_admitted(
+        properties.fts_fields,
+        input.cancellation(),
+    )
+    .unwrap();
+    let array_name = uqa_sql::catalog::table_metadata::TableMetadata::from_admitted(
+        properties.row_type_array_name,
+        input.cancellation(),
+    )
+    .unwrap();
+    assert_eq!(&*fields, &**table.fts_fields.get().unwrap());
+    assert_eq!(&*array_name, &**table.row_type_array_name.get().unwrap());
+    drop((properties.analyzer, parent_memory));
+    assert!(input.memory().used() > 0);
     engine.sql("BEGIN; UPDATE saved SET body='private'; ROLLBACK; DROP TABLE saved; CREATE TABLE saved(replacement integer)", &[]).unwrap();
     drop((cut, engine));
-    std::thread::spawn(move || assert_eq!(table_bytes(&table), expected))
-        .join()
-        .unwrap();
+    std::thread::spawn(move || {
+        assert_eq!(table_bytes(&table), expected);
+        assert_eq!(&*fields, &**table.fts_fields.get().unwrap());
+        assert_eq!(&*array_name, &**table.row_type_array_name.get().unwrap());
+    })
+    .join()
+    .unwrap();
     assert_eq!(control.memory().used(), 0);
+    assert_eq!(input.memory().used(), 0);
 }
 
 #[test]
