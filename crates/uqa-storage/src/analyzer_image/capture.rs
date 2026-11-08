@@ -31,6 +31,10 @@ enum Source {
 pub struct AnalyzerImageSnapshot(Arc<RetainedAnalyzer>);
 
 impl AnalyzerImageSnapshot {
+    pub(crate) fn read_control(&self) -> &StorageReadControl {
+        &self.0.control
+    }
+
     /// Borrow the selected descriptor and dictionary bytes without copying or reopening resources.
     pub fn image_reader<'a>(
         &'a self,

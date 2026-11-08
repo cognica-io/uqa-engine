@@ -178,17 +178,89 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
     let memory = Engine::new();
     assert_eq!(
         memory.backup_capabilities(),
-        BackupCapabilities::UNSUPPORTED
+        BackupCapabilities {
+            export: true,
+            import: false,
+            snapshot_fingerprints: false
+        }
     );
-    let error = memory
-        .begin_backup(&repository, options, &control)
-        .err()
+    sql(&memory, "CREATE ROLE restricted; SET ROLE restricted");
+    assert_eq!(
+        memory
+            .begin_backup(&repository, options, &control)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("42501")
+    );
+    sql(&memory, "RESET ROLE");
+    sql(&memory, "BEGIN");
+    assert!(memory.sql("SELECT 1 / 0", &[]).is_err());
+    assert_eq!(
+        memory
+            .begin_backup(&repository, options, &control)
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("25P02")
+    );
+    sql(&memory, "ROLLBACK");
+    let mut job = memory.begin_backup(&repository, options, &control).unwrap();
+    assert!(job.cancel().unwrap().is_none());
+    drop(job);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::plain(false)]
+#[case::protected(true)]
+fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case] encrypted: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE saved(id integer PRIMARY KEY, body text); INSERT INTO saved VALUES(1,'original'),(2,'retained')");
+    let control = StorageReadControl::with_limit(32 << 20);
+    let repository = repository(&directory.path().join("repository"), &control, encrypted);
+    let options = BackupOptions::new(16 << 20, 16 << 20);
+    let mut full = engine.begin_backup(&repository, options, &control).unwrap();
+    while full.advance(1, 127).unwrap() == BackupCaptureStep::Pending {}
+    let full_report = full.report().unwrap();
+    assert!(full_report.image.written_units > 25);
+    assert_eq!(full_report.image.reused_units, 0);
+    let root = full.publish().unwrap();
+    drop(full);
+    assert_eq!(control.memory().used(), 0);
+    sql(&engine, "BEGIN; UPDATE saved SET body='private'");
+    let mut child = engine
+        .begin_backup(
+            &repository,
+            BackupOptions {
+                parent: Some(root.backup()),
+                ..options
+            },
+            &control,
+        )
         .unwrap();
-    assert!(matches!(
-        error,
-        uqa_sql::SQLError::Host(ref source)
-            if matches!(source.downcast_ref::<BackupError>(), Some(BackupError::Unsupported(_)))
-    ));
+    assert_eq!(child.cut().format.provider(), ImageProvider::Memory);
+    assert_eq!(engine.transaction_depth(), 1);
+    sql(
+        &engine,
+        "ROLLBACK; UPDATE saved SET body='later'; DROP TABLE saved",
+    );
+    drop(engine);
+    while child.advance(1, 113).unwrap() == BackupCaptureStep::Pending {}
+    let report = child.report().unwrap();
+    assert_eq!(report.image.written_units, 0);
+    assert_eq!(report.image.reused_units, full_report.image.written_units);
+    let child_root = child.publish().unwrap();
+    assert_eq!(child.publish().unwrap(), child_root);
+    drop(child);
+    repository.remove_backup(root.backup(), &control).unwrap();
+    let lease = repository
+        .open_backup(child_root.backup(), &control)
+        .unwrap();
+    lease.verify(16 << 20, &control).unwrap();
+    drop(lease);
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[rstest::rstest]

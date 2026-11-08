@@ -59,6 +59,18 @@ impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
+    fn next_image_document_id(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check_inverted_read()?;
+        let next = self.0.next_image_document_id(after, control)?;
+        self.check_inverted_read()?;
+        control.check()?;
+        Ok(next)
+    }
+
     fn image_document_reader<'a>(
         &'a self,
         doc_id: DocId,

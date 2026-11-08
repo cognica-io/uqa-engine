@@ -38,12 +38,10 @@ impl Publication {
         })
     }
 
-    #[cfg(test)]
     pub(super) fn registry(&self) -> &MemoryCaptureRegistry {
         &self.registry
     }
 
-    #[cfg(test)]
     pub(super) fn selected(&self) -> uqa_storage::memory_capture::MemoryCaptureSources {
         self.owner.snapshot()
     }

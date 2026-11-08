@@ -27,9 +27,9 @@ use crate::TableState;
 mod publication;
 use publication::Publication;
 mod sources;
+pub(crate) use sources::CapturedTable;
 use sources::TableSources;
 mod snapshot;
-#[cfg(test)]
 pub(crate) use snapshot::SnapshotTableCut;
 pub(crate) use snapshot::SnapshotTableSources;
 
@@ -299,7 +299,6 @@ impl TableRegistry {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn snapshot_sources(
         &self,
     ) -> StorageBackendResult<(MemoryCaptureRegistry, SnapshotTableSources)> {

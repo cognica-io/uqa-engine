@@ -64,6 +64,11 @@ impl<T> CapturedMemoryValue<T> {
         })
     }
 
+    /// The original retention scope accompanies an independently controlled child reader.
+    pub fn read_control(&self) -> &StorageReadControl {
+        &self.control
+    }
+
     pub fn get(&self) -> StorageBackendResult<&T> {
         self.control.check()?;
         Ok(&self.value)
@@ -195,6 +200,11 @@ fn allocate(next: &AtomicU64) -> StorageBackendResult<u64> {
 pub struct MemoryCapture(Arc<Capture>);
 
 impl MemoryCapture {
+    /// Read-only access to this cut's original retention and cancellation scope.
+    pub fn read_control(&self) -> &StorageReadControl {
+        &self.0.control
+    }
+
     /// Observe the first failure, including cancellation, and release the failed cut's retained archive. An invalidated cut can never collect newer values or become usable again.
     pub fn check(&self) -> StorageBackendResult<()> {
         self.0.check()

@@ -7,6 +7,56 @@
 use super::*;
 use std::sync::Arc;
 
+#[test]
+fn text_image_identity_seek_preserves_sparse_and_empty_term_documents_without_allocation() {
+    let retention = StorageReadControl::with_limit(1 << 20);
+    let mut imported = builder(&retention);
+    let bytes = fixture(false);
+    let mut empty = bytes[..117].to_vec();
+    empty[65..73].copy_from_slice(&0_u64.to_le_bytes());
+    empty[109..117].copy_from_slice(&0_u64.to_le_bytes());
+    for (id, image) in [(0, &bytes), (7, &empty), (u64::MAX, &bytes)] {
+        imported
+            .add_image_document(id, &mut image.as_slice())
+            .unwrap();
+    }
+    let source = imported.finish().unwrap();
+    let control = StorageReadControl::with_limit(0);
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(
+            source.next_image_document_id(None, &control).unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            source.next_image_document_id(Some(0), &control).unwrap(),
+            Some(7)
+        );
+        assert_eq!(
+            source.next_image_document_id(Some(6), &control).unwrap(),
+            Some(7)
+        );
+        assert_eq!(
+            source.next_image_document_id(Some(7), &control).unwrap(),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            source
+                .next_image_document_id(Some(u64::MAX), &control)
+                .unwrap(),
+            None
+        );
+    });
+    assert_eq!(allocation.count_total, 0);
+    retention.cancellation().cancel();
+    assert!(source.next_image_document_id(None, &control).is_err());
+    drop(source);
+    assert_eq!(retention.memory().used(), 0);
+    let empty = MemoryInvertedIndex::new(uqa_analysis::keyword_analyzer());
+    assert_eq!(empty.next_image_document_id(None, &control).unwrap(), None);
+    control.cancellation().cancel();
+    assert!(empty.next_image_document_id(None, &control).is_err());
+}
+
 fn compare(index: &dyn InvertedIndex, id: u64, expected: &[u8], window: usize) {
     let control = StorageReadControl::with_limit(16 << 10);
     let mut reader = index.image_document_reader(id, &control).unwrap().unwrap();

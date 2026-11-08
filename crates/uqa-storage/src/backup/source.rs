@@ -6,6 +6,9 @@
 
 use super::{BackupCut, BackupResult, UnitAddress, UnitKind};
 
+mod native;
+pub use native::{NativeBackupImage, NativeImageEntries, NativeImageStep, NativeImageUnit};
+
 mod owned;
 pub use owned::OwnedBackupImage;
 

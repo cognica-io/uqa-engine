@@ -27,7 +27,6 @@ macro_rules! resource_sources {
                 Ok(())
             }
 
-            #[cfg(test)]
             pub(super) fn keys(&self, control: &uqa_storage::read_control::StorageReadControl) -> StorageBackendResult<uqa_core::memory::Budgeted<ResourceKeys>> {
                 let keys = ResourceKeys { $($field: self.$field.key()?,)+ };
                 let mut bytes = size_of::<ResourceKeys>();
@@ -36,7 +35,6 @@ macro_rules! resource_sources {
             }
         }
 
-        #[cfg(test)]
         pub(crate) struct ResourceKeys {
             $(pub(crate) $field: uqa_storage::memory_capture::MemoryCaptureKey<uqa_storage::memory_capture::CapturedMemoryValue<$image>>,)+
         }

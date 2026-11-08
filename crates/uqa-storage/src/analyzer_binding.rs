@@ -15,6 +15,7 @@ use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
 use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendResult};
 
 pub mod capture;
+mod image;
 pub mod registry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Spilled evaluated-index captures retain native record roots and encrypted files without reading or copying the complete value population. Independent retention charges cached metadata footprints; bounded chunk preparation and output preserve exact evaluated bytes after source mutation or closure.
 
+- Add bounded native image composition with retained catalog/resource/table-metadata adapters, exact field analyzer revisions and document/text/vector readers. Immutable successor selection preserves empty-term text documents and original cancellation after source retirement. Complete memory backup assembly and public restore remain under implementation.
+
 - Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.
 
 - Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
@@ -37,6 +39,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
 
 ### Added
+
+- Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export; public restore activation remains under implementation.
 
 - Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Complete memory backup and public Engine restore remain in progress.
 

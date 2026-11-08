@@ -46,7 +46,6 @@ impl SnapshotSources {
         Self::with_tables(tables, durable)
     }
 
-    #[cfg(test)]
     pub(crate) fn live(
         tables: &super::TableRegistry,
         durable: &DurableCatalogSnapshot,
@@ -102,35 +101,30 @@ impl SnapshotSources {
     }
 }
 
-#[cfg(test)]
 type SequenceKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
         uqa_execution::catalog::sequence::capture::CapturedSequences,
     >,
 >;
 
-#[cfg(test)]
 type ForeignKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
         uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
     >,
 >;
 
-#[cfg(test)]
 type MetadataKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
         uqa_execution::catalog::table_capture::CapturedTableMetadata,
     >,
 >;
 
-#[cfg(test)]
 type CommentKey = uqa_storage::memory_capture::MemoryCaptureKey<
     uqa_storage::memory_capture::CapturedMemoryValue<
         uqa_execution::catalog::comments::CapturedComments,
     >,
 >;
 
-#[cfg(test)]
 pub(crate) struct SnapshotCut {
     pub(crate) tables: super::SnapshotTableCut,
     pub(crate) catalog_oids: uqa_execution::catalog::identity::CapturedCatalogOidPosition,
@@ -142,7 +136,6 @@ pub(crate) struct SnapshotCut {
     pub(crate) resources: uqa_core::memory::Budgeted<resources::ResourceKeys>,
 }
 
-#[cfg(test)]
 impl std::ops::Deref for SnapshotCut {
     type Target = super::SnapshotTableCut;
 
@@ -151,7 +144,6 @@ impl std::ops::Deref for SnapshotCut {
     }
 }
 
-#[cfg(test)]
 impl SnapshotSources {
     pub(crate) fn capture(
         &self,

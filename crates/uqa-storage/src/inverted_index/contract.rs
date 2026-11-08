@@ -50,6 +50,18 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Select the next evaluated text document from this exact image owner without reading its payload. Identity zero and the maximum identity are valid; absent text fields do not create an image document. Unsupported owners reject the request instead of collecting or rebuilding the index.
+    fn next_image_document_id(
+        &self,
+        _after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text image identities are not supported by this backend".into(),
+        ))
+    }
+
     /// Read one evaluated text image in bounded windows, retaining its exact term and occurrence positions. Unsupported providers reject construction before producing bytes.
     fn image_document_reader<'a>(
         &'a self,

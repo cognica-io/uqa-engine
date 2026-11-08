@@ -25,7 +25,6 @@ pub(crate) struct SnapshotTableSources {
 
 enum MembershipSource {
     Original(MemoryCaptureCell<Membership>),
-    #[cfg(test)]
     Live(MemoryCaptureKey<CapturedTableMembership>),
 }
 
@@ -33,7 +32,6 @@ impl MembershipSource {
     fn key(&self) -> StorageBackendResult<MemoryCaptureKey<CapturedTableMembership>> {
         match self {
             Self::Original(source) => source.key(),
-            #[cfg(test)]
             Self::Live(key) => Ok(key.clone()),
         }
     }
@@ -80,7 +78,6 @@ impl SnapshotTableSources {
         Ok(sources)
     }
 
-    #[cfg(test)]
     pub(super) fn live(
         registry: MemoryCaptureRegistry,
         selection: MemoryCaptureSources,
@@ -96,7 +93,6 @@ impl SnapshotTableSources {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn capture(
         &self,
         control: &uqa_storage::read_control::StorageReadControl,
@@ -111,20 +107,20 @@ impl SnapshotTableSources {
     }
 }
 
-#[cfg(test)]
 pub(crate) struct SnapshotTableCut {
     pub(crate) cut: uqa_storage::memory_capture::MemoryCapture,
     membership: std::sync::Arc<uqa_core::memory::Budgeted<CapturedTableMembership>>,
 }
 
-#[cfg(test)]
 impl SnapshotTableCut {
+    #[cfg(test)]
     pub(crate) fn assert_unread(&self) {
         for (_, source) in &self.membership.get().unwrap().0.sources {
             source.assert_unread(&self.cut);
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn names(&self) -> StorageBackendResult<Vec<RelationIdentity>> {
         self.cut.check()?;
         Ok(self
@@ -137,6 +133,21 @@ impl SnapshotTableCut {
             .collect())
     }
 
+    pub(crate) fn next_table(
+        &self,
+        after: Option<&RelationIdentity>,
+    ) -> StorageBackendResult<Option<(&RelationIdentity, super::sources::CapturedTable)>> {
+        self.cut.check()?;
+        let (membership, identity) = self.membership.get()?;
+        assert!(identity.matches(&self.cut));
+        membership
+            .sources
+            .first_from(after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded))
+            .map(|(name, source)| Ok((name, source.capture(&self.cut)?)))
+            .transpose()
+    }
+
+    #[cfg(test)]
     pub(crate) fn table(
         &self,
         name: &RelationIdentity,
