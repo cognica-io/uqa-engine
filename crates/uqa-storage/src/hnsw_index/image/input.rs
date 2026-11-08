@@ -12,11 +12,8 @@ use super::{
 };
 use crate::{spill_map::Builder, HNSWIndexParams};
 
-pub(crate) fn read(
-    input: &mut ImageInput<'_>,
-    dimensions: u32,
-) -> StorageBackendResult<Budgeted<HNSWIndex>> {
-    let memory = input.control.memory().reserve(size_of::<HNSWIndex>())?;
+pub(crate) fn read(input: &mut ImageInput<'_>, dimensions: u32) -> StorageBackendResult<HNSWIndex> {
+    let mut memory = input.control.memory().reserve(size_of::<HNSWIndex>())?;
     let params = HNSWIndexParams {
         m: input.count()?,
         ef_construction: input.count()?,
@@ -53,7 +50,9 @@ pub(crate) fn read(
         previous = Some(id);
     }
     validation::validate(&index, input.control)?;
-    Ok(Budgeted::new(index, memory))
+    memory.grow(size_of::<uqa_core::memory::MemoryReservation>())?;
+    index.image_memory = Some(std::sync::Arc::new(memory));
+    Ok(index)
 }
 
 fn read_nodes(input: &mut ImageInput<'_>, index: &mut HNSWIndex) -> StorageBackendResult<()> {

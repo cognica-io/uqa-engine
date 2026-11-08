@@ -7,7 +7,11 @@
 //! HNSW graph state and construction parameters.
 
 use super::store::Map;
-use uqa_core::{memory::MemoryBudget, DocId};
+use std::sync::Arc;
+use uqa_core::{
+    memory::{MemoryBudget, MemoryReservation},
+    DocId,
+};
 
 use crate::vector_index::HNSWIndexParams;
 use crate::StorageBackendResult;
@@ -72,6 +76,7 @@ pub struct HNSWIndex {
     pub(super) dirty_nodes: Map<u64>,
     pub(super) full_rewrite: bool,
     pub(super) memory: MemoryBudget,
+    pub(super) image_memory: Option<Arc<MemoryReservation>>,
 }
 
 impl HNSWIndex {
@@ -108,6 +113,7 @@ impl HNSWIndex {
             dirty_nodes: Map::new(memory, memory.limit() / 32),
             full_rewrite: true,
             memory: memory.clone(),
+            image_memory: None,
         })
     }
 

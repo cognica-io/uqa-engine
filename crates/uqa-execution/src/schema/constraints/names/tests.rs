@@ -175,11 +175,11 @@ fn reservation_refresh_preserves_the_current_owned_index_name() {
     .unwrap();
     let relation = RelationIdentity::new("public", "t");
     let mut initial = snapshot(false, OWNER);
-    initial.tables.get_mut(&relation).unwrap().keys = Arc::new(vec![key.clone()]);
+    initial.tables.get_mut(&relation).unwrap().keys = vec![key.clone()].into();
     let mut refreshed = initial.clone();
     let mut renamed = key.clone();
     renamed.name = Some("renamed".into());
-    refreshed.tables.get_mut(&relation).unwrap().keys = Arc::new(vec![renamed.clone()]);
+    refreshed.tables.get_mut(&relation).unwrap().keys = vec![renamed.clone()].into();
     let session = Session::new(refreshed);
     *session.current.borrow_mut() = initial;
     let mut candidate = TableConstraintSet {

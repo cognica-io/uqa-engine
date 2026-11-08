@@ -6,6 +6,8 @@
 
 //! Authorized, independently retained backup jobs over the installed provider.
 
+mod memory;
+
 use crate::{Engine, SQLError};
 use std::sync::Arc;
 
@@ -41,20 +43,21 @@ impl BackupOptions {
 }
 
 impl Engine {
-    /// Report the currently connected Engine paths. Memory images and Engine restore activation remain unsupported; provider image primitives do not advertise those public capabilities.
+    /// Report the currently connected Engine paths. Engine restore activation remains unsupported; provider image primitives do not advertise that public capability.
     pub fn backup_capabilities(&self) -> BackupCapabilities {
         BackupCapabilities {
-            export: self
-                .storage
-                .provider
-                .as_ref()
-                .is_some_and(|provider| provider.backup_capabilities().export),
+            export: self.storage.memory_capture.is_some()
+                || self
+                    .storage
+                    .provider
+                    .as_ref()
+                    .is_some_and(|provider| provider.backup_capabilities().export),
             import: false,
             snapshot_fingerprints: false,
         }
     }
 
-    /// Start a committed persistent export as the effective superuser. Admission follows the existing direct-query transaction boundary; no source SQL transaction or statement gate escapes into the job. Private and temporary state is excluded by the provider's committed cut. Encrypted sources require an encrypted repository unless plaintext export is explicitly enabled. Capture/admission errors are SQL errors; subsequent job errors retain the repository's typed backup errors.
+    /// Start a committed export as the effective superuser. Admission follows the existing direct-query transaction boundary; no source SQL transaction or statement gate escapes into the job. Private and temporary state is excluded by the owning committed cut. Encrypted sources require an encrypted repository unless plaintext export is explicitly enabled. Capture/admission errors are SQL errors; subsequent job errors retain the repository's typed backup errors.
     pub fn begin_backup<'a>(
         &self,
         repository: &'a LocalRepository,
@@ -62,18 +65,27 @@ impl Engine {
         control: &StorageReadControl,
     ) -> Result<BackupJob<'a>, SQLError> {
         let control = control.with_temporary_limit(options.maximum_workspace_bytes);
-        let source = self.with_direct_query_snapshot(
-            true,
-            |engine| {
-                control.check().map_err(|error| {
-                    uqa_execution::storage_errors::storage_error("start backup", &error)
-                })?;
-                if !engine.current_user_is_superuser() {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42501".into(),
-                        message: "database backup requires superuser authority".into(),
-                    });
-                }
+        let authorize = |engine: &Self| {
+            control.check().map_err(|error| {
+                uqa_execution::storage_errors::storage_error("start backup", &error)
+            })?;
+            if !engine.current_user_is_superuser() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42501".into(),
+                    message: "database backup requires superuser authority".into(),
+                });
+            }
+            if options.maximum_encoded_bytes == 0 || options.maximum_workspace_bytes == 0 {
+                return Err(start_error(BackupError::Invalid("zero backup job limit")));
+            }
+            Ok(())
+        };
+        let source = if self.storage.memory_capture.is_some() {
+            let cut = self.capture_committed_memory_query(&control, authorize)?;
+            memory::from_snapshot(self, cut, &control).map_err(start_error)?
+        } else {
+            self.with_direct_query_snapshot(true, |engine| {
+                authorize(engine)?;
                 let provider = engine
                     .storage
                     .provider
@@ -88,13 +100,11 @@ impl Engine {
                         "encrypted source requires a protected repository or explicit plaintext export",
                     )));
                 }
-                if options.maximum_encoded_bytes == 0 || options.maximum_workspace_bytes == 0 {
-                    return Err(start_error(BackupError::Invalid("zero backup job limit")));
-                }
                 provider.capture_backup_image(&control).map_err(start_error)
             },
             std::convert::identity,
-        )?;
+        )?
+        };
         repository
             .begin_image_backup(
                 source,

@@ -62,7 +62,7 @@ pub(super) use table_security::{bound_table_security, table_security};
 pub use tables::{
     read_columns_image, read_columns_image_with_footprint, read_dropped_attributes_image,
     read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
-    read_table_hierarchy_image, read_table_keys_image,
+    read_table_hierarchy_image, read_table_hierarchy_image_with_footprint, read_table_keys_image,
 };
 pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};

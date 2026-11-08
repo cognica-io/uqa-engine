@@ -146,6 +146,27 @@ impl<'a> BackupImageReader<'a> {
         self.unit.as_ref().map(|unit| &unit.entry)
     }
 
+    pub(in crate::backup) fn read_exact_current(
+        &mut self,
+        mut output: &mut [u8],
+    ) -> BackupResult<()> {
+        while !output.is_empty() {
+            let read = self.read_current(output)?;
+            if read == 0 {
+                return Err(BackupError::Invalid("truncated backup image prefix"));
+            }
+            output = &mut output[read..];
+        }
+        Ok(())
+    }
+
+    pub(in crate::backup) fn require_current_end(&mut self) -> BackupResult<()> {
+        if self.read_current(&mut [0])? != 0 {
+            return Err(BackupError::Invalid("trailing backup image bytes"));
+        }
+        Ok(())
+    }
+
     pub fn verified(&self) -> Option<VerifiedBackupImage> {
         matches!(self.stage, Stage::Complete).then_some(VerifiedBackupImage(self.root))
     }

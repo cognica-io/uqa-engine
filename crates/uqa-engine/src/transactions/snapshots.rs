@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 
 mod table;
 
-#[cfg(test)]
 mod capture;
 
 /// Only an original committed boundary owns backup sources; private generations retain undo state alone.

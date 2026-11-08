@@ -37,7 +37,7 @@ fn restore(
     bytes: &[u8],
     control: &StorageReadControl,
     temporary: &DiskANNTemporaryBudget,
-) -> Budgeted<DiskANNMemoryIndex> {
+) -> DiskANNMemoryIndex {
     let mut bytes = &bytes[13..];
     let mut input = ImageInput {
         reader: &mut bytes,
@@ -72,7 +72,7 @@ fn memory_diskann_empty_image_composes_existing_manifest_with_independent_wire_f
     assert_eq!(encode(&source), expected);
     let target = StorageReadControl::with_limit(1 << 20);
     let restored = read_vector_image(&mut expected.as_slice(), &target).unwrap();
-    assert_eq!(encode(&**restored), expected);
+    assert_eq!(encode(&*restored), expected);
     assert_eq!(restored.count().unwrap(), 0);
     drop(restored);
     assert_eq!(target.memory().used(), 0);
@@ -86,7 +86,7 @@ fn memory_diskann_images_preserve_physical_metadata_changes_tensor_scores_and_so
     let bytes = encode(&source);
     let target = StorageReadControl::with_limit(1 << 20);
     let restored = read_vector_image(&mut bytes.as_slice(), &target).unwrap();
-    assert_eq!(encode(&**restored), bytes);
+    assert_eq!(encode(&*restored), bytes);
     assert_eq!(
         restored.diskann_query_metadata(&target).unwrap(),
         expected_metadata
@@ -101,7 +101,7 @@ fn memory_diskann_images_preserve_physical_metadata_changes_tensor_scores_and_so
                     .map(|p| (p.doc_id, p.payload.score.to_bits()))
                     .collect::<Vec<_>>()
             };
-            assert_eq!(bits(&**restored), bits(&source));
+            assert_eq!(bits(&*restored), bits(&source));
         }
         for threshold in [-1.0, 0.0, 0.5, 1.0] {
             assert_eq!(
@@ -113,7 +113,7 @@ fn memory_diskann_images_preserve_physical_metadata_changes_tensor_scores_and_so
     let expected = scores(&source);
     drop(source);
     assert_eq!(original.memory().used(), 0);
-    assert_eq!(scores(&**restored), expected);
+    assert_eq!(scores(&*restored), expected);
     drop(restored);
     assert_eq!(target.memory().used(), 0);
 }
@@ -125,7 +125,7 @@ fn memory_diskann_restore_retains_build_options_but_establishes_independent_futu
     let bytes = encode(&source);
     let target = StorageReadControl::with_limit(1 << 20);
     let temporary = DiskANNTemporaryBudget::new(1 << 20);
-    let (mut restored, lease) = restore(&bytes, &target, &temporary).into_parts();
+    let mut restored = restore(&bytes, &target, &temporary);
     assert_eq!(restored.options, source.options);
     assert_ne!(restored.clock.database, source.clock.database);
     assert_eq!(temporary.used(), 0);
@@ -161,7 +161,7 @@ fn memory_diskann_restore_retains_build_options_but_establishes_independent_futu
     let mut old_bytes = Vec::new();
     old.write_image(&mut old_bytes, &original).unwrap();
     assert_eq!(old_bytes, bytes);
-    drop((old, restored, lease));
+    drop((old, restored));
     assert_eq!(target.memory().used(), 0);
 }
 
@@ -256,15 +256,13 @@ fn memory_diskann_restore_uses_the_destination_temporary_budget_without_import_r
     let bytes = encode(&source);
     let target = StorageReadControl::with_limit(1 << 20);
     let temporary = DiskANNTemporaryBudget::new(0);
-    let (mut restored, lease) =
-        read_vector_image_with_temporary(&mut bytes.as_slice(), &target, &temporary)
-            .unwrap()
-            .into_parts();
+    let mut restored =
+        read_vector_image_with_temporary(&mut bytes.as_slice(), &target, &temporary).unwrap();
     assert_eq!(encode(&*restored), bytes);
     assert_eq!(temporary.used(), 0);
     assert!(restored.initialize().is_err());
     assert_eq!(encode(&*restored), bytes);
-    drop((restored, lease));
+    drop(restored);
     assert_eq!(target.memory().used(), 0);
 }
 

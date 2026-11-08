@@ -25,8 +25,8 @@ macro_rules! table_sources {
             $(pub(super) $field: MemoryCaptureKey<$frozen>,)*
         }
 
-        #[cfg(test)]
         pub(crate) struct CapturedTable {
+            pub(crate) control: uqa_storage::read_control::StorageReadControl,
             pub(crate) object_id: [u8; 16],
             pub(crate) catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
             pub(crate) persistence: uqa_sql::ast::RelationPersistence,
@@ -96,10 +96,10 @@ macro_rules! table_sources {
                 Ok(source)
             }
 
-            #[cfg(test)]
             pub(super) fn capture(&self, cut: &uqa_storage::memory_capture::MemoryCapture) -> StorageBackendResult<CapturedTable> {
                 cut.check()?;
                 let value = CapturedTable {
+                    control: cut.read_control().clone(),
                     object_id: self.object_id,
                     catalog_oids: self.catalog_oids,
                     persistence: self.persistence,

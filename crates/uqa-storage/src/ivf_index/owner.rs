@@ -8,7 +8,10 @@
 
 use std::sync::Arc;
 
-use uqa_core::{memory::Budgeted, DocId, PostingList};
+use uqa_core::{
+    memory::{Budgeted, MemoryReservation},
+    DocId, PostingList,
+};
 
 use super::{IVFData, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::{
@@ -26,6 +29,7 @@ use crate::{
 
 pub struct IVFIndex {
     pub(super) data: MemoryCaptureCell<IVFData>,
+    _image_memory: Option<MemoryReservation>,
 }
 
 impl IVFIndex {
@@ -50,12 +54,21 @@ impl IVFIndex {
     pub(super) fn from_data(data: IVFData) -> Self {
         Self {
             data: MemoryCaptureCell::new(data),
+            _image_memory: None,
         }
     }
 
     pub(super) fn from_budgeted(data: Budgeted<IVFData>) -> Budgeted<Self> {
         let (data, memory) = data.into_parts();
         Budgeted::new(Self::from_data(data), memory)
+    }
+
+    pub(super) fn from_image(data: Budgeted<IVFData>) -> Self {
+        let (data, memory) = data.into_parts();
+        Self {
+            data: MemoryCaptureCell::new(data),
+            _image_memory: Some(memory),
+        }
     }
 
     /// Register before publishing this index in the domain. Training, probe changes and ordinary writes then preserve every applicable cut inside this owner.

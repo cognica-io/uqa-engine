@@ -7,8 +7,8 @@
 //! Exact tensors stream from the retained ordered root without its legacy full-map export.
 
 use super::{
-    invalid, read_floats, Budgeted, BudgetedVec, ImageInput, ImageOutput, MemoryError,
-    StorageBackendResult, StorageReadControl, VectorIndex,
+    invalid, read_floats, BudgetedVec, ImageInput, ImageOutput, MemoryError, StorageBackendResult,
+    StorageReadControl, VectorIndex,
 };
 use crate::{
     image_io::{ImageRead, ImageReader},
@@ -53,11 +53,15 @@ pub(in crate::vector_index) fn write(
 pub(super) fn read(
     input: &mut ImageInput<'_>,
     dimensions: u32,
-) -> StorageBackendResult<Budgeted<MemoryVectorIndex>> {
+) -> StorageBackendResult<MemoryVectorIndex> {
+    let header = input
+        .control
+        .memory()
+        .reserve(size_of::<MemoryVectorIndex>())?;
     let mut memory = input
         .control
         .memory()
-        .reserve(size_of::<MemoryVectorIndex>() + size_of::<MemoryVectorState>())?;
+        .reserve(size_of::<MemoryVectorState>())?;
     let count = input.count()?;
     let expected_vectors = input.count()?;
     memory.grow(
@@ -89,8 +93,10 @@ pub(super) fn read(
         state.replace(document, tensor);
         previous = Some(document);
     }
+    state.image_memory = Some(memory);
+    index.image_memory = Some(header);
     if index.count()? != expected_vectors {
         return Err(invalid());
     }
-    Ok(Budgeted::new(index, memory))
+    Ok(index)
 }

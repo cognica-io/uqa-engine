@@ -49483,6 +49483,839 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_image_preparation_and_output_are_bounded_and_preserve_exact_units",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/native/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Read two components through empty positions and 1/2/128-position and 1/7/32768-byte windows.",
+      "invariant": "Calls respect their preparation bound; addresses and bytes remain exact, empty reads preserve ownership, and completion releases all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_image_invalid_order_and_unread_advance_retire_the_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/native/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Select duplicate or reversed addresses and advance a partly read component.",
+      "invariant": "Invalid order and premature advance permanently fail the image and release the cut, codecs and keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_image_cancellation_admission_and_unwind_cannot_resume",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/native/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Cancel preparation/output, deny admission and unwind from a codec.",
+      "invariant": "Failures cannot resume; all retained sources, readers and leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_image_source_failure_and_invalid_calls_release_all_retained_state",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/source/native/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Reject a zero window, an unprepared read and an invalidated generation; drop a pending image.",
+      "invariant": "No failed-source payload escapes and every terminal path releases all retained owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_catalog_units_keep_the_committed_generation_after_transaction_and_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Select native catalog slots before private transaction changes, rollback, replacement and Engine retirement.",
+      "invariant": "Selected bytes retain the original committed state; table seeking excludes later membership and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_resource_units_preserve_all_resource_kinds_after_replacement_and_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests.rs",
+      "capability": "Retained native backup image composition",
+      "workload": "Select two graph, model, path-index and analyzer identities, replace/remove live resources and close the Engine.",
+      "invariant": "Ordered bounded selection and one-position preparation preserve every original image and release the independent source allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_preserves_independent_wire_and_native_optional_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Encode/decode the independent native table fixture through four read windows and absent/present-empty array names.",
+      "invariant": "Exact identities, lifecycle flags, u128 positions, field order and opaque bytes survive with all decoding leases released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_rejects_truncation_tags_trailing_bytes_and_unadmitted_counts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Truncate at every byte, corrupt discriminants, append trailing data and declare an oversized field count.",
+      "invariant": "Every malformed or unadmitted input fails before publication and releases all private memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_streams_large_borrowed_configuration_without_payload_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Stream a four-MiB analyzer payload and a long/empty field name under a 4096-byte output allowance.",
+      "invariant": "Reads emit at most 16 KiB and allocate nothing after cursor creation; the original payload is never copied into scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_cancellation_and_unwind_release_private_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Cancel an open output reader, unwind during admitted input and deny initial input allowance.",
+      "invariant": "Readers remain failed and all partially reconstructed native payloads release their leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_table_units_preserve_native_properties_and_bound_metadata_after_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Capture an unlogged constrained table and all ten metadata components before rollback, replacement and Engine closure.",
+      "invariant": "Properties match the original table and every SQL/Planner/maintenance image remains byte-identical after retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_catalog_and_table_readers_keep_original_cancellation_after_opening",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests.rs",
+      "capability": "Native memory table and catalog image ownership",
+      "workload": "Open a selected role or table-properties reader with independent output controls, then cancel its original capture.",
+      "invariant": "Original cancellation remains active after codec opening; the failed reader cannot resume and all output/source leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_binding_images_preserve_independent_wire_names_revisions_and_token_observations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests.rs",
+      "capability": "Resolved field analyzer binding images",
+      "workload": "Encode four valid field-binding shapes through four output windows and decode supplied original revisions.",
+      "invariant": "Optional names, ownership, last phase, canonical analyzer images and index/search token observations match independent framing after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_binding_images_reject_incomplete_framing_and_inconsistent_assignment",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests.rs",
+      "capability": "Resolved field analyzer binding images",
+      "workload": "Truncate every byte and corrupt tags, child framing, trailing data or the owner/phase relation.",
+      "invariant": "Malformed or inconsistent paired revisions publish no binding and release every admitted input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_binding_images_borrow_wide_names_with_fixed_output_workspace",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests.rs",
+      "capability": "Resolved field analyzer binding images",
+      "workload": "Stream a one-MiB historical name under an 8192-byte output allowance.",
+      "invariant": "Output matches independent bytes with less than 16 KiB total cursor allocations and no payload-sized scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "field_binding_images_retain_both_source_controls_and_release_failed_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests.rs",
+      "capability": "Resolved field analyzer binding images",
+      "workload": "Cancel either independently retained side after opening output; cancel, unwind or deny input after partial admission.",
+      "invariant": "Both original scopes remain active during metadata and children, failed readers cannot resume, and partial input leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_field_images_keep_committed_historical_sides_after_cut_and_engine_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests.rs",
+      "capability": "Resolved field analyzer binding images",
+      "workload": "Capture two original field bindings during a private replacement, exclude a temporary table and close the Engine and cut before reading.",
+      "invariant": "Ordered detached readers retain original index/search revisions despite equal names, rollback and deletion, with all source/output/input leases released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "text_image_identity_seek_preserves_sparse_and_empty_term_documents_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/stream.rs",
+      "capability": "Retained memory data images",
+      "workload": "Seek sparse identities including zero, maximum and a document with empty terms under zero output allowance.",
+      "invariant": "Identity seeks allocate nothing, include every owned text image and preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_data_images_preserve_committed_rows_text_and_vectors_after_owner_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/data/tests.rs",
+      "capability": "Retained memory data images",
+      "workload": "Select native row, text and vector images during a private transaction, then drop the table, Engine and capture handles.",
+      "invariant": "Readers retain exact committed native bytes and identities and release all allowances after independent consumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_data_readers_enforce_original_capture_and_independent_output_controls",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/data/tests.rs",
+      "capability": "Retained memory data images",
+      "workload": "Cancel either the original capture or independent reader after opening each physical component.",
+      "invariant": "Every component terminates on cancellation and releases its payload and output allowances without a usable partial continuation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_evaluated_index_images_keep_original_keys_after_private_writes_and_name_reuse",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/data/tests.rs",
+      "capability": "Committed evaluated-index image adapters",
+      "workload": "Select an expression index during a private UPDATE, replace its definition under the same name and retire the table, capture and Engine before reading.",
+      "invariant": "Owned metadata and value readers retain the original committed evaluated expression and release all source and output admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_names_preserve_native_order_without_delimiter_aliases",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/tests.rs",
+      "capability": "Canonical memory image addresses",
+      "workload": "Exercise prefixes, embedded NUL, UTF-8, complete object and storage identities, every table component and denied address construction.",
+      "invariant": "The mapping preserves native tuple order and all identity bytes without aliasing; failed construction releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_addresses_preserve_complete_generations_and_component_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/tests.rs",
+      "capability": "Canonical memory image addresses",
+      "workload": "Exercise prefixes, embedded NUL, UTF-8, complete object and storage identities, every table component and denied address construction.",
+      "invariant": "The mapping preserves native tuple order and all identity bytes without aliasing; failed construction releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_copy_obeys_memory_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/tests.rs",
+      "capability": "Canonical memory image addresses",
+      "workload": "Reject resource address allocation with a one-byte allowance and empty address construction after cancellation.",
+      "invariant": "Both rejected constructors return errors and release all admission; neither leaves a live address.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_header_preserves_absent_zero_and_exhausted_allocator_positions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/header/tests.rs",
+      "capability": "Exact memory image header",
+      "workload": "Stream the fixed source identity and absent, zero or exhausted catalog allocation positions; reject every truncated prefix and contradictory framing.",
+      "invariant": "Header output and private input preserve exact fields, reject zero source identities and release all cursor admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_header_rejects_invalid_tags_hidden_absent_payloads_and_trailing_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/header/tests.rs",
+      "capability": "Exact memory image header",
+      "workload": "Stream the fixed source identity and absent, zero or exhausted catalog allocation positions; reject every truncated prefix and contradictory framing.",
+      "invariant": "Header output and private input preserve exact fields, reject zero source identities and release all cursor admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_image_stream_covers_native_units_and_survives_private_writes_and_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests/assembled.rs",
+      "capability": "Complete committed memory image source",
+      "workload": "Stream actual Engine catalogs and table owners one position at a time, change private state, replace tables, close the source, compare independent cuts and cancel output.",
+      "invariant": "Selected addresses and native bytes survive source replacement and closure, exclude private and temporary state, retain stable source identity and retire failed cuts without damaging the Engine.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_image_source_identity_is_stable_per_engine_and_independent_between_engines",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests/assembled.rs",
+      "capability": "Complete committed memory image source",
+      "workload": "Stream actual Engine catalogs and table owners one position at a time, change private state, replace tables, close the source, compare independent cuts and cancel output.",
+      "invariant": "Selected addresses and native bytes survive source replacement and closure, exclude private and temporary state, retain stable source identity and retire failed cuts without damaging the Engine.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_image_failure_retires_the_cut_and_preserves_the_engine",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/tests/assembled.rs",
+      "capability": "Complete committed memory image source",
+      "workload": "Stream actual Engine catalogs and table owners one position at a time, change private state, replace tables, close the source, compare independent cuts and cancel output.",
+      "invariant": "Selected addresses and native bytes survive source replacement and closure, exclude private and temporary state, retain stable source identity and retire failed cuts without damaging the Engine.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "public_memory_backup_publishes_full_and_independent_incremental_roots",
+      "cases": 2,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Public memory full and incremental export",
+      "workload": "Publish plain and protected complete memory backups, capture a no-op child, mutate and close the source, remove the parent and verify the child repository root.",
+      "invariant": "No-op capture reuses every original unit without new payload writes; child publication is idempotent and the verified child remains independent of its removed parent and source.",
+      "case_names": [
+        "case_1_plain",
+        "case_2_protected"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_preserves_independent_wire_identities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Decode independent byte fixtures for every family and table component, full-width identities, NUL and UTF-8 names, and compare table encodings with the literal wire.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_rejects_malformed_envelopes_and_names",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Reject foreign namespace/generation, unknown structural families, bad lengths, malformed escapes and invalid UTF-8 after a partially admitted first name.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_address_decode_rejects_noncanonical_components",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Reject every truncated prefix of a complete table key, unknown component/presence tags and trailing bytes.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_owns_admitted_names_and_releases_partial_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Decode a large escaped resource name, retire its source buffer, account retained capacity, and reject denied or cancelled construction without a leaked lease.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_preserves_units_and_bounds_complete_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Stream a protected image containing all component families and exact payloads under seven-byte verification windows, then require complete object verification and release every allocation.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_rejects_incomplete_catalogs_and_invalid_headers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Reject authenticated but incomplete catalog membership, a mismatched header source, unsupported cuts, wrong unit kinds and unknown resources before import completion.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_rejects_partial_table_and_index_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Reject each missing table metadata slot, index values without their own metadata, conflicting table generations and incorrect component kinds.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_cancellation_and_unread_units_release_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Cancel before or during catalog consumption and whole-object verification, and reject advancing past unread data while releasing the root lease and all partial owners.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_transfer_native_ownership_without_reconstruction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Decode original column, CHECK and hierarchy images into native owners, encode them again and retain shared consumers after their input and parent owners close.",
+      "invariant": "The decoded population transfers with its original leases and exact wire observations; independent capture admits the complete cached footprint without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_admit_every_retained_literal_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Restore megabyte resident literals in columns, CHECK expressions and partition bounds under the original decoder peak plus one fixed native header.",
+      "invariant": "No second population copy fits the allowance; every independently owned literal is included in capture admission and remains available after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_release_failed_input_and_native_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Exercise truncated and trailing images, denied payload/header admission and cancelled input for all three native table definition families.",
+      "invariant": "Failed private construction releases every decoded reservation and cannot expose a native generation; exact original budget errors remain typed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_retains_admission_in_every_shared_consumer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Decode megabyte key names and native foreign-key/dropped-attribute images under the decoder allowance plus one shared header; retain a detached consumer through source and parent closure on another thread.",
+      "invariant": "Each consumer keeps the original admitted payload alive; independent capture is allocation-free and charges the complete cached footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_mutation_detaches_admission_and_preserves_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Mutate an imported generation through unwinding and a forgotten write guard while retaining its preceding metadata snapshot.",
+      "invariant": "Mutation preserves the original fields and reservation until the final old consumer retires; native capacity publication and failed-closed capture remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_releases_failed_input_and_shared_owner_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Reject truncated/trailing images, cancellation and insufficient decoder/shared-owner admission.",
+      "invariant": "Failed private construction leaves no payload reservation and preserves typed memory errors before any catalog publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_metadata_names_keep_native_allocations_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Decode megabyte field names and an optional array name, retire the input and outer metadata, then move the native owners across threads.",
+      "invariant": "Exact decoded string and vector allocations retain independent original admission without a second population copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_table_names_transfer_original_payloads_and_retain_shared_consumers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Adopt megabyte native names and absent/empty/present array names, retain shared consumers after parent retirement and independently recapture them.",
+      "invariant": "Original buffer and string addresses remain unchanged; capture admits the full cached footprint and shared consumers retain the original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_table_names_release_inputs_on_cancellation_and_header_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Cancel adoption and deny the fixed shared-owner header after admitting the original optional-name payload.",
+      "invariant": "Failed private adoption releases all input admission and preserves cancellation or memory SQLSTATE.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_every_common_stage_and_native_setting",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Original analyzer configuration",
+      "workload": "Decode original common tokenizer, character-filter, token-filter and normalization settings, including deferred invalid settings.",
+      "invariant": "Native enum values, option presence, ordered payloads and original encoded buffer addresses survive under the input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_literal_wire_and_defers_resource_access",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Deferred analyzer execution",
+      "workload": "Decode independent literal images with an invalid regex and unavailable reloadable synonym file.",
+      "invariant": "Import preserves exact publication bytes and configuration; ordinary execution retains its original validation and file errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_rejects_partial_and_ambiguous_native_shapes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer image input validation",
+      "workload": "Decode every truncated prefix and malformed, duplicate, unordered, overflowing and trailing native image shapes.",
+      "invariant": "Invalid input fails before publication and releases every partial native allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_retains_admission_through_independent_consumers",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer input ownership",
+      "workload": "Decode a one-MiB configuration, clone its native owner, independently capture bytes and retire the configuration on another thread.",
+      "invariant": "Encoded bytes outlive configuration without retaining it; original and independent leases survive until their corresponding final owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_releases_cancelled_and_underfunded_construction",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer input admission",
+      "workload": "Cancel input and exhaust allowances during construction of a large original stop-word list.",
+      "invariant": "Typed cancellation or memory errors release partial values; measured admission never exceeds the original limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_unresolved_korean_options",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
+      "capability": "Original Korean configuration",
+      "workload": "Decode every Korean tokenizer mode and POS tag, omitted and empty options, and unresolved original Unicode profiles.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without resolving or compiling dictionaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_unresolved_japanese_options",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
+      "capability": "Original Japanese configuration",
+      "workload": "Decode every Japanese tokenizer mode and filter shape, omitted and empty options, and unresolved profiles and probes.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without expanding defaults, validating deferred settings or resolving resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_owners_enter_live_capture_and_preserve_unread_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Register decoded exact, IVF, HNSW and DiskANN indexes, capture their collection, then retire unread native owners.",
+      "invariant": "The selected evaluated image remains byte-exact after source and registry retirement, and every original allowance releases with its last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_exact_tensor_reservations_follow_shared_roots_after_owner_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Retain ordinary and writable snapshots of a decoded 1024-coordinate tensor; clear the original and replace the fork.",
+      "invariant": "Shared imported tensors retain their original lease until the last original root retires; a detached replacement owns independent state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_mutations_leave_independent_snapshots_and_images_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Mutate all four decoded native vector methods while query and export snapshots retain their preceding generations.",
+      "invariant": "Future queries match original native operations, captured bytes stay unchanged and all retention returns to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "rejected_imported_vector_registration_retires_its_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Attempt live registration of all four decoded vector methods with zero native membership allowance.",
+      "invariant": "Rejected publication leaves the collection empty and releases all imported and provisional registration ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_rejection_and_unwinding_release_every_native_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Reject trailing input and unwind after successful native import for all four vector methods.",
+      "invariant": "No failed or abandoned private candidate retains original admission or exposes a partial destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_preserve_deferred_resolution_and_native_mutation_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable evaluated text input",
+      "workload": "Import independent raw-term and duplicate-edge bytes with an invalid deferred default, reject a new analyzed row, then remove and replace through native mutation.",
+      "invariant": "No analyzer resolution occurs during adoption; rejection preserves the corpus and ordinary post-import writes work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_keep_exact_revisions_and_native_binding_transactions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text analyzer ownership",
+      "workload": "Adopt actual evaluated text with independent index/search revisions and exercise rejected index changes, search assignment, clearing and default binding.",
+      "invariant": "Compiled revision identities and original bytes survive; native transactional binding validation and future mutation remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_corpus_reservations_follow_shared_roots_and_detach_on_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text root admission",
+      "workload": "Create read, writable and deep-copy snapshots, cancel the completed input control, clear the original and mutate the writable snapshot.",
+      "invariant": "Original payload leases follow shared corpus roots until their last reader; independent copies remain usable after those leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_enter_live_capture_and_survive_unread_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text capture retirement",
+      "workload": "Publish an imported native corpus in a real capture registry, retire its source before reading and observe the selected original image.",
+      "invariant": "Original occurrences and field counters survive source loss; read-only cuts reject mutation and both original allowances retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_publication_rejection_and_unwinding_release_original_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text publication admission",
+      "workload": "Exhaust final header admission, cancel private publication and unwind after native adoption.",
+      "invariant": "No rejected destination escapes; payload and binding owners release their original admission on every failure path.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

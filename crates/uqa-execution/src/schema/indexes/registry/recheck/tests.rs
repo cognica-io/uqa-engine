@@ -42,7 +42,7 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
     snapshot.tables.insert(
         relation.clone(),
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
+            dropped_attributes: Vec::new().into(),
             row_type_array_name: None,
             object_id: [1; 16],
             catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
@@ -55,7 +55,7 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
             columns: columns.clone().into(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),
-            foreign_keys: Arc::default(),
+            foreign_keys: Vec::new().into(),
             keys: constraints.key_constraints.clone().into(),
             hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
@@ -86,8 +86,7 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
     let mut renamed = current_rows.get(&old).unwrap().clone();
     renamed.relation = new.clone();
     current_rows.rename(&old, renamed).unwrap();
-    Arc::make_mut(&mut refreshed.tables.get_mut(&root).unwrap().keys)[0].name =
-        Some(new.name.clone());
+    refreshed.tables.get_mut(&root).unwrap().keys.make_mut()[0].name = Some(new.name.clone());
     validate_snapshots(
         &before,
         &before,
@@ -100,7 +99,7 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
         let mut changed = refreshed.clone();
         match mutation {
             0 => changed.tables.get_mut(&root).unwrap().object_id = [99; 16],
-            1 => Arc::make_mut(&mut changed.tables.get_mut(&root).unwrap().keys)[0]
+            1 => changed.tables.get_mut(&root).unwrap().keys.make_mut()[0]
                 .columns
                 .push("other".into()),
             _ => {
@@ -196,7 +195,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
                 &table.object_id,
             );
             table.columns = Arc::new(plain.columns.clone()).into();
-            table.keys = Arc::default();
+            table.keys = Vec::new().into();
             let mut row = original.clone();
             row.relation = RelationIdentity::new("public", format!("unrelated_index_{index}"));
             row.table_name = relation.qualified_name();
@@ -233,7 +232,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
         unindexed.definitions.catalog_indexes = Arc::default();
         for table in unindexed.tables.values_mut() {
             table.columns = Arc::new(plain.columns.clone()).into();
-            table.keys = Arc::default();
+            table.keys = Vec::new().into();
         }
         let unindexed = CatalogReadView::new(unindexed);
         super::super::validation::PARTITION_TABLE_VISITS.set(0);

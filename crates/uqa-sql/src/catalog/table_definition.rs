@@ -16,6 +16,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod image;
+
 mod sealed {
     pub trait Definition {}
 }

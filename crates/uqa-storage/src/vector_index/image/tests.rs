@@ -13,6 +13,8 @@ use crate::{
 };
 use std::io::{Read, Write};
 
+mod ownership;
+
 pub(crate) fn encode(index: &dyn VectorIndex) -> Vec<u8> {
     let mut bytes = Vec::new();
     let control = StorageReadControl::with_limit(1 << 24);
@@ -73,10 +75,10 @@ fn exact_image_matches_independent_tensor_bytes_and_preserves_coordinate_bits() 
     let restored = read_vector_image(&mut fixture.as_slice(), &control).unwrap();
     assert_eq!(restored.count().unwrap(), 3);
     assert_eq!(
-        scored(&**restored, &[1.0, 0.0], 1),
+        scored(&*restored, &[1.0, 0.0], 1),
         vec![(9, 1.0_f64.to_bits())]
     );
-    assert_eq!(encode(&**restored), fixture);
+    assert_eq!(encode(&*restored), fixture);
     let mut original = MemoryVectorIndex::new(2);
     original.add(2, vec![-0.0, 1.0]).unwrap();
     original
@@ -94,11 +96,11 @@ fn images_preserve_search_tensor_reduction_and_future_mutations() {
         let bytes = encode(&*source);
         let control = StorageReadControl::with_limit(1 << 24);
         let restored = read_vector_image(&mut bytes.as_slice(), &control).unwrap();
-        assert_eq!(encode(&**restored), bytes);
+        assert_eq!(encode(&*restored), bytes);
         assert_eq!(restored.index_kind(), source.index_kind());
         for query in [[1.0, 0.0], [-1.0, 0.0], [0.0, 0.0], [1.0e30, 0.0]] {
             for k in [0, 1, 3, 20] {
-                assert_eq!(scored(&**restored, &query, k), scored(&*source, &query, k));
+                assert_eq!(scored(&*restored, &query, k), scored(&*source, &query, k));
             }
             for threshold in [-1.0, 0.0, 0.75, 1.0] {
                 assert_eq!(
@@ -107,7 +109,7 @@ fn images_preserve_search_tensor_reduction_and_future_mutations() {
                 );
             }
         }
-        let (mut restored, lease) = restored.into_parts();
+        let mut restored = restored;
         for index in [&mut *source, &mut *restored] {
             index.add_many(9, vec![vec![0.0, -1.0]]).unwrap();
             index.delete(5).unwrap();
@@ -119,7 +121,7 @@ fn images_preserve_search_tensor_reduction_and_future_mutations() {
             scored(&*restored, &[0.0, 1.0], 20),
             scored(&*source, &[0.0, 1.0], 20)
         );
-        drop((restored, lease));
+        drop(restored);
         assert_eq!(control.memory().used(), 0);
     }
 }
@@ -257,9 +259,9 @@ fn empty_and_zero_dimension_images_preserve_the_owners_existing_carriers() {
             }
             let bytes = encode(&**index);
             let restored = read_vector_image(&mut bytes.as_slice(), &control).unwrap();
-            assert_eq!(encode(&**restored), bytes);
+            assert_eq!(encode(&*restored), bytes);
             assert_eq!(restored.count().unwrap(), usize::from(populate) * 2);
-            assert_eq!(scored(&**restored, &[], 5), scored(&**index, &[], 5));
+            assert_eq!(scored(&*restored, &[], 5), scored(&**index, &[], 5));
         }
     }
     assert_eq!(control.memory().used(), 0);
@@ -332,7 +334,7 @@ fn large_coordinates_use_bounded_chunks_without_a_full_export_cache() {
     };
     let restored = read_vector_image(&mut input, &control).unwrap();
     assert!(input.calls > 500);
-    assert_eq!(encode(&**restored), bytes);
+    assert_eq!(encode(&*restored), bytes);
     drop(restored);
     assert_eq!(control.memory().used(), 0);
 }

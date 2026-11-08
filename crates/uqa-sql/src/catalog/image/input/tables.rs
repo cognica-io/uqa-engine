@@ -29,7 +29,7 @@ pub use constraints::{
     read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
     read_table_keys_image,
 };
-pub use hierarchy::read_table_hierarchy_image;
+pub use hierarchy::{read_table_hierarchy_image, read_table_hierarchy_image_with_footprint};
 
 /// Reconstruct ordered native columns under one retained allowance. Scalar payloads, physical identities and declaration order remain unchanged; relation-wide validation belongs to the enclosing restore owner.
 pub fn read_columns_image(

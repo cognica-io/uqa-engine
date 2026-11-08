@@ -23,7 +23,6 @@ use parking_lot::{Mutex, ReentrantMutex, RwLock};
 mod catalog_capture;
 mod catalog_cell;
 mod generation_sources;
-#[cfg(test)]
 pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
@@ -34,9 +33,8 @@ mod table_metadata;
 pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
-pub(crate) use table_membership::PersistentTableRegistrySnapshot;
-#[cfg(test)]
 pub(crate) use table_membership::SnapshotTableCut;
+pub(crate) use table_membership::{CapturedTable, PersistentTableRegistrySnapshot};
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
@@ -49,6 +47,7 @@ use super::{
 pub(super) struct StorageContext {
     pub(super) tables: Arc<TableRegistry>,
     pub(super) memory_capture: Option<uqa_storage::memory_capture::MemoryCaptureRegistry>,
+    pub(super) memory_identity: Option<Arc<Mutex<Option<uqa_storage::mvcc::DatabaseId>>>>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
@@ -70,6 +69,7 @@ impl StorageContext {
                     .expect("fresh memory capture domain"),
             ),
             memory_capture: Some(registry),
+            memory_identity: Some(Arc::new(Mutex::new(None))),
             catalog: None,
             backend: None,
             provider: None,
@@ -85,6 +85,7 @@ impl StorageContext {
         Self {
             tables: Arc::new(table_membership::TableRegistry::persistent()),
             memory_capture: None,
+            memory_identity: None,
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
@@ -96,6 +97,7 @@ impl StorageContext {
         Self {
             tables: Arc::clone(&source.tables),
             memory_capture: source.memory_capture.clone(),
+            memory_identity: source.memory_identity.clone(),
             catalog: source.catalog.clone(),
             backend: source.backend.clone(),
             provider: source.provider.clone(),
@@ -645,7 +647,6 @@ impl StatementGate {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn owns_current_operation(&self) -> bool {
         let identity = std::ptr::from_ref(self) as usize;
         self.mutex.is_owned_by_current_thread()

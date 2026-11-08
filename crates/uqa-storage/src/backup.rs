@@ -17,12 +17,16 @@ mod frame;
 mod import;
 mod inventory;
 mod mapping;
+mod memory;
 mod records;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod repository;
 mod root;
 mod source;
 mod types;
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
@@ -41,10 +45,19 @@ pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Pro
 pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, RecordImageImportUnit};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
+pub use memory::{
+    memory_image_namespace, memory_table_metadata_reader, read_memory_image_address,
+    read_memory_table_metadata, DecodedMemoryImageAddress, DecodedMemoryTableMetadata,
+    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageHeader, MemoryImageKey,
+    MemoryRelationIdentities, MemoryTableMetadata, MemoryTableProperties, MemoryTableStatistics,
+    MemoryTableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
+    MEMORY_IMAGE_TABLE_METADATA_COUNT,
+};
 pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
 pub use source::{
-    BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, OwnedBackupImage,
+    BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit,
+    NativeBackupImage, NativeImageEntries, NativeImageStep, NativeImageUnit, OwnedBackupImage,
 };
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,

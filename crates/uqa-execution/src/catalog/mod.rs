@@ -9,6 +9,7 @@
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
+use uqa_sql::catalog::table_metadata::SharedTableMetadata;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -87,7 +88,8 @@ pub struct GraphCatalogOverlay {
 /// Immutable table-definition fields used by binding and catalog projection.
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
-    pub dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    pub dropped_attributes:
+        SharedTableMetadata<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     pub object_id: [u8; 16],
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
@@ -96,8 +98,8 @@ pub struct CatalogTableSnapshot {
     pub columns: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
     pub checks: SharedTableDefinition<Vec<uqa_sql::ast::TableCheck>>,
-    pub foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
-    pub keys: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    pub foreign_keys: SharedTableMetadata<Vec<uqa_sql::ast::ForeignKey>>,
+    pub keys: SharedTableMetadata<Vec<uqa_sql::ast::TableKeyConstraint>>,
     pub hierarchy: SharedTableDefinition<uqa_sql::ast::TableHierarchy>,
     pub persistence: uqa_sql::ast::RelationPersistence,
 }

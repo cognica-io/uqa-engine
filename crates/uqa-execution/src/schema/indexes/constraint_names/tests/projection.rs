@@ -51,7 +51,7 @@ fn changed_key_names_copy_only_changed_constraint_collections() {
         let mut snapshot = catalog.snapshot().clone();
         let table = snapshot.tables.get_mut(&relation).unwrap();
         if keys {
-            Arc::make_mut(&mut table.keys)[0].name = Some("old".into());
+            table.keys.make_mut()[0].name = Some("old".into());
         }
         if inherited {
             {
@@ -69,7 +69,7 @@ fn changed_key_names_copy_only_changed_constraint_collections() {
             assert!(before.columns.shares_definition(&after.columns));
             assert!(before.checks.shares_definition(&after.checks));
             assert_eq!(
-                Arc::ptr_eq(&before.keys, &after.keys),
+                before.keys.shares_definition(&after.keys),
                 name != &relation || !keys
             );
             assert_eq!(
@@ -112,8 +112,8 @@ fn unchanged_key_names_still_validate_owners_and_skip_temporary_tables() {
         let relation = RelationIdentity::new("public", "t");
         match corruption {
             0 => {
-                Arc::make_mut(&mut snapshot.tables.get_mut(&relation).unwrap().keys)[0]
-                    .catalog_identity = None;
+                snapshot.tables.get_mut(&relation).unwrap().keys.make_mut()[0].catalog_identity =
+                    None;
             }
             1 => names.names.as_mut().unwrap().clear(),
             2 => {
@@ -153,7 +153,7 @@ fn invalid_inherited_owner_does_not_publish_an_earlier_name_change() {
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "t");
     let table = snapshot.tables.get_mut(&relation).unwrap();
-    Arc::make_mut(&mut table.keys)[0].name = Some("old".into());
+    table.keys.make_mut()[0].name = Some("old".into());
     {
         let target = &mut table.hierarchy;
         let mut value = (**target).clone();

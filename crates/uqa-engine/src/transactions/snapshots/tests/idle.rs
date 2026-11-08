@@ -210,12 +210,17 @@ fn memory_capture_rejects_reentrant_unframed_writes_but_accepts_original_frames(
     {
         let _statement = engine.lock_statement_gate();
         assert!(engine.capture_committed_memory(&control).is_err());
+        assert!(engine
+            .capture_committed_memory_query(&control, |_| Ok(()))
+            .is_err());
         assert_eq!(control.memory().used(), 0);
     }
     engine
         .transaction(|engine| {
             sql(engine, "UPDATE docs SET body='private'");
-            let selected = capture(engine, &control);
+            let selected = engine
+                .capture_committed_memory_query(&control, |_| Ok(()))
+                .unwrap();
             assert_eq!(
                 selected
                     .table(&RelationIdentity::new("public", "docs"))
@@ -229,7 +234,10 @@ fn memory_capture_rejects_reentrant_unframed_writes_but_accepts_original_frames(
         })
         .unwrap();
     assert_eq!(control.memory().used(), 0);
-    let selected = capture(&engine, &control);
+    let selected = engine
+        .capture_committed_memory_query(&control, |_| Ok(()))
+        .unwrap();
+    assert_eq!(engine.transaction_depth(), 0);
     assert_eq!(
         selected
             .table(&RelationIdentity::new("public", "docs"))

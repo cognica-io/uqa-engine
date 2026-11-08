@@ -14,6 +14,27 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn next_image_document_id(
+        &self,
+        after: Option<DocId>,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check_retained_read()?;
+        control.check()?;
+        let next = self
+            .state
+            .documents
+            .first_from(
+                after
+                    .as_ref()
+                    .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+            )
+            .map(|(&id, _)| id);
+        self.check_retained_read()?;
+        control.check()?;
+        Ok(next)
+    }
+
     fn image_document_reader<'a>(
         &'a self,
         doc_id: DocId,

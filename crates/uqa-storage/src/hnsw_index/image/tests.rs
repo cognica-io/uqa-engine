@@ -47,7 +47,7 @@ fn fixture() -> Vec<u8> {
     bytes
 }
 
-fn restore(bytes: &[u8], dimensions: u32, control: &StorageReadControl) -> Budgeted<HNSWIndex> {
+fn restore(bytes: &[u8], dimensions: u32, control: &StorageReadControl) -> HNSWIndex {
     let mut bytes = &bytes[13..];
     let mut input = ImageInput {
         reader: &mut bytes,
@@ -63,7 +63,7 @@ fn independent_graph_fixture_preserves_identity_norms_topology_and_pending_delta
     let bytes = fixture();
     let control = StorageReadControl::with_limit(1 << 20);
     let restored = restore(&bytes, 2, &control);
-    assert_eq!(encode(&*restored), bytes);
+    assert_eq!(encode(&restored), bytes);
     assert_eq!(restored.params().seed, 0xf00d);
     assert_eq!(
         restored.raw_vectors.get(7).unwrap().unwrap().norm.to_bits(),
@@ -83,7 +83,7 @@ fn independent_graph_fixture_preserves_identity_norms_topology_and_pending_delta
             .doc_id,
         42
     );
-    let (mut restored, lease) = restored.into_parts();
+    let mut restored = restored;
     let delta = restored.take_persistence_delta();
     assert!(!delta.full_rewrite);
     assert_eq!(delta.meta.entry_point, Some(7));
@@ -97,7 +97,7 @@ fn independent_graph_fixture_preserves_identity_norms_topology_and_pending_delta
         restored.active.get(active_key(43, 0)).unwrap().as_deref(),
         Some(&8)
     );
-    drop((delta, restored, lease));
+    drop((delta, restored));
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -115,7 +115,7 @@ fn tombstones_neighbor_order_and_future_graph_deltas_survive_images() {
     assert!(source.deleted_count > 0);
     let bytes = encode(&source);
     let control = StorageReadControl::with_limit(1 << 24);
-    let (mut restored, lease) = restore(&bytes, 2, &control).into_parts();
+    let mut restored = restore(&bytes, 2, &control);
     assert_eq!(encode(&restored), bytes);
     assert_eq!(
         *source.take_persistence_delta().collect().unwrap(),
@@ -132,7 +132,7 @@ fn tombstones_neighbor_order_and_future_graph_deltas_survive_images() {
         *restored.take_persistence_delta().collect().unwrap()
     );
     assert_eq!(encode(&restored), encode(&source));
-    drop((restored, lease));
+    drop(restored);
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -170,12 +170,12 @@ fn invalid_graph_metadata_and_edges_reject_before_candidate_publication() {
         assert!(read_vector_image(&mut bytes.as_slice(), &control).is_err());
         assert_eq!(control.memory().used(), 0);
     }
-    let (mut source, lease) = restore(&fixture(), 2, &control).into_parts();
+    let mut source = restore(&fixture(), 2, &control);
     source.deleted_count = 1;
     let mut output = Vec::new();
     assert!(source.write_image(&mut output, &control).is_err());
     assert!(output.is_empty());
-    drop((source, lease));
+    drop(source);
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -212,7 +212,7 @@ fn spilled_graph_images_use_the_invoking_workspace_and_restore_below_corpus_size
     let restored = restore(&bytes, 1024, &target_control);
     assert!(restored.raw_vectors.is_spilled());
     assert_eq!(restored.search_knn(&vector(3), 7).unwrap(), expected);
-    assert_eq!(encode(&*restored), bytes);
+    assert_eq!(encode(&restored), bytes);
     assert!(target_control.memory().peak() <= target_control.memory().limit());
     drop((restored, source));
     assert_eq!(source_control.memory().used(), 0);

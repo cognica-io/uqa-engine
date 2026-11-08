@@ -154,16 +154,13 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
     let snapshot = snapshot.unwrap();
     let retained = snapshot.data.tables.values().next().unwrap();
     assert!(Arc::ptr_eq(&columns, &retained.columns));
-    assert!(Arc::ptr_eq(
-        &constraints,
-        &retained.key_constraints.snapshot()
-    ));
+    assert!(constraints.shares_definition(&retained.key_constraints.snapshot()));
 
     sql(&engine, "BEGIN; ALTER TABLE docs ALTER COLUMN body SET DEFAULT 'changed'; ALTER TABLE docs ADD COLUMN extra boolean");
     assert!(!Arc::ptr_eq(&columns, &table.columns.generation()));
     sql(&engine, "ROLLBACK");
     assert!(Arc::ptr_eq(&columns, &table.columns.generation()));
-    assert!(Arc::ptr_eq(&constraints, &table.key_constraints.snapshot()));
+    assert!(constraints.shares_definition(&table.key_constraints.snapshot()));
     sql(&engine, "INSERT INTO docs(id) VALUES(1)");
     let result = engine
         .sql("SELECT length(body) AS size FROM docs", &[])

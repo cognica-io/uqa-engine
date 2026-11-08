@@ -15,7 +15,7 @@ use std::time::Duration;
 
 mod stream;
 
-fn restore(bytes: &[u8], control: &StorageReadControl) -> Budgeted<IVFIndex> {
+fn restore(bytes: &[u8], control: &StorageReadControl) -> IVFIndex {
     let mut bytes = &bytes[13..];
     let mut input = ImageInput {
         reader: &mut bytes,
@@ -60,7 +60,7 @@ fn independent_stale_training_fixture_preserves_exact_values_and_defers_training
     assert_eq!(restored.state(), IVFState::Stale);
     assert_eq!(restored.nprobe(), 3);
     assert_eq!(restored.metadata_snapshot().assignments, [(5, 0, 0)]);
-    assert_eq!(encode(&*restored), bytes);
+    assert_eq!(encode(&restored), bytes);
     assert_eq!(
         restored.data.read().vectors[&(5, 0)].vector[0].to_bits(),
         (-0.0_f32).to_bits()
@@ -112,7 +112,7 @@ fn actual_training_states_and_reconstructed_sorted_lists_preserve_queries() {
             restored.data.read().inverted_lists,
             index.data.read().inverted_lists
         );
-        assert_eq!(encode(&*restored), bytes);
+        assert_eq!(encode(&restored), bytes);
         for query in [[1.0, 0.0], [0.0, 1.0]] {
             assert_eq!(
                 restored.search_knn(&query, 4).unwrap(),

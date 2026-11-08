@@ -22,7 +22,7 @@ use uqa_sql::{
 
 fn table(oid: u32) -> CatalogTableSnapshot {
     CatalogTableSnapshot {
-        dropped_attributes: Arc::default(),
+        dropped_attributes: Vec::new().into(),
         object_id: [1; 16],
         catalog_oids: RelationCatalogOids {
             relation: oid,
@@ -35,8 +35,8 @@ fn table(oid: u32) -> CatalogTableSnapshot {
         columns: SharedTableDefinition::default(),
         columns_declared: true,
         checks: SharedTableDefinition::default(),
-        foreign_keys: Arc::default(),
-        keys: Arc::default(),
+        foreign_keys: Vec::new().into(),
+        keys: Vec::new().into(),
         hierarchy: SharedTableDefinition::default(),
         persistence: RelationPersistence::Permanent,
     }

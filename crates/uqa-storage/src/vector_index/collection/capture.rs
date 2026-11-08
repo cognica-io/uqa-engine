@@ -238,6 +238,15 @@ impl MemoryCaptureSource for VectorIndexes {
 }
 
 impl CapturedVectorIndexes {
+    /// Seek the next retained identity in logarithmic time, without allocating or visiting earlier entries.
+    pub fn next_field(&self, after: Option<&str>) -> StorageBackendResult<Option<&str>> {
+        self.control.check()?;
+        Ok(self
+            .indexes
+            .first_from(after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded))
+            .map(|(name, _)| name.as_str()))
+    }
+
     pub fn fields(&self) -> StorageBackendResult<impl ExactSizeIterator<Item = &str>> {
         self.control.check()?;
         Ok(self

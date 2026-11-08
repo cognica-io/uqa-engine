@@ -218,6 +218,7 @@ impl Clone for MemoryIndexState {
             field_counters: self.field_counters.clone(),
             doc_count: self.doc_count,
             retention: RetainedPayload::default(),
+            image_memory: None,
         };
         // Cloned strings/vectors may have smaller capacities. Account the new allocations during this existing deep-copy boundary, never during shared capture.
         state.retention.bytes = state.payload_size();

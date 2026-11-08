@@ -19,7 +19,7 @@ fn catalog() -> CatalogReadView {
         snapshot.tables.insert(
             RelationIdentity::new(schema, "pg_class"),
             CatalogTableSnapshot {
-                dropped_attributes: std::sync::Arc::new(Vec::new()),
+                dropped_attributes: Vec::new().into(),
                 row_type_array_name: None,
                 object_id: [1; 16],
                 catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
@@ -32,8 +32,8 @@ fn catalog() -> CatalogReadView {
                 columns: SharedTableDefinition::default(),
                 columns_declared: true,
                 checks: SharedTableDefinition::default(),
-                foreign_keys: Arc::default(),
-                keys: Arc::default(),
+                foreign_keys: Vec::new().into(),
+                keys: Vec::new().into(),
                 hierarchy: SharedTableDefinition::default(),
                 persistence: uqa_sql::ast::RelationPersistence::Permanent,
             },

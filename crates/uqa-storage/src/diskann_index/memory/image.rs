@@ -23,7 +23,6 @@ use crate::{
     StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::memory::Budgeted;
 
 mod stream;
 
@@ -73,7 +72,7 @@ pub(crate) fn read(
     input: &mut ImageInput<'_>,
     dimensions: u32,
     temporary: &DiskANNTemporaryBudget,
-) -> StorageBackendResult<Budgeted<DiskANNMemoryIndex>> {
+) -> StorageBackendResult<DiskANNMemoryIndex> {
     let memory = input
         .control
         .memory()
@@ -126,10 +125,7 @@ pub(crate) fn read(
         _memory: memory,
     };
     input.control.check()?;
-    Ok(Budgeted::new(
-        result,
-        input.control.memory().empty_reservation(),
-    ))
+    Ok(result)
 }
 
 fn read_options(

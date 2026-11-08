@@ -10,14 +10,17 @@ use super::Analyzer;
 use crate::AnalysisError;
 use std::sync::Arc;
 use uqa_core::{
-    memory::{MemoryError, Produced, ProductionControl},
-    ValueRetentionError,
+    json::JsonReadError,
+    memory::{Budgeted, MemoryError, Produced, ProductionControl},
+    CancellationToken, ValueRetentionError,
 };
+
+mod image;
 
 /// An original configuration and its publication-time image. Construction neither validates stages nor resolves files or dictionaries. Encoding failures remain attached to this generation and affect capture only.
 #[derive(Debug, Clone)]
 pub struct AnalyzerDefinition {
-    configuration: Arc<Analyzer>,
+    configuration: Arc<Produced<Analyzer>>,
     image: Result<AnalyzerConfigurationImage, Arc<AnalysisError>>,
 }
 
@@ -28,12 +31,14 @@ pub enum AnalyzerConfigurationError {
     Encoding(Arc<AnalysisError>),
     #[error(transparent)]
     Admission(#[from] ValueRetentionError),
+    #[error(transparent)]
+    Decoding(#[from] JsonReadError),
 }
 
 /// Only the unresolved configuration bytes. Retaining this image does not retain the original configuration, compiled pipelines or resolved resources.
 #[derive(Debug, Clone)]
 pub struct AnalyzerConfigurationImage {
-    bytes: Arc<Vec<u8>>,
+    bytes: Arc<Produced<Vec<u8>>>,
     retained_bytes: usize,
 }
 
@@ -44,22 +49,48 @@ impl AnalyzerDefinition {
             .and_then(|bytes| {
                 let retained_bytes = bytes
                     .capacity()
-                    .checked_add(size_of::<Vec<u8>>())
+                    .checked_add(size_of::<Produced<Vec<u8>>>())
                     .ok_or(MemoryError::SizeOverflow)?;
                 Ok(AnalyzerConfigurationImage {
-                    bytes: Arc::new(bytes),
+                    bytes: ordinary(bytes),
                     retained_bytes,
                 })
             })
             .map_err(Arc::new);
         Self {
-            configuration: Arc::new(configuration),
+            configuration: ordinary(configuration),
             image,
         }
     }
 
     pub fn configuration(&self) -> &Analyzer {
         &self.configuration
+    }
+
+    /// Reconstruct this owner's original configuration image without validating stages, opening paths, resolving dictionaries or compiling a pipeline. The encoded buffer moves into the result unchanged; decoded native payloads and shared headers use its existing allowance. Every cloned definition retains both owners, while captured images retain only their encoded owner.
+    pub fn from_image(
+        bytes: Budgeted<Vec<u8>>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let (bytes, memory) = bytes.into_parts();
+        let budget = memory.budget().clone();
+        let bytes = Budgeted::new(bytes, memory);
+        let control = ProductionControl::new(&budget, cancellation, cancellation);
+        control.check()?;
+        let configuration = image::decode(&bytes, &budget, cancellation)?;
+        let configuration = Produced::from(configuration).into_shared(&control)?;
+        let retained_bytes = bytes
+            .capacity()
+            .checked_add(size_of::<Produced<Vec<u8>>>())
+            .ok_or(ValueRetentionError::Memory(MemoryError::SizeOverflow))?;
+        let bytes = Produced::from(bytes).into_shared(&control)?;
+        Ok(Self {
+            configuration,
+            image: Ok(AnalyzerConfigurationImage {
+                bytes,
+                retained_bytes,
+            }),
+        })
     }
 
     /// Independently admit and share the original encoded owner without serialization, resource resolution or population-dependent work.
@@ -75,6 +106,15 @@ impl AnalyzerDefinition {
         let memory = control.reserve(image.retained_bytes)?;
         Ok(control.finish(image.clone(), memory)?)
     }
+}
+
+fn ordinary<T>(value: T) -> Arc<Produced<T>> {
+    let control = ProductionControl::uncontrolled();
+    control
+        .finish(value, None)
+        .expect("ordinary configuration production")
+        .into_shared(&control)
+        .expect("ordinary configuration publication")
 }
 
 impl serde::Serialize for AnalyzerDefinition {

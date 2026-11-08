@@ -13,10 +13,7 @@ use super::{
 };
 use uqa_core::memory::MemoryError;
 
-pub(crate) fn read(
-    input: &mut ImageInput<'_>,
-    dimensions: u32,
-) -> StorageBackendResult<Budgeted<IVFIndex>> {
+pub(crate) fn read(input: &mut ImageInput<'_>, dimensions: u32) -> StorageBackendResult<IVFIndex> {
     let mut memory = input.control.memory().reserve(size_of::<IVFIndex>())?;
     let nlist = input.count()?;
     let nprobe = input.count()?;
@@ -50,7 +47,7 @@ pub(crate) fn read(
     read_vectors(input, &mut index, &mut memory)?;
     restore_lists(&mut index, &mut memory, input.control)?;
     validation::validate(&index, input.control)?;
-    Ok(IVFIndex::from_budgeted(Budgeted::new(index, memory)))
+    Ok(IVFIndex::from_image(Budgeted::new(index, memory)))
 }
 
 fn read_vectors(

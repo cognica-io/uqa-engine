@@ -61,7 +61,7 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
     snapshot.tables.insert(
         identity.clone(),
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
+            dropped_attributes: Vec::new().into(),
             object_id: [7; 16],
             catalog_oids: oids,
             row_type_array_name: None,
@@ -69,8 +69,8 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),
-            foreign_keys: Arc::default(),
-            keys: Arc::default(),
+            foreign_keys: Vec::new().into(),
+            keys: Vec::new().into(),
             hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },

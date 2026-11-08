@@ -100,6 +100,15 @@ pub struct CapturedFieldAnalyzers {
 }
 
 impl CapturedFieldAnalyzers {
+    /// Seek the next retained identity in logarithmic time, without allocating or visiting earlier entries.
+    pub fn next_key(&self, after: Option<&Key>) -> StorageBackendResult<Option<&Key>> {
+        self.control.check()?;
+        Ok(self
+            .values
+            .first_from(after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded))
+            .map(|(name, _)| &*name.0))
+    }
+
     pub(super) fn capture(
         values: &RetainedMap<StoredKey, Arc<Produced<ImageBinding>>>,
         control: &StorageReadControl,
