@@ -25,7 +25,10 @@ mod constraints;
 mod hierarchy;
 mod sequences;
 pub use attributes::read_dropped_attributes_image;
-pub use constraints::{read_foreign_keys_image, read_table_checks_image, read_table_keys_image};
+pub use constraints::{
+    read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
+    read_table_keys_image,
+};
 pub use hierarchy::read_table_hierarchy_image;
 
 /// Reconstruct ordered native columns under one retained allowance. Scalar payloads, physical identities and declaration order remain unchanged; relation-wide validation belongs to the enclosing restore owner.
@@ -34,7 +37,16 @@ pub fn read_columns_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Vec<ColumnDef>>, SQLError> {
-    read_list(
+    Ok(read_columns_image_with_footprint(reader, memory, cancellation)?.0)
+}
+
+/// Reconstruct native columns and report separately owned literal bytes for independent capture admission. Their original constructor leases stay with the literals.
+pub fn read_columns_image_with_footprint(
+    reader: &mut dyn Read,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(Budgeted<Vec<ColumnDef>>, usize), SQLError> {
+    read_list_with_footprint(
         reader,
         memory,
         cancellation,
@@ -50,12 +62,22 @@ fn read_list<'a, T>(
     magic: [u8; 8],
     item: impl FnMut(&mut Input<'a>, &mut MemoryReservation) -> Result<T, SQLError>,
 ) -> Result<Budgeted<Vec<T>>, SQLError> {
+    Ok(read_list_with_footprint(reader, memory, cancellation, magic, item)?.0)
+}
+
+fn read_list_with_footprint<'a, T>(
+    reader: &'a mut dyn Read,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+    magic: [u8; 8],
+    item: impl FnMut(&mut Input<'a>, &mut MemoryReservation) -> Result<T, SQLError>,
+) -> Result<(Budgeted<Vec<T>>, usize), SQLError> {
     let mut input = Input::new(reader, memory, cancellation);
     let count = input.header(magic)?;
     let mut reservation = memory.empty_reservation();
     let values = input.items(count, &mut reservation, item)?;
     input.binary.end()?;
-    Ok(Budgeted::new(values, reservation))
+    Ok((Budgeted::new(values, reservation), input.retained_children))
 }
 
 impl Input<'_> {

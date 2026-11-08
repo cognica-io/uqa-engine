@@ -6,7 +6,7 @@
 
 //! Private native constraints retain admitted values without publication or constraint execution.
 
-use super::{invalid, payload, read_list, Input};
+use super::{invalid, payload, read_list, read_list_with_footprint, Input};
 use crate::{
     ast::{
         DetachedPartitionConstraint, ForeignKey, TableCheck, TableKeyConstraint,
@@ -26,7 +26,16 @@ pub fn read_table_checks_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Vec<TableCheck>>, SQLError> {
-    read_list(
+    Ok(read_table_checks_image_with_footprint(reader, memory, cancellation)?.0)
+}
+
+/// Reconstruct native checks and report separately retained child bytes for independent capture admission.
+pub fn read_table_checks_image_with_footprint(
+    reader: &mut dyn Read,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(Budgeted<Vec<TableCheck>>, usize), SQLError> {
+    read_list_with_footprint(
         reader,
         memory,
         cancellation,

@@ -214,7 +214,12 @@ impl SyntaxCopy for crate::ast::RetainedInputLiteral {
         if copying.purpose == super::CopyPurpose::Executable {
             return Ok(self.clone());
         }
-        Ok(Self(self.0.capture_with_control(&copying.control)?))
+        let (literal, bytes) = self.0.capture_with_footprint(&copying.control)?;
+        copying.retained_children = copying
+            .retained_children
+            .checked_add(bytes)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok(Self(literal))
     }
 }
 

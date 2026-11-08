@@ -8,6 +8,63 @@ use super::*;
 use std::io::Read;
 
 #[test]
+fn native_column_constructor_and_image_preserve_separate_literal_footprints() {
+    use crate::{
+        ast::RetainedInputLiteral,
+        ir::{RetainedConstantValue, RetainedScalarLiteral},
+    };
+    use uqa_core::memory::ProductionControl;
+    let source = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&source, &token, &token);
+    let value = control.copy_value(&Value::Str("x".repeat(32768))).unwrap();
+    let value = RetainedConstantValue::from_produced(value, &control).unwrap();
+    let literal = RetainedScalarLiteral::with_control(
+        value,
+        Some(ColumnType::Text.clone_with_control(&control).unwrap()),
+        Some(control.copy_text("pg_catalog.text").unwrap()),
+        Some(100),
+        &control,
+    )
+    .unwrap();
+    let mut column = ColumnDef::nullable("v", ColumnType::Text);
+    column.default = Some(Expr::RetainedLiteral(Box::new(RetainedInputLiteral(
+        literal,
+    ))));
+    let columns = vec![column];
+    let destination = MemoryBudget::new(1 << 20);
+    let (native, native_children) = crate::catalog::definition_capture::foreign::stored_columns(
+        &columns,
+        &ProductionControl::new(&destination, &token, &token),
+    )
+    .unwrap();
+    assert!(native_children > 32768);
+    assert_eq!(
+        destination.used(),
+        native.reserved_bytes() + native_children
+    );
+    let bytes = encode(&native, 127);
+    drop(columns);
+    assert_eq!(source.used(), 0);
+    let restored_memory = MemoryBudget::new(1 << 20);
+    let (restored, restored_children) = crate::catalog::image::read_columns_image_with_footprint(
+        &mut bytes.as_slice(),
+        &restored_memory,
+        &token,
+    )
+    .unwrap();
+    assert_eq!(restored_children, native_children);
+    assert_eq!(
+        restored_memory.used(),
+        restored.reserved_bytes() + restored_children
+    );
+    assert_eq!(encode(&restored, 31), bytes);
+    drop((native, restored));
+    assert_eq!(destination.used(), 0);
+    assert_eq!(restored_memory.used(), 0);
+}
+
+#[test]
 fn native_column_input_rejects_partial_invalid_and_unfunded_images() {
     let bytes = encode(&[complete()], 127);
     let memory = MemoryBudget::new(1 << 20);

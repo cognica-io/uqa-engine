@@ -6,16 +6,16 @@
 
 //! Decode continuations retain enough capacity to retire their native forest without allocating.
 
-use super::{empty_query, empty_source, retirement::Retire, Frame, Node, Owner};
+use super::{empty_query, empty_source, retirement::Retire, Frame, NativeNode, Node, Owner};
 use crate::plan::{CommandPlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan};
 
 mod commands;
 
-impl Drop for Owner {
+impl<N: NativeNode> Drop for Owner<N> {
     fn drop(&mut self) {
-        if !matches!(self.root, Node::Empty) {
+        if !self.root.is_empty() {
             debug_assert!(self.frames.is_empty());
-            let root = std::mem::replace(&mut self.root, Node::Empty);
+            let root = std::mem::replace(&mut self.root, N::empty());
             self.frames
                 .push(Frame::new(root))
                 .expect("admitted root retirement slot");
@@ -25,9 +25,9 @@ impl Drop for Owner {
                 frame.retiring = true;
                 frame.position = 0;
                 frame.count = None;
-                frame.retire_scalars();
+                N::retire_scalars(&mut frame);
             }
-            if let Some(child) = frame.retire_child() {
+            if let Some(child) = N::retire_child(&mut frame) {
                 debug_assert!(self.frames.capacity() >= self.frames.len() + 2);
                 self.frames
                     .push(frame)
@@ -41,7 +41,7 @@ impl Drop for Owner {
 }
 
 impl Frame {
-    fn retire_scalars(&mut self) {
+    pub(super) fn retire_scalars(&mut self) {
         match &mut self.node {
             Node::Empty => {}
             Node::Query(query) => match &mut query.root {
@@ -88,7 +88,7 @@ impl Frame {
         }
     }
 
-    fn retire_child(&mut self) -> Option<Node> {
+    pub(super) fn retire_child(&mut self) -> Option<Node> {
         match &mut self.node {
             Node::Empty => None,
             Node::Query(query) => query_child(query, &mut self.position),

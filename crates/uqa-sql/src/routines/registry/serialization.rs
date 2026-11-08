@@ -13,7 +13,7 @@ use serde::{ser::SerializeSeq, Serialize, Serializer};
 impl Serialize for CapturedRoutines {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut entries = serializer.serialize_seq(Some(self.len()))?;
-        for (name, overloads) in self.iter() {
+        for (name, overloads) in self {
             entries.serialize_element(&(name, CapturedOverloads(overloads)))?;
         }
         entries.end()

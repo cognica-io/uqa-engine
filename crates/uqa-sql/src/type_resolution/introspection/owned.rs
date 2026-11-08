@@ -105,84 +105,17 @@ impl OwnedBinder<'_> {
         })
     }
 
-    fn bind_node(&self, mut expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
-        let control = &self.context.control;
+    // Constructor-specific temporaries belong to their selected operation, not to every recursive dispatch frame.
+    fn bind_node(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
         match &*expression {
             ScalarExpr::Func { .. } => self.bind_call(expression),
-            ScalarExpr::Array(_) => {
-                expression = expression.map_children(control, |_, child| self.bind(child))?;
-                let ScalarExpr::Array(items) = &*expression else {
-                    unreachable!()
-                };
-                let target = self.context.common_type(items.iter())?;
-                if let Some(target) = target {
-                    expression = expression
-                        .map_children(control, |_, child| self.common_cast(child, &target))?;
-                }
-                Ok(expression)
-            }
+            ScalarExpr::Array(_) => self.bind_array(expression),
             ScalarExpr::CompositeRow { .. } => self.bind_composite(expression),
             ScalarExpr::Binary { .. } => self.bind_binary(expression),
-            ScalarExpr::UnaryMinus(inner) => {
-                let source = self.context.semantic(self.context.infer(inner))?.flatten();
-                let source = source
-                    .map(|source| {
-                        self.context.semantic(
-                            crate::type_resolution::operators::unary_minus_result_type_with_control(
-                                &source, control,
-                            ),
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
-                expression.map_child(0, control, |child| {
-                    let child = self.bind(child)?;
-                    match source {
-                        Some(source) => self.wrap_declared(child, &source),
-                        None => Ok(child),
-                    }
-                })
-            }
-            ScalarExpr::Between { expr, low, high } => {
-                let low_types = self
-                    .context
-                    .semantic(self.context.binary_operand_types(
-                        crate::ast::BinaryOp::GreaterEqual,
-                        expr,
-                        low,
-                    ))?
-                    .flatten();
-                let high_types = self
-                    .context
-                    .semantic(self.context.binary_operand_types(
-                        crate::ast::BinaryOp::LessEqual,
-                        expr,
-                        high,
-                    ))?
-                    .flatten();
-                expression = expression.map_children(control, |_, child| self.bind(child))?;
-                self.coerce_between(expression, low_types, high_types)
-            }
-            ScalarExpr::InList { .. } => {
-                expression = expression.map_children(control, |_, child| self.bind(child))?;
-                self.coerce_membership(expression)
-            }
-            ScalarExpr::WindowCall { args, filter, .. } => {
-                let argument_count = args.len();
-                let has_filter = filter.is_some();
-                let last = expression.child_count() - usize::from(has_filter);
-                for index in 0..argument_count {
-                    expression = expression.map_child(index, control, |child| self.bind(child))?;
-                }
-                if has_filter {
-                    expression = expression.map_child(last, control, |child| self.bind(child))?;
-                }
-                // The remaining constructor slots are partition keys, ordering keys and frame offsets, in binding order.
-                for index in argument_count..last {
-                    expression = expression.map_child(index, control, |child| self.bind(child))?;
-                }
-                Ok(expression)
-            }
+            ScalarExpr::UnaryMinus(_) => self.bind_unary_minus(expression),
+            ScalarExpr::Between { .. } => self.bind_between(expression),
+            ScalarExpr::InList { .. } => self.bind_membership(expression),
+            ScalarExpr::WindowCall { .. } => self.bind_window(expression),
             ScalarExpr::Case { .. } => self.bind_case(expression),
             ScalarExpr::Cast { .. } => self.bind_cast(expression),
             ScalarExpr::Collated { .. }
@@ -191,11 +124,102 @@ impl OwnedBinder<'_> {
             | ScalarExpr::And(_)
             | ScalarExpr::Or(_)
             | ScalarExpr::IsNull { .. }
-            | ScalarExpr::InSubquery { .. } => {
-                expression.map_children(control, |_, child| self.bind(child))
-            }
+            | ScalarExpr::InSubquery { .. } => self.bind_children(expression),
             _ => Ok(expression),
         }
+    }
+
+    fn bind_children(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        expression.map_children(&self.context.control, |_, child| self.bind(child))
+    }
+
+    fn bind_array(&self, mut expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        let control = &self.context.control;
+        expression = self.bind_children(expression)?;
+        let ScalarExpr::Array(items) = &*expression else {
+            unreachable!()
+        };
+        let target = self.context.common_type(items.iter())?;
+        if let Some(target) = target {
+            expression =
+                expression.map_children(control, |_, child| self.common_cast(child, &target))?;
+        }
+        Ok(expression)
+    }
+
+    fn bind_unary_minus(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        let control = &self.context.control;
+        let ScalarExpr::UnaryMinus(inner) = &*expression else {
+            unreachable!()
+        };
+        let source = self.context.semantic(self.context.infer(inner))?.flatten();
+        let source = source
+            .map(|source| {
+                self.context.semantic(
+                    crate::type_resolution::operators::unary_minus_result_type_with_control(
+                        &source, control,
+                    ),
+                )
+            })
+            .transpose()?
+            .flatten();
+        expression.map_child(0, control, |child| {
+            let child = self.bind(child)?;
+            match source {
+                Some(source) => self.wrap_declared(child, &source),
+                None => Ok(child),
+            }
+        })
+    }
+
+    fn bind_between(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        let ScalarExpr::Between { expr, low, high } = &*expression else {
+            unreachable!()
+        };
+        let low_types = self
+            .context
+            .semantic(self.context.binary_operand_types(
+                crate::ast::BinaryOp::GreaterEqual,
+                expr,
+                low,
+            ))?
+            .flatten();
+        let high_types = self
+            .context
+            .semantic(self.context.binary_operand_types(
+                crate::ast::BinaryOp::LessEqual,
+                expr,
+                high,
+            ))?
+            .flatten();
+        let expression = self.bind_children(expression)?;
+        self.coerce_between(expression, low_types, high_types)
+    }
+
+    fn bind_membership(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        let expression = self.bind_children(expression)?;
+        self.coerce_membership(expression)
+    }
+
+    fn bind_window(&self, mut expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+        let control = &self.context.control;
+        let ScalarExpr::WindowCall { args, filter, .. } = &*expression else {
+            unreachable!()
+        };
+        let argument_count = args.len();
+        let has_filter = filter.is_some();
+        let last = expression.child_count() - usize::from(has_filter);
+        for index in 0..argument_count {
+            expression = expression.map_child(index, control, |child| self.bind(child))?;
+        }
+        if has_filter {
+            expression = expression.map_child(last, control, |child| self.bind(child))?;
+        }
+        // The remaining constructor slots are partition keys, ordering keys and frame offsets, in binding order.
+        for index in argument_count..last {
+            expression = expression.map_child(index, control, |child| self.bind(child))?;
+        }
+        Ok(expression)
     }
 
     fn bind_binary(&self, mut expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {

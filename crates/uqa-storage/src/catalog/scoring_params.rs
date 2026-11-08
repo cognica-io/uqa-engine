@@ -10,10 +10,12 @@ use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, RetainedMap, Retaine
 
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
+mod image;
+
 /// Ordered, transactionally replaceable scoring metadata. Clones share an immutable root; updates copy only the affected tree path and never clone another entry's encoded payload.
 #[derive(Clone)]
 pub struct ScoringParameters {
-    values: RetainedMap<String, String>,
+    values: RetainedMap<String, Budgeted<String>>,
 }
 
 impl Default for ScoringParameters {
@@ -38,11 +40,11 @@ impl ScoringParameters {
     }
 
     pub fn get(&self, name: &str) -> Option<&String> {
-        self.values.get(name)
+        self.values.get(name).map(|value| &**value)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
-        self.values.iter()
+        self.values.iter().map(|(name, value)| (name, &**value))
     }
 
     /// Failed path admission leaves both membership and its retained-payload total unchanged.
@@ -51,7 +53,9 @@ impl ScoringParameters {
             .capacity()
             .checked_add(encoded.capacity())
             .ok_or(MemoryError::SizeOverflow)?;
-        self.values.insert(name, encoded, payload_bytes)
+        let memory = self.values.budget().reserve(payload_bytes)?;
+        self.values
+            .insert(name, Budgeted::new(encoded, memory), payload_bytes)
     }
 
     pub fn remove(&mut self, name: &str) -> Result<bool, MemoryError> {
@@ -89,7 +93,7 @@ impl ScoringParameters {
 
 /// One immutable scoring catalog generation. Its containing reservation owns the complete structural and encoded-payload retention, independently of other captures and later writes.
 pub struct CapturedScoringParameters {
-    values: RetainedMapSnapshot<String, String>,
+    values: RetainedMapSnapshot<String, Budgeted<String>>,
 }
 
 impl CapturedScoringParameters {
@@ -102,11 +106,11 @@ impl CapturedScoringParameters {
     }
 
     pub fn get(&self, name: &str) -> Option<&String> {
-        self.values.get(name)
+        self.values.get(name).map(|value| &**value)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
-        self.values.iter()
+        self.values.iter().map(|(name, value)| (name, &**value))
     }
 }
 

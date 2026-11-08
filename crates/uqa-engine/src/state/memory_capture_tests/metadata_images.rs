@@ -15,6 +15,150 @@ use uqa_sql::catalog::{
 };
 
 #[test]
+fn memory_index_and_scoring_images_preserve_selected_definitions_after_engine_retirement() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE image_indexed(id integer, body text); CREATE INDEX saved_index ON image_indexed(id); CREATE TEMP TABLE private_indexed(id integer); CREATE INDEX private_index ON private_indexed(id)");
+    engine
+        .save_scoring_params("signal", "{ \"x\": 1.00, \"x\": 2 }")
+        .unwrap();
+    let expected = {
+        let indexes = engine.durable.catalog_indexes.read();
+        indexes
+            .iter()
+            .filter(|(key, _)| indexes.is_durable(key))
+            .map(|(_, row)| row.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(expected.len(), 1);
+    let index_key = engine.durable.catalog_indexes.key().unwrap();
+    let params_key = engine.durable.scoring_params.key().unwrap();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; DROP INDEX saved_index; ROLLBACK; DROP INDEX saved_index; CREATE INDEX saved_index ON image_indexed(body)");
+    engine.save_scoring_params("signal", "replacement").unwrap();
+    drop(engine);
+    let indexes = index_key.retained(&cut).unwrap().unwrap();
+    let params = params_key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let output = control.clone();
+    let (indexes, params) = std::thread::spawn(move || {
+        fn bytes(mut reader: uqa_storage::image_io::ImageReader<'_>) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let mut part = [0; 257];
+            loop {
+                let count = reader.read(&mut part).unwrap();
+                if count == 0 {
+                    return bytes;
+                }
+                bytes.extend_from_slice(&part[..count]);
+            }
+        }
+        (
+            bytes(indexes.get().unwrap().image_reader(&output).unwrap()),
+            bytes(params.get().unwrap().image_reader(&output).unwrap()),
+        )
+    })
+    .join()
+    .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    let restored = StorageReadControl::with_limit(1 << 20);
+    let indexes = uqa_execution::catalog::index::registry::CatalogIndexes::read_image(
+        &mut indexes.as_slice(),
+        restored.memory(),
+        restored.cancellation(),
+    )
+    .unwrap();
+    assert_eq!(indexes.len(), expected.len());
+    for original in expected {
+        let actual = indexes.get(&original.relation).unwrap();
+        assert_eq!(actual.relation, original.relation);
+        assert_eq!(actual.index_type, original.index_type);
+        assert_eq!(actual.table_name, original.table_name);
+        assert_eq!(actual.columns_json, original.columns_json);
+        assert_eq!(actual.parameters_json, original.parameters_json);
+        assert_eq!(actual.definition_json, original.definition_json);
+    }
+    let params = uqa_storage::catalog::scoring_params::ScoringParameters::read_image(
+        &mut params.as_slice(),
+        &restored,
+    )
+    .unwrap();
+    assert_eq!(
+        params.get("signal").map(String::as_str),
+        Some("{ \"x\": 1.00, \"x\": 2 }")
+    );
+    drop((indexes, params));
+    assert_eq!(restored.memory().used(), 0);
+}
+
+#[test]
+fn memory_comment_images_preserve_original_addresses_after_engine_retirement() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TYPE described_type AS ENUM('original'); COMMENT ON TYPE described_type IS 'original 한글'; CREATE TYPE pg_temp.private_object AS ENUM('private'); COMMENT ON TYPE pg_temp.private_object IS 'private description'");
+    let expected = {
+        let comments = engine.durable.comments.read();
+        comments
+            .iter()
+            .filter(|(address, _)| !comments.is_temporary(address))
+            .map(|(address, text)| (*address, text.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(expected.len(), 1);
+    let key = engine.durable.comments.key().unwrap();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; COMMENT ON TYPE described_type IS 'private'; ROLLBACK; DROP TYPE described_type; CREATE TYPE described_type AS ENUM('replacement'); COMMENT ON TYPE described_type IS 'replacement description'");
+    drop(engine);
+    let captured = key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let output_control = control.clone();
+    let image = std::thread::spawn(move || {
+        let mut reader = captured
+            .get()
+            .unwrap()
+            .image_reader(&output_control)
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut part = [0; 257];
+        loop {
+            let count = reader.read(&mut part).unwrap();
+            if count == 0 {
+                return bytes;
+            }
+            bytes.extend_from_slice(&part[..count]);
+        }
+    })
+    .join()
+    .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    let memory = MemoryBudget::new(1 << 20);
+    let restored = uqa_execution::catalog::comments::CommentRegistry::read_image(
+        &mut image.as_slice(),
+        &memory,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert!(restored
+        .iter()
+        .map(|(address, text)| (*address, text))
+        .eq(expected.iter().map(|(address, text)| (*address, text))));
+    drop(restored);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn captured_type_images_preserve_original_identities_labels_and_authority_after_engine_closure() {
     for mutate in [false, true] {
         let engine = Engine::new();

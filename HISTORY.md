@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
+
+- Native rewrite-rule images preserve original SQL, bound conditions, OLD/NEW identities and dependency membership through independently retained event owners. Complete memory Engine backup and public restore remain in progress.
+
+- Nested scalar type binding no longer retains unrelated constructor and call-coercion workspace across recursive argument descent, preventing default-thread stack overflow in collation-aware expressions.
+
 - Reject saved query images whose DEFAULT positions exceed the original VALUES width, before rule rewriting can use those positions.
 
 - Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation; complete stored catalog integration and Engine restore remain in progress.
@@ -17,6 +23,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
 
 ### Added
+
+- Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Complete memory backup and public Engine restore remain in progress.
+
+- Add bounded native foreign-table catalog images preserving original declarations, server references, option order and matching relation authority without contacting foreign data sources. Complete memory backup assembly and public Engine restore remain under implementation.
+
+- Add native routine catalog images preserving original declarations, unexamined source bodies, separately bound SQL plans and execution authority. Restored definitions and shared bodies retain independent memory and cleanup ownership; complete memory backup and public Engine restore remain under implementation.
+
+- Add bounded images for original stored SQL query, mutation and NOTIFY bodies, with separate bound SQL plan images. Reconstruction preserves original syntax, bindings and local window addresses under admitted ownership; routine/rule catalog integration and complete Engine restore remain in progress.
 
 - Add bounded native stored-view images preserving original query bindings, authority revisions and evaluated materialized rows. Reconstructed immutable catalogs retain their query cleanup and memory ownership through capture and replacement; whole-memory assembly and public Engine restore remain under implementation.
 
@@ -148,6 +162,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
+
+- Capture transaction rollback state after catalog admission, releasing obsolete cached analysis before replanning large statements and keeping rollback on the selected catalog view.
 
 - Keep SQL call-selection workspace out of recursive argument-observation frames, preventing stack exhaustion when a prepared nested collated expression is analyzed again on an ordinary thread stack.
 

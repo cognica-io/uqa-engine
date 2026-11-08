@@ -13,7 +13,7 @@ use crate::{
         CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
         DroppedCompositeAttribute,
     },
-    ir::{RetainedConstantValue, RetainedScalarLiteral},
+    ir::RetainedScalarLiteral,
 };
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 
@@ -129,7 +129,17 @@ impl Input<'_> {
             self.binary.cancellation,
             self.binary.cancellation,
         );
-        let value = RetainedConstantValue::from_produced(value.into(), &control)?;
-        RetainedScalarLiteral::with_control(value, ty, declaration, collation_oid, &control)
+        let (literal, bytes) = RetainedScalarLiteral::from_produced(
+            value.into(),
+            ty,
+            declaration,
+            collation_oid,
+            &control,
+        )?;
+        self.retained_children = self
+            .retained_children
+            .checked_add(bytes)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok(literal)
     }
 }

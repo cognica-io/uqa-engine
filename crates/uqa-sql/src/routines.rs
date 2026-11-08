@@ -28,7 +28,7 @@ pub mod registry;
 pub mod resolution;
 pub mod result_check;
 pub mod security;
-pub use ownership::{SQLRoutine, SharedRoutineBody};
+pub use ownership::{RetainedRoutineValue, SQLRoutine, SharedRoutineBody};
 
 use crate::ast::{
     ColumnType, CreateFunction, FunctionBinding, FunctionReturns, RoutineInvocationBinding,

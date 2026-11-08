@@ -10,6 +10,127 @@ use crate::catalog::{
 };
 use uqa_core::{catalog_acl::TablePrivileges, memory::MemoryBudget, CancellationToken};
 
+#[test]
+fn native_bound_authority_images_preserve_existing_wire_and_admitted_maps() {
+    use crate::catalog::security::BoundTableSecurity;
+    let expected = fixture();
+    let bytes = encode(&expected, 17);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let mut decoded = None;
+    let allocation = allocation_counter::measure(|| {
+        decoded =
+            Some(BoundTableSecurity::read_image(&mut bytes.as_slice(), &memory, &token).unwrap());
+    });
+    let decoded = decoded.unwrap();
+    assert_eq!(
+        allocation.bytes_current,
+        i64::try_from(memory.used()).unwrap()
+    );
+    assert_eq!(decoded.role_owner, expected.privileges.role_owner);
+    assert_eq!(decoded.acl.as_deref(), expected.privileges.acl());
+    assert!(decoded.column_acls.iter().eq(expected
+        .privileges
+        .column_acls()
+        .iter()
+        .map(|(key, value)| (key, value))));
+    assert_eq!(decoded.acl_revisions.relation, expected.relation_revision);
+    assert!(decoded.acl_revisions.columns.iter().eq(expected
+        .column_revisions
+        .iter()
+        .map(|(key, value)| (key, value))));
+    let mut actual = Vec::new();
+    {
+        let mut output = [0; 31];
+        let mut reader = decoded.image_reader(&token).unwrap();
+        loop {
+            let count = reader.read(&mut output).unwrap();
+            if count == 0 {
+                break;
+            }
+            actual.extend_from_slice(&output[..count]);
+        }
+    }
+    assert_eq!(actual, bytes);
+    let required = memory.used();
+    drop(decoded);
+    assert_eq!(memory.used(), 0);
+    let exact = MemoryBudget::new(required);
+    drop(BoundTableSecurity::read_image(&mut bytes.as_slice(), &exact, &token).unwrap());
+    assert_eq!(exact.used(), 0);
+    let denied = MemoryBudget::new(required - 1);
+    assert_eq!(
+        BoundTableSecurity::read_image(&mut bytes.as_slice(), &denied, &token)
+            .unwrap_err()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(denied.used(), 0);
+}
+
+#[test]
+fn native_bound_authority_images_reject_partial_unordered_and_cancelled_input() {
+    use crate::catalog::security::BoundTableSecurity;
+    let mut value = fixture();
+    let bytes = encode(&value, 29);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    for end in 0..bytes.len() {
+        assert!(BoundTableSecurity::read_image(&mut &bytes[..end], &memory, &token).is_err());
+        assert_eq!(memory.used(), 0);
+    }
+    value.column_revisions = vec![("z".into(), [3; 16]), ("a".into(), [4; 16])];
+    assert!(
+        BoundTableSecurity::read_image(&mut encode(&value, 19).as_slice(), &memory, &token)
+            .is_err()
+    );
+    assert_eq!(memory.used(), 0);
+    value.column_revisions[1].0 = "z".into();
+    assert!(
+        BoundTableSecurity::read_image(&mut encode(&value, 19).as_slice(), &memory, &token)
+            .is_err()
+    );
+    assert_eq!(memory.used(), 0);
+    token.cancel();
+    assert_eq!(
+        BoundTableSecurity::read_image(&mut bytes.as_slice(), &memory, &token)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn native_bound_authority_output_borrows_large_native_maps_without_projection() {
+    use crate::catalog::security::BoundTableSecurity;
+    let mut value = BoundTableSecurity::owner(fixture().privileges.role_owner);
+    for index in 0..4096 {
+        value
+            .column_acls
+            .insert(format!("column_{index:05}"), Vec::new());
+        value
+            .acl_revisions
+            .columns
+            .insert(format!("column_{index:05}"), [7; 16]);
+    }
+    let token = CancellationToken::new();
+    let mut output = [0; 4096];
+    let allocation = allocation_counter::measure(|| {
+        let mut reader = value.image_reader(&token).unwrap();
+        let mut total = 0;
+        loop {
+            let count = reader.read(&mut output).unwrap();
+            if count == 0 {
+                break;
+            }
+            total += count;
+        }
+        assert!(total > 4096 * 32);
+    });
+    assert_eq!(allocation.count_total, 0);
+}
+
 fn fixture() -> CapturedTableSecurity {
     let owner = RoleIdentity {
         oid: 65536,

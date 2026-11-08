@@ -15,6 +15,80 @@ fn fixture(engine: &Engine) {
     sql(engine,"CREATE TABLE docs(id integer); CREATE FUNCTION bound(a integer DEFAULT 7) RETURNS integer LANGUAGE SQL STABLE SECURITY DEFINER RETURN a + 1; CREATE FUNCTION bound(a text) RETURNS text LANGUAGE SQL AS 'SELECT a'; CREATE PROCEDURE change() LANGUAGE SQL BEGIN ATOMIC INSERT INTO docs VALUES (1); END; SET check_function_bodies = off; CREATE FUNCTION deferred() RETURNS integer LANGUAGE plpgsql AS 'invalid until invoked'; RESET check_function_bodies");
 }
 
+#[test]
+fn memory_routine_images_preserve_published_bindings_after_engine_retirement() {
+    let engine = Engine::new();
+    fixture(&engine);
+    sql(
+        &engine,
+        "CREATE ROLE reader; GRANT EXECUTE ON FUNCTION bound(integer) TO reader",
+    );
+    let original = engine.durable.sql_user_functions.snapshot();
+    let key = engine.durable.sql_user_functions.key().unwrap();
+    let control = StorageReadControl::with_limit(4 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "CREATE OR REPLACE FUNCTION bound(a integer DEFAULT 9) RETURNS integer LANGUAGE SQL RETURN a + 100; REVOKE EXECUTE ON FUNCTION bound(integer) FROM reader; DROP PROCEDURE change()");
+    drop(engine);
+    let saved = key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let memory = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let token = uqa_core::CancellationToken::new();
+    let mut reader = saved.get().unwrap().image_reader(&memory, &token).unwrap();
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 23];
+    loop {
+        let count = reader.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    drop(reader);
+    drop(saved);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(memory.used(), 0);
+    let restored = uqa_sql::routines::registry::RoutineRegistry::read_image(
+        &mut bytes.as_slice(),
+        &memory,
+        &token,
+    )
+    .unwrap();
+    let captured_memory = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let captured = restored
+        .capture(&uqa_core::memory::ProductionControl::new(
+            &captured_memory,
+            &token,
+            &token,
+        ))
+        .unwrap();
+    same(&captured, &original);
+    drop(original);
+    let RoutineBody::Bound(body) = &restored["public.bound"][0].body else {
+        panic!("bound body")
+    };
+    let body = body.clone();
+    drop(restored);
+    drop(captured);
+    assert_eq!(captured_memory.used(), 0);
+    assert!(memory.used() > 0);
+    std::thread::spawn(move || {
+        let CompiledFunctionBody::SQL(plans) = &**body else {
+            panic!("SQL body")
+        };
+        assert_eq!(plans.len(), 1);
+        drop(body);
+    })
+    .join()
+    .unwrap();
+    assert_eq!(memory.used(), 0);
+}
+
 fn same(saved: &CapturedRoutines, original: &uqa_sql::routines::registry::RoutineRegistry) {
     assert_eq!(saved.len(), original.len());
     for ((name, entries), (old_name, old)) in saved.iter().zip(original) {

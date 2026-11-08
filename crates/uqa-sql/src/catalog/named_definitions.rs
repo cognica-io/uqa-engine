@@ -17,7 +17,7 @@ use uqa_core::{
 };
 
 mod image;
-use image::DefinitionEntry;
+pub(crate) use image::DefinitionEntry;
 pub(crate) use image::DefinitionImage;
 mod serialization;
 

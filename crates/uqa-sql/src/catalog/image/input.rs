@@ -50,17 +50,19 @@ pub(super) use foreign_wrappers::foreign_wrappers;
 pub(super) use functions::function_binding_image;
 pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
-pub use plans::{CapturedExpressionPlan, CapturedQuery};
+pub(super) use plans::{read_routines as routines, read_rules as rules};
+pub use plans::{CapturedExpressionPlan, CapturedPlan, CapturedQuery, CapturedStatement};
 pub(super) use roles::roles;
 pub(super) use scalars::scalar_image;
 pub use scalars::CapturedScalar;
 pub(super) use security::{database, schemas};
 pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
-pub(super) use table_security::table_security;
+pub(super) use table_security::{bound_table_security, table_security};
 pub use tables::{
-    read_columns_image, read_dropped_attributes_image, read_foreign_keys_image,
-    read_table_checks_image, read_table_hierarchy_image, read_table_keys_image,
+    read_columns_image, read_columns_image_with_footprint, read_dropped_attributes_image,
+    read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
+    read_table_hierarchy_image, read_table_keys_image,
 };
 pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
@@ -68,6 +70,7 @@ pub(super) use views::views;
 
 struct Input<'a> {
     binary: ImageInput<'a>,
+    retained_children: usize,
 }
 impl<'a> Input<'a> {
     fn new(
@@ -76,6 +79,7 @@ impl<'a> Input<'a> {
         cancellation: &'a CancellationToken,
     ) -> Self {
         Self {
+            retained_children: 0,
             binary: ImageInput {
                 reader,
                 memory,

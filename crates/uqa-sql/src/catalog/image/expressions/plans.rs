@@ -15,6 +15,7 @@ use uqa_core::{
 
 pub(in super::super) const MAGIC: [u8; 8] = *b"UQAQRY01";
 pub(in super::super) const EXPRESSION_MAGIC: [u8; 8] = *b"UQAXPL01";
+pub(in super::super) const UNIFIED_MAGIC: [u8; 8] = *b"UQAPLN01";
 
 pub(super) trait Node: Sync {
     fn part(&self, position: usize) -> Result<Option<Part<'_>>, SQLError>;
@@ -27,9 +28,11 @@ pub(super) enum Part<'a> {
     Bytes(&'a [u8]),
     Tag(u8),
     Count(usize),
+    U16(u16),
     U32(u32),
     U64(u64),
     Scalar(&'a crate::ScalarExpr),
+    Expression(&'a crate::ast::Expr),
     Type(&'a crate::ColumnType),
     Binding(&'a crate::ast::FunctionBinding),
     ViewMap(views::Map<'a>),
@@ -37,6 +40,9 @@ pub(super) enum Part<'a> {
     Value(&'a uqa_core::Value),
     Columns(&'a OwnedSet<ColumnIdentity>),
     Positions(&'a OwnedSet<usize>),
+    StatementMap(&'a uqa_core::memory::OwnedMap<String, crate::ast::MergeTargetColumnBinding>),
+    Oids(&'a OwnedSet<u32>),
+    RuleSet(rules::Set<'a>),
 }
 
 pub(super) enum Frame<'a> {
@@ -44,6 +50,9 @@ pub(super) enum Frame<'a> {
     ViewMap(Box<views::Cursor<'a>>, MemoryReservation),
     Columns(Box<OwnedSetIter<'a, ColumnIdentity>>, MemoryReservation),
     Positions(Box<OwnedSetIter<'a, usize>>, MemoryReservation),
+    StatementMap(Box<statements::ColumnCursor<'a>>, MemoryReservation),
+    Oids(Box<OwnedSetIter<'a, u32>>, MemoryReservation),
+    RuleSet(Box<rules::Cursor<'a>>, MemoryReservation),
 }
 
 fn fields<'a>(position: usize, values: &[&'a dyn Node]) -> Option<Part<'a>> {
@@ -70,12 +79,13 @@ macro_rules! image_struct {
 }
 
 macro_rules! image_enum {
-    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? })?),* $(,)? }) => {
+    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? })?),* $(,)? } $(reject { $($rejected:pat => $message:literal),* $(,)? })?) => {
         impl Node for $ty {
             fn part(&self, position: usize) -> Result<Option<Part<'_>>, SQLError> {
                 Ok(match self {
                     $(Self::$name $(($value))? $({$($field),*})? =>
                         variant(position, $tag, &[$($value,)? $($($field,)*)?]),)*
+                    $($($rejected => return Err(invalid($message)),)*)?
                 })
             }
         }
@@ -86,9 +96,13 @@ mod metadata;
 mod mutations;
 mod primitives;
 mod queries;
+mod routines;
+mod rules;
 mod sources;
+mod statements;
 #[cfg(test)]
 mod tests;
+mod unified;
 mod views;
 
 impl QueryPlan {
@@ -128,6 +142,14 @@ impl crate::plan::ExpressionPlan {
 impl<'a> DefinitionImageReader<'a> {
     pub(super) fn plan_part(&mut self, frame: Frame<'a>) -> Result<(), SQLError> {
         match frame {
+            Frame::RuleSet(cursor, memory) => self.rule_set(cursor, memory)?,
+            Frame::StatementMap(cursor, memory) => self.statement_columns(cursor, memory)?,
+            Frame::Oids(mut values, memory) => {
+                if let Some(value) = values.next() {
+                    self.fields.scalar(value.to_le_bytes());
+                    self.push(ImageFrame::Plan(Frame::Oids(values, memory)))?;
+                }
+            }
             Frame::ViewMap(cursor, memory) => self.view_map(cursor, memory)?,
             Frame::Node(node, position) => {
                 let Some(part) = node.part(position)? else {
@@ -154,6 +176,15 @@ impl<'a> DefinitionImageReader<'a> {
 
     fn plan_field(&mut self, part: Part<'a>) -> Result<(), SQLError> {
         match part {
+            Part::RuleSet(values) => self.start_rule_set(values)?,
+            Part::StatementMap(values) => self.start_statement_columns(values)?,
+            Part::Oids(values) => {
+                let memory = self.memory.reserve(size_of::<OwnedSetIter<'_, u32>>())?;
+                self.push(ImageFrame::Plan(Frame::Oids(
+                    Box::new(values.iter()),
+                    memory,
+                )))?;
+            }
             Part::ViewMap(map) => self.start_view_map(map)?,
             Part::ViewAcl(acl) => self.fields.acl(acl),
             Part::Value(value) => self.push(ImageFrame::Value(value))?,
@@ -163,11 +194,13 @@ impl<'a> DefinitionImageReader<'a> {
             Part::Bytes(value) => self.fields.bytes(value),
             Part::Tag(value) => self.fields.scalar([value]),
             Part::Count(value) => self.fields.count(value),
+            Part::U16(value) => self.fields.scalar(value.to_le_bytes()),
             Part::U32(value) => self.fields.scalar(value.to_le_bytes()),
             Part::U64(value) => self.fields.scalar(value.to_le_bytes()),
             Part::Scalar(value) => {
                 self.push(ImageFrame::Scalar(super::scalars::Part::Node(value)))?;
             }
+            Part::Expression(value) => self.push(ImageFrame::Node(value))?,
             Part::Type(value) => self.push(ImageFrame::Type(value))?,
             Part::Binding(value) => self.push(ImageFrame::Binding(value))?,
             Part::Columns(values) => {

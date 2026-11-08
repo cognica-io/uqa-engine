@@ -17,6 +17,8 @@ use uqa_core::{
 };
 use uqa_sql::{ast::RelationPersistence, SQLError};
 
+mod image;
+
 #[derive(Clone)]
 pub struct CommentRegistry {
     durable: RetainedMap<CommentAddress, Budgeted<String>>,

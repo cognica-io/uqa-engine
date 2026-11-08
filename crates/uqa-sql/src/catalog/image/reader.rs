@@ -23,7 +23,7 @@ use crate::{
             database::{BoundDatabaseSecurity, DatabasePrivileges},
             sequence_registry::SequenceAuthority,
             system_relations::{SystemAcl, SystemRelationSecurity},
-            table_binding::{BoundTableAclEntry, CapturedTableSecurity},
+            table_binding::{BoundTableAclEntry, BoundTableSecurity, CapturedTableSecurity},
             BoundSchemaSecurity,
         },
         shell_type::StoredShellType,
@@ -43,6 +43,7 @@ use uqa_core::{
 };
 
 pub(super) enum Entries<'a> {
+    NativeTableSecurity(Option<&'a BoundTableSecurity>),
     TableSecurity(Option<&'a CapturedTableSecurity>),
     FunctionBinding(Option<&'a FunctionBinding>),
     SequenceAuthorities(CapturedDefinitionIter<'a, RelationIdentity, SequenceAuthority>),
@@ -71,6 +72,7 @@ enum Acl<'a> {
 enum Columns<'a> {
     None,
     Table(Iter<'a, (String, Vec<BoundTableAclEntry>)>),
+    NativeTable(BudgetedMapIter<'a, String, Vec<BoundTableAclEntry>>),
     System(BudgetedMapIter<'a, String, SystemAcl>),
     Graph(BudgetedMapIter<'a, String, u32>),
 }
@@ -180,8 +182,30 @@ impl<'a> CatalogImageReader<'a> {
         self.columns = Columns::Table(privileges.column_acls().iter());
         self.tail = Tail::TableRevisions(column_revisions.iter());
     }
+    fn native_table_security(&mut self, value: &'a BoundTableSecurity) {
+        self.fields.identity(value.role_owner);
+        self.fields
+            .optional_incarnation(value.acl_revisions.relation);
+        self.fields.count(value.column_acls.len());
+        self.fields.count(value.acl_revisions.columns.len());
+        self.fields.flag(value.acl.is_some());
+        if let Some(acl) = &value.acl {
+            self.fields.count(acl.len());
+            self.acl = Acl::Table(acl.iter());
+        }
+        self.columns = Columns::NativeTable(value.column_acls.iter());
+        self.tail = Tail::NativeTableRevisions(value.acl_revisions.columns.iter());
+    }
     fn next_column(&mut self) -> bool {
         match &mut self.columns {
+            Columns::NativeTable(columns) => {
+                if let Some((name, acl)) = columns.next() {
+                    self.fields.text(name);
+                    self.fields.count(acl.len());
+                    self.acl = Acl::Table(acl.iter());
+                    return true;
+                }
+            }
             Columns::Table(columns) => {
                 if let Some((name, acl)) = columns.next() {
                     self.fields.text(name);
@@ -234,6 +258,12 @@ impl<'a> CatalogImageReader<'a> {
             return Ok(true);
         }
         match &mut self.entries {
+            Entries::NativeTableSecurity(entry) => {
+                let Some(value) = entry.take() else {
+                    return Ok(false);
+                };
+                self.native_table_security(value);
+            }
             Entries::TableSecurity(entry) => {
                 let Some(value) = entry.take() else {
                     return Ok(false);

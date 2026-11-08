@@ -44,6 +44,71 @@ fn same(saved: &CapturedEventCatalog<StoredRule>, original: &RuleCatalog) {
 }
 
 #[test]
+fn memory_rule_images_preserve_original_bindings_after_engine_retirement() {
+    let engine = Engine::new();
+    fixture(&engine);
+    let original = engine.durable.rules.snapshot();
+    let key = engine.durable.rules.key().unwrap();
+    let control = StorageReadControl::with_limit(4 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "ALTER TABLE docs DISABLE RULE changed; DROP RULE inserted ON docs; CREATE OR REPLACE FUNCTION saved(a integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN a + 100");
+    drop(engine);
+    let saved = key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let memory = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let token = uqa_core::CancellationToken::new();
+    let mut reader = saved.get().unwrap().image_reader(&memory, &token).unwrap();
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 23];
+    loop {
+        let count = reader.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    drop(reader);
+    drop(saved);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(memory.used(), 0);
+    let restored = RuleCatalog::read_image(&mut bytes.as_slice(), &memory, &token).unwrap();
+    let separate = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let captured = restored
+        .capture(&uqa_core::memory::ProductionControl::new(
+            &separate, &token, &token,
+        ))
+        .unwrap();
+    same(&captured, &original);
+    drop(original);
+    let entries = restored
+        .get(&RelationIdentity::new("public", "docs"))
+        .unwrap()
+        .clone();
+    drop(restored);
+    drop(captured);
+    assert_eq!(separate.used(), 0);
+    assert!(memory.used() > 0);
+    std::thread::spawn(move || {
+        assert_eq!(entries.len(), 2);
+        assert!(entries
+            .get("changed")
+            .unwrap()
+            .bound_condition_plan()
+            .is_some());
+        drop(entries);
+    })
+    .join()
+    .unwrap();
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn memory_rule_capture_preserves_bound_conditions_dependencies_and_modes_through_rollback_replacement_and_unread_closure(
 ) {
     for mutate in [false, true] {

@@ -293,14 +293,11 @@ impl RetainedScalarLiteral {
     }
 
     /// Copy an evaluated literal and its selected metadata into independent capture ownership without consulting an unrelated statement's cancellation.
-    pub(crate) fn capture_with_control(
+    pub(crate) fn capture_with_footprint(
         &self,
         control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        let value = RetainedConstantValue::from_produced(
-            self.value.capture_with_control(control)?,
-            control,
-        )?;
+    ) -> Result<(Self, usize), SQLError> {
+        let value = self.value.capture_with_control(control)?;
         let ty = self
             .ty
             .as_ref()
@@ -311,7 +308,30 @@ impl RetainedScalarLiteral {
             .as_ref()
             .map(|name| control.copy_text(name))
             .transpose()?;
-        Self::with_control(value, ty, declaration, self.collation_oid, control)
+        Self::from_produced(value, ty, declaration, self.collation_oid, control)
+    }
+
+    /// Construct independent retained payload and metadata owners and report their complete admitted footprint without walking or decoding the completed value.
+    pub(crate) fn from_produced(
+        value: Produced<Value>,
+        ty: Option<Produced<ColumnType>>,
+        declaration: Option<Produced<String>>,
+        collation_oid: Option<u32>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, usize), SQLError> {
+        let value = value.into_shared(control)?;
+        let value_bytes = value.reserved_bytes();
+        let literal = Self::with_control(
+            RetainedConstantValue::new(value, 0),
+            ty,
+            declaration,
+            collation_oid,
+            control,
+        )?;
+        let bytes = value_bytes
+            .checked_add(literal.0.reserved_bytes())
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok((literal, bytes))
     }
 
     /// Materialize one value only at an interface that requires an owned literal. Cloning plans retains the shared owner instead.
