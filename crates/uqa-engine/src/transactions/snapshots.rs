@@ -127,7 +127,8 @@ impl Engine {
             table
                 .value_indexes
                 .write()
-                .clone_from(&table_snapshot.value_indexes.read());
+                .restore(&table_snapshot.value_indexes.read())
+                .map_err(|error| Engine::storage_tx_error("restore value-index sources", &error))?;
             table.doc_count_cache.store(
                 table_snapshot.doc_count_cache,
                 std::sync::atomic::Ordering::Release,

@@ -125,9 +125,9 @@ impl Engine {
             updates.push((table, columns, checks, hierarchy));
         }
         for (table, columns, checks, hierarchy) in updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
-            *table.hierarchy.write() = hierarchy;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
+            table.hierarchy.write().publish(hierarchy)?;
         }
         Ok(())
     }
@@ -200,8 +200,8 @@ impl Engine {
 
         let tables_changed = !table_updates.is_empty();
         for (_, table, columns, checks) in table_updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
         }
         let foreign_tables_changed = !foreign_updates.is_empty();
         if foreign_tables_changed {

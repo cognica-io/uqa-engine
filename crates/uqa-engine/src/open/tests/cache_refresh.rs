@@ -259,7 +259,7 @@ fn data_commits_retain_schema_and_decoded_statistics_across_sessions() {
     pause_automatic_statistics(&reader);
     reader.sql("SELECT * FROM changed", &[]).unwrap();
     let before = reader.require_table("changed").unwrap();
-    let schema = before.columns.snapshot();
+    let schema = before.columns.generation();
     let statistics = before.column_stats.snapshot();
     let unrelated = reader.require_table("untouched").unwrap();
     let registries = reader.durable.schemas.snapshot();
@@ -276,7 +276,7 @@ fn data_commits_retain_schema_and_decoded_statistics_across_sessions() {
             Arc::ptr_eq(&before, &after),
             "data-only commit rebuilt the table catalog"
         );
-        assert!(Arc::ptr_eq(&schema, &after.columns.snapshot()));
+        assert!(Arc::ptr_eq(&schema, &after.columns.generation()));
         assert!(
             Arc::ptr_eq(&statistics, &after.column_stats.snapshot()),
             "data-only commit decoded unchanged statistics"
@@ -441,7 +441,7 @@ fn automatic_statistics_and_concurrent_readers_retain_table_definitions() {
             .map(|reader| {
                 scope.spawn(move || {
                     let table = reader.require_table("items").unwrap();
-                    let columns = table.columns.snapshot();
+                    let columns = table.columns.generation();
                     let graphs = reader.durable.graphs.snapshot();
                     let deadline = Instant::now() + Duration::from_secs(20);
                     loop {
@@ -449,7 +449,7 @@ fn automatic_statistics_and_concurrent_readers_retain_table_definitions() {
                         assert_eq!(result.rows[0]["n"], uqa_core::Value::Int(80));
                         let current = reader.require_table("items").unwrap();
                         assert!(Arc::ptr_eq(&table, &current));
-                        assert!(Arc::ptr_eq(&columns, &current.columns.snapshot()));
+                        assert!(Arc::ptr_eq(&columns, &current.columns.generation()));
                         assert!(
                             Arc::ptr_eq(&graphs, &reader.durable.graphs.snapshot()),
                             "automatic statistics rebuilt an unrelated graph"

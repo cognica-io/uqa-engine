@@ -28,6 +28,10 @@ pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod table_capture;
+mod table_definition;
+pub(crate) use table_definition::{TableDefinitionCell, TableDefinitionWrite};
+mod table_metadata;
+pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 pub(crate) use table_membership::PersistentTableRegistrySnapshot;
@@ -140,10 +144,11 @@ impl StorageContext {
             uqa_execution::catalog::index::value::ValueIndexes,
         >,
     > {
-        self.memory_cell(
-            uqa_execution::catalog::index::value::ValueIndexes::default(),
-            persistence,
-        )
+        use uqa_execution::catalog::index::value::ValueIndexes;
+        let indexes = self
+            .table_capture_registry(persistence)
+            .map_or_else(ValueIndexes::default, ValueIndexes::memory);
+        self.memory_cell(indexes, persistence)
     }
 }
 

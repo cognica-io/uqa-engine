@@ -12,7 +12,12 @@ fn selected_column_payloads_are_admitted_once_and_survive_nested_readers() {
     columns[0].missing_value = Some(Value::Str("selected".repeat(4096)));
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let schema = schema(&columns, &index);
-    let definitions = Arc::downgrade(&schema.columns);
+    let uqa_sql::catalog::table_definition::SharedTableDefinition::External(definitions) =
+        &schema.columns
+    else {
+        panic!("external fixture columns")
+    };
+    let definitions = Arc::downgrade(definitions);
     let source: Arc<dyn DocumentStore> = Arc::new(MemoryDocumentStore::new());
     let rejected = StorageReadControl::with_limit(4096);
     let error = retain(

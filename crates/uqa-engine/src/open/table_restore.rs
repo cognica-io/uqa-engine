@@ -232,22 +232,22 @@ impl Engine {
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv),
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vectors.into()),
-            fts_fields: CatalogCell::new(schema.fts_fields),
+            fts_fields: crate::state::TableMetadataCell::new(schema.fts_fields),
             columns_declared: CatalogCell::new(
                 constraints.columns_declared.unwrap_or(!columns.is_empty()),
             ),
-            columns: CatalogCell::new(columns),
+            columns: crate::state::TableDefinitionCell::new(&columns)?,
             next_id: CatalogCell::new(next_id),
             maps_integer_keys: CatalogCell::new(maps_integer_keys),
-            analyzer: CatalogCell::new(analyzer),
+            analyzer: CatalogCell::new(uqa_analysis::AnalyzerDefinition::new(analyzer)),
             column_stats: CatalogCell::new(column_stats.into()),
             column_stats_loaded: CatalogCell::new(true),
             column_stats_dirty: CatalogCell::new(column_stats_dirty),
             statistics_maintenance: CatalogCell::new(MaintenanceState::default()),
-            table_checks: CatalogCell::new(constraints.checks),
-            foreign_keys: CatalogCell::new(constraints.foreign_keys),
-            key_constraints: CatalogCell::new(constraints.key_constraints),
-            hierarchy: CatalogCell::new(constraints.hierarchy),
+            table_checks: crate::state::TableDefinitionCell::new(&constraints.checks)?,
+            foreign_keys: crate::state::TableMetadataCell::new(constraints.foreign_keys),
+            key_constraints: crate::state::TableMetadataCell::new(constraints.key_constraints),
+            hierarchy: crate::state::TableDefinitionCell::new(&constraints.hierarchy)?,
             value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 uqa_execution::catalog::index::value::ValueIndexes::default(),
             ),
@@ -256,8 +256,12 @@ impl Engine {
             persistence: constraints.persistence,
             on_commit: constraints.on_commit,
             catalog_oids: constraints.catalog_oids,
-            row_type_array_name: CatalogCell::new(constraints.row_type_array_name),
-            dropped_attributes: CatalogCell::new(constraints.dropped_attributes),
+            row_type_array_name: crate::state::TableMetadataCell::new(
+                constraints.row_type_array_name,
+            ),
+            dropped_attributes: crate::state::TableMetadataCell::new(
+                constraints.dropped_attributes,
+            ),
         }))
     }
 }

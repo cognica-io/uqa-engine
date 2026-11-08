@@ -88,7 +88,14 @@ fn selected_columns(engine: &Engine, table: &crate::TableState, memory: &MemoryB
     assert_eq!(names.reserved_bytes(), memory.used() - before);
     drop(names);
     assert_eq!(memory.used(), before);
-    table.columns.write()[0].name = "x".repeat(4 << 20);
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "x".repeat(4 << 20);
+            Ok(())
+        })
+        .unwrap();
     let measured = allocation_counter::measure(|| {
         assert_eq!(
             context
@@ -100,7 +107,14 @@ fn selected_columns(engine: &Engine, table: &crate::TableState, memory: &MemoryB
     });
     assert!(measured.bytes_total < 16 << 10, "{measured:?}");
     assert_eq!(memory.used(), before);
-    table.columns.write()[0].name = "id".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "id".into();
+            Ok(())
+        })
+        .unwrap();
     for cancellation in [&statement, &session] {
         cancellation.cancel();
         assert_eq!(

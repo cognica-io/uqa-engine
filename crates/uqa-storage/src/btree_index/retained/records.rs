@@ -24,9 +24,9 @@ thread_local! {
     pub(super) static NODE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-const CHUNK: usize = 4096;
-const NODE: u8 = 0;
-const VALUE: u8 = 1;
+pub(super) const CHUNK: usize = 4096;
+pub(super) const NODE: u8 = 0;
+pub(super) const VALUE: u8 = 1;
 pub(super) const MAX_HEIGHT: u8 = 96;
 
 #[derive(Clone, Copy)]
@@ -50,7 +50,7 @@ impl Node {
         bytes[27..].copy_from_slice(&self.count.to_be_bytes());
         bytes
     }
-    fn decode(bytes: &[u8]) -> StorageBackendResult<Self> {
+    pub(super) fn decode(bytes: &[u8]) -> StorageBackendResult<Self> {
         if bytes.len() != 35
             || bytes[0] == 0
             || bytes[0] > MAX_HEIGHT
@@ -225,19 +225,19 @@ impl<'a> Records<'a> {
     }
 }
 
-fn key(kind: u8, id: DocId) -> [u8; 9] {
+pub(super) fn key(kind: u8, id: DocId) -> [u8; 9] {
     let mut key = [0; 9];
     key[0] = kind;
     key[1..].copy_from_slice(&id.to_be_bytes());
     key
 }
-fn chunk_key(id: DocId, ordinal: u64) -> [u8; 17] {
+pub(super) fn chunk_key(id: DocId, ordinal: u64) -> [u8; 17] {
     let mut value = [0; 17];
     value[..9].copy_from_slice(&key(VALUE, id));
     value[9..].copy_from_slice(&ordinal.to_be_bytes());
     value
 }
-fn decode_id(key: &[u8]) -> StorageBackendResult<DocId> {
+pub(super) fn decode_id(key: &[u8]) -> StorageBackendResult<DocId> {
     if key.len() != 9 {
         return Err(invalid("invalid node identity"));
     }

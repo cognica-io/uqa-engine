@@ -99,7 +99,7 @@ impl Engine {
         name: &str,
         source: &TableState,
     ) -> Arc<TableState> {
-        let analyzer = source.analyzer.read().clone();
+        let analyzer = source.analyzer.read().configuration().clone();
         Arc::new(TableState {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
@@ -115,8 +115,12 @@ impl Engine {
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 std::collections::BTreeMap::new().into(),
             ),
-            fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
-            columns: CatalogCell::from_snapshot(source.columns.snapshot()),
+            fts_fields: crate::state::TableMetadataCell::from_generation(
+                source.fts_fields.generation(),
+            ),
+            columns: crate::state::TableDefinitionCell::from_generation(
+                source.columns.generation(),
+            ),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
             next_id: crate::state::CatalogCell::new(*source.next_id.read()),
             maps_integer_keys: crate::state::CatalogCell::new(*source.maps_integer_keys.read()),
@@ -127,10 +131,18 @@ impl Engine {
             statistics_maintenance: crate::state::CatalogCell::new(
                 source.statistics_maintenance.read().clone(),
             ),
-            table_checks: CatalogCell::from_snapshot(source.table_checks.snapshot()),
-            foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
-            key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),
-            hierarchy: CatalogCell::from_snapshot(source.hierarchy.snapshot()),
+            table_checks: crate::state::TableDefinitionCell::from_generation(
+                source.table_checks.generation(),
+            ),
+            foreign_keys: crate::state::TableMetadataCell::from_generation(
+                source.foreign_keys.generation(),
+            ),
+            key_constraints: crate::state::TableMetadataCell::from_generation(
+                source.key_constraints.generation(),
+            ),
+            hierarchy: crate::state::TableDefinitionCell::from_generation(
+                source.hierarchy.generation(),
+            ),
             value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 uqa_execution::catalog::index::value::ValueIndexes::default(),
             ),
@@ -139,8 +151,12 @@ impl Engine {
             persistence: source.persistence,
             on_commit: source.on_commit,
             catalog_oids: source.recorded_catalog_oids(),
-            row_type_array_name: CatalogCell::from_snapshot(source.row_type_array_name.snapshot()),
-            dropped_attributes: CatalogCell::from_snapshot(source.dropped_attributes.snapshot()),
+            row_type_array_name: crate::state::TableMetadataCell::from_generation(
+                source.row_type_array_name.generation(),
+            ),
+            dropped_attributes: crate::state::TableMetadataCell::from_generation(
+                source.dropped_attributes.generation(),
+            ),
         })
     }
 }

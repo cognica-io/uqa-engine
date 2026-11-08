@@ -24,6 +24,7 @@ mod roles;
 mod routines;
 mod rules;
 mod security_images;
+mod table_definitions;
 mod triggers;
 mod types;
 mod views;
@@ -64,15 +65,15 @@ fn memory_engine_capture_preserves_evaluated_expression_keys_after_routine_repla
         }
         drop((table, engine));
         let captured = key.retained(&cut).unwrap().unwrap();
-        let index = captured.get(&field).unwrap().unwrap();
+        let index = captured.get(&field, &cut).unwrap().unwrap();
         assert_eq!(
-            index.value(1).unwrap(),
+            index.value(1).unwrap().as_deref(),
             Some(&crate::Value::Row(
                 vec![crate::Value::Str("original".into())].into()
             ))
         );
         assert_eq!(index.len().unwrap(), 1);
-        drop((captured, cut));
+        drop((index, captured, cut));
         assert_eq!(control.memory().used(), 0);
     }
 }

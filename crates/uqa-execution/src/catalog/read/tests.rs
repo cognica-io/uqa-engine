@@ -10,6 +10,7 @@ use super::*;
 use crate::catalog::RelationLookupMode;
 use crate::catalog::{security::BoundTableSecurity, test_support::empty_catalog};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::catalog::VirtualRelation;
 
 fn catalog() -> CatalogReadView {
@@ -28,12 +29,12 @@ fn catalog() -> CatalogReadView {
                 security: Arc::new(BoundTableSecurity::owner(
                     uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
                 )),
-                columns: Arc::default(),
+                columns: SharedTableDefinition::default(),
                 columns_declared: true,
-                checks: Arc::default(),
+                checks: SharedTableDefinition::default(),
                 foreign_keys: Arc::default(),
                 keys: Arc::default(),
-                hierarchy: Arc::default(),
+                hierarchy: SharedTableDefinition::default(),
                 persistence: uqa_sql::ast::RelationPersistence::Permanent,
             },
         );

@@ -34897,6 +34897,21 @@
     },
     {
       "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_begin_retires_analysis_from_the_previous_catalog_view",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/transactions/tests/admission.rs",
+      "capability": "Statement catalog admission and transaction recovery",
+      "workload": "A retained 256-KiB SQL literal, a separately committed sibling catalog change, direct BEGIN and rollback on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Successful transaction admission retires the obsolete catalog analysis before publishing its rollback snapshot; rollback cannot resurrect that cache, the committed sibling table remains visible and subsequent SQL preserves the literal. Closing the engine releases its complete query allowance.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
       "test": "native_rule_binding_uses_the_original_allowance_and_releases_destinations",
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/rule_binding.rs",
       "kind": "lib",
@@ -48921,6 +48936,529 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_value_capture_retains_native_roots_without_visiting_or_copying_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Resident evaluated-key capture",
+      "workload": "Capture one and 4,096 resident evaluated keys, update one key, change its role, and retire every live owner.",
+      "invariant": "Capture allocates less than 2 KiB, admits every reachable payload without visiting it, updates allocate less than 32 KiB, unchanged values share their original addresses, and all snapshot leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_value_capture_counts_complete_nested_payloads_before_root_retention",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Resident evaluated-key capture",
+      "workload": "Retain a resident nested evaluated value with a 2 MiB payload under independently small and sufficient capture allowances.",
+      "invariant": "Insufficient admission publishes no captured owner; successful root retention preserves the original carrier address and nested payload, observes cancellation, and releases all admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_record_capture_retains_roots_without_spill_or_value_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/capture/tests.rs",
+      "capability": "Native record capture work",
+      "workload": "Capture 256 resident or spilled records, deny one byte below full admission, then delete and retire the live source.",
+      "invariant": "Capture allocates less than 2 KiB and performs zero record or payload reads and zero spill writes; roots, revisions, exact values and complete release survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_record_capture_charges_resident_payloads_and_preserves_undo_footprints",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/capture/tests.rs",
+      "capability": "Native record capture admission",
+      "workload": "Capture a two-MiB resident payload, replace it with a short value, mutate under a savepoint and roll back.",
+      "invariant": "Complete cached payload footprints reject insufficient independent limits, follow immutable undo roots and release all source and capture reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_capture_streams_wide_values_with_bounded_memory_after_source_loss",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Spilled evaluated-key image output",
+      "workload": "Capture a two-MiB value with 128 KiB, mutate and close the source, then prepare in three-position steps and stream with 64 KiB.",
+      "invariant": "Capture allocates less than 2 KiB without decoding; every chunk and EOF is accounted, bytes match an independent UQAVAL01 fixture, an unfunded decode fails and all leases release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_capture_preserves_exact_representations_and_owned_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Native evaluated-key identity",
+      "workload": "Capture resident and spilled NULL, signed zero, NaN bits, tag-shaped maps and duplicate positional record names.",
+      "invariant": "Exact admission and one-byte-short rejection preserve every native carrier; independently decoded values retain their own allowance after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_image_preparation_counts_deleted_chunks_and_node_positions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Bounded deleted-key traversal",
+      "workload": "Replace a 128-KiB value with NULL and delete another identity before capture.",
+      "invariant": "Each deleted node or chunk remains a charged metadata position; preparation visits at most one position per call and output contains only the exact live NULL image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_images_reject_chunk_corruption_before_output",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Native chunk validation",
+      "workload": "Delete or alter the length of an evaluated value chunk before capture.",
+      "invariant": "Invalid chunk metadata fails before output, leaves no reader allocation, preserves typed errors and prevents reader resumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_value_images_preserve_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/retained/capture/tests.rs",
+      "capability": "Captured chunk cancellation",
+      "workload": "Cancel either the original capture or the independent output control after preparing and reading one byte.",
+      "invariant": "The next read reports cancellation, drops all reader workspace and remains terminal; the ordinary source remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_value_capture_keeps_wide_evaluated_values_on_native_roots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/tests.rs",
+      "capability": "Spilled evaluated-key capture",
+      "workload": "Capture a two-MiB evaluated key under 128 KiB and independently under a full decoding allowance.",
+      "invariant": "Capture allocates less than 2 KiB and retains native files; decoding alone requires payload admission, preserves exact bytes and releases every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_capture_retains_names_without_visiting_child_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Native evaluated-index membership",
+      "workload": "Capture 128 named indexes and one derived column cache, then seek the final identity and read a selected child.",
+      "invariant": "Membership capture allocates less than 2 KiB, preserves ordered names and leaves every child unread until selected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_publication_keeps_exact_children_after_replacement_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Evaluated-index source publication",
+      "workload": "Reuse a name, add and remove children, retain three independently selected memberships, and retire the source.",
+      "invariant": "Each cut resolves its exact original child; foreign cuts are rejected and independently retained values survive cut retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_value_membership_denied_successors_preserve_live_and_selected_collections",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/tests.rs",
+      "capability": "Evaluated-index publication admission",
+      "workload": "Exhaust native name and published membership allowances before insertion and clearing, then update the original child.",
+      "invariant": "Denied successor preparation changes neither live membership nor published selection, and the old captured value remains exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "idle_value_index_publication_preserves_reused_names_and_restored_child_membership",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests/live_publication.rs",
+      "capability": "Idle evaluated-index generations",
+      "workload": "Capture lower-case expression keys, recreate the same index using upper-case keys, roll back a row change, add another index and close the Engine.",
+      "invariant": "Idle cuts retain original evaluated keys and the restored child group includes later indexes; all captured leases retire with their final child owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_metadata_preserves_independent_wire_and_historical_policy",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index metadata images",
+      "workload": "Compare explicit wire bytes, historical eligibility and exact field text, then reject every truncated prefix, unknown flags and insufficient field admission.",
+      "invariant": "The metadata inverse preserves native policy and counts; failed input releases every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_value_images_preserve_exact_carriers_and_deleted_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index image identity selection",
+      "workload": "Capture resident and spilled NULL/negative-zero values after deletion, mutate and retire the source, then enumerate physical positions and decode exact bytes.",
+      "invariant": "Both representations emit identical live carriers, while spilled tombstones are counted as individual positions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_images_stream_wide_values_with_independent_bounded_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Bounded evaluated-index images",
+      "workload": "Stream a two-MiB value from resident and spilled captures after source closure using independent 128-KiB output admission and one-position preparation.",
+      "invariant": "Spilled output never decodes the population, output scratch remains bounded, and the original value reconstructs exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_index_image_readers_keep_both_controls_and_release_failed_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/capture/image/tests.rs",
+      "capability": "Evaluated-index image cancellation",
+      "workload": "Open metadata and value readers, consume a prefix and cancel either original capture or invoking output.",
+      "invariant": "Both controls remain effective after opening, failure is terminal and all cursor workspace is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_payload_footprints_share_controlled_and_ordinary_counting",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests.rs",
+      "capability": "Native value footprint construction",
+      "workload": "Count scalar and nested native payloads through ordinary and admitted construction, denied workspace and both cancellation scopes.",
+      "invariant": "Construction observes the unchanged retained payload without cloning it; ordinary flat observation allocates nothing and failed controlled traversal releases its workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_shares_native_roots_without_population_work_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Immutable statistics capture",
+      "workload": "Capture 2,048 native distributions, replace their source and retire its owner.",
+      "invariant": "Independent capture allocates no population storage, retains original addresses and exact values, and releases the complete cached payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_independently_admits_ordinary_produced_and_decoded_generations",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Statistics generation retention",
+      "workload": "Retain ordinary, admitted and image-decoded distributions with exact and one-byte-short independent budgets.",
+      "invariant": "Every source representation retains the original generation, rejects insufficient admission and releases both producer and capture reservations after final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_capture_footprints_follow_replacement_capacity_and_both_controls",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/tests/capture.rs",
+      "capability": "Statistics publication footprint",
+      "workload": "Insert and replace ordinary distributions before and after sharing, then cancel each capture scope.",
+      "invariant": "Cached capacity follows the actual published generation; source and invoking cancellation reject capture without retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_statistics_capture_preserves_native_distributions_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed statistics source retention",
+      "workload": "Capture a committed table with a one-MiB distribution, replace live statistics and retire the Engine.",
+      "invariant": "Capture uses less than 64 KiB allocation workspace while retaining and charging the original distribution; cancellation and final retirement preserve the original control.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_share_original_bytes_without_configuration_retention",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Published analyzer image retention",
+      "workload": "Capture a one-MiB configuration, replace its definition and retire the original configuration owner.",
+      "invariant": "Capture allocates nothing, independently admits the exact exposed image capacity and preserves original bytes without retaining configuration or executable resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_preserve_unresolved_paths_and_deferred_validation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Unresolved analyzer publication",
+      "workload": "Publish an invalid regular expression and missing synonym path and compare its image with independent JSON bytes.",
+      "invariant": "Publication and capture preserve deferred validation, do not resolve files and retain the exact existing serialized configuration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_images_admit_exact_capacity_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Analyzer image admission",
+      "workload": "Capture a published image with exact and insufficient allowances and independently cancelled original/invoking scopes.",
+      "invariant": "Admission is checked before shared retention and every failure or final retirement releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "published_analyzer_encoding_errors_leave_the_original_configuration_usable",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests.rs",
+      "capability": "Analyzer configuration failure preservation",
+      "workload": "Publish a native non-UTF-8 synonym path and independently request its unavailable JSON image twice.",
+      "invariant": "The original configuration remains intact; capture returns the same cached serialization error without rewriting paths or rerunning encoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_analyzer_capture_shares_the_original_published_image",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed analyzer image selection",
+      "workload": "Select a one-MiB original analyzer image during a private replacement, then roll back, replace and retire the Engine.",
+      "invariant": "The selected image preserves its original address and bytes with less than 64 KiB of capture allocation, independent admission and complete cancellation/lifetime handling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_capture_shares_native_capacities_without_population_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain 2,048 metadata names with spare payload and vector capacities.",
+      "invariant": "Capture shares the original native generation with zero allocation, exact independent admission, both cancellation scopes and complete release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_publication_keeps_original_snapshots_and_recounts_detached_capacities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Mutate a shared metadata value and restore its original generation.",
+      "invariant": "Mutation detaches before changing values, publishes actual destination capacities and preserves original snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_write_publishes_capacities_during_unwind_and_fails_closed_when_forgotten",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Unwind during publication and deliberately forget a borrowed writer.",
+      "invariant": "Unwinding publishes the changed footprint; a forgotten writer cannot admit mutated payload using stale capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_constraints_charge_all_nested_names_and_vector_capacities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain key and foreign-key metadata including all nested name buffers and spare vector capacity.",
+      "invariant": "The original immutable generation requires the exact complete payload allowance and releases it on every failure and completion path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_dropped_attributes_preserve_original_owned_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain a dropped attribute with spare alignment-name capacity and original physical metadata.",
+      "invariant": "Capture preserves all native fields and independently charges original exposed capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_table_names_and_constraints_capture_original_native_generations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed native table metadata selection",
+      "workload": "Select five original one-MiB metadata values during private replacements, roll back, replace them and retire the Engine.",
+      "invariant": "Capture preserves native addresses and values with less than 64 KiB of allocation, independent admission and complete cancellation and lifetime handling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "published_table_literals_release_query_sources_and_capture_without_reading_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests.rs",
+      "capability": "Native table expression generations",
+      "workload": "Detach an evaluated one-MiB default from its query source and retain the native definition under exact and denied allowances.",
+      "invariant": "Native publication releases the query source; capture performs no source read or allocation, preserves constructor leases and releases independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_definition_publication_keeps_the_original_on_source_failure_and_unwinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests.rs",
+      "capability": "Native table expression generations",
+      "workload": "Fail a retained default read, unwind a candidate edit and publish a successful replacement.",
+      "invariant": "Failed construction and unwinding preserve the original generation; successful publication detaches and keeps captured predecessors unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "published_table_definitions_preserve_constraints_and_provisional_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests.rs",
+      "capability": "Native table expression generations",
+      "workload": "Construct column, CHECK and partition definitions, including provisional SQL syntax awaiting the existing declaration validator.",
+      "invariant": "Construction preserves complete syntax and metadata without evaluation; independent capture honors both cancellation scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_native_columns_keep_constructor_leases_and_charge_literal_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests.rs",
+      "capability": "Native table expression generations",
+      "workload": "Retain published columns containing a one-MiB evaluated literal after retiring the original native catalog handle.",
+      "invariant": "Query retention charges complete literal payloads and preserves native constructor leases until the final retained consumer retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_table_expressions_capture_original_native_generations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/table_definitions.rs",
+      "capability": "Native table expression generations",
+      "workload": "Select original one-MiB column, CHECK and partition payloads during private replacements, rollback and Engine closure.",
+      "invariant": "Selection allocates less than 64 KiB, independently admits all payloads and preserves native generation identities through retirement and cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "failed_native_table_definition_publication_restores_the_original_default",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/table_definitions.rs",
+      "capability": "Native table expression generations",
+      "workload": "Reject an unavailable evaluated default on memory, native SQLite, SQLite KV and redb, then insert with the prior and replacement defaults.",
+      "invariant": "The original definition survives failed publication, temporary source ownership is released and later schema publication remains usable.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_routine_capture_admits_original_and_bound_retained_literals",
@@ -48944,21 +49482,6 @@
       "invariant": "Each independent capture admits exactly its native baseline plus every retained literal payload; insufficient admission releases all ownership.",
       "case_names": [
         ""
-      ]
-    },
-    {
-      "package": "uqa-engine",
-      "kind": "lib",
-      "test": "admitted_begin_retires_analysis_from_the_previous_catalog_view",
-      "cases": 3,
-      "source": "crates/uqa-engine/src/transactions/tests/admission.rs",
-      "capability": "Statement catalog admission and transaction recovery",
-      "workload": "A retained 256-KiB SQL literal, a separately committed sibling catalog change, direct BEGIN and rollback on native SQLite, SQLite Key/Value and redb.",
-      "invariant": "Successful transaction admission retires the obsolete catalog analysis before publishing its rollback snapshot; rollback cannot resurrect that cache, the committed sibling table remains visible and subsequent SQL preserves the literal. Closing the engine releases its complete query allowance.",
-      "case_names": [
-        "case_1_sqlite_native",
-        "case_2_sqlite_kv",
-        "case_3_redb"
       ]
     }
   ]

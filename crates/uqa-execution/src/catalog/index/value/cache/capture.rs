@@ -7,41 +7,18 @@
 //! Capture stored expression keys and their eligibility without evaluating expressions again.
 
 use super::{comparison::StoredComparison, ValueIndexCache};
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
+use std::ops::Deref;
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap, BudgetedString},
+    memory::{Budgeted, BudgetedString, RetainedMapSnapshot},
     DocId, Value, ValueRetentionError,
 };
 use uqa_storage::{
-    memory_capture::MemoryCaptureSource, read_control::StorageReadControl, StorageBackendError,
-    StorageBackendResult, ValueIndexKey,
+    btree_index::retained::RetainedValueIndexSnapshot, memory_capture::MemoryCaptureSource,
+    read_control::StorageReadControl, StorageBackendError, StorageBackendResult,
 };
 
-/// The live collection is mutated only through its enclosing source admission owner.
-#[derive(Default)]
-pub struct ValueIndexes(BTreeMap<ValueIndexKey, ValueIndexCache>);
-
-impl From<BTreeMap<ValueIndexKey, ValueIndexCache>> for ValueIndexes {
-    fn from(indexes: BTreeMap<ValueIndexKey, ValueIndexCache>) -> Self {
-        Self(indexes)
-    }
-}
-
-impl Deref for ValueIndexes {
-    type Target = BTreeMap<ValueIndexKey, ValueIndexCache>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ValueIndexes {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+mod image;
+pub use image::ValueIndexImageMetadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueIndexComparison {
@@ -63,8 +40,29 @@ pub struct CapturedValueIndexPolicy {
 pub struct CapturedValueIndex {
     field: BudgetedString,
     policy: CapturedValueIndexPolicy,
-    values: BudgetedMap<DocId, Budgeted<Value>>,
+    values: CapturedValues,
     control: StorageReadControl,
+}
+
+enum CapturedValues {
+    Resident(Budgeted<RetainedMapSnapshot<DocId, Value>>),
+    Spilled(Budgeted<RetainedValueIndexSnapshot>),
+}
+
+/// Resident values borrow the admitted immutable root; spilled values retain the allowance of their individual decoding.
+pub enum CapturedValue<'a> {
+    Borrowed(&'a Value),
+    Owned(Budgeted<Value>),
+}
+
+impl Deref for CapturedValue<'_> {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
 }
 
 impl ValueIndexCache {
@@ -74,49 +72,37 @@ impl ValueIndexCache {
     ) -> StorageBackendResult<Budgeted<CapturedValueIndex>> {
         control.check()?;
         let memory = control.memory().reserve(size_of::<CapturedValueIndex>())?;
-        let field = copy_text(&self.field, control)?;
-        let mut values = BudgetedMap::new(control.memory());
-        let mut insert = |id, value| -> StorageBackendResult<()> {
-            control.check()?;
-            if values.insert(id, value)?.is_some() {
-                return Err(StorageBackendError::Other(
-                    "duplicate captured value-index identity".into(),
-                ));
-            }
-            Ok(())
-        };
-        if let Some(retained) = &self.retained {
-            retained.visit_values_owned(control, &mut |id, value| {
-                insert(id, value)?;
-                Ok(true)
-            })?;
-        } else {
-            for (&id, value) in &self.policy.values {
-                let value = value
-                    .clone_budgeted(control.memory(), control.cancellation())
-                    .map_err(value_error)?;
-                insert(id, value)?;
-            }
-        }
+        Ok(Budgeted::new(self.freeze(control)?, memory))
+    }
+}
+
+impl MemoryCaptureSource for ValueIndexCache {
+    type Frozen = CapturedValueIndex;
+
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
         control.check()?;
-        Ok(Budgeted::new(
-            CapturedValueIndex {
-                field,
-                policy: CapturedValueIndexPolicy {
-                    carried: self.is_carried(),
-                    has_temporal: self.policy.has_temporal,
-                    has_row_values: self.policy.has_row_values,
-                    comparison: match self.policy.comparison {
-                        StoredComparison::Ordered => ValueIndexComparison::Ordered,
-                        StoredComparison::TypedField => ValueIndexComparison::TypedField,
-                        StoredComparison::Fallible => ValueIndexComparison::Fallible,
-                    },
+        let field = copy_text(&self.field, control)?;
+        let values = if let Some(retained) = &self.retained {
+            CapturedValues::Spilled(retained.capture(control)?)
+        } else {
+            CapturedValues::Resident(self.policy.values.capture(control.memory())?)
+        };
+        control.check()?;
+        Ok(CapturedValueIndex {
+            field,
+            policy: CapturedValueIndexPolicy {
+                carried: self.is_carried(),
+                has_temporal: self.policy.has_temporal,
+                has_row_values: self.policy.has_row_values,
+                comparison: match self.policy.comparison {
+                    StoredComparison::Ordered => ValueIndexComparison::Ordered,
+                    StoredComparison::TypedField => ValueIndexComparison::TypedField,
+                    StoredComparison::Fallible => ValueIndexComparison::Fallible,
                 },
-                values,
-                control: control.clone(),
             },
-            memory,
-        ))
+            values,
+            control: control.clone(),
+        })
     }
 }
 
@@ -133,18 +119,25 @@ impl CapturedValueIndex {
 
     pub fn len(&self) -> StorageBackendResult<usize> {
         self.control.check()?;
-        Ok(self.values.len())
+        Ok(match &self.values {
+            CapturedValues::Resident(values) => values.len(),
+            CapturedValues::Spilled(values) => values.len()?,
+        })
     }
 
     pub fn is_empty(&self) -> StorageBackendResult<bool> {
-        self.control.check()?;
-        Ok(self.values.is_empty())
+        Ok(self.len()? == 0)
     }
 
-    /// Absence and an evaluated SQL NULL remain distinct. The returned borrow cannot outlive its admitted source owner.
-    pub fn value(&self, id: DocId) -> StorageBackendResult<Option<&Value>> {
+    /// Absence and an evaluated SQL NULL remain distinct. Decoding a spilled value retains its capture allowance until the returned value is dropped.
+    pub fn value(&self, id: DocId) -> StorageBackendResult<Option<CapturedValue<'_>>> {
         self.control.check()?;
-        Ok(self.values.get(&id).map(|value| &**value))
+        Ok(match &self.values {
+            CapturedValues::Resident(values) => values.get(&id).map(CapturedValue::Borrowed),
+            CapturedValues::Spilled(values) => {
+                values.get(id, &self.control)?.map(CapturedValue::Owned)
+            }
+        })
     }
 
     /// Visit exact stored representations in document identity order. Cancellation is observed between callbacks and after the final callback.
@@ -153,53 +146,25 @@ impl CapturedValueIndex {
         visitor: &mut dyn FnMut(DocId, &Value) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         self.control.check()?;
-        for (&id, value) in &self.values {
+        let mut visit = |id, value: &Value| {
             self.control.check()?;
             visitor(id, value)?;
+            self.control.check()
+        };
+        match &self.values {
+            CapturedValues::Resident(values) => {
+                for (&id, value) in values.iter() {
+                    visit(id, value)?;
+                }
+            }
+            CapturedValues::Spilled(values) => {
+                values.visit_values_owned(&self.control, &mut |id, value| {
+                    visit(id, &value)?;
+                    Ok(true)
+                })?;
+            }
         }
         self.control.check()
-    }
-}
-
-/// Named SQL indexes retain evaluated keys. Opportunistic column accelerators are derived caches and do not enter the image.
-pub struct CapturedValueIndexes {
-    indexes: BudgetedMap<ValueIndexKey, Budgeted<CapturedValueIndex>>,
-    control: StorageReadControl,
-}
-
-impl MemoryCaptureSource for ValueIndexes {
-    type Frozen = CapturedValueIndexes;
-    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
-        control.check()?;
-        let mut indexes = BudgetedMap::new(control.memory());
-        for (key, index) in &self.0 {
-            if !matches!(key, ValueIndexKey::Index(_)) {
-                continue;
-            }
-            control.check()?;
-            let name = copy_text(key.name(), control)?;
-            let (name, name_memory) = name.into_parts();
-            let (index, mut memory) = index.capture_values(control)?.into_parts();
-            memory.absorb(name_memory);
-            indexes.insert(ValueIndexKey::Index(name), Budgeted::new(index, memory))?;
-        }
-        control.check()?;
-        Ok(CapturedValueIndexes {
-            indexes,
-            control: control.clone(),
-        })
-    }
-}
-
-impl CapturedValueIndexes {
-    pub fn get(&self, key: &ValueIndexKey) -> StorageBackendResult<Option<&CapturedValueIndex>> {
-        self.control.check()?;
-        Ok(self.indexes.get(key).map(|index| &**index))
-    }
-
-    pub fn keys(&self) -> StorageBackendResult<impl ExactSizeIterator<Item = &ValueIndexKey>> {
-        self.control.check()?;
-        Ok(self.indexes.iter().map(|(key, _)| key))
     }
 }
 
@@ -216,7 +181,7 @@ fn copy_text(value: &str, control: &StorageReadControl) -> StorageBackendResult<
     Ok(BudgetedString::from_budgeted(value))
 }
 
-fn value_error(error: ValueRetentionError) -> StorageBackendError {
+pub(super) fn value_error(error: ValueRetentionError) -> StorageBackendError {
     match error {
         ValueRetentionError::Memory(error) => error.into(),
         ValueRetentionError::Cancelled(error) => error.into(),

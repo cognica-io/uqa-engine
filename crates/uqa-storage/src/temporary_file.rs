@@ -64,6 +64,13 @@ impl TemporaryFileMetadata {
 }
 
 impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
+    /// Native file-owner layout and the exposed path capacity. Kernel state, allocator bookkeeping and dependency-private allocations are not estimated as owned payload.
+    pub(crate) fn retained_bytes(&self) -> Option<usize> {
+        size_of::<Mutex<Owner<BYTES>>>()
+            .checked_add(size_of::<PathBuf>())?
+            .checked_add(self.path.capacity())
+    }
+
     /// Ciphertext file length for a logical length, including both slots and complete block framing. This excludes filesystem allocation metadata.
     pub fn physical_len_for(logical_length: u64) -> io::Result<u64> {
         if BYTES == 0 || BYTES > BLOCK_BYTES {

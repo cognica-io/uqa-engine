@@ -13,8 +13,10 @@ use uqa_core::{
     DocId, Value,
 };
 
+mod capture;
 mod records;
 mod tree;
+pub use capture::RetainedValueIndexSnapshot;
 use records::Records;
 
 /// A physical value index whose ordered nodes and value chunks use the existing encrypted private-record runs. Core ordering is unchanged; SQL operator selection belongs to the caller. Each replacement publishes a new root only after all of its writes succeed. Cloning shares immutable runs and forks subsequent updates.

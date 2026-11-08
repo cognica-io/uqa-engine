@@ -8,6 +8,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Table column, CHECK and partition definitions retain independent immutable generations and complete evaluated-literal ownership across committed memory capture, query readers and transaction rollback.
+
+- Committed memory captures share immutable table field names, foreign and key constraints, row-array names and dropped-attribute metadata under independent capacity admission; publication and rollback preserve original generations.
+
+- Committed memory captures share the original table analyzer configuration image while preserving deferred validation and resource loading.
+
+- Committed memory captures retain original Planner statistics under independent cached-footprint admission without copying their distribution population.
+
+- Stream original evaluated-index policies and value images from committed memory captures, including spilled keys, without reevaluation. Complete memory inventory and Engine restore remain under implementation.
+
+- Retain immutable named-index membership separately from evaluated child values. Live publication and rollback preserve exact child identities through name reuse, deletion and source retirement without scanning values when capturing the name root. Complete memory backup and public restore remain under implementation.
+
+- Spilled evaluated-index captures retain native record roots and encrypted files without reading or copying the complete value population. Independent retention charges cached metadata footprints; bounded chunk preparation and output preserve exact evaluated bytes after source mutation or closure.
+
+- Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.
+
 - Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
 
 - Native rewrite-rule images preserve original SQL, bound conditions, OLD/NEW identities and dependency membership through independently retained event owners. Complete memory Engine backup and public restore remain in progress.

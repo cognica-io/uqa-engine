@@ -54,7 +54,7 @@ pub fn rewrite_sequence_schema_dependencies(
         context.foreign.persist_foreign_table(relation, table)?;
     }
     for (state, columns, constraints) in &table_updates {
-        state.publish_expressions(columns, &constraints.checks);
+        state.publish_expressions(columns, &constraints.checks)?;
     }
     let foreign_tables_changed = !foreign_updates.is_empty();
     if foreign_tables_changed {

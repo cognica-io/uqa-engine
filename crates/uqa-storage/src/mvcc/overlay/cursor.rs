@@ -26,6 +26,17 @@ pub struct PrivateRecordEntry<'a> {
 }
 
 impl PrivateRecordSnapshot {
+    /// Select an exact private entry without reading its payload. Native codecs validate the retained length before admitting any payload allocation.
+    pub(crate) fn entry(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PrivateRecordEntry<'_>>> {
+        control.check()?;
+        super::tiers::lookup(&self.records, &self.runs, key, control)
+            .map(|change| change.map(|change| PrivateRecordEntry { change }))
+    }
+
     /// Select this prefix strictly after `after` on the retained private root. The cursor and entries cannot outlive the root; a later command or undo never changes their records.
     pub fn cursor(
         &self,
@@ -102,6 +113,11 @@ impl PrivateRecordEntry<'_> {
 
     pub fn metadata(&self) -> RecordMetadata {
         self.change.metadata()
+    }
+
+    /// Encoded payload length from the native entry metadata; deletions have no payload.
+    pub(crate) fn value_len(&self) -> Option<u64> {
+        self.change.value_len()
     }
 
     /// Read this entry's value under the caller's allowance, without seeking its identity again. Resident payloads retain their original reservation.

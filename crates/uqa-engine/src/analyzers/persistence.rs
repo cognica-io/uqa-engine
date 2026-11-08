@@ -235,7 +235,9 @@ impl Engine {
             FieldAnalyzerBinding::unassigned(revision.clone(), revision)
         } else {
             let binding = self.current_field_analyzer_binding(table_name, table, field)?;
-            *table.analyzer.write() = binding.index.compiled.descriptor().configuration()?;
+            *table.analyzer.write() = uqa_analysis::AnalyzerDefinition::new(
+                binding.index.compiled.descriptor().configuration()?,
+            );
             binding
         };
         for (phase, name) in old {

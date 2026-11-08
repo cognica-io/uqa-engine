@@ -13,7 +13,7 @@ pub(super) use change::TieredChange;
 use std::iter::Peekable;
 use std::ops::Bound;
 
-use uqa_core::memory::BudgetedSharedMapIter;
+use uqa_core::memory::{BudgetedSharedMap, BudgetedSharedMapIter};
 
 use crate::mvcc::VersionResult;
 use crate::read_control::StorageReadControl;
@@ -25,7 +25,7 @@ use crate::mvcc::key::RecordKey;
 
 /// The newest change of `key` in `records` or `runs`; the memory tier shadows the runs.
 pub(super) fn lookup<'a>(
-    records: &'a super::Records,
+    records: &'a BudgetedSharedMap<RecordKey, Change>,
     runs: &RunSet,
     key: &[u8],
     control: &StorageReadControl,
@@ -43,7 +43,7 @@ struct RunHead {
 
 /// Visits the changes of a private root in key order: its memory tier first, then its runs from newest to oldest, so that only the newest change of each key is returned.
 pub(super) struct TieredCursor<'a> {
-    records: Option<&'a super::Records>,
+    records: Option<&'a BudgetedSharedMap<RecordKey, Change>>,
     memtable: Option<Peekable<BudgetedSharedMapIter<'a, RecordKey, Change>>>,
     runs: Vec<RunHead>,
 }
@@ -51,7 +51,7 @@ pub(super) struct TieredCursor<'a> {
 impl<'a> TieredCursor<'a> {
     /// A cursor over `records` and `runs` from `start`; without `records`, only the runs are read.
     pub(super) fn new(
-        records: Option<&'a super::Records>,
+        records: Option<&'a BudgetedSharedMap<RecordKey, Change>>,
         runs: &RunSet,
         start: Bound<&[u8]>,
         control: &StorageReadControl,
@@ -61,7 +61,7 @@ impl<'a> TieredCursor<'a> {
 
     /// Start a prefix scan without opening runs whose complete key interval is disjoint. The consumer still enforces the prefix on each returned change.
     pub(super) fn for_prefix(
-        records: Option<&'a super::Records>,
+        records: Option<&'a BudgetedSharedMap<RecordKey, Change>>,
         runs: &RunSet,
         prefix: &[u8],
         start: Bound<&[u8]>,

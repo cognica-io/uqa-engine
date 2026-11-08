@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::{test_support, CatalogTableSnapshot};
 use std::sync::Arc;
 use uqa_sql::catalog::relation_oids::RelationOidKind;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> CatalogTableSnapshot {
     let mut oids = RelationCatalogOids::legacy(RelationOidKind::Table, &object_id);
@@ -20,12 +21,12 @@ fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> Cat
         security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         )),
-        columns: Arc::default(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
+        checks: SharedTableDefinition::default(),
         foreign_keys: Arc::default(),
         keys: Arc::default(),
-        hierarchy: Arc::default(),
+        hierarchy: SharedTableDefinition::default(),
         persistence: uqa_sql::ast::RelationPersistence::Permanent,
     }
 }

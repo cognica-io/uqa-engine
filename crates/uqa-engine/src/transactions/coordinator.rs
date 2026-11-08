@@ -482,8 +482,10 @@ impl Engine {
             Some(Self::storage_tx_error("BEGIN refresh rollback", &error))
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
-            self.drop_persistent_value_indexes();
             let mut cleanup_errors = Vec::new();
+            if let Err(error) = self.drop_persistent_value_indexes() {
+                cleanup_errors.push(format!("value-index retirement: {error}"));
+            }
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
             (!cleanup_errors.is_empty()).then(|| SQLError::Internal(cleanup_errors.join("; ")))
         };

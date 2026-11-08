@@ -22,14 +22,25 @@ pub trait TableSchemaState {
     fn write_columns(&self) -> Box<dyn columns::ColumnSchemaWrite + '_>;
     fn persist_columns(&self, columns: &[ColumnDef]) -> StorageBackendResult<()>;
     fn constraint_header(&self) -> TableConstraintSet;
-    fn publish_constraints(&self, columns: Vec<ColumnDef>, constraints: TableConstraintSet);
+    fn publish_constraints(
+        &self,
+        columns: Vec<ColumnDef>,
+        constraints: TableConstraintSet,
+    ) -> StorageBackendResult<()>;
 
     fn key_constraints(&self) -> Vec<uqa_sql::ast::TableKeyConstraint>;
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()>;
     fn constraints(&self) -> TableConstraintSet;
     fn dependency_constraints(&self) -> TableConstraintSet;
-    fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]);
+    fn publish_expressions(
+        &self,
+        columns: &[ColumnDef],
+        checks: &[uqa_sql::ast::TableCheck],
+    ) -> StorageBackendResult<()>;
 
     fn columns_declared(&self) -> bool;
     fn mark_statistics_dirty(&self) -> StorageBackendResult<()>;
@@ -57,7 +68,7 @@ pub trait TableSchemaState {
         columns_declared: bool,
         columns: Vec<ColumnDef>,
         constraints: TableConstraintSet,
-    );
+    ) -> StorageBackendResult<()>;
     fn persist_next_id(&self) -> StorageBackendResult<()>;
     fn refresh_value_indexes(&self) -> StorageBackendResult<()>;
 }
@@ -95,7 +106,7 @@ pub fn declare_row_columns(
     let mut constraints = table.constraint_header();
     constraints.columns_declared = Some(true);
     table.persist_declaration(&columns, &constraints)?;
-    table.publish_columns(true, columns, constraints);
+    table.publish_columns(true, columns, constraints)?;
     context.changes.table_catalog_changed();
     Ok(())
 }
@@ -289,8 +300,8 @@ pub fn register_column(
     state.mark_statistics_dirty()?;
     state.persist_candidate(&columns, &constraints)?;
     let hierarchy = std::mem::take(&mut constraints.hierarchy);
-    state.publish_columns(true, columns, constraints);
-    state.publish_hierarchy(hierarchy);
+    state.publish_columns(true, columns, constraints)?;
+    state.publish_hierarchy(hierarchy)?;
     indexes.publish(&context.indexes)?;
     if legacy_auto_increment {
         state.persist_next_id()?;
@@ -361,8 +372,8 @@ pub fn replace_constraint_state(
         constraints.columns_declared.unwrap_or(false) || !columns.is_empty(),
         columns,
         constraints,
-    );
-    state.publish_hierarchy(hierarchy);
+    )?;
+    state.publish_hierarchy(hierarchy)?;
     indexes.publish(&context.indexes)?;
     state.mark_statistics_dirty()?;
     state.refresh_value_indexes()?;

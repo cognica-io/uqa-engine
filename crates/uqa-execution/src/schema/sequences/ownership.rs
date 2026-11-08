@@ -119,7 +119,7 @@ pub fn clear_auto_increment_owner_markers(
             continue;
         }
         state.persist_columns(&columns)?;
-        state.write_columns().publish(columns);
+        state.write_columns().publish(columns)?;
         catalog_changed = true;
     }
     if catalog_changed {

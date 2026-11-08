@@ -8,6 +8,7 @@
 
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -92,12 +93,12 @@ pub struct CatalogTableSnapshot {
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     pub row_type_array_name: Option<String>,
     pub security: Arc<crate::catalog::security::BoundTableSecurity>,
-    pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    pub columns: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
-    pub checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
+    pub checks: SharedTableDefinition<Vec<uqa_sql::ast::TableCheck>>,
     pub foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
     pub keys: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
-    pub hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
+    pub hierarchy: SharedTableDefinition<uqa_sql::ast::TableHierarchy>,
     pub persistence: uqa_sql::ast::RelationPersistence,
 }
 

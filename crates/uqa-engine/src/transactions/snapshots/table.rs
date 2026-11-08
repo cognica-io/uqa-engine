@@ -7,6 +7,7 @@
 //! Undo data and its capture sources share an immutable generation, never live table owners.
 
 use crate::{Engine, TableDataSnapshot, TableState};
+use uqa_execution::catalog::index::value::ValueIndexes;
 use uqa_sql::SQLError;
 use uqa_storage::{
     memory_capture::{MemoryCaptureCell, MemoryCaptureRegistry, MemoryCaptureSource},
@@ -64,6 +65,10 @@ impl TableDataSnapshot {
             .filter(|(key, _)| matches!(key, uqa_storage::ValueIndexKey::Index(_)))
             .map(|(key, index)| (key.clone(), index.clone()))
             .collect::<std::collections::BTreeMap<_, _>>();
+        let mut value_indexes = registry.map_or_else(ValueIndexes::default, ValueIndexes::memory);
+        value_indexes.replace(values).map_err(|error| {
+            Engine::storage_tx_error("snapshot value-index registration", &error)
+        })?;
         macro_rules! metadata {
             ($field:ident) => {
                 table
@@ -80,7 +85,7 @@ impl TableDataSnapshot {
             document_store: source(documents, registry)?,
             inverted_index: source(text, registry)?,
             vector_indexes: source(vectors, registry)?,
-            value_indexes: source(values.into(), registry)?,
+            value_indexes: source(value_indexes, registry)?,
             security: metadata!(security),
             storage_generation: metadata!(storage_generation),
             fts_fields: metadata!(fts_fields),

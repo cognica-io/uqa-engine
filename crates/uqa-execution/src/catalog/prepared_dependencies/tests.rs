@@ -6,6 +6,7 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::Statement,
     routines::{RoutineBody, SQLUserFunction},
@@ -86,12 +87,12 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
             security: Arc::new(super::super::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
             )),
-            columns: Arc::default(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
+            checks: SharedTableDefinition::default(),
             foreign_keys: Arc::default(),
             keys: Arc::default(),
-            hierarchy: Arc::default(),
+            hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },
     );

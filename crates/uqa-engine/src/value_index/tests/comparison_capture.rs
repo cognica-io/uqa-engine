@@ -90,7 +90,7 @@ fn fixture(fail_page: bool) -> (crate::Engine, ComparisonRows) {
     };
     let table = engine.require_table("comparison_capture").unwrap();
     *table.document_store.write() = Box::new(rows.clone());
-    crate::Engine::value_indexes_clear(&table);
+    crate::Engine::value_indexes_clear(&table).unwrap();
     (engine, rows)
 }
 

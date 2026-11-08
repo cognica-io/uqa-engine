@@ -48,6 +48,33 @@ fn retained_map_lower_bound_seeks_without_allocating_or_visiting_earlier_keys() 
         assert_eq!(allocation.count_total, 0);
         assert!(COMPARES.load(AtomicOrdering::Relaxed) < 32);
     }
+    let captured = MemoryBudget::new(1 << 20);
+    let snapshot = map.capture(&captured).unwrap();
+    map.insert(Key(4000), u32::MAX, 0).unwrap();
+    map.remove(&Key(4001)).unwrap();
+    drop(map);
+    for (bound, expected) in [
+        (Bound::Unbounded, Some(0)),
+        (Bound::Included(&Key(4000)), Some(4000)),
+        (Bound::Excluded(&Key(4000)), Some(4001)),
+        (Bound::Included(&Key(4095)), Some(4095)),
+        (Bound::Excluded(&Key(4095)), None),
+        (Bound::Included(&Key(u32::MAX)), None),
+    ] {
+        COMPARES.store(0, AtomicOrdering::Relaxed);
+        let allocation = allocation_counter::measure(|| {
+            assert_eq!(
+                snapshot
+                    .first_from(bound)
+                    .map(|(key, value)| (key.0, *value)),
+                expected.map(|key| (key, key)),
+            );
+        });
+        assert_eq!(allocation.count_total, 0);
+        assert!(COMPARES.load(AtomicOrdering::Relaxed) < 32);
+    }
+    drop(snapshot);
+    assert_eq!(captured.used(), 0);
 }
 
 #[test]

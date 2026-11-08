@@ -190,7 +190,7 @@ fn borrowed_local_scan_preserves_lock_identity_and_cancellation() {
             serializable: None,
             table_name: "t".into(),
             table: table_with_shared(shared),
-            column_definitions: Arc::new(Vec::new()),
+            column_definitions: Arc::new(Vec::new()).into(),
             columns: columns.clone(),
             schema: columns.clone(),
             physical_schema: crate::RowSchema::new(columns),

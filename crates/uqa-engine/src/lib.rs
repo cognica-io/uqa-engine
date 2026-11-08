@@ -586,26 +586,44 @@ struct TableDataSnapshot {
     value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
         uqa_execution::catalog::index::value::ValueIndexes,
     >,
-    fts_fields: state::CatalogSnapshot<Vec<FieldName>>,
-    columns: state::CatalogSnapshot<Vec<uqa_sql::ast::ColumnDef>>,
+    fts_fields:
+        state::CatalogSnapshot<uqa_sql::catalog::table_metadata::TableMetadata<Vec<FieldName>>>,
+    columns: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
+    >,
     columns_declared: state::CatalogSnapshot<bool>,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
     next_id: state::CatalogSnapshot<u128>,
     maps_integer_keys: state::CatalogSnapshot<bool>,
-    analyzer: state::CatalogSnapshot<Analyzer, Vec<u8>>,
+    analyzer: state::CatalogSnapshot<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
     column_stats: state::CatalogSnapshot<uqa_planner::ColumnStatistics>,
     column_stats_loaded: state::CatalogSnapshot<bool>,
     column_stats_dirty: state::CatalogSnapshot<bool>,
     statistics_maintenance: state::CatalogSnapshot<statistics::MaintenanceState>,
-    table_checks: state::CatalogSnapshot<Vec<uqa_sql::ast::TableCheck>>,
-    foreign_keys: state::CatalogSnapshot<Vec<uqa_sql::ast::ForeignKey>>,
-    key_constraints: state::CatalogSnapshot<Vec<uqa_sql::ast::TableKeyConstraint>>,
-    hierarchy: state::CatalogSnapshot<uqa_sql::ast::TableHierarchy>,
-    row_type_array_name: state::CatalogSnapshot<Option<String>>,
-    dropped_attributes:
-        state::CatalogSnapshot<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    table_checks: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::TableCheck>>,
+    >,
+    foreign_keys: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<Vec<uqa_sql::ast::ForeignKey>>,
+    >,
+    key_constraints: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    >,
+    hierarchy: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<uqa_sql::ast::TableHierarchy>,
+    >,
+    row_type_array_name:
+        state::CatalogSnapshot<uqa_sql::catalog::table_metadata::TableMetadata<Option<String>>>,
+    dropped_attributes: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<
+            Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
+        >,
+    >,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }
@@ -627,15 +645,18 @@ pub(crate) struct TableState {
     inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
     vector_indexes:
         uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
-    fts_fields: state::CatalogCell<Vec<FieldName>>,
+    fts_fields: state::TableMetadataCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
-    columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
+    columns: state::TableDefinitionCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
     /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
     next_id: state::CatalogCell<u128>,
     /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
     maps_integer_keys: state::CatalogCell<bool>,
-    analyzer: state::CatalogCell<Analyzer, Vec<u8>>,
+    analyzer: state::CatalogCell<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
@@ -646,16 +667,16 @@ pub(crate) struct TableState {
     statistics_maintenance: state::CatalogCell<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
-    table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
+    table_checks: state::TableDefinitionCell<Vec<uqa_sql::ast::TableCheck>>,
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
-    foreign_keys: state::CatalogCell<Vec<uqa_sql::ast::ForeignKey>>,
+    foreign_keys: state::TableMetadataCell<Vec<uqa_sql::ast::ForeignKey>>,
     /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
     /// their SQL NULL-equality policy.
-    key_constraints: state::CatalogCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    key_constraints: state::TableMetadataCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
     /// Direct parents, an optional partition key, and an optional child bound.
     /// The complete object is persisted with the table's constraint envelope.
-    hierarchy: state::CatalogCell<uqa_sql::ast::TableHierarchy>,
+    hierarchy: state::TableDefinitionCell<uqa_sql::ast::TableHierarchy>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
@@ -673,9 +694,9 @@ pub(crate) struct TableState {
     on_commit: uqa_sql::ast::OnCommitAction,
     /// The public OIDs allocated when the table was created; `None` for a table created before OIDs were recorded, which derives them from its identity.
     catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
-    row_type_array_name: state::CatalogCell<Option<String>>,
+    row_type_array_name: state::TableMetadataCell<Option<String>>,
     dropped_attributes:
-        state::CatalogCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+        state::TableMetadataCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
 }
 
 impl TableState {

@@ -7,17 +7,18 @@
 use super::super::context::{RetrievalIndexState, TextIndexRead, VectorIndexRead};
 use super::validate_vector_query;
 use std::{collections::BTreeMap, sync::Arc};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{vector_index::VectorIndexes, MemoryVectorIndex, VectorIndex};
 
 struct CapturedTable {
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     vectors: VectorIndexes,
 }
 
 impl RetrievalIndexState for CapturedTable {
-    fn columns(&self) -> Arc<Vec<ColumnDef>> {
-        Arc::clone(&self.columns)
+    fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>> {
+        self.columns.clone()
     }
 
     fn inverted_index(&self) -> TextIndexRead<'_> {
@@ -48,7 +49,7 @@ fn table(declaration: Option<&str>, dimensions: Option<u32>) -> CapturedTable {
         );
     }
     CapturedTable {
-        columns: Arc::new(columns),
+        columns: Arc::new(columns).into(),
         vectors: vectors.into(),
     }
 }

@@ -31,7 +31,7 @@ pub trait VacuumTable {
     fn clear_documents(&self) -> StorageBackendResult<()>;
     fn clear_text_index(&self) -> StorageBackendResult<()>;
     fn vector_indexes(&self) -> VacuumVectorIndexes<'_>;
-    fn clear_value_indexes(&self);
+    fn clear_value_indexes(&self) -> StorageBackendResult<()>;
     fn persistence(&self) -> RelationPersistence;
     fn mark_doc_count_dirty(&self);
 }

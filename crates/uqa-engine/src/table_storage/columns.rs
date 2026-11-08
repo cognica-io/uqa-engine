@@ -218,17 +218,20 @@ impl Engine {
         security.rename_column_acl(from, to);
     }
 
-    fn rename_column_key_metadata(t: &super::TableState, from: &str, to: &str) {
-        uqa_sql::schema::columns::publication::rename_local_column(
-            &mut t.hierarchy.write(),
-            from,
-            to,
-        );
+    fn rename_column_key_metadata(
+        t: &super::TableState,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        let mut hierarchy = t.hierarchy.read().clone();
+        uqa_sql::schema::columns::publication::rename_local_column(&mut hierarchy, from, to);
+        t.hierarchy.write().publish(hierarchy)?;
         uqa_sql::schema::columns::publication::rename_key_columns(
             &mut t.key_constraints.write(),
             from,
             to,
         );
+        Ok(())
     }
 
     fn rename_document_fields(
@@ -314,10 +317,14 @@ impl Engine {
             .read()
             .with_renamed_field(&table_name, from, to)?;
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
-        Self::value_indexes_clear(&t);
-        uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
+        Self::value_indexes_clear(&t)?;
+        let mut columns = t.columns.write();
+        let mut next = columns.clone();
+        uqa_sql::schema::columns::publication::rename_column(&mut next, from, to);
+        columns.publish(next)?;
+        drop(columns);
         Self::rename_column_acl(&t, from, to);
-        Self::rename_column_key_metadata(&t, from, to);
+        Self::rename_column_key_metadata(&t, from, to)?;
         {
             let mut fts = t.fts_fields.write();
             for f in fts.iter_mut() {

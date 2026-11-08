@@ -67,6 +67,7 @@ impl SnapshotTableSources {
             let entry = TableSources::from_snapshot(table, &name)?;
             selection = entry.select(&selection)?;
             selection = table.vector_indexes.read().capture_sources(&selection)?;
+            selection = table.value_indexes.read().capture_sources(&selection)?;
             let mut root = membership.write();
             *root = root.with_source(name, entry)?;
         }

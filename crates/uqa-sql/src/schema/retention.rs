@@ -16,6 +16,7 @@ use uqa_core::{
 };
 
 use crate::ast::{ColumnDef, ColumnType, Expr, FunctionBinding};
+use crate::catalog::table_definition::SharedTableDefinition;
 
 mod columns;
 mod domains;
@@ -68,23 +69,30 @@ type Result<T> = std::result::Result<T, CatalogRetentionError>;
 
 /// An admitted immutable column generation. Clones share both the original definitions and one reservation; they do not copy ASTs or reacquire an allowance. Strings, vector capacities, boxed payloads and nested Core values are charged. Allocator/reference-count bookkeeping and Core value map node slack are outside the payload allowance.
 #[derive(Debug, Clone)]
-pub struct RetainedColumns(Arc<Budgeted<Arc<Vec<ColumnDef>>>>);
+pub struct RetainedColumns(Arc<Budgeted<SharedTableDefinition<Vec<ColumnDef>>>>);
 
 impl RetainedColumns {
     /// Admit an existing, SQL-validated generation before acquiring shared ownership. The source remains unchanged on cancellation or quota failure. Subqueries violate the stored column-expression invariant enforced by the default, CHECK and generated-column validators and return a typed error.
-    pub fn capture(
-        columns: &Arc<Vec<ColumnDef>>,
+    pub fn capture<C: Clone + Into<SharedTableDefinition<Vec<ColumnDef>>>>(
+        columns: &C,
         budget: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self> {
-        let mut walker = Walker::new(budget, cancellation);
-        walker.charge(size_of::<Vec<ColumnDef>>())?;
-        walker.children(columns, Node::Column)?;
-        let memory = walker.finish()?;
         cancellation.check()?;
-        Ok(Self(
-            Budgeted::new(Arc::clone(columns), memory).into_shared()?,
-        ))
+        let columns = columns.clone().into();
+        let memory = match &columns {
+            SharedTableDefinition::Native(definition) => {
+                budget.reserve(definition.retained_bytes())?
+            }
+            SharedTableDefinition::External(columns) => {
+                let mut walker = Walker::new(budget, cancellation);
+                walker.charge(size_of::<Vec<ColumnDef>>())?;
+                walker.children(columns, Node::Column)?;
+                walker.finish()?
+            }
+        };
+        cancellation.check()?;
+        Ok(Self(Budgeted::new(columns, memory).into_shared()?))
     }
 
     pub fn as_slice(&self) -> &[ColumnDef] {

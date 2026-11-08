@@ -38,6 +38,7 @@ mod unicode;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
+    AnalyzerConfigurationError, AnalyzerConfigurationImage, AnalyzerDefinition,
     AnalyzerImageSource, AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer,
     CompiledAnalyzer,
 };

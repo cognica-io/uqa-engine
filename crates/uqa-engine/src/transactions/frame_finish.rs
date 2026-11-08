@@ -400,7 +400,9 @@ impl Engine {
             }
         }
         if self.storage.backend.is_some() {
-            self.drop_persistent_value_indexes();
+            if let Err(error) = self.drop_persistent_value_indexes() {
+                cleanup_errors.push(format!("value-index retirement: {error}"));
+            }
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if session_snapshot.is_some() {
@@ -611,7 +613,9 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        self.drop_persistent_value_indexes();
+        if let Err(error) = self.drop_persistent_value_indexes() {
+            cleanup_errors.push(format!("value-index retirement: {error}"));
+        }
         if self.storage.backend.is_some() {
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }

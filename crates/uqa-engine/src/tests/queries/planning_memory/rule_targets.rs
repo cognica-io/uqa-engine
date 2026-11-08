@@ -21,7 +21,14 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
     let engine = provider.open(&directory.path().join("rule-target.db"));
     engine.sql("CREATE TABLE items (n text DEFAULT 'original'); CREATE VIEW selected AS SELECT 'original'::text AS n; CREATE MATERIALIZED VIEW materialized AS SELECT 'original'::text AS n", &[]).unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+            Ok(())
+        })
+        .unwrap();
     {
         let mut views = engine.durable.views.write();
         views
@@ -83,7 +90,14 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
         drop(output);
         assert_eq!(memory.used(), before + occupied.bytes());
     }
-    table.columns.write()[0].name = "x".repeat(4 * 1024 * 1024);
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "x".repeat(4 * 1024 * 1024);
+            Ok(())
+        })
+        .unwrap();
     // The view still requires an admitted analysis tree to validate its row schema; table defaults and materialized rows are irrelevant to that descriptor.
     for target in ["items", "selected"] {
         let measured = allocation_counter::measure(|| {
@@ -100,7 +114,14 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
         );
         assert_eq!(memory.used(), before + occupied.bytes());
     }
-    table.columns.write()[0].name = "n".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "n".into();
+            Ok(())
+        })
+        .unwrap();
     drop(occupied);
     for token in [resources.cancellation(), &invoking] {
         token.cancel();
@@ -266,7 +287,14 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
     let before_scope = memory.used();
     let scope = crate::capabilities::query_scope::new_for_current_routine(&engine).unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+            Ok(())
+        })
+        .unwrap();
 
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(memory, resources.cancellation(), &invoking);
@@ -303,7 +331,14 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
         "{provider:?}: {observed:?}"
     );
     assert_eq!(memory.used(), before + occupied.bytes());
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("original".into())));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("original".into())));
+            Ok(())
+        })
+        .unwrap();
     let definitions =
         rule_returning_columns_with_control(engine.rule_analysis_context(), "items", &control)
             .unwrap();

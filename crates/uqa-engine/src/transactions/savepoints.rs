@@ -154,7 +154,9 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(savepoint.dirty);
-        self.drop_persistent_value_indexes();
+        if let Err(error) = self.drop_persistent_value_indexes() {
+            cleanup_errors.push(format!("value-index retirement: {error}"));
+        }
         if self.storage.backend.is_some() {
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }

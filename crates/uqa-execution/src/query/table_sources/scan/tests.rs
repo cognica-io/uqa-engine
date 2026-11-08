@@ -170,7 +170,7 @@ fn document_field_projection_does_not_copy_unrequested_payload() {
         serializable: None,
         table_name: "docs".into(),
         table: Arc::new(DocumentTable(RwLock::new(Box::new(rows)))),
-        column_definitions: Arc::new(Vec::new()),
+        column_definitions: Arc::new(Vec::new()).into(),
         columns: columns.clone(),
         schema: columns,
         physical_schema: schema,

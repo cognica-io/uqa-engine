@@ -229,8 +229,8 @@ impl VacuumTable for VacuumTableBinding<'_> {
     fn vector_indexes(&self) -> VacuumVectorIndexes<'_> {
         Box::new(self.table.vector_indexes.write())
     }
-    fn clear_value_indexes(&self) {
-        self.table.value_indexes.write().clear();
+    fn clear_value_indexes(&self) -> StorageBackendResult<()> {
+        self.table.value_indexes.write().clear()
     }
     fn persistence(&self) -> RelationPersistence {
         self.table.persistence

@@ -86,7 +86,7 @@ fn rewrite_full_vacuum_table(
         index.clear()?;
     }
     context.storage.clear_btree_indexes(table_name)?;
-    table.clear_value_indexes();
+    table.clear_value_indexes()?;
     for (doc_id, document, vectors) in documents {
         context
             .rows

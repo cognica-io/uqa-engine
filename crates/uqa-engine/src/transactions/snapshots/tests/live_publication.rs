@@ -183,3 +183,99 @@ fn idle_publication_tracks_restored_physical_vector_incarnations_and_later_field
     drop((table, changed_table, extra, original, changed));
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn idle_value_index_publication_preserves_reused_names_and_restored_child_membership() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE docs(id integer PRIMARY KEY, body text); INSERT INTO docs VALUES(1,'Original'); CREATE INDEX saved_expression ON docs(lower(body))");
+    let field = |engine: &Engine| {
+        engine
+            .value_indexable_fields("docs")
+            .unwrap()
+            .into_iter()
+            .find(|field| matches!(field, uqa_storage::ValueIndexKey::Index(_)))
+            .unwrap()
+    };
+    let original_field = field(&engine);
+    let control = StorageReadControl::with_limit(16 << 20);
+    let original = capture(&engine, &control);
+    sql(
+        &engine,
+        "DROP INDEX saved_expression; CREATE INDEX saved_expression ON docs(upper(body))",
+    );
+    let replacement_field = field(&engine);
+    let replacement = capture(&engine, &control);
+    sql(&engine, "BEGIN; UPDATE docs SET body='Private'; ROLLBACK; CREATE INDEX length_expression ON docs(length(body))");
+    let fields: Vec<_> = engine
+        .value_indexable_fields("docs")
+        .unwrap()
+        .into_iter()
+        .filter(|field| matches!(field, uqa_storage::ValueIndexKey::Index(_)))
+        .collect();
+    let length_field = fields
+        .iter()
+        .find(|field| **field != replacement_field)
+        .unwrap()
+        .clone();
+    let restored = capture(&engine, &control);
+    sql(
+        &engine,
+        "DROP TABLE docs; CREATE TABLE docs(replacement boolean)",
+    );
+    drop(engine);
+    let relation = RelationIdentity::new("public", "docs");
+    let old_table = original.table(&relation).unwrap();
+    let new_table = replacement.table(&relation).unwrap();
+    let restored_table = restored.table(&relation).unwrap();
+    assert_eq!(old_table.value_indexes.keys().unwrap().len(), 1);
+    assert_eq!(new_table.value_indexes.keys().unwrap().len(), 1);
+    assert_eq!(restored_table.value_indexes.keys().unwrap().len(), 2);
+    let old = old_table
+        .value_indexes
+        .get(&original_field, &original.cut)
+        .unwrap()
+        .unwrap();
+    let new = new_table
+        .value_indexes
+        .get(&replacement_field, &replacement.cut)
+        .unwrap()
+        .unwrap();
+    let recovered = restored_table
+        .value_indexes
+        .get(&replacement_field, &restored.cut)
+        .unwrap()
+        .unwrap();
+    let length = restored_table
+        .value_indexes
+        .get(&length_field, &restored.cut)
+        .unwrap()
+        .unwrap();
+    drop((
+        old_table,
+        new_table,
+        restored_table,
+        original,
+        replacement,
+        restored,
+    ));
+    let row = |value| Value::Row(vec![value].into());
+    assert_eq!(
+        old.value(1).unwrap().as_deref(),
+        Some(&row(Value::Str("original".into())))
+    );
+    assert_eq!(
+        new.value(1).unwrap().as_deref(),
+        Some(&row(Value::Str("ORIGINAL".into())))
+    );
+    assert_eq!(
+        recovered.value(1).unwrap().as_deref(),
+        Some(&row(Value::Str("ORIGINAL".into())))
+    );
+    assert_eq!(
+        length.value(1).unwrap().as_deref(),
+        Some(&row(Value::Int(8)))
+    );
+    assert!(control.memory().used() > 0);
+    drop((old, new, recovered, length));
+    assert_eq!(control.memory().used(), 0);
+}

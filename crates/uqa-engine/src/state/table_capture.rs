@@ -9,7 +9,6 @@
 use super::{CatalogCell, StorageContext};
 use crate::TableState;
 use std::sync::Arc;
-use uqa_sql::catalog::definition_capture;
 use uqa_storage::StorageBackendResult;
 
 impl StorageContext {
@@ -26,48 +25,26 @@ impl StorageContext {
                     CatalogCell::capture_source(table.$field.snapshot(), Some(registry), $copy)?;
             };
         }
-        capture!(columns, |value, control| definition_capture::columns(
-            value, control
-        ));
-        capture!(table_checks, |value, control| definition_capture::checks(
-            value, control
-        ));
-        capture!(foreign_keys, |value, control| {
-            definition_capture::foreign_keys(value, control)
-        });
-        capture!(key_constraints, |value, control| definition_capture::keys(
-            value, control
-        ));
-        capture!(hierarchy, definition_capture::hierarchy);
-        capture!(fts_fields, |value, control| definition_capture::names(
-            value, control
-        ));
-        capture!(row_type_array_name, definition_capture::optional_name);
-        capture!(dropped_attributes, |value, control| {
-            definition_capture::dropped_attributes(value, control)
-        });
+        table.columns = table.columns.capture_source(registry)?;
+        table.table_checks = table.table_checks.capture_source(registry)?;
+        table.hierarchy = table.hierarchy.capture_source(registry)?;
+        table.foreign_keys = table.foreign_keys.capture_source(registry)?;
+        table.key_constraints = table.key_constraints.capture_source(registry)?;
+        table.fts_fields = table.fts_fields.capture_source(registry)?;
+        table.row_type_array_name = table.row_type_array_name.capture_source(registry)?;
+        table.dropped_attributes = table.dropped_attributes.capture_source(registry)?;
         capture!(columns_declared, |value, control| Ok(
             control.finish(*value, control.empty_reservation())?
         ));
         capture!(security, super::BoundTableSecurity::capture_security);
-        capture!(column_stats, |value, control| {
-            let copied =
-                value.with_replacements(&uqa_planner::ColumnStatistics::default(), *control)?;
-            Ok(control.finish(copied, control.empty_reservation())?)
-        });
+        capture!(
+            column_stats,
+            uqa_planner::ColumnStatistics::capture_with_control
+        );
         capture!(analyzer, |value, control| {
-            let copied = value
-                .encode_configuration_budgeted(
-                    control.budget().expect("catalog capture allowance"),
-                    || {
-                        control
-                            .check_cancellation()
-                            .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
-                    },
-                )
-                .map_err(|error| uqa_sql::SQLError::Host(Arc::new(error)))?;
-            let (copied, memory) = copied.into_parts();
-            Ok(control.finish(copied, Some(memory))?)
+            value
+                .capture_image(control)
+                .map_err(|error| uqa_sql::SQLError::Host(Arc::new(error)))
         });
         capture!(storage_generation, inline);
         capture!(next_id, inline);

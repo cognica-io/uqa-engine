@@ -59,6 +59,13 @@ impl TieredChange<'_> {
         }
     }
 
+    pub(in crate::mvcc::overlay) fn value_len(&self) -> Option<u64> {
+        match self {
+            Self::Resident(change) => change.write.value().map(|value| value.len() as u64),
+            Self::Spilled { entry, .. } => entry.value.map(|location| location.len),
+        }
+    }
+
     pub(in crate::mvcc::overlay) fn kind(&self) -> RecordWriteKind {
         match self {
             Self::Resident(change) => change.write.kind(),
