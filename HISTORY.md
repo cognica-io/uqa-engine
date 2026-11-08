@@ -165,6 +165,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
 
+- Capture transaction rollback state after catalog admission, releasing obsolete cached analysis before replanning large statements and keeping rollback on the selected catalog view.
+
 - Keep SQL call-selection workspace out of recursive argument-observation frames, preventing stack exhaustion when a prepared nested collated expression is analyzed again on an ordinary thread stack.
 
 - Retire deeply nested native scalar expressions with constant stack and no traversal allocation, including cleanup after a retained resource unwinds. Native AST payloads move into execution plans without replacement boxes or declaration copies; Rust consumers borrow expression variants when inspecting their fields.
