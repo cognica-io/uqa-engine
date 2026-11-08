@@ -49857,6 +49857,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_preserves_units_and_bounds_complete_verification",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Stream a protected image containing all component families and exact payloads under seven-byte verification windows, then require complete object verification and release every allocation.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_rejects_incomplete_catalogs_and_invalid_headers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Reject authenticated but incomplete catalog membership, a mismatched header source, unsupported cuts, wrong unit kinds and unknown resources before import completion.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_rejects_partial_table_and_index_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Reject each missing table metadata slot, index values without their own metadata, conflicting table generations and incorrect component kinds.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_import_stream_cancellation_and_unread_units_release_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests.rs",
+      "capability": "Complete memory image import admission",
+      "workload": "Cancel before or during catalog consumption and whole-object verification, and reject advancing past unread data while releasing the root lease and all partial owners.",
+      "invariant": "Only complete ordered component membership and the existing complete repository verifier admit image EOF; failures make the reader terminal without a leaked name, file, workspace or root lease.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -13,7 +13,7 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
-pub(super) const RESOURCE_KINDS: u8 = 4;
+pub(super) use uqa_storage::backup::MEMORY_IMAGE_RESOURCE_KINDS as RESOURCE_KINDS;
 
 pub(super) fn next(
     source: &SnapshotCut,

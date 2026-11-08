@@ -10,7 +10,7 @@ use super::readers::{captured, sql_error, ReadFn};
 use crate::state::SnapshotCut;
 use uqa_storage::{image_io::ImageReader, read_control::StorageReadControl, StorageBackendResult};
 
-pub(super) const CATALOG_COUNT: u16 = 24;
+pub(super) use uqa_storage::backup::MEMORY_IMAGE_CATALOG_COUNT as CATALOG_COUNT;
 
 pub(super) fn image(
     source: &SnapshotCut,

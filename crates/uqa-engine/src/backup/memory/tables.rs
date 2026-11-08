@@ -21,7 +21,7 @@ use uqa_storage::{
     StorageBackendError, StorageBackendResult,
 };
 
-pub(super) const TABLE_METADATA_COUNT: u8 = 10;
+pub(super) use uqa_storage::backup::MEMORY_IMAGE_TABLE_METADATA_COUNT as TABLE_METADATA_COUNT;
 pub(super) type TableOwner = Arc<Budgeted<CapturedTable>>;
 
 pub(super) fn retain(

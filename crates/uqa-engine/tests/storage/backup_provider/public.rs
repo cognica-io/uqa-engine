@@ -8,6 +8,9 @@ use super::*;
 use uqa_engine::backup::{
     BackupCapabilities, BackupCapturePhase, BackupError, BackupJob, BackupOptions,
 };
+use uqa_storage::backup::{
+    BackupSourceStep, DecodedMemoryImageAddress, DecodedMemoryTableUnit, MemoryImageImportReader,
+};
 
 fn repository(path: &Path, control: &StorageReadControl, encrypted: bool) -> LocalRepository {
     LocalRepository::create(
@@ -258,8 +261,59 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case]
     let lease = repository
         .open_backup(child_root.backup(), &control)
         .unwrap();
-    lease.verify(16 << 20, &control).unwrap();
-    drop(lease);
+    let mut input = MemoryImageImportReader::new(lease, 16 << 20, &control).unwrap();
+    let mut catalogs = 0;
+    let mut documents = std::collections::BTreeMap::new();
+    loop {
+        match input.advance(113).unwrap() {
+            BackupSourceStep::Complete => break,
+            BackupSourceStep::Pending => continue,
+            BackupSourceStep::Unit => (),
+        }
+        let document = match input.current_unit().unwrap().address {
+            DecodedMemoryImageAddress::Catalog(_) => {
+                catalogs += 1;
+                false
+            }
+            DecodedMemoryImageAddress::Table {
+                schema,
+                relation,
+                unit: DecodedMemoryTableUnit::Document(_),
+                ..
+            } => {
+                assert_eq!(&**schema, "public");
+                assert_eq!(&**relation, "saved");
+                true
+            }
+            _ => false,
+        };
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 127];
+        loop {
+            let read = input.read_current(&mut buffer).unwrap();
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        if document {
+            let decoded =
+                uqa_storage::document_store::image::decode_document_image(&bytes, &control)
+                    .unwrap();
+            let Value::Int(id) = &decoded.fields()["id"] else {
+                panic!("restored integer identity")
+            };
+            assert!(documents
+                .insert(*id, decoded.fields()["body"].clone())
+                .is_none());
+        }
+    }
+    assert_eq!(catalogs, 24);
+    assert_eq!(input.header().unwrap().source, child_root.cut().source);
+    assert_eq!(documents.len(), 2);
+    assert_eq!(documents[&1], Value::Str("original".into()));
+    assert_eq!(documents[&2], Value::Str("retained".into()));
+    drop(input);
     assert_eq!(control.memory().used(), 0);
 }
 

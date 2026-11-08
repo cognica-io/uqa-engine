@@ -154,8 +154,8 @@ impl<'a, M: BackupRecordImportMapping> MappedRecordImageImportReader<'a, M> {
             for _ in 0..length {
                 bytes.push(0)?;
             }
-            read_exact(reader, &mut bytes)?;
-            require_end(reader)?;
+            reader.read_exact_current(&mut bytes)?;
+            reader.require_current_end()?;
             self.mapping
                 .as_mut()
                 .unwrap()
@@ -182,10 +182,10 @@ impl<'a, M: BackupRecordImportMapping> MappedRecordImageImportReader<'a, M> {
         }
         let identifier = address.family == 2;
         let mut bytes = [0; 8];
-        read_exact(reader, &mut bytes)?;
+        reader.read_exact_current(&mut bytes)?;
         let value = u64::from_be_bytes(bytes);
         if identifier {
-            require_end(reader)?;
+            reader.require_current_end()?;
         } else if value == 0 || value > self.root.cut().sequence.unwrap().as_u64() {
             return Err(BackupError::Invalid("record image record revision"));
         }
@@ -214,22 +214,4 @@ impl<'a, M: BackupRecordImportMapping> MappedRecordImageImportReader<'a, M> {
         self.current = None;
         self.mapping = None;
     }
-}
-
-fn read_exact(reader: &mut BackupImageReader<'_>, mut output: &mut [u8]) -> BackupResult<()> {
-    while !output.is_empty() {
-        let read = reader.read_current(output)?;
-        if read == 0 {
-            return Err(BackupError::Invalid("truncated record image prefix"));
-        }
-        output = &mut output[read..];
-    }
-    Ok(())
-}
-
-fn require_end(reader: &mut BackupImageReader<'_>) -> BackupResult<()> {
-    if reader.read_current(&mut [0])? != 0 {
-        return Err(BackupError::Invalid("trailing record image bytes"));
-    }
-    Ok(())
 }

@@ -26,6 +26,9 @@ mod source;
 mod types;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
     BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
     BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
@@ -47,7 +50,8 @@ pub use memory::{
     read_memory_table_metadata, DecodedMemoryImageAddress, DecodedMemoryTableMetadata,
     DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageHeader, MemoryImageKey,
     MemoryRelationIdentities, MemoryTableMetadata, MemoryTableProperties, MemoryTableStatistics,
-    MemoryTableUnit,
+    MemoryTableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
+    MEMORY_IMAGE_TABLE_METADATA_COUNT,
 };
 pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
 pub use root::BackupRoot;
