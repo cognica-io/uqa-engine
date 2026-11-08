@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -49790,8 +49790,8 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/backup/memory/address/tests.rs",
       "capability": "Canonical memory image addresses",
-      "workload": "Exercise prefixes, embedded NUL, UTF-8, complete object and storage identities, every table component and denied address construction.",
-      "invariant": "The mapping preserves native tuple order and all identity bytes without aliasing; failed construction releases its original allowance.",
+      "workload": "Reject resource address allocation with a one-byte allowance and empty address construction after cancellation.",
+      "invariant": "Both rejected constructors return errors and release all admission; neither leaves a live address.",
       "case_names": [
         ""
       ]
