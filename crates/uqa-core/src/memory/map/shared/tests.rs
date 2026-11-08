@@ -422,3 +422,39 @@ fn failed_path_and_rotation_reservations_preserve_roots_and_release_candidates()
     }
     assert!(failures > 1 && successes > 1);
 }
+
+#[test]
+fn immutable_successors_keep_original_entries_across_construction_allowances() {
+    let original = MemoryBudget::new(1 << 16);
+    let future = MemoryBudget::new(1 << 16);
+    let text = "original".repeat(32);
+    let owner = Budgeted::new(text.clone(), original.reserve(text.len()).unwrap());
+    let mut source = BudgetedSharedMap::new(&original);
+    source.try_insert(1, owner).unwrap();
+    let selected = source.snapshot();
+    let pointer = selected.get(&1).unwrap().as_ptr();
+    drop(source);
+    let occupied = original.reserve(original.available()).unwrap();
+    let empty = || Budgeted::new(String::new(), future.empty_reservation());
+    let added = selected.with_insert(2, empty(), &future).unwrap();
+    let removed = added.with_remove(&2, &future).unwrap();
+    let successor = removed.with_insert(3, empty(), &future).unwrap();
+    assert_eq!(successor.get(&1).unwrap().as_ptr(), pointer);
+    assert!(selected.get(&3).is_none());
+    assert!(successor.get(&2).is_none());
+    assert_eq!(verify(&successor.root).0, 2);
+    let limit = future.reserve(future.available()).unwrap();
+    assert!(successor.with_insert(4, empty(), &future).is_err());
+    assert!(successor.with_remove(&3, &future).is_err());
+    assert_eq!(successor.get(&1).unwrap().as_ptr(), pointer);
+    assert_eq!(successor.len(), 2);
+    drop((selected, added, removed));
+    assert_eq!(&**successor.get(&1).unwrap(), &text);
+    assert!(original.used() > occupied.bytes());
+    drop(successor);
+    assert_eq!(original.used(), occupied.bytes());
+    assert_eq!(future.used(), limit.bytes());
+    drop((occupied, limit));
+    assert_eq!(original.used(), 0);
+    assert_eq!(future.used(), 0);
+}

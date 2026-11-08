@@ -50724,6 +50724,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "immutable_successors_keep_original_entries_across_construction_allowances",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests.rs",
+      "capability": "Immutable native source succession",
+      "workload": "Retain an immutable root, exhaust its original allowance and create insertion/removal successors under another allowance; then exhaust successor admission and reject changes.",
+      "invariant": "Unchanged entries keep their exact buffers and original reservations; only new paths use the selected budget, failed changes preserve every predecessor, and final retirement releases both allowances.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

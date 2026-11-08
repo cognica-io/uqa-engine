@@ -73,19 +73,15 @@ impl MemoryCaptureSources {
         if self.root.get(&id).is_some() {
             return Ok(self.clone());
         }
-        let mut map = BudgetedSharedMap::new(&self.memory);
-        map.restore(&self.root);
         Ok(Self {
-            root: map.with_insert(id, ())?.snapshot(),
+            root: self.root.with_insert(id, (), &self.memory)?,
             ..self.clone()
         })
     }
 
     fn without_identity(&self, id: u64) -> StorageBackendResult<Self> {
-        let mut map = BudgetedSharedMap::new(&self.memory);
-        map.restore(&self.root);
         Ok(Self {
-            root: map.with_remove(&id)?.snapshot(),
+            root: self.root.with_remove(&id, &self.memory)?,
             ..self.clone()
         })
     }
