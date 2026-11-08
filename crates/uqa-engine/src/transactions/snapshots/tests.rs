@@ -106,7 +106,10 @@ fn transaction_data_retention_releases_live_table_owners_after_replacement_and_c
             .unwrap(),
         Some(Value::Str("x".repeat(1 << 20)))
     );
-    assert!(Arc::ptr_eq(&committed.durable.views, &original_views));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &committed.durable.views,
+        &original_views
+    ));
     assert!(committed.memory_membership.is_some());
 }
 

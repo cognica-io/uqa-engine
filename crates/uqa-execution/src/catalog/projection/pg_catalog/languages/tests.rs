@@ -9,7 +9,6 @@ use crate::catalog::{
     projection::pg_proc::build_requested_pg_proc, test_support::empty_catalog, CatalogReadView,
     RelationLookupMode, RelationNameResolution,
 };
-use std::sync::Arc;
 use uqa_sql::{
     ast::Statement,
     routines::{RoutineBody, SQLUserFunction},
@@ -107,7 +106,7 @@ fn user_sql_and_procedural_routines_join_the_same_language_identities() {
         };
         definition.catalog_oid = Some(oid);
         definition.owner = Some(RoleIdentity::BOOTSTRAP);
-        Arc::make_mut(&mut snapshot.definitions.sql_user_functions).insert(
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions).insert(
             definition.name.clone(),
             vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
         ).unwrap();

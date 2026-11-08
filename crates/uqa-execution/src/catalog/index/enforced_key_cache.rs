@@ -6,7 +6,7 @@
 
 //! The enforced keys of the tables a session writes, kept while the definitions they were read from are the same objects.
 
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
 use parking_lot::Mutex;
 use uqa_sql::{ast::TableKeyConstraint, catalog::index::EnforcedKey};
@@ -20,7 +20,7 @@ const TABLES: usize = 8;
 struct Entry {
     table: String,
     constraints: Vec<TableKeyConstraint>,
-    indexes: Arc<IndexRows>,
+    indexes: RetainedValue<IndexRows>,
     keys: Vec<EnforcedKey>,
 }
 
@@ -35,12 +35,12 @@ impl EnforcedKeyCache {
         &self,
         table: &str,
         constraints: Vec<TableKeyConstraint>,
-        indexes: &Arc<IndexRows>,
+        indexes: &RetainedValue<IndexRows>,
         find: impl FnOnce(Vec<TableKeyConstraint>) -> StorageBackendResult<Vec<EnforcedKey>>,
     ) -> StorageBackendResult<Vec<EnforcedKey>> {
         if let Some(entry) = self.entries.lock().iter().find(|entry| {
             entry.table == table
-                && Arc::ptr_eq(&entry.indexes, indexes)
+                && RetainedValue::ptr_eq(&entry.indexes, indexes)
                 && entry.constraints == constraints
         }) {
             return Ok(entry.keys.clone());
@@ -55,7 +55,7 @@ impl EnforcedKeyCache {
             entries.push(Entry {
                 table: table.to_owned(),
                 constraints,
-                indexes: Arc::clone(indexes),
+                indexes: RetainedValue::clone(indexes),
                 keys: keys.clone(),
             });
         }

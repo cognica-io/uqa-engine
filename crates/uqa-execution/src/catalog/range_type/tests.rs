@@ -6,6 +6,7 @@
 
 use super::*;
 use std::cell::RefCell;
+use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleDefinitions;
@@ -190,11 +191,11 @@ fn catalog(definition: StoredRange) -> crate::catalog::CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
         .snapshot()
         .clone();
-    snapshot.definitions.ranges = Arc::new(
+    snapshot.definitions.ranges = uqa_core::memory::RetainedValue::new(
         RangeRegistry::try_from_iter([(definition.identity.qualified_name(), definition)]).unwrap(),
     );
-    snapshot.definitions.roles = Arc::new(roles());
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles());
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
             "public".into(),
             crate::catalog::security::BoundSchemaSecurity::bootstrap("public"),

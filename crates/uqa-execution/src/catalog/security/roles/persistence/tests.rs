@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
@@ -236,8 +237,8 @@ fn unchanged_role_metadata_uses_the_committed_catalog_instead_of_stale_session_v
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let values = restore_and_migrate(&catalog).unwrap();
     let current = RoleCatalogSnapshot {
-        roles: Arc::new(values.roles),
-        memberships: Arc::new(values.memberships),
+        roles: uqa_core::memory::RetainedValue::new(values.roles),
+        memberships: uqa_core::memory::RetainedValue::new(values.memberships),
     };
     let mut roles = (*current.roles).clone();
     let mut extra = RoleDefinition::bootstrap();
@@ -248,8 +249,8 @@ fn unchanged_role_metadata_uses_the_committed_catalog_instead_of_stale_session_v
     persist_roles(Some(&catalog), &current.roles, &roles).unwrap();
     let values = restore(&catalog).unwrap();
     let latest = RoleCatalogSnapshot {
-        roles: Arc::new(values.roles),
-        memberships: Arc::new(values.memberships),
+        roles: uqa_core::memory::RetainedValue::new(values.roles),
+        memberships: uqa_core::memory::RetainedValue::new(values.memberships),
     }
     .merge_private(Some(&catalog), &current)
     .unwrap();

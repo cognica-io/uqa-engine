@@ -6,6 +6,7 @@
 
 //! Metadata and publication adapters for SQL-owned index declarations and execution-owned builds.
 use crate::{capabilities::RelationResolution, Engine};
+use uqa_core::memory::RetainedValue;
 use uqa_execution::schema::indexes::registry::{
     IndexPublicationKind, IndexRegistryContext, IndexRegistryPublication,
 };
@@ -64,7 +65,7 @@ impl Engine {
 impl IndexRegistryPublication for Engine {
     fn index_catalog(
         &self,
-    ) -> std::sync::Arc<uqa_execution::catalog::index::registry::CatalogIndexes> {
+    ) -> RetainedValue<uqa_execution::catalog::index::registry::CatalogIndexes> {
         self.durable.catalog_indexes.snapshot()
     }
 

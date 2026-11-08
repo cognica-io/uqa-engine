@@ -33,7 +33,7 @@ fn fixture() -> ForeignTableCaptureSource {
         .unwrap();
     catalog.insert(second, unlogged, security).unwrap();
     ForeignTableCaptureSource {
-        catalog: Arc::new(catalog),
+        catalog: uqa_core::memory::RetainedValue::new(catalog),
     }
 }
 
@@ -50,7 +50,7 @@ fn durable_foreign_capture_retains_paired_roots_without_visiting_temporary_paylo
     temporary
         .options
         .insert("payload".into(), "x".repeat(1 << 20));
-    Arc::make_mut(&mut source.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut source.catalog)
         .insert(
             RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20)),
             temporary,

@@ -6,7 +6,8 @@
 
 //! Undefined type authority uses the same independent records, OID claims and private-overlay rules as completed types.
 
-use std::{collections::BTreeSet, ops::Deref, sync::Arc};
+use std::{collections::BTreeSet, ops::Deref};
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::shell_type::{validate_shell_registry, StoredShellType};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
@@ -51,10 +52,10 @@ pub fn restore(
 
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<ShellRegistry>,
-    committed: Arc<ShellRegistry>,
+    current: &RetainedValue<ShellRegistry>,
+    committed: RetainedValue<ShellRegistry>,
     roles: &RoleDefinitions,
-) -> StorageBackendResult<Arc<ShellRegistry>> {
+) -> StorageBackendResult<RetainedValue<ShellRegistry>> {
     let registry = FORMAT.merge_private(catalog, current, committed)?;
     validate_shell_registry(&registry, roles).map_err(StorageBackendError::Other)?;
     Ok(registry)

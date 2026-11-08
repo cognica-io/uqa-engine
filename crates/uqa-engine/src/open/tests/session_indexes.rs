@@ -59,7 +59,7 @@ fn independent_sessions_reuse_physical_index_preparation(#[case] provider: usize
         let original = first.physical_index_definitions().unwrap();
         for _ in 0..4 {
             let next = quiet_session(&engine);
-            assert!(Arc::ptr_eq(
+            assert!(uqa_core::memory::RetainedValue::ptr_eq(
                 &first.durable.catalog_indexes.snapshot(),
                 &next.durable.catalog_indexes.snapshot()
             ));

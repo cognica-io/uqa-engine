@@ -28,7 +28,7 @@ impl Catalog {
         };
         definition.object_id = Some([1; 16]);
         Self {
-            types: Arc::default(),
+            types: RoutineTypeSnapshot::default(),
             function: SQLUserFunction::new(
                 *definition,
                 RoutineBody::Bound(CompiledFunctionBody::SQL(Vec::new()).shared()),
@@ -68,7 +68,7 @@ impl RoutineTypeCatalog for Catalog {
 
 impl RoutineOverloadCatalog for Catalog {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::clone(&self.types)
+        self.types.clone()
     }
     fn routine_search_path(&self) -> Vec<String> {
         panic!("selected native namespace lookup must borrow the path")

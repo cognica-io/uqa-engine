@@ -85,7 +85,10 @@ fn fixture() -> TableMetadataCaptureSource {
             &CancellationToken::new(),
         )
         .unwrap();
-    TableMetadataCaptureSource::new(Arc::new(indexes), Arc::new(analyzers))
+    TableMetadataCaptureSource::new(
+        uqa_core::memory::RetainedValue::new(indexes),
+        uqa_core::memory::RetainedValue::new(analyzers),
+    )
 }
 
 fn bytes(image: &AnalyzerImageSnapshot) -> Vec<u8> {
@@ -122,13 +125,13 @@ fn table_metadata_capture_selects_original_persistence_before_names_and_payloads
         allocation_counter::measure(|| captured = Some(source.capture(&control).unwrap()));
     let captured = captured.unwrap();
     let mut selected_only = fixture();
-    selected_only.indexes = Arc::new(
+    selected_only.indexes = uqa_core::memory::RetainedValue::new(
         selected_only
             .indexes
             .without_table("public.temporary_membership")
             .unwrap(),
     );
-    selected_only.analyzers = Arc::new(
+    selected_only.analyzers = uqa_core::memory::RetainedValue::new(
         selected_only
             .analyzers
             .without_table("public.temporary_membership")

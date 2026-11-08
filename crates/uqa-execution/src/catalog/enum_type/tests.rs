@@ -6,6 +6,7 @@
 
 use super::*;
 use std::cell::RefCell;
+use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::catalog::enum_type::initial_enum_labels;
 use uqa_sql::catalog::roles::RoleDefinition;
@@ -44,7 +45,7 @@ struct Publication<'a> {
 #[test]
 fn physical_label_lookup_tracks_the_pinned_registry_generation() {
     let cache = EnumLabelCache::default();
-    let first = Arc::new(
+    let first = uqa_core::memory::RetainedValue::new(
         EnumRegistry::try_from_iter([
             (
                 "public.mood".into(),
@@ -74,7 +75,7 @@ fn physical_label_lookup_tracks_the_pinned_registry_generation() {
         .unwrap()
         .unwrap();
     changed.remove("public.color").unwrap();
-    let changed = Arc::new(changed);
+    let changed = uqa_core::memory::RetainedValue::new(changed);
     assert_eq!(cache.value(&changed, 20_003), Some(value.clone()));
     assert_eq!(
         cache

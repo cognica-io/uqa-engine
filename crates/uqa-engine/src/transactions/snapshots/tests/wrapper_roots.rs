@@ -23,7 +23,7 @@ fn committed_wrapper_roots_preserve_original_options_and_incarnations_with_bound
             .iter()
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(&engine, "BEGIN; DROP FOREIGN DATA WRAPPER saved_000; CREATE FOREIGN DATA WRAPPER saved_000 HANDLER memory_fdw_handler OPTIONS (z 'private'); SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -58,7 +58,7 @@ fn committed_wrapper_roots_preserve_original_options_and_incarnations_with_bound
             engine.durable.foreign_wrappers.read()["saved_000"].identity
         );
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert!(saved
             .get()
             .unwrap()

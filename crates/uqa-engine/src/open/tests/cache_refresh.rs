@@ -276,16 +276,22 @@ fn data_commits_retain_schema_and_decoded_statistics_across_sessions() {
             Arc::ptr_eq(&before, &after),
             "data-only commit rebuilt the table catalog"
         );
-        assert!(Arc::ptr_eq(&schema, &after.columns.generation()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &schema,
+            &after.columns.generation()
+        ));
         assert!(
-            Arc::ptr_eq(&statistics, &after.column_stats.snapshot()),
+            uqa_core::memory::RetainedValue::ptr_eq(&statistics, &after.column_stats.snapshot()),
             "data-only commit decoded unchanged statistics"
         );
         assert!(Arc::ptr_eq(
             &unrelated,
             &reader.require_table("untouched").unwrap()
         ));
-        assert!(Arc::ptr_eq(&registries, &reader.durable.schemas.snapshot()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &registries,
+            &reader.durable.schemas.snapshot()
+        ));
     }
 }
 
@@ -324,7 +330,7 @@ fn indexed_data_commits_and_existing_definitions_retain_reader_registries() {
         assert!(!pending(), "unfinished constraint publication after {statement}");
         assert_eq!(reader.sql("SELECT id FROM records ORDER BY id LIMIT 1", &[]).unwrap().rows[0]["id"], uqa_core::Value::Int(1));
         assert!(Arc::ptr_eq(&table, &reader.require_table("records").unwrap()), "table rebuilt after {statement}");
-        assert!(Arc::ptr_eq(&registries, &reader.durable.schemas.snapshot()), "registries rebuilt after {statement}");
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(&registries, &reader.durable.schemas.snapshot()), "registries rebuilt after {statement}");
     }
 }
 
@@ -359,11 +365,11 @@ fn analyze_replaces_only_affected_statistics_and_shares_the_decoded_snapshot() {
         &second.require_table("changed").unwrap()
     ));
     assert_eq!(first_table.column_stats.read()["id"].row_count, 2);
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first_table.column_stats.snapshot(),
         &second_table.column_stats.snapshot()
     ));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &unrelated_stats,
         &first
             .require_table("untouched")
@@ -449,9 +455,15 @@ fn automatic_statistics_and_concurrent_readers_retain_table_definitions() {
                         assert_eq!(result.rows[0]["n"], uqa_core::Value::Int(80));
                         let current = reader.require_table("items").unwrap();
                         assert!(Arc::ptr_eq(&table, &current));
-                        assert!(Arc::ptr_eq(&columns, &current.columns.generation()));
+                        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+                            &columns,
+                            &current.columns.generation()
+                        ));
                         assert!(
-                            Arc::ptr_eq(&graphs, &reader.durable.graphs.snapshot()),
+                            uqa_core::memory::RetainedValue::ptr_eq(
+                                &graphs,
+                                &reader.durable.graphs.snapshot()
+                            ),
                             "automatic statistics rebuilt an unrelated graph"
                         );
                         if current
@@ -529,7 +541,7 @@ fn unrelated_registry_writes_preserve_graph_allocations() {
             .unwrap();
         reader.sql("SELECT * FROM events", &[]).unwrap();
         assert!(
-            Arc::ptr_eq(&graphs, &reader.durable.graphs.snapshot()),
+            uqa_core::memory::RetainedValue::ptr_eq(&graphs, &reader.durable.graphs.snapshot()),
             "non-graph registry update rebuilt graphs"
         );
     }
@@ -537,7 +549,10 @@ fn unrelated_registry_writes_preserve_graph_allocations() {
         .sql("CREATE TABLE extra (id INTEGER); ANALYZE events", &[])
         .unwrap();
     reader.sql("SELECT * FROM extra", &[]).unwrap();
-    assert!(Arc::ptr_eq(&graphs, &reader.durable.graphs.snapshot()));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &graphs,
+        &reader.durable.graphs.snapshot()
+    ));
     assert!(graphs
         .values()
         .all(|store| matches!(store.as_ref(), uqa_graph::GraphStoreHandle::Persistent(_))));
@@ -601,7 +616,7 @@ fn concurrent_sessions_use_independent_handles_without_rebuilding_graphs() {
     for (reader, before) in readers.iter().zip(handles) {
         let after = reader.durable.graphs.snapshot();
         assert!(
-            Arc::ptr_eq(&before, &after),
+            uqa_core::memory::RetainedValue::ptr_eq(&before, &after),
             "entity writes rebuilt the graph handle catalog"
         );
         assert!(after

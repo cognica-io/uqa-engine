@@ -7,6 +7,7 @@
 use super::*;
 use crate::tests::providers::Provider;
 use uqa_core::memory::MemoryBudget;
+use uqa_core::memory::RetainedValue;
 use uqa_execution::schema::events::EventCatalogPublication;
 use uqa_sql::{
     catalog::events::{RuleCatalog, TriggerCatalog},
@@ -60,11 +61,14 @@ fn native_event_restore_admission_preserves_both_originals_and_stored_metadata(
             Some("53200"),
             "{provider:?}: {error}"
         );
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &originals.0,
             &engine.durable.triggers.snapshot()
         ));
-        assert!(Arc::ptr_eq(&originals.1, &engine.durable.rules.snapshot()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &originals.1,
+            &engine.durable.rules.snapshot()
+        ));
         assert_eq!(
             catalog.get_metadata(TRIGGERS_METADATA_KEY).unwrap(),
             stored_triggers
@@ -103,8 +107,8 @@ fn native_event_restore_admission_preserves_both_originals_and_stored_metadata(
 
 struct RejectMigration<'a> {
     engine: &'a Engine,
-    triggers: Arc<TriggerCatalog>,
-    rules: Arc<RuleCatalog>,
+    triggers: RetainedValue<TriggerCatalog>,
+    rules: RetainedValue<RuleCatalog>,
     writes: std::cell::Cell<usize>,
 }
 impl RejectMigration<'_> {
@@ -118,11 +122,11 @@ impl RejectMigration<'_> {
                 .in_transaction(),
             "event restoration must retain its migration transaction"
         );
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &self.triggers,
             &self.engine.durable.triggers.snapshot()
         ));
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &self.rules,
             &self.engine.durable.rules.snapshot()
         ));
@@ -191,11 +195,11 @@ fn failed_native_event_migration_write_preserves_original_authority(#[case] prov
                 .contains("injected event migration write failure"),
             "{provider:?}: {error}"
         );
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &observer.triggers,
             &engine.durable.triggers.snapshot()
         ));
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &observer.rules,
             &engine.durable.rules.snapshot()
         ));
@@ -207,11 +211,11 @@ fn failed_native_event_migration_write_preserves_original_authority(#[case] prov
     }
     assert_eq!(observer.writes.get(), 2);
     backend.rollback_transaction().unwrap();
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &observer.triggers,
         &engine.durable.triggers.snapshot()
     ));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &observer.rules,
         &engine.durable.rules.snapshot()
     ));

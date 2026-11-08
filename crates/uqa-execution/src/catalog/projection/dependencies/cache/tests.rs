@@ -14,9 +14,10 @@ use uqa_sql::catalog::roles::RoleDefinitions;
 
 fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([(
             "uqa".into(),
             uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
@@ -191,7 +192,7 @@ fn failed_dependency_derivation_does_not_publish_partial_metadata() {
     let catalog = fixture(0);
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "malformed");
-    Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes)
         .insert(
             uqa_storage::CatalogIndexRow {
                 relation,

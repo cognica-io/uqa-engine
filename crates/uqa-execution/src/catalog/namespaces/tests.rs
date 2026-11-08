@@ -18,14 +18,14 @@ pub(super) fn catalog() -> CatalogReadView {
     reader.oid = 42;
     reader.object_id = [42; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
         ])
         .unwrap(),
     );
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([
             (
                 "public".into(),
@@ -39,7 +39,7 @@ pub(super) fn catalog() -> CatalogReadView {
     graphs
         .insert("g", Arc::new(uqa_graph::GraphStoreHandle::default()))
         .unwrap();
-    snapshot.definitions.graphs = Arc::new(graphs);
+    snapshot.definitions.graphs = uqa_core::memory::RetainedValue::new(graphs);
     CatalogReadView::new(snapshot)
 }
 

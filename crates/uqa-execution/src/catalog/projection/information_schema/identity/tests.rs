@@ -9,7 +9,6 @@ use crate::catalog::{
     projection::CatalogRequest, sequence::SequenceState, test_support::empty_catalog,
     CatalogReadView,
 };
-use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{AutoIncrement, AutoIncrementOwner, ColumnType, SequenceDataType};
 
@@ -18,7 +17,7 @@ fn identity_attributes_borrow_only_the_owned_sequence_definition() {
     let mut snapshot = empty_catalog().snapshot().clone();
     let state = SequenceState::initial(7, 2, SequenceDataType::BigInt);
     let selected = RelationIdentity::new("public", "owned_sequence");
-    let sequences = Arc::make_mut(&mut snapshot.definitions.sequences);
+    let sequences = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sequences);
     let security = uqa_sql::catalog::security::BoundSequenceSecurity::owner(
         uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
     );

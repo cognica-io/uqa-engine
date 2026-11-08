@@ -8,9 +8,8 @@
 
 use super::{sql, Engine};
 use crate::tests::providers::Provider;
-use std::sync::Arc;
 use uqa_core::{
-    memory::{MemoryBudget, ProductionControl},
+    memory::{MemoryBudget, ProductionControl, RetainedValue},
     CancellationToken,
 };
 use uqa_execution::catalog::security::table_inquiry::TablePrivilegeState;
@@ -48,8 +47,14 @@ fn admitted_table_authority_survives_sql_rollback_and_retained_reader_retirement
     let token = CancellationToken::new();
     let decoded = BoundTableSecurity::read_image(&mut expected.as_slice(), &input, &token).unwrap();
     let pointer = decoded.column_acls.keys().next().unwrap().as_ptr();
-    let generation = Arc::new(TableMetadata::from_admitted(decoded, &token).unwrap());
+    let generation = RetainedValue::with_budget(
+        TableMetadata::from_admitted(decoded, &token).unwrap(),
+        &input,
+    )
+    .unwrap();
     table.security.restore(&generation);
+    let original_generation = table.security.generation();
+    assert!(RetainedValue::ptr_eq(&generation, &original_generation));
     drop(generation);
     let retained = table
         .security_snapshot_with_control(&ProductionControl::uncontrolled())
@@ -67,7 +72,23 @@ fn admitted_table_authority_survives_sql_rollback_and_retained_reader_retirement
         image(&engine.table("saved").unwrap().unwrap().security.read()),
         expected
     );
+    let restored_generation = engine
+        .table("saved")
+        .unwrap()
+        .unwrap()
+        .security
+        .generation();
     sql(&engine, "REVOKE SELECT(body) ON saved FROM reader");
+    assert!(!RetainedValue::ptr_eq(
+        &restored_generation,
+        &engine
+            .table("saved")
+            .unwrap()
+            .unwrap()
+            .security
+            .generation()
+    ));
+    drop(restored_generation);
     assert_ne!(
         image(&engine.table("saved").unwrap().unwrap().security.read()),
         expected
@@ -78,5 +99,7 @@ fn admitted_table_authority_survives_sql_rollback_and_retained_reader_retirement
     assert!(input.used() > 0);
     assert_eq!(image(&retained), expected);
     drop(retained);
+    assert!(input.used() > 0);
+    drop(original_generation);
     assert_eq!(input.used(), 0);
 }

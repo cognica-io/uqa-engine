@@ -7,6 +7,7 @@
 //! Immutable observations of already-owned index catalog rows.
 
 use super::{CatalogIndexRegistry, CatalogIndexRegistryIter, CatalogIndexRow};
+use crate::memory::{AdmittedRetainedValue, Budgeted, RetainedValue, RetainedValueOwner};
 use crate::RelationIdentity;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -42,6 +43,17 @@ impl CatalogIndexSnapshot {
         Self(Some(Storage::Native(registry)))
     }
 
+    /// Erase the registry type while retaining its original native or admitted allocation, without another wrapper allocation.
+    pub fn from_retained_registry<T: CatalogIndexRegistry + 'static>(
+        registry: RetainedValue<T>,
+    ) -> Self {
+        let registry: Arc<dyn CatalogIndexRegistry> = match registry.into_owner() {
+            RetainedValueOwner::Native(value) => value,
+            RetainedValueOwner::Admitted(value) => value,
+        };
+        Self::from_registry(registry)
+    }
+
     pub fn iter(
         &self,
     ) -> impl ExactSizeIterator<Item = &CatalogIndexRow> + DoubleEndedIterator + Clone {
@@ -61,6 +73,34 @@ impl CatalogIndexSnapshot {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl<T: CatalogIndexRegistry> CatalogIndexRegistry for Budgeted<AdmittedRetainedValue<T>> {
+    fn len(&self) -> usize {
+        self.payload.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.payload.is_empty()
+    }
+
+    fn get(&self, key: &RelationIdentity) -> Option<&CatalogIndexRow> {
+        self.payload.get(key)
+    }
+
+    fn first_from(
+        &self,
+        start: std::ops::Bound<&RelationIdentity>,
+    ) -> Option<(&RelationIdentity, &CatalogIndexRow)> {
+        self.payload.first_from(start)
+    }
+
+    fn last_before(
+        &self,
+        end: std::ops::Bound<&RelationIdentity>,
+    ) -> Option<(&RelationIdentity, &CatalogIndexRow)> {
+        self.payload.last_before(end)
     }
 }
 

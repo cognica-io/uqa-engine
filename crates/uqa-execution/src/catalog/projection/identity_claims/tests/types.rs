@@ -60,14 +60,14 @@ fn add_user_types(snapshot: &mut CatalogReadSnapshot) {
         array_name: None,
         usage_acl: None,
     };
-    Arc::make_mut(&mut snapshot.definitions.domains)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
         .insert("public.positive".into(), domain)
         .unwrap();
     let mut legacy = snapshot.definitions.domains["public.positive"].clone();
     legacy.oid = 60_002;
     legacy.array_oid = None;
     legacy.identity.name = "legacy".into();
-    Arc::make_mut(&mut snapshot.definitions.domains)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
         .insert("public.legacy".into(), legacy)
         .unwrap();
     let definition = StoredEnum {
@@ -80,14 +80,14 @@ fn add_user_types(snapshot: &mut CatalogReadSnapshot) {
         labels: initial_enum_labels(60_010, &["calm".into()], &[60_012]).unwrap(),
         usage_acl: None,
     };
-    snapshot.definitions.enums = Arc::new(
+    snapshot.definitions.enums = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
             "public.mood".into(),
             definition,
         )]))
         .unwrap(),
     );
-    snapshot.definitions.composites = Arc::new(
+    snapshot.definitions.composites = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
             "public.pair".into(),
             StoredComposite {
@@ -143,7 +143,7 @@ fn add_relations(snapshot: &mut CatalogReadSnapshot, tables: u32) {
                 populated: true,
             },
         };
-        Arc::make_mut(&mut snapshot.definitions.views)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
             .insert(RelationIdentity::new("public", name), view)
             .unwrap();
     }
@@ -242,9 +242,9 @@ fn type_membership_uses_the_selected_generation_after_rename_removal_and_rollbac
         .insert(RelationIdentity::new("other", "renamed"), definition);
     let renamed = CatalogReadView::new(snapshot.clone());
     snapshot.tables.clear();
-    Arc::make_mut(&mut snapshot.definitions.domains).clear();
-    Arc::make_mut(&mut snapshot.definitions.enums).clear();
-    Arc::make_mut(&mut snapshot.definitions.composites).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.enums).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.composites).clear();
     let removed = CatalogReadView::new(snapshot);
     let before = TYPE_PROJECTION_BUILDS.get();
     for (catalog, occupied) in [
@@ -276,7 +276,7 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
         array_type: Some(relation + 2),
         rule: None,
     };
-    let views = Arc::make_mut(&mut snapshot.definitions.views);
+    let views = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views);
     for (index, name) in views
         .keys()
         .cloned()
@@ -298,7 +298,7 @@ fn recorded_relation_and_graph_arrays_occupy_only_the_type_oid_class() {
     table.catalog_oids = Some(oids(80_020));
     snapshot.definitions.foreign_tables =
         crate::catalog::test_support::foreign_tables([(relation.clone(), table)]);
-    snapshot.definitions.graph_catalog_oids = Arc::new(
+    snapshot.definitions.graph_catalog_oids = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::graph_oids::GraphOidRegistry::try_from_iter([(
             "graph".into(),
             GraphCatalogOids {

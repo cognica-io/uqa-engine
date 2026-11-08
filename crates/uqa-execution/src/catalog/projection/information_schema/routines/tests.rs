@@ -7,7 +7,6 @@
 use super::*;
 use crate::catalog::test_support::{empty_catalog, CatalogServices};
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     roles::RoleDefinition,
@@ -22,14 +21,14 @@ fn catalog(revoked: &[u32]) -> CatalogReadView {
     reader.oid = 20_000;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
         ])
         .unwrap(),
     );
-    snapshot.definitions.builtin_routine_security = Arc::new(
+    snapshot.definitions.builtin_routine_security = uqa_core::memory::RetainedValue::new(
         BuiltinRoutineSecurities::try_from_iter(revoked.iter().map(|oid| {
             (
                 *oid,

@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::catalog::test_support::{empty_catalog, table_snapshot, CatalogServices};
-use std::sync::Arc;
 
 mod fixtures;
 mod lifecycle;
@@ -95,7 +94,7 @@ fn concurrent_event_inquiries_derive_each_collection_once() {
 fn trigger_lookup_preserves_the_first_address_error_after_earlier_matches() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.triggers)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
         .rewrite(|_, name, trigger| {
             let mut trigger = trigger.clone();
             trigger.definition.table = "public.missing".into();

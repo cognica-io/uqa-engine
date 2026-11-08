@@ -49,31 +49,32 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
         tables: uqa_core::memory::OwnedMap::default(),
         graph_overlay: None,
         definitions: CatalogDefinitionSnapshot {
-            builtin_routine_security: Arc::default(),
-            foreign_wrappers: Arc::default(),
-            foreign_servers: Arc::default(),
+            builtin_routine_security: uqa_core::memory::RetainedValue::default(),
+            foreign_wrappers: uqa_core::memory::RetainedValue::default(),
+            foreign_servers: uqa_core::memory::RetainedValue::default(),
             foreign_tables: Arc::default(),
-            sql_user_functions: Arc::default(),
-            role_memberships: Arc::default(),
-            domains: Arc::default(),
-            enums: Arc::default(),
-            ranges: Arc::default(),
-            shells: Arc::default(),
-            comments: Arc::default(),
-            composites: Arc::default(),
-            graphs: Arc::default(),
-            views: Arc::default(),
-            catalog_indexes: Arc::default(),
-            database_security: uqa_sql::catalog::security::database::DatabaseAuthority::bootstrap()
-                .into(),
-            schemas: Arc::default(),
-            sequences: Arc::default(),
-            graph_catalog_oids: Arc::default(),
+            sql_user_functions: uqa_core::memory::RetainedValue::default(),
+            role_memberships: uqa_core::memory::RetainedValue::default(),
+            domains: uqa_core::memory::RetainedValue::default(),
+            enums: uqa_core::memory::RetainedValue::default(),
+            ranges: uqa_core::memory::RetainedValue::default(),
+            shells: uqa_core::memory::RetainedValue::default(),
+            comments: uqa_core::memory::RetainedValue::default(),
+            composites: uqa_core::memory::RetainedValue::default(),
+            graphs: uqa_core::memory::RetainedValue::default(),
+            views: uqa_core::memory::RetainedValue::default(),
+            catalog_indexes: uqa_core::memory::RetainedValue::default(),
+            database_security: uqa_core::memory::RetainedValue::new(
+                uqa_sql::catalog::security::database::DatabaseAuthority::bootstrap(),
+            ),
+            schemas: uqa_core::memory::RetainedValue::default(),
+            sequences: uqa_core::memory::RetainedValue::default(),
+            graph_catalog_oids: uqa_core::memory::RetainedValue::default(),
             foreign_table_security: Arc::default(),
-            system_relation_security: Arc::default(),
-            roles: Arc::default(),
-            triggers: Arc::default(),
-            rules: Arc::default(),
+            system_relation_security: uqa_core::memory::RetainedValue::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            triggers: uqa_core::memory::RetainedValue::default(),
+            rules: uqa_core::memory::RetainedValue::default(),
         },
         temporary_namespace: None,
     })
@@ -175,7 +176,7 @@ pub(crate) fn edit_sequence_security(
         .map(|(relation, security)| (relation.clone(), security.clone()))
         .unwrap();
     edit(&mut security);
-    Arc::make_mut(&mut snapshot.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.catalog)
         .replace_security(&relation, security)
         .unwrap();
 }

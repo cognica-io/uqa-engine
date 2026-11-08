@@ -9,8 +9,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Deref,
-    sync::Arc,
 };
+use uqa_core::memory::RetainedValue;
 use uqa_sql::{ast::RelationPersistence, catalog::dependencies::ObjectAddress, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -104,9 +104,9 @@ pub fn restore(
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
     current: &CommentRegistry,
-    committed: Arc<CommentRegistry>,
-) -> StorageBackendResult<Arc<CommentRegistry>> {
-    let mut committed = Arc::new(committed.with_temporary_from(current));
+    committed: RetainedValue<CommentRegistry>,
+) -> StorageBackendResult<RetainedValue<CommentRegistry>> {
+    let mut committed = RetainedValue::new(committed.with_temporary_from(current));
     let addresses = current
         .durable_iter()
         .chain(committed.durable_iter())
@@ -118,13 +118,13 @@ pub fn merge_private(
             catalog.metadata_has_private_changes(&key(object))
         })? {
             if let Some(description) = current.durable_get(&object) {
-                Arc::make_mut(&mut committed)
+                RetainedValue::make_mut(&mut committed)
                     .insert(object, description, RelationPersistence::Permanent)
                     .map_err(|error| {
                         StorageBackendError::backend("private comment merge", error)
                     })?;
             } else {
-                Arc::make_mut(&mut committed)
+                RetainedValue::make_mut(&mut committed)
                     .remove(&object)
                     .map_err(|error| {
                         StorageBackendError::backend("private comment merge", error)
@@ -281,6 +281,7 @@ pub fn object_description(
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
+    use std::sync::Arc;
     use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
     struct Publication {
@@ -334,7 +335,8 @@ mod tests {
         let fresh = restore(&publication.catalog, &CommentRegistry::new()).unwrap();
         assert_eq!(fresh.len(), 1);
         assert_eq!(fresh[&durable.into()], "durable");
-        let merged = merge_private(None, &current, Arc::new(fresh)).unwrap();
+        let merged =
+            merge_private(None, &current, uqa_core::memory::RetainedValue::new(fresh)).unwrap();
         assert_eq!(*merged, current);
         set(
             &publication,

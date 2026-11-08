@@ -16,6 +16,7 @@ pub use rebuild::{DiskANNMaintenanceCensus, DiskANNRebuildPolicy};
 use std::{ops::Bound, sync::Arc};
 use transaction::{Completed, Job};
 use uqa_core::memory::MemoryReservation;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::schema::indexes::vectors::VectorIndexCatalog;
 use uqa_storage::{
     diskann_index::{build::DiskANNTemporaryBudget, DiskANNIndexBinding, DiskANNIndexOptions},
@@ -48,7 +49,7 @@ pub struct DiskANNMaintenanceStatus {
 
 /// The host supplies coalesced wakes; this owner admits one index and counts/prunes one 64-entry page or constructs one admitted generation per step. A retained catalog pass prevents new indexes from extending the current pass indefinitely.
 pub struct DiskANNJournalMaintenance {
-    indexes: Option<Arc<crate::catalog::index::registry::CatalogIndexes>>,
+    indexes: Option<RetainedValue<crate::catalog::index::registry::CatalogIndexes>>,
     last_version: Option<u64>,
     after: Option<RelationIdentity>,
     name_memory: MemoryReservation,
@@ -115,7 +116,7 @@ impl DiskANNJournalMaintenance {
     /// `version` is a commit generation already incorporated into the supplied catalog snapshot, never a newer independent observation. None disables unchanged-database coalescing. Commits during a finite pass trigger another pass instead of being consumed by its completion.
     pub fn step(
         &mut self,
-        indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
+        indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
         version: Option<u64>,
         vectors: &dyn VectorIndexCatalog,
         backend: &dyn PersistentStorageBackend,
@@ -132,7 +133,7 @@ impl DiskANNJournalMaintenance {
 
     fn advance(
         &mut self,
-        indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
+        indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
         version: Option<u64>,
         vectors: &dyn VectorIndexCatalog,
         backend: &dyn PersistentStorageBackend,

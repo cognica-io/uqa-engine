@@ -36,7 +36,7 @@ fn relation_ownership_keeps_role_incarnations_and_uses_no_value_snapshot() {
         .context()
         .ensure_relation_owner(&relation, "sequence")
         .unwrap();
-    Arc::make_mut(&mut fixture.retained.roles.roles)
+    uqa_core::memory::RetainedValue::make_mut(&mut fixture.retained.roles.roles)
         .edit("reader", |role| {
             role.object_id = [9; 16];
             Ok(())
@@ -98,7 +98,7 @@ fn sequence_oid_binding_and_comma_privileges_keep_one_authority_per_invocation()
 fn sequence_name_inquiry_reads_roles_and_acl_after_resolution_without_rebinding_subject() {
     let fixture = Fixture::new();
     let mut replaced = fixture.retained.clone();
-    Arc::make_mut(&mut replaced.roles.roles)
+    uqa_core::memory::RetainedValue::make_mut(&mut replaced.roles.roles)
         .edit("reader", |role| {
             role.object_id = [2; 16];
             Ok(())
@@ -132,7 +132,7 @@ fn removed_sequences_do_not_reappear_from_the_statement_catalog() {
     let fixture = Fixture::new();
     {
         let mut current = fixture.current.borrow_mut();
-        Arc::make_mut(&mut current.catalog)
+        uqa_core::memory::RetainedValue::make_mut(&mut current.catalog)
             .remove(&RelationIdentity::new("public", "ids"))
             .unwrap();
     }

@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::catalog::test_support::{empty_catalog, table_snapshot, CatalogServices};
-use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{EventEnableMode, TableConstraintSet},
@@ -22,14 +21,14 @@ fn stored_constraints_and_triggers_ignore_invoking_role_schema_usage() {
     reader.oid = 20_000;
     reader.object_id = [8; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
         ])
         .unwrap(),
     );
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
             "hidden".into(),
             BoundSchemaSecurity::owner(uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP),
@@ -64,7 +63,7 @@ fn stored_constraints_and_triggers_ignore_invoking_role_schema_usage() {
     .remove(0) else {
         panic!("trigger");
     };
-    Arc::make_mut(&mut snapshot.definitions.triggers)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
         .insert_event(
             relation,
             "watch".into(),

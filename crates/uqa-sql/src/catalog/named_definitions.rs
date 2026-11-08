@@ -94,6 +94,21 @@ impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K
     }
 }
 
+impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K>
+    for uqa_core::memory::RetainedValue<V>
+{
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
+    where
+        T: 'a,
+        K: 'a,
+    {
+        self.as_ref().iter()
+    }
+    fn get(&self, name: &K::View) -> Option<&T> {
+        self.as_ref().get(name)
+    }
+}
+
 pub(crate) mod sealed {
     pub trait Definition {}
     pub trait Key {}

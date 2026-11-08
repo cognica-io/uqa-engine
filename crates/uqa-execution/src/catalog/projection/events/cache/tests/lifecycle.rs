@@ -17,7 +17,7 @@ fn retained_event_addresses_survive_rename_and_removal() {
     let original_view = view_rule_by_oid(&catalog, 90_003).unwrap().1;
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "items");
-    Arc::make_mut(&mut snapshot.definitions.triggers)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
         .edit(&relation, |triggers| {
             let mut trigger = triggers["watch_000"].clone();
             triggers.remove("watch_000")?;
@@ -26,7 +26,7 @@ fn retained_event_addresses_survive_rename_and_removal() {
         })
         .unwrap()
         .unwrap();
-    Arc::make_mut(&mut snapshot.definitions.rules)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.rules)
         .edit(&relation, |rules| {
             let mut rule = rules["rule_000"].clone();
             rules.remove("rule_000")?;
@@ -35,7 +35,7 @@ fn retained_event_addresses_survive_rename_and_removal() {
         })
         .unwrap()
         .unwrap();
-    let views = Arc::make_mut(&mut snapshot.definitions.views);
+    let views = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views);
     let relation = RelationIdentity::new("public", "view_000");
     let view = views[&relation].clone();
     assert!(views.remove(&relation).unwrap());
@@ -59,9 +59,9 @@ fn retained_event_addresses_survive_rename_and_removal() {
         view_rule_by_oid(&current, 90_003).unwrap().0.name,
         "renamed_view"
     );
-    snapshot.definitions.triggers = Arc::default();
-    snapshot.definitions.rules = Arc::default();
-    snapshot.definitions.views = Arc::default();
+    snapshot.definitions.triggers = uqa_core::memory::RetainedValue::default();
+    snapshot.definitions.rules = uqa_core::memory::RetainedValue::default();
+    snapshot.definitions.views = uqa_core::memory::RetainedValue::default();
     let removed = CatalogReadView::new(snapshot);
     assert!(trigger_by_oid(&removed, &resolution, 70_000)
         .unwrap()
@@ -80,7 +80,7 @@ fn retained_event_addresses_survive_rename_and_removal() {
 fn rule_lookup_keeps_user_rules_before_views_and_ordinary_views_before_materialized() {
     let catalog = fixture(1);
     let mut snapshot = catalog.snapshot().clone();
-    let views = Arc::make_mut(&mut snapshot.definitions.views);
+    let views = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views);
     for (name, kind) in [
         (
             "view_000",
@@ -122,7 +122,7 @@ fn rule_lookup_keeps_user_rules_before_views_and_ordinary_views_before_materiali
 fn a_later_missing_view_rule_identity_does_not_affect_an_earlier_match() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
         .edit(&RelationIdentity::new("public", "view_002"), |view| {
             view.catalog_oids.as_mut().unwrap().rule = None;
             Ok(())

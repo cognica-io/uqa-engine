@@ -9,6 +9,7 @@
 use super::EnumRegistry;
 use parking_lot::Mutex;
 use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_core::EnumValue;
 use uqa_sql::expr::enums::{EnumTypeLabel, EnumTypeLabels};
 
@@ -19,13 +20,13 @@ pub struct EnumLabelCache {
 }
 
 struct IndexedLabels {
-    registry: Arc<EnumRegistry>,
+    registry: RetainedValue<EnumRegistry>,
     types: BTreeMap<u32, Arc<EnumTypeLabels>>,
     labels: BTreeMap<u32, (u32, usize)>,
 }
 
 impl IndexedLabels {
-    fn new(registry: &Arc<EnumRegistry>) -> Self {
+    fn new(registry: &RetainedValue<EnumRegistry>) -> Self {
         let types: BTreeMap<_, _> = registry
             .values()
             .map(|definition| {
@@ -58,7 +59,7 @@ impl IndexedLabels {
             })
             .collect();
         Self {
-            registry: Arc::clone(registry),
+            registry: RetainedValue::clone(registry),
             types,
             labels,
         }
@@ -69,14 +70,18 @@ impl EnumLabelCache {
     /// The labels of one enum type in the given registry generation, in ascending key order.
     pub fn labels(
         &self,
-        registry: &Arc<EnumRegistry>,
+        registry: &RetainedValue<EnumRegistry>,
         type_oid: u32,
     ) -> Option<Arc<EnumTypeLabels>> {
         self.with_index(registry, |indexed| indexed.types.get(&type_oid).cloned())
     }
 
     /// Look up an admitted physical label identity in the same pinned generation as ordinary enum output.
-    pub fn value(&self, registry: &Arc<EnumRegistry>, label_oid: u32) -> Option<EnumValue> {
+    pub fn value(
+        &self,
+        registry: &RetainedValue<EnumRegistry>,
+        label_oid: u32,
+    ) -> Option<EnumValue> {
         self.with_index(registry, |indexed| {
             let (type_oid, index) = indexed.labels.get(&label_oid)?;
             let label = &indexed.types.get(type_oid)?.labels[*index];
@@ -85,19 +90,23 @@ impl EnumLabelCache {
     }
 
     /// Read the actual type and declaration-order position without allocating a value or copying its key.
-    pub fn position(&self, registry: &Arc<EnumRegistry>, label_oid: u32) -> Option<(u32, usize)> {
+    pub fn position(
+        &self,
+        registry: &RetainedValue<EnumRegistry>,
+        label_oid: u32,
+    ) -> Option<(u32, usize)> {
         self.with_index(registry, |indexed| indexed.labels.get(&label_oid).copied())
     }
 
     fn with_index<T>(
         &self,
-        registry: &Arc<EnumRegistry>,
+        registry: &RetainedValue<EnumRegistry>,
         read: impl FnOnce(&IndexedLabels) -> T,
     ) -> T {
         let mut entry = self.entry.lock();
         if !entry
             .as_ref()
-            .is_some_and(|indexed| Arc::ptr_eq(&indexed.registry, registry))
+            .is_some_and(|indexed| RetainedValue::ptr_eq(&indexed.registry, registry))
         {
             *entry = Some(IndexedLabels::new(registry));
         }

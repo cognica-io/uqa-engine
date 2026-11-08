@@ -5,7 +5,6 @@
 //
 
 use crate::{open::CatalogRestoreMode, tests::providers::Provider};
-use std::sync::Arc;
 use uqa_core::memory::MemoryBudget;
 use uqa_execution::catalog::comments::CommentRegistry;
 
@@ -62,7 +61,10 @@ fn native_comment_restore_preserves_original_root_and_metadata_on_admission_fail
         Some("53200"),
         "{provider:?}: {error}"
     );
-    assert!(Arc::ptr_eq(&original, &engine.durable.comments.snapshot()));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &original,
+        &engine.durable.comments.snapshot()
+    ));
     assert_eq!(
         catalog.metadata_with_prefix("uqa.sql.comment.v1:").unwrap(),
         stored
@@ -122,7 +124,7 @@ fn native_foreign_restore_preserves_the_paired_root_and_stored_rows_on_admission
         Some("53200"),
         "{provider:?}: {error}"
     );
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &original,
         &engine.durable.foreign_catalog.snapshot()
     ));
@@ -190,7 +192,7 @@ fn native_index_restore_preserves_original_generation_and_stored_rows_on_admissi
         Some("53200"),
         "{provider:?}: {error}"
     );
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &original,
         &engine.durable.catalog_indexes.snapshot()
     ));

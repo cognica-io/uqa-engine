@@ -7,6 +7,7 @@
 //! Retain the physical relation and its actual metadata/index guards during column deletion.
 use crate::{Engine, TableState};
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_core::{DocId, RelationIdentity};
 use uqa_execution::schema::publication::removal::{
     ColumnDropCatalog, ColumnDropIndexes, ColumnDropPublicationContext, ColumnDropRows,
@@ -176,7 +177,7 @@ impl ColumnDropIndexes for Engine {
         }
         Ok(())
     }
-    fn field_analyzers(&self) -> std::sync::Arc<crate::TableFieldAnalyzerRegistry> {
+    fn field_analyzers(&self) -> RetainedValue<crate::TableFieldAnalyzerRegistry> {
         self.durable.table_field_analyzers.snapshot()
     }
     fn publish_field_analyzers(&self, catalog: crate::TableFieldAnalyzerRegistry) {

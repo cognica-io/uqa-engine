@@ -10,12 +10,11 @@ use crate::catalog::sequence::{
     registry::{SequenceCatalog, SequenceRecord},
     SequenceState,
 };
-use std::sync::Arc;
 use uqa_sql::SQLError;
 
 fn snapshot() -> SequenceReadSnapshot {
     SequenceReadSnapshot {
-        catalog: Arc::new(
+        catalog: uqa_core::memory::RetainedValue::new(
             SequenceCatalog::try_from_iter([(
                 RelationIdentity::new("private", "ids"),
                 SequenceRecord {
@@ -31,8 +30,8 @@ fn snapshot() -> SequenceReadSnapshot {
             .unwrap(),
         ),
         roles: RoleCatalogSnapshot {
-            roles: Arc::default(),
-            memberships: Arc::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            memberships: uqa_core::memory::RetainedValue::default(),
         },
     }
 }

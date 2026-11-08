@@ -32,7 +32,7 @@ fn fixture() -> CatalogReadView {
     ) else {
         panic!("query")
     };
-    Arc::make_mut(&mut snapshot.definitions.views)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
         .insert(
             RelationIdentity::new("public", "v"),
             StoredView {
@@ -185,7 +185,7 @@ fn source_view_context(
     query: uqa_sql::plan::QueryPlan,
 ) -> uqa_sql::binding::BindingContext<'static> {
     let mut snapshot = fixture().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
         .edit(&RelationIdentity::new("public", "v"), |view| {
             view.definition.query = query;
             Ok(())
@@ -304,7 +304,7 @@ fn source_schema_binding_borrows_retained_view_payloads_instead_of_cloning_them(
 #[test]
 fn admitted_source_catalog_adapters_preserve_shadowing_row_type_identity_and_cleanup() {
     let mut snapshot = fixture().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.sequences)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sequences)
         .insert(
             RelationIdentity::new("later", "v"),
             SequenceRecord {

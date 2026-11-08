@@ -5,7 +5,6 @@
 //
 
 use super::*;
-use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::RoleAttribute, catalog::roles::RoleDefinition};
 
@@ -35,14 +34,14 @@ pub(super) fn permissions() -> BuiltinRoutinePermissions {
         attributes: uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]),
         connection_limit: -1,
     };
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
         ])
         .unwrap(),
     );
-    snapshot.definitions.builtin_routine_security = Arc::new(
+    snapshot.definitions.builtin_routine_security = uqa_core::memory::RetainedValue::new(
         BuiltinRoutineSecurities::try_from_iter([
             (
                 870,
@@ -97,7 +96,8 @@ fn builtin_permission_snapshots_and_bootstrap_authority_are_retained() {
     let revoked = permissions();
     let catalog = &revoked.restricted.as_ref().unwrap().catalog;
     let mut next = catalog.snapshot().clone();
-    Arc::make_mut(&mut next.definitions.builtin_routine_security).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut next.definitions.builtin_routine_security)
+        .clear();
     let allowed = BuiltinRoutinePermissions::new(CatalogReadView::new(next), "reader".into());
     let lower = binding("lower", &["text"]);
     allowed.require_execute(&lower).unwrap();

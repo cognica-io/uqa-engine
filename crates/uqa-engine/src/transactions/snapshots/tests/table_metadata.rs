@@ -94,8 +94,8 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
             .insert(&key, binding, true, &uqa_core::CancellationToken::new())
             .unwrap();
     }
-    let weak_indexes = Arc::downgrade(&engine.durable.catalog_indexes.snapshot());
-    let weak_analyzers = Arc::downgrade(&engine.durable.table_field_analyzers.snapshot());
+    let weak_indexes = engine.durable.catalog_indexes.snapshot().identity();
+    let weak_analyzers = engine.durable.table_field_analyzers.snapshot().identity();
     sql(&engine, "BEGIN; UPDATE \"Saved.Schema\".\"Docs\" SET body='private'; DROP INDEX \"Saved.Schema\".id_index; CREATE INDEX id_index ON \"Saved.Schema\".\"Docs\"(body)");
     engine
         .register_named_analyzer("saved", r#"{"tokenizer":{"type":"standard"}}"#)
@@ -113,8 +113,8 @@ fn transaction_table_metadata_preserves_original_relations_and_historical_analyz
     sql(&engine, completion);
     sql(&engine, "DROP TABLE \"Saved.Schema\".\"Docs\"; CREATE TABLE \"Saved.Schema\".\"Docs\"(replacement boolean)");
     drop(engine);
-    assert!(weak_indexes.upgrade().is_none());
-    assert!(weak_analyzers.upgrade().is_none());
+    assert!(!weak_indexes.is_alive());
+    assert!(!weak_analyzers.is_alive());
     let saved = selected.metadata.captured(&selected.cut).unwrap();
     let metadata = saved.get().unwrap();
     assert_eq!(metadata.indexes.len(), original.len());

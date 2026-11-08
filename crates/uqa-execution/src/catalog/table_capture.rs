@@ -6,8 +6,8 @@
 
 //! Original relation membership selects its index metadata and resolved analyzer revisions.
 
-use std::sync::Arc;
 use uqa_core::memory::Budgeted;
+use uqa_core::memory::RetainedValue;
 use uqa_storage::{
     analyzer_binding::registry::{CapturedFieldAnalyzers, FieldAnalyzerCatalog},
     memory_capture::{CapturedMemoryValue, MemoryCaptureSource},
@@ -21,15 +21,15 @@ pub struct CapturedTableMetadata {
 }
 
 pub struct TableMetadataCaptureSource {
-    indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
-    analyzers: Arc<FieldAnalyzerCatalog>,
+    indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
+    analyzers: RetainedValue<FieldAnalyzerCatalog>,
 }
 
 impl TableMetadataCaptureSource {
     /// Construct from the same retained generation as the table data and both metadata roots.
     pub fn new(
-        indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
-        analyzers: Arc<FieldAnalyzerCatalog>,
+        indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
+        analyzers: RetainedValue<FieldAnalyzerCatalog>,
     ) -> Self {
         Self { indexes, analyzers }
     }

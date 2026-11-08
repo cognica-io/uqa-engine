@@ -14,22 +14,22 @@ use uqa_sql::{ast::SequenceDataType, catalog::roles::RoleDefinition};
 
 fn registry(entries: &[(&str, u8, i64)]) -> SequenceReadSnapshot {
     let mut snapshot = SequenceReadSnapshot {
-        catalog: Arc::new(SequenceCatalog::with_budget(
+        catalog: uqa_core::memory::RetainedValue::new(SequenceCatalog::with_budget(
             &uqa_core::memory::MemoryBudget::new(1 << 20),
         )),
         roles: RoleCatalogSnapshot {
-            roles: Arc::new(
+            roles: uqa_core::memory::RetainedValue::new(
                 RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
                     .unwrap(),
             ),
-            memberships: Arc::new(RoleMemberships::new()),
+            memberships: uqa_core::memory::RetainedValue::new(RoleMemberships::new()),
         },
     };
     for &(name, identity, start) in entries {
         let relation = RelationIdentity::new("public", name);
         let mut state = SequenceState::initial(start, 1, SequenceDataType::BigInt);
         state.definition_generation = [identity; 16];
-        Arc::make_mut(&mut snapshot.catalog)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.catalog)
             .insert(
                 relation,
                 SequenceRecord {
@@ -56,7 +56,7 @@ fn private_definition_merge_retains_renames_deletions_security_and_temporary_rec
     let renamed = RelationIdentity::new("public", "renamed");
     let mut security = current.catalog.security()[&renamed].clone();
     security.acl = Some(Vec::new());
-    Arc::make_mut(&mut current.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut current.catalog)
         .replace_security(&renamed, security)
         .unwrap();
     let temporary = RelationIdentity::new("public", "temporary");
@@ -65,7 +65,7 @@ fn private_definition_merge_retains_renames_deletions_security_and_temporary_rec
         ..*current.catalog.get(&temporary).unwrap()
     };
     let security = current.catalog.security()[&temporary].clone();
-    Arc::make_mut(&mut current.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut current.catalog)
         .insert(temporary.clone(), record, security)
         .unwrap();
     let committed = registry(&[
@@ -181,7 +181,9 @@ fn detached_sequence_inspection_preserves_candidate_order_and_retained_names() {
     let alpha = RelationIdentity::new("public", "alpha");
     let beta = RelationIdentity::new("public", "beta");
     let missing = RelationIdentity::new("public", "missing");
-    Arc::make_mut(&mut current.catalog).remove(&alpha).unwrap();
+    uqa_core::memory::RetainedValue::make_mut(&mut current.catalog)
+        .remove(&alpha)
+        .unwrap();
     assert_eq!(retained.names(), ["public.alpha", "public.beta"]);
     assert_eq!(retained.named_states()["public.alpha"].start, 10);
     assert_eq!(

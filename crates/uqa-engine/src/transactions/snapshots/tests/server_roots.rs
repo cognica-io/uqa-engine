@@ -18,7 +18,7 @@ fn committed_server_roots_preserve_original_options_and_incarnations_with_bounde
             .iter()
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(&engine, "BEGIN; DROP SERVER saved_000; CREATE SERVER saved_000 FOREIGN DATA WRAPPER memory_fdw OPTIONS (z 'private'); SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -61,7 +61,7 @@ fn committed_server_roots_preserve_original_options_and_incarnations_with_bounde
                 .object_id
         );
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert!(saved
             .get()
             .unwrap()

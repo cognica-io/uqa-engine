@@ -7,6 +7,7 @@
 //! A shell restores exactly one claimed identity, without an array or an implicit format fallback.
 
 use super::*;
+use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleDefinitions;

@@ -8,6 +8,7 @@
 
 use crate::catalog::{domain::DomainRegistry, CatalogReadSnapshot, CatalogTableSnapshot};
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::catalog::table_metadata::SharedTableMetadata;
@@ -64,8 +65,8 @@ pub trait ConstraintNameCatalog {
     ) -> Option<(RelationIdentity, ConstraintTableMetadata)>;
     fn constraint_schema_tables(&self, schema: &str) -> Vec<ConstraintTableMetadata>;
     fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables>;
-    fn constraint_domains(&self) -> Arc<DomainRegistry>;
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog>;
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry>;
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog>;
 }
 
 impl ConstraintNameCatalog for CatalogReadSnapshot {
@@ -91,10 +92,10 @@ impl ConstraintNameCatalog for CatalogReadSnapshot {
     fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables> {
         Arc::clone(&self.definitions.foreign_tables)
     }
-    fn constraint_domains(&self) -> Arc<DomainRegistry> {
-        Arc::clone(&self.definitions.domains)
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry> {
+        RetainedValue::clone(&self.definitions.domains)
     }
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog> {
-        Arc::clone(&self.definitions.triggers)
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog> {
+        RetainedValue::clone(&self.definitions.triggers)
     }
 }

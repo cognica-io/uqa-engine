@@ -15,7 +15,8 @@ use crate::catalog::{
     security::roles::persistence::{self, RoleCatalogSnapshot},
     snapshot_read::with_read_transaction,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
@@ -32,7 +33,7 @@ use uqa_storage::{
 
 #[derive(Clone)]
 pub struct SequenceReadSnapshot {
-    pub catalog: Arc<SequenceCatalog>,
+    pub catalog: RetainedValue<SequenceCatalog>,
     pub roles: RoleCatalogSnapshot,
 }
 
@@ -163,7 +164,7 @@ impl SequenceReadSnapshot {
             .cloned()
             .collect::<Vec<_>>();
         for relation in removed {
-            Arc::make_mut(&mut self.catalog)
+            RetainedValue::make_mut(&mut self.catalog)
                 .remove_selected(&relation)
                 .map_err(|error| StorageBackendError::backend("select private sequence", error))?;
         }
@@ -176,7 +177,7 @@ impl SequenceReadSnapshot {
                 .get(&relation)
                 .expect("selected complete sequence exists");
             let security = current.catalog.security()[&relation].clone();
-            Arc::make_mut(&mut self.catalog)
+            RetainedValue::make_mut(&mut self.catalog)
                 .insert(relation, record, security)
                 .map_err(|error| StorageBackendError::backend("select private sequence", error))?;
         }
@@ -228,7 +229,7 @@ impl SequenceReadSnapshot {
             .replace_catalog_oids(catalog_oids)
             .map_err(|error| StorageBackendError::backend("load sequence OIDs", error))?;
         Ok(Self {
-            catalog: Arc::new(registry),
+            catalog: RetainedValue::new(registry),
             roles: self.roles,
         })
     }
@@ -253,8 +254,8 @@ pub fn read_sequence_snapshot(
     with_read_transaction(independent, |catalog| {
         let roles = persistence::restore(catalog)?;
         let roles = RoleCatalogSnapshot {
-            roles: Arc::new(roles.roles),
-            memberships: Arc::new(roles.memberships),
+            roles: RetainedValue::new(roles.roles),
+            memberships: RetainedValue::new(roles.memberships),
         };
         let (rows, recorded) = if preserve_private {
             current.roles = roles.merge_private(bound, &current.roles)?;

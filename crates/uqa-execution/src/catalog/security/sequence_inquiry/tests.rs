@@ -41,7 +41,7 @@ impl Catalog {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
-            catalog: Arc::new(
+            catalog: uqa_core::memory::RetainedValue::new(
                 SequenceCatalog::try_from_iter([(
                     relation,
                     SequenceRecord {
@@ -63,14 +63,14 @@ impl Catalog {
                 .unwrap(),
             ),
             roles: RoleCatalogSnapshot {
-                roles: Arc::new(
+                roles: uqa_core::memory::RetainedValue::new(
                     RoleDefinitions::try_from_iter([
                         ("uqa".into(), RoleDefinition::bootstrap()),
                         (reader.name.clone(), reader),
                     ])
                     .unwrap(),
                 ),
-                memberships: Arc::new(RoleMemberships::new()),
+                memberships: uqa_core::memory::RetainedValue::new(RoleMemberships::new()),
             },
         };
         Self {
@@ -143,7 +143,7 @@ fn inquiry_refresh_keeps_selected_role_identity_across_name_resolution() {
     ] {
         let catalog = Catalog::new();
         let mut replaced = catalog.retained.clone();
-        Arc::make_mut(&mut replaced.roles.roles)
+        uqa_core::memory::RetainedValue::make_mut(&mut replaced.roles.roles)
             .edit("reader", |role| {
                 role.object_id = [2; 16];
                 Ok(())
@@ -231,7 +231,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
         role.oid = 20_001;
         role.object_id = [2; 16];
         let new_reader = role.identity();
-        Arc::make_mut(&mut snapshot.roles.roles)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.roles.roles)
             .insert(role.name.clone(), role)
             .unwrap();
         let replacement = Some(new_reader);
@@ -258,7 +258,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
 #[test]
 fn removed_sequence_authority_does_not_reappear_from_a_retained_statement_catalog() {
     let catalog = Catalog::new();
-    Arc::make_mut(&mut catalog.current.borrow_mut().catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut catalog.current.borrow_mut().catalog)
         .remove(&RelationIdentity::new("public", "ids"))
         .unwrap();
     let oid = legacy_sequence_relation_oid([7; 16]);

@@ -28,7 +28,7 @@ fn committed_type_roots_capture_in_bounded_work_without_temporary_payload_retent
             ),
         );
         let original = engine.durable.domains.snapshot();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(
             &engine,
@@ -58,7 +58,7 @@ fn committed_type_roots_capture_in_bounded_work_without_temporary_payload_retent
         assert!(control.memory().used() < 2 << 20);
         sql(&engine, "ALTER DOMAIN saved_000 ADD CONSTRAINT changed CHECK(VALUE <> 'private') NOT VALID; ROLLBACK TO original; COMMIT; DROP DOMAIN saved_000; CREATE DOMAIN saved_000 AS integer");
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert_eq!(
             serde_json::to_value(captured.get().unwrap()).unwrap(),
             expected

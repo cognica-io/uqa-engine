@@ -38,7 +38,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     reader.oid = 20_000;
     reader.object_id = [9; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
@@ -52,7 +52,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
             BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP),
         )
         .unwrap();
-    snapshot.definitions.schemas = Arc::new(schemas);
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(schemas);
     let Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN hidden.positive AS integer DEFAULT abs(-7)")
             .unwrap()
@@ -60,7 +60,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     else {
         panic!("domain");
     };
-    snapshot.definitions.domains = Arc::new(
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
             "hidden.positive".into(),
             StoredDomain {
@@ -80,7 +80,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     definition.params[0].default = Some(constant(60_000, "regtype"));
     definition.catalog_oid = Some(70_000);
     definition.owner = Some(RoleIdentity::BOOTSTRAP);
-    snapshot.definitions.sql_user_functions = Arc::new(
+    snapshot.definitions.sql_user_functions = uqa_core::memory::RetainedValue::new(
         uqa_sql::routines::registry::RoutineRegistry::try_from_iter([(
             "hidden.echo".into(),
             vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],

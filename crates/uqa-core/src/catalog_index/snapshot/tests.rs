@@ -155,3 +155,39 @@ fn native_observations_keep_structural_order_cloned_positions_and_exact_length()
     drop(snapshot);
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn admitted_native_catalog_projection_retains_original_header_without_allocating_wrappers() {
+    use crate::memory::{MemoryBudget, RetainedValue};
+    let input = MemoryBudget::new(1 << 20);
+    let rows = BTreeMap::from([(
+        RelationIdentity::new("public", "index"),
+        row("table", "original payload".into()),
+    )]);
+    let pointer = rows.values().next().unwrap().parameters_json.as_ptr();
+    let registry = RetainedValue::with_budget(rows, &input).unwrap();
+    let identity = registry.identity();
+    assert!(identity.matches(&registry));
+    let mut projected = None;
+    let allocation = allocation_counter::measure(|| {
+        projected = Some(CatalogIndexSnapshot::from_retained_registry(registry));
+    });
+    assert_eq!(allocation.count_total, 0);
+    let snapshot = projected.unwrap();
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(
+        snapshot.iter().next().unwrap().parameters_json.as_ptr(),
+        pointer
+    );
+    let saved = snapshot.clone();
+    drop(snapshot);
+    assert!(input.used() > 0);
+    assert_eq!(saved.iter().len(), 1);
+    assert_eq!(
+        saved.iter().next().unwrap().parameters_json,
+        "original payload"
+    );
+    drop(saved);
+    assert_eq!(input.used(), 0);
+    assert!(!identity.is_alive());
+}

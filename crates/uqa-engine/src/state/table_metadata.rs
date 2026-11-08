@@ -6,9 +6,8 @@
 
 //! Table metadata locks adapt SQL's native immutable generations to retained source identities.
 
-use super::{CatalogCell, CatalogSnapshot};
+use super::{CatalogCell, CatalogGeneration, CatalogSnapshot};
 use parking_lot::MappedRwLockReadGuard;
-use std::sync::Arc;
 use uqa_sql::catalog::table_metadata::{
     SharedTableMetadata, TableMetadata, TableMetadataValue, TableMetadataWrite,
 };
@@ -29,11 +28,11 @@ impl<T: TableMetadataValue, F: Send + Sync + 'static> TableMetadataCell<T, F> {
         Self(CatalogCell::new(TableMetadata::new(value)))
     }
 
-    pub(crate) fn from_generation(value: Arc<TableMetadata<T>>) -> Self {
+    pub(crate) fn from_generation(value: impl Into<CatalogGeneration<TableMetadata<T>>>) -> Self {
         Self(CatalogCell::from_snapshot(value))
     }
 
-    pub(crate) fn generation(&self) -> Arc<TableMetadata<T>> {
+    pub(crate) fn generation(&self) -> CatalogGeneration<TableMetadata<T>> {
         self.0.snapshot()
     }
 
@@ -52,7 +51,7 @@ impl<T: TableMetadataValue, F: Send + Sync + 'static> TableMetadataCell<T, F> {
         self.0.source_snapshot(registry)
     }
 
-    pub(crate) fn restore(&self, snapshot: &Arc<TableMetadata<T>>) {
+    pub(crate) fn restore(&self, snapshot: &CatalogGeneration<TableMetadata<T>>) {
         self.0.restore(snapshot);
     }
 

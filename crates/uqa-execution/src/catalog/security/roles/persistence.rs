@@ -6,7 +6,8 @@
 
 //! Durable role records and their transaction-private catalog overlays.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     catalog::roles::{restoration, RoleDefinition, RoleMembership, RoleMembershipKey},
@@ -27,8 +28,8 @@ pub struct RoleCatalogValues {
 
 #[derive(Clone)]
 pub struct RoleCatalogSnapshot {
-    pub roles: Arc<RoleDefinitions>,
-    pub memberships: Arc<RoleMemberships>,
+    pub roles: RetainedValue<RoleDefinitions>,
+    pub memberships: RetainedValue<RoleMemberships>,
 }
 
 impl RoleCatalogSnapshot {
@@ -44,15 +45,15 @@ impl RoleCatalogSnapshot {
                 .keys()
                 .chain(current.roles.keys())
                 .collect::<std::collections::BTreeSet<_>>();
-            let mut roles = Arc::clone(&self.roles);
+            let mut roles = RetainedValue::clone(&self.roles);
             for name in names {
                 if catalog.metadata_has_private_changes(&records::role_key(name))? {
                     if let Some(role) = current.roles.get(name) {
-                        Arc::make_mut(&mut roles)
+                        RetainedValue::make_mut(&mut roles)
                             .insert(name.clone(), role.clone())
                             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     } else {
-                        Arc::make_mut(&mut roles)
+                        RetainedValue::make_mut(&mut roles)
                             .remove(name)
                             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     }
@@ -64,15 +65,15 @@ impl RoleCatalogSnapshot {
                 .keys()
                 .chain(current.memberships.keys())
                 .collect::<std::collections::BTreeSet<_>>();
-            let mut memberships = Arc::clone(&self.memberships);
+            let mut memberships = RetainedValue::clone(&self.memberships);
             for identity in identities {
                 if catalog.metadata_has_private_changes(&memberships::key(identity))? {
                     if let Some(membership) = current.memberships.get(identity) {
-                        Arc::make_mut(&mut memberships)
+                        RetainedValue::make_mut(&mut memberships)
                             .insert(*identity, membership.clone())
                             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     } else {
-                        Arc::make_mut(&mut memberships)
+                        RetainedValue::make_mut(&mut memberships)
                             .remove(identity)
                             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                     }

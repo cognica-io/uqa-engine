@@ -34,7 +34,9 @@ impl Engine {
             Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
             Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
         )?;
-        self.durable.graphs.restore(&Arc::new(stores));
+        self.durable
+            .graphs
+            .restore(&crate::state::CatalogGeneration::new(stores));
         let indexes = self
             .durable
             .path_indexes
@@ -44,7 +46,9 @@ impl Engine {
                 self.storage.backend.as_ref().expect("persistent backend"),
             )
             .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
-        self.durable.path_indexes.restore(&Arc::new(indexes));
+        self.durable
+            .path_indexes
+            .restore(&crate::state::CatalogGeneration::new(indexes));
         Ok(())
     }
 
@@ -80,7 +84,9 @@ impl Engine {
             .read()
             .restored(catalog, || self.new_graph_store())?;
         if let Some(stores) = successor {
-            self.durable.graphs.restore(&Arc::new(stores));
+            self.durable
+                .graphs
+                .restore(&crate::state::CatalogGeneration::new(stores));
         }
         Ok(())
     }

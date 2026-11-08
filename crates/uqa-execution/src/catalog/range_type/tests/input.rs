@@ -117,10 +117,10 @@ impl Inputs {
         let mut snapshot = crate::catalog::test_support::empty_catalog()
             .snapshot()
             .clone();
-        snapshot.definitions.ranges = Arc::new(
+        snapshot.definitions.ranges = uqa_core::memory::RetainedValue::new(
             uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(ranges).unwrap(),
         );
-        snapshot.definitions.enums = Arc::new(
+        snapshot.definitions.enums = uqa_core::memory::RetainedValue::new(
             uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
                 "public.label".into(),
                 enumeration,

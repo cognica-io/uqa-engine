@@ -5,7 +5,6 @@
 //
 
 use crate::Engine;
-use std::sync::Arc;
 use uqa_execution::schema::events::persistence::{RULES_METADATA_KEY, TRIGGERS_METADATA_KEY};
 
 mod native;
@@ -31,7 +30,10 @@ fn load_only_rule_restore_rejects_legacy_metadata_without_publishing_or_writing(
     assert!(error
         .to_string()
         .contains("requires an initial-open format migration"));
-    assert!(Arc::ptr_eq(&before, &engine.durable.rules.snapshot()));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &before,
+        &engine.durable.rules.snapshot()
+    ));
     assert_eq!(
         catalog.get_metadata(RULES_METADATA_KEY).unwrap().as_deref(),
         Some(legacy)
@@ -66,7 +68,10 @@ fn trigger_identity_migration_is_initial_only_and_survives_reopen() {
     assert!(error
         .to_string()
         .contains("requires an initial-open function-identity migration"));
-    assert!(Arc::ptr_eq(&before, &engine.durable.triggers.snapshot()));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &before,
+        &engine.durable.triggers.snapshot()
+    ));
     assert_eq!(
         catalog
             .get_metadata(TRIGGERS_METADATA_KEY)

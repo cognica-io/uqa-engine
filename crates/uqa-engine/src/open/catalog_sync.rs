@@ -270,7 +270,7 @@ impl Engine {
             &snapshot.roles,
             &self.temporary_schema_name(),
         )?;
-        snapshot.builtin_routine_security = Arc::new(
+        snapshot.builtin_routine_security = crate::state::CatalogGeneration::new(
             uqa_execution::catalog::security::builtin_routines::merge_private(
                 self.storage.catalog.as_deref(),
                 &current.builtin_routine_security,
@@ -278,11 +278,12 @@ impl Engine {
                 &snapshot.roles,
             )?,
         );
-        snapshot.system_relation_security = Arc::new(system_relations::merge_private(
-            self.storage.catalog.as_deref(),
-            &current.system_relation_security,
-            (*snapshot.system_relation_security).clone(),
-        )?);
+        snapshot.system_relation_security =
+            crate::state::CatalogGeneration::new(system_relations::merge_private(
+                self.storage.catalog.as_deref(),
+                &current.system_relation_security,
+                (*snapshot.system_relation_security).clone(),
+            )?);
         snapshot.views = uqa_execution::catalog::security::relation_authority::merge_private_views(
             self.storage.catalog.as_deref(),
             &current.views,

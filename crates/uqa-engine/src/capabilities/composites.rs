@@ -8,6 +8,7 @@
 
 use crate::Engine;
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_execution::catalog::composite_type::{
     CompositeRegistry, CompositeRegistryPublication, CompositeRegistryRead,
 };
@@ -84,10 +85,10 @@ impl Engine {
     }
 
     /// The composite registry generation of the running statement: the pinned query snapshot when one exists, otherwise the session's current definitions.
-    pub(crate) fn composite_registry_snapshot(&self) -> Arc<CompositeRegistry> {
+    pub(crate) fn composite_registry_snapshot(&self) -> RetainedValue<CompositeRegistry> {
         self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.composites.snapshot(),
-            |snapshot| Arc::clone(&snapshot.composites),
+            |snapshot| snapshot.composites.clone(),
         )
     }
 }

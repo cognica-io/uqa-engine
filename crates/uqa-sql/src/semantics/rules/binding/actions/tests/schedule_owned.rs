@@ -43,7 +43,7 @@ impl RuleCatalog for Rules {
         control: &ProductionControl<'_>,
     ) -> Result<CapturedRules, SQLError> {
         CapturedRules::from_catalog(
-            Arc::clone(&self.0),
+            Arc::clone(&self.0).into(),
             self.resolve_rule_relation_with_control(table, control)?,
             event,
             false,

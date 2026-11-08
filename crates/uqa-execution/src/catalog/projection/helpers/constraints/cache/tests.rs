@@ -9,7 +9,6 @@ use crate::catalog::{
     cache::RegtypeOutputCache,
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
-use std::sync::Arc;
 use uqa_core::{
     catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity, RelationIdentity, Value,
 };
@@ -25,9 +24,10 @@ fn table_name(position: usize) -> RelationIdentity {
 
 fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([(
             "uqa".into(),
             uqa_sql::catalog::roles::RoleDefinition::bootstrap(),

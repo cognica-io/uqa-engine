@@ -52,7 +52,7 @@ fn independent_sessions_share_committed_catalog_allocations() {
         !Arc::ptr_eq(&first, &second),
         "physical handles must stay session-bound"
     );
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first.columns.generation(),
         &second.columns.generation()
     ));
@@ -60,7 +60,7 @@ fn independent_sessions_share_committed_catalog_allocations() {
         .key_constraints
         .snapshot()
         .shares_definition(&second.key_constraints.snapshot()));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &engine.durable.schemas.snapshot(),
         &session.durable.schemas.snapshot()
     ));
@@ -92,7 +92,7 @@ fn independent_sessions_share_committed_catalog_allocations() {
         Value::Str("ready".into())
     );
     assert!(
-        Arc::ptr_eq(
+        uqa_core::memory::RetainedValue::ptr_eq(
             &first.columns.generation(),
             &session
                 .try_table("items")

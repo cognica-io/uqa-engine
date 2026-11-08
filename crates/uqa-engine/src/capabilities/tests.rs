@@ -86,11 +86,11 @@ fn catalog_views_share_schema_and_graph_allocations_until_mutation() {
     assert!(first.snapshot().tables[&relation]
         .columns
         .shares_definition(&second.snapshot().tables[&relation].columns));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first.snapshot().definitions.graphs,
         &second.snapshot().definitions.graphs
     ));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first.snapshot().definitions.schemas,
         &second.snapshot().definitions.schemas
     ));

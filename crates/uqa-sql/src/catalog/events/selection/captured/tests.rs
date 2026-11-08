@@ -46,7 +46,7 @@ fn captured_rules_preserve_event_enablement_order_and_declaration_addresses() {
     ] {
         entries.insert(name.into(), rule(name, event, mode));
     }
-    let catalog = Arc::new(
+    let catalog = RetainedValue::new(
         crate::catalog::events::EventCatalog::try_from_iter([(
             RelationIdentity::new("public", "items"),
             crate::catalog::events::EventDefinitions::try_from_iter(entries).unwrap(),
@@ -113,7 +113,7 @@ fn capture_borrows_large_actions_and_keeps_the_original_generation_until_release
         panic!("query")
     };
     query.projections[0].expr = Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
-    let mut catalog = Arc::new(
+    let mut catalog = RetainedValue::new(
         crate::catalog::events::EventCatalog::try_from_iter([(
             RelationIdentity::new("public", "items"),
             crate::catalog::events::EventDefinitions::try_from_iter([("a".into(), stored)])
@@ -142,7 +142,7 @@ fn capture_borrows_large_actions_and_keeps_the_original_generation_until_release
         &raw const next_generation[&relation]["a"]
     ));
     drop(next_generation);
-    let original = Arc::downgrade(&catalog);
+    let original = catalog.identity();
     let memory = MemoryBudget::new(256);
     let sibling = memory.reserve(37).unwrap();
     let token = CancellationToken::new();
@@ -166,15 +166,15 @@ fn capture_borrows_large_actions_and_keeps_the_original_generation_until_release
         memory.used() - sibling.bytes()
     );
     let selected = selected.unwrap();
-    Arc::make_mut(&mut catalog).clear();
+    RetainedValue::make_mut(&mut catalog).clear();
     assert!(catalog.is_empty());
     assert_eq!(
         selected.iter().next().unwrap().unwrap().definition.name,
         "a"
     );
-    assert!(original.upgrade().is_some());
+    assert!(original.is_alive());
     drop(selected);
-    assert!(original.upgrade().is_none());
+    assert!(!original.is_alive());
     assert_eq!(memory.used(), sibling.bytes());
     drop(sibling);
     assert_eq!(memory.used(), 0);
@@ -186,7 +186,7 @@ fn captured_iteration_observes_both_cancellations_even_for_empty_selections() {
     let original = CancellationToken::new();
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(&memory, &original, &invoking);
-    let catalog = Arc::new(
+    let catalog = RetainedValue::new(
         crate::catalog::events::EventCatalog::try_from_iter([(
             RelationIdentity::new("public", "items"),
             crate::catalog::events::EventDefinitions::try_from_iter([

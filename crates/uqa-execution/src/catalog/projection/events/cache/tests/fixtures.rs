@@ -17,9 +17,10 @@ use uqa_sql::{
 
 pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
     );
     let relation = RelationIdentity::new("public", "items");
@@ -42,7 +43,7 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
             catalog_oid: Some(70_000 + i64::try_from(position).unwrap()),
             constraint_catalog_oid: None,
         };
-        Arc::make_mut(&mut snapshot.definitions.triggers)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
             .insert_event(relation.clone(), trigger.definition.name.clone(), trigger)
             .unwrap();
         let Statement::CreateRule(definition) = uqa_sql::compile(&format!(
@@ -60,10 +61,10 @@ pub(super) fn fixture(unrelated: usize) -> CatalogReadView {
             dependencies: None,
             catalog_oid: Some(80_000 + i64::try_from(position).unwrap()),
         };
-        Arc::make_mut(&mut snapshot.definitions.rules)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.rules)
             .insert_event(relation.clone(), rule.definition.name.clone(), rule)
             .unwrap();
-        Arc::make_mut(&mut snapshot.definitions.views)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
             .insert(
                 RelationIdentity::new("public", format!("view_{position:03}")),
                 view(position),

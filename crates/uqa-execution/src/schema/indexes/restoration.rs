@@ -164,7 +164,7 @@ fn candidate_catalog(
     for row in rows {
         indexes.insert_in(row.clone(), &snapshot)?;
     }
-    snapshot.definitions.catalog_indexes = std::sync::Arc::new(indexes);
+    snapshot.definitions.catalog_indexes = uqa_core::memory::RetainedValue::new(indexes);
     Ok((CatalogReadView::new(snapshot), names))
 }
 

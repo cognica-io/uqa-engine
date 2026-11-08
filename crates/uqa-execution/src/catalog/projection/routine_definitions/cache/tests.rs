@@ -15,7 +15,7 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     for position in 0..=unrelated {
         let Statement::CreateFunction(mut definition) = uqa_sql::compile(&format!("CREATE FUNCTION public.routine_{position:03}() RETURNS integer LANGUAGE SQL AS 'SELECT 1'")).unwrap().remove(0) else { panic!("routine"); };
         definition.catalog_oid = Some(70_000 + u32::try_from(position).unwrap());
-        Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
             .insert(
                 definition.name.clone(),
                 vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
@@ -72,7 +72,8 @@ fn concurrent_routine_inquiries_index_addresses_once() {
 fn routine_address_errors_preserve_earlier_matches_and_precede_builtin_fallback() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    let routines = Arc::make_mut(&mut snapshot.definitions.sql_user_functions);
+    let routines =
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions);
     routines
         .edit("public.routine_001", |overloads| {
             let mut definition = overloads[0].def.clone();
@@ -106,7 +107,8 @@ fn routine_addresses_keep_overload_order_and_retained_generations() {
     let catalog = fixture(1);
     let original = user_routine_by_oid(&catalog, 70_000).unwrap().unwrap();
     let mut snapshot = catalog.snapshot().clone();
-    let routines = Arc::make_mut(&mut snapshot.definitions.sql_user_functions);
+    let routines =
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions);
     let mut first = routines["public.routine_000"].clone();
     routines.remove("public.routine_000").unwrap();
     let mut definition = first[0].def.clone();
@@ -133,7 +135,7 @@ fn routine_addresses_keep_overload_order_and_retained_generations() {
             .name,
         "public.routine_001"
     );
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions).clear();
     let removed = CatalogReadView::new(snapshot);
     assert!(user_routine_by_oid(&removed, 70_000).unwrap().is_none());
     assert_eq!(original.def.name, "public.routine_000");

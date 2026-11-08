@@ -166,7 +166,10 @@ fn sequence_security_conversion_is_initial_only_and_rolls_back_with_later_catalo
             error.to_string().contains("initial catalog migration"),
             "{error}"
         );
-        assert!(Arc::ptr_eq(&before, &first.durable.sequences.snapshot()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &before,
+            &first.durable.sequences.snapshot()
+        ));
         raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
         drop(second);
         drop(first);
@@ -221,7 +224,10 @@ fn sequence_authority_rejects_replaced_owner_grantee_and_grantor_on_refresh_and_
                 error.to_string().contains("missing role incarnation"),
                 "{error}"
             );
-            assert!(Arc::ptr_eq(&before, &first.durable.sequences.snapshot()));
+            assert!(uqa_core::memory::RetainedValue::ptr_eq(
+                &before,
+                &first.durable.sequences.snapshot()
+            ));
             let Err(error) = first.new_session() else {
                 panic!("invalid endpoint accepted")
             };

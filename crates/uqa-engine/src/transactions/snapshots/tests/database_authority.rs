@@ -20,7 +20,7 @@ fn committed_database_authority_retains_original_grants_with_bounded_capture_wor
         }
         let original = engine.durable.database_security.snapshot();
         let expected = original.as_ref().as_ref().clone();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(
             &engine,
@@ -61,7 +61,7 @@ fn committed_database_authority_retains_original_grants_with_bounded_capture_wor
         sql(&engine, "GRANT CREATE ON DATABASE uqa TO PUBLIC");
         assert_ne!(engine.durable.database_security.read().as_ref(), &expected);
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert_eq!(saved.get().unwrap().as_ref(), &expected);
         drop(selected);
         control.cancellation().cancel();

@@ -23,7 +23,7 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         // The index rows the catalog view of this statement holds.
         let indexes = match self.query_catalog_snapshot.as_ref() {
-            Some(snapshot) => std::sync::Arc::clone(&snapshot.catalog_indexes),
+            Some(snapshot) => snapshot.catalog_indexes.clone(),
             None => self.durable.catalog_indexes.snapshot(),
         };
         self.runtime

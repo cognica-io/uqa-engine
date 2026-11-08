@@ -6,7 +6,8 @@
 
 //! Versioned domain authority, complete restoration and durable registry publication.
 
-use std::{ops::Deref, sync::Arc};
+use std::ops::Deref;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{
     domain::{validate_domain_registry, StoredDomain},
@@ -34,10 +35,10 @@ pub trait DomainRegistryPublication: RoleCatalogGuards {
 /// Overlay private domain replacements and deletions without losing independently committed definitions.
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<DomainRegistry>,
-    committed: Arc<DomainRegistry>,
+    current: &RetainedValue<DomainRegistry>,
+    committed: RetainedValue<DomainRegistry>,
     roles: &RoleDefinitions,
-) -> StorageBackendResult<Arc<DomainRegistry>> {
+) -> StorageBackendResult<RetainedValue<DomainRegistry>> {
     let committed = merge_private_records(current, committed, |name| {
         catalog.map_or(Ok(false), |catalog| {
             catalog.metadata_has_private_changes(&records::key(name))
@@ -49,9 +50,9 @@ pub fn merge_private(
 
 fn merge_private_records(
     current: &DomainRegistry,
-    mut committed: Arc<DomainRegistry>,
+    mut committed: RetainedValue<DomainRegistry>,
     mut is_private: impl FnMut(&str) -> StorageBackendResult<bool>,
-) -> StorageBackendResult<Arc<DomainRegistry>> {
+) -> StorageBackendResult<RetainedValue<DomainRegistry>> {
     let names = current
         .keys()
         .chain(committed.keys())
@@ -60,11 +61,11 @@ fn merge_private_records(
     for name in names {
         if is_private(&name)? {
             if let Some(domain) = current.get(&name) {
-                Arc::make_mut(&mut committed)
+                RetainedValue::make_mut(&mut committed)
                     .insert(name, domain.clone())
                     .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             } else {
-                Arc::make_mut(&mut committed)
+                RetainedValue::make_mut(&mut committed)
                     .remove(&name)
                     .map_err(|error| StorageBackendError::backend("domain definition", error))?;
             }

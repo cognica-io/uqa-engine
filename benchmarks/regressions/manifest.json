@@ -50906,6 +50906,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_shared_values_keep_original_bytes_until_the_last_reader_retires",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Exhaust an input allowance, detach an ordinary writable successor and retire independently shared original readers.",
+      "invariant": "The shared header retires with its last generation reader; shared payload reservations remain with native owners, including detached successors. Mutation neither consumes the input allowance nor changes retained values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_shared_values_preserve_identity_and_detach_only_shared_writes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Adopt the same native Arc twice, mutate one shared owner and then mutate its unique successor.",
+      "invariant": "Original pointer identity and native copy-on-write behavior are preserved; an unshared mutable successor keeps its allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "denied_shared_header_retires_the_consumed_payload_with_its_reservation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Admit a payload with a total allowance one byte below the required shared header.",
+      "invariant": "Header rejection consumes no published owner and releases all original payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "weak_value_identity_does_not_retain_admitted_bytes_or_match_reused_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Keep a non-owning cache identity after all readers retire and construct 64 equal replacement values.",
+      "invariant": "The key pins no admitted payload or header, preserves native shared identity, and never matches a replacement allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_catalog_generation_survives_snapshot_sources_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/catalog_cell.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Capture an admitted native catalog through independent source identities, cancel input, mutate and restore the saved generation.",
+      "invariant": "Undo and source readers preserve the original header; retirement releases original admission while the independently frozen cut remains readable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_native_catalog_projection_retains_original_header_without_allocating_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Project an admitted registry through the public erased index snapshot and keep an independent snapshot after source retirement.",
+      "invariant": "Projection allocates no wrapper and keeps the original header admitted until the final projected reader retires; a non-owning identity pins no admitted bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "equal_shared_generations_preserve_constant_work_for_dependency_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Compare the same and distinct equal native/admitted generations while independently counting payload comparisons.",
+      "invariant": "Shared dependency generations require no payload traversal; distinct equal owners preserve native equality.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

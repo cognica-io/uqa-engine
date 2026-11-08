@@ -246,7 +246,7 @@ fn corrupt_current_routine_authority_never_rebinds_or_installs_placeholders() {
                 CatalogRestoreMode::LoadOnly
             )
             .is_err());
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &before,
             &first.durable.sql_user_functions.snapshot()
         ));

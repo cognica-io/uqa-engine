@@ -19,7 +19,7 @@ fn committed_schema_roots_preserve_original_authority_with_bounded_capture_work(
             .iter()
             .map(|(name, security)| (name.clone(), security.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(
             &engine,
@@ -47,7 +47,7 @@ fn committed_schema_roots_preserve_original_authority_with_bounded_capture_work(
             .eq(expected.iter().map(|(name, security)| (name, security))));
         sql(&engine, "REVOKE USAGE ON SCHEMA saved_000 FROM reader; ROLLBACK TO changed; COMMIT; ALTER SCHEMA saved_000 RENAME TO moved; DROP SCHEMA moved; CREATE SCHEMA saved_000");
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert!(captured
             .get()
             .unwrap()

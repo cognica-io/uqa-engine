@@ -14,6 +14,7 @@ use uqa_sql::catalog::roles::RoleDefinitions;
 pub use values::rewrite_composite_constants;
 
 use std::ops::DerefMut;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};
 
 pub type RoutineRegistryWrite<'a> = Box<dyn DerefMut<Target = RoutineRegistry> + 'a>;
@@ -35,7 +36,7 @@ pub struct RoutineMutationContext<'a> {
     pub changes: &'a dyn crate::schema::namespaces::NamespaceCatalogChanges,
 }
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_sql::ast::CreateFunction;
 
 pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
@@ -43,22 +44,22 @@ pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 /// Select one complete metadata record so committed refresh cannot discard private routine definitions or ACL changes.
 pub fn merge_private(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
-    current: &Arc<RoutineRegistry>,
-    committed: Arc<RoutineRegistry>,
+    current: &RetainedValue<RoutineRegistry>,
+    committed: RetainedValue<RoutineRegistry>,
     roles: &RoleDefinitions,
     temporary_schema: &str,
-) -> uqa_storage::StorageBackendResult<Arc<RoutineRegistry>> {
+) -> uqa_storage::StorageBackendResult<RetainedValue<RoutineRegistry>> {
     let mut registry = if catalog.map_or(Ok(false), |catalog| {
         catalog.metadata_has_private_changes(FUNCTIONS_METADATA_KEY)
     })? {
-        Arc::clone(current)
+        RetainedValue::clone(current)
     } else {
         committed
     };
     for (name, overloads) in current.iter().filter(|(name, _)| {
         uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, temporary_schema)
     }) {
-        Arc::make_mut(&mut registry)
+        RetainedValue::make_mut(&mut registry)
             .insert(name.clone(), overloads.clone())
             .map_err(|error| {
                 uqa_storage::StorageBackendError::backend(

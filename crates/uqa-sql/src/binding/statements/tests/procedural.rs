@@ -10,7 +10,6 @@ use crate::routines::{
     resolution::{RoutineOverloadCatalog, RoutineOverloadContext, RoutineTypeSnapshot},
     RoutineBody, SQLUserFunction,
 };
-use std::sync::Arc;
 
 struct Procedures(Vec<crate::routines::SQLRoutine>);
 
@@ -81,7 +80,7 @@ impl RoutineTypeCatalog for Procedures {
 }
 impl RoutineOverloadCatalog for Procedures {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::default()
+        RoutineTypeSnapshot::default()
     }
     fn routine_search_path(&self) -> Vec<String> {
         vec!["public".into()]

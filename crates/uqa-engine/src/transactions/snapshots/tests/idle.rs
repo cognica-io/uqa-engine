@@ -16,7 +16,7 @@ fn idle_memory_capture_retires_sources_without_retaining_undo_or_temporary_paylo
     let weak = Arc::downgrade(&table);
     drop(table);
     let views = engine.durable.views.snapshot();
-    let weak_views = Arc::downgrade(&views);
+    let weak_views = views.identity();
     drop(views);
     let control = StorageReadControl::with_limit(128 << 10);
     assert_eq!(engine.transaction_depth(), 0);
@@ -29,7 +29,7 @@ fn idle_memory_capture_retires_sources_without_retaining_undo_or_temporary_paylo
     sql(&engine, "UPDATE docs SET body='later'; SELECT setval('saved',500); DROP VIEW saved_view; DROP TABLE docs; CREATE TABLE docs(replacement boolean)");
     drop(engine);
     assert!(weak.upgrade().is_none());
-    assert!(weak_views.upgrade().is_none());
+    assert!(!weak_views.is_alive());
     let table = selected
         .table(&RelationIdentity::new("public", "docs"))
         .unwrap();

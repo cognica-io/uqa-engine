@@ -6,7 +6,7 @@
 
 //! Bind SQL routine overload resolution to shared catalog allocations and session metadata.
 
-use crate::{Arc, Engine};
+use crate::Engine;
 use uqa_sql::{
     ast::{ColumnType, FunctionBinding},
     routines::{
@@ -21,7 +21,7 @@ impl RoutineOverloadCatalog for Engine {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
         self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.domains.snapshot(),
-            |snapshot| Arc::clone(&snapshot.domains),
+            |snapshot| snapshot.domains.clone(),
         )
     }
     fn routine_search_path(&self) -> Vec<String> {

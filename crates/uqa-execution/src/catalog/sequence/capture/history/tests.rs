@@ -7,7 +7,6 @@
 use super::*;
 use crate::catalog::sequence::registry::{SequenceCatalog, SequenceRecord};
 use crate::catalog::{security::roles::persistence::RoleCatalogSnapshot, sequence::SequenceState};
-use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
@@ -21,7 +20,7 @@ fn fixture() -> SequenceCaptureSource {
     state.definition_generation = [7; 16];
     state.cache_size = 8;
     let definitions = SequenceReadSnapshot {
-        catalog: Arc::new(
+        catalog: uqa_core::memory::RetainedValue::new(
             SequenceCatalog::try_from_iter([(
                 relation,
                 SequenceRecord {
@@ -35,8 +34,8 @@ fn fixture() -> SequenceCaptureSource {
             .unwrap(),
         ),
         roles: RoleCatalogSnapshot {
-            roles: Arc::default(),
-            memberships: Arc::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            memberships: uqa_core::memory::RetainedValue::default(),
         },
     };
     SequenceCaptureSource::new(definitions)
@@ -97,7 +96,7 @@ fn sequence_value_capture_joins_original_object_and_definition_before_admission(
         .unwrap();
     let temporary = RelationIdentity::new("pg_temp_1", "x".repeat(1 << 20));
     let definitions = source.definitions.as_mut().unwrap();
-    Arc::make_mut(&mut definitions.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut definitions.catalog)
         .insert(
             temporary,
             SequenceRecord {
@@ -155,7 +154,7 @@ fn sequence_value_capture_joins_original_object_and_definition_before_admission(
 fn sequence_history_publication_preserves_unread_cuts_and_native_session_observations() {
     let registry = MemoryCaptureRegistry::new();
     let source = fixture();
-    let weak = Arc::downgrade(&source.definitions.as_ref().unwrap().catalog);
+    let weak = source.definitions.as_ref().unwrap().catalog.identity();
     let cell = registry.cell(source).unwrap();
     let key = cell.key().unwrap();
     cell.write()
@@ -202,7 +201,7 @@ fn sequence_history_publication_preserves_unread_cuts_and_native_session_observa
         .record([8; 16], value([1; 16], 900, true), None, true)
         .unwrap();
     drop(cell);
-    assert!(weak.upgrade().is_none());
+    assert!(!weak.is_alive());
     assert!(failed.check().is_err());
     let second_saved = key.captured(&second).unwrap();
     assert_eq!(captured_state(&second_saved).current, -9);
@@ -232,7 +231,7 @@ fn sequence_history_prepares_every_successor_before_effects_and_preserves_abando
             .unwrap();
     }
     let mut definitions = original.definitions.unwrap();
-    definitions.catalog = Arc::new(catalog);
+    definitions.catalog = uqa_core::memory::RetainedValue::new(catalog);
     let mut source = SequenceCaptureSource::new(definitions);
     source
         .record(

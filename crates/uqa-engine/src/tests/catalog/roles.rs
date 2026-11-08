@@ -82,11 +82,11 @@ fn failed_role_declaration_preserves_live_registry_identity_and_prepared_cache()
         .sql("CREATE ROLE forbidden SUPERUSER", &[])
         .unwrap_err();
     assert!(matches!(error, uqa_sql::SQLError::Routine { sqlstate, .. } if sqlstate == "42501"));
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &roles,
         &engine.durable.roles.snapshot()
     ));
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &memberships,
         &engine.durable.role_memberships.snapshot()
     ));
