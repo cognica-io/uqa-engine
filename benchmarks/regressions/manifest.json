@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -50248,6 +50248,71 @@
       "capability": "Writable vector image ownership",
       "workload": "Reject trailing input and unwind after successful native import for all four vector methods.",
       "invariant": "No failed or abandoned private candidate retains original admission or exposes a partial destination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_preserve_deferred_resolution_and_native_mutation_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable evaluated text input",
+      "workload": "Import independent raw-term and duplicate-edge bytes with an invalid deferred default, reject a new analyzed row, then remove and replace through native mutation.",
+      "invariant": "No analyzer resolution occurs during adoption; rejection preserves the corpus and ordinary post-import writes work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_keep_exact_revisions_and_native_binding_transactions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text analyzer ownership",
+      "workload": "Adopt actual evaluated text with independent index/search revisions and exercise rejected index changes, search assignment, clearing and default binding.",
+      "invariant": "Compiled revision identities and original bytes survive; native transactional binding validation and future mutation remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_corpus_reservations_follow_shared_roots_and_detach_on_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text root admission",
+      "workload": "Create read, writable and deep-copy snapshots, cancel the completed input control, clear the original and mutate the writable snapshot.",
+      "invariant": "Original payload leases follow shared corpus roots until their last reader; independent copies remain usable after those leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_images_enter_live_capture_and_survive_unread_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text capture retirement",
+      "workload": "Publish an imported native corpus in a real capture registry, retire its source before reading and observe the selected original image.",
+      "invariant": "Original occurrences and field counters survive source loss; read-only cuts reject mutation and both original allowances retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_text_publication_rejection_and_unwinding_release_original_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/image/tests/ownership.rs",
+      "capability": "Writable text publication admission",
+      "workload": "Exhaust final header admission, cancel private publication and unwind after native adoption.",
+      "invariant": "No rejected destination escapes; payload and binding owners release their original admission on every failure path.",
       "case_names": [
         ""
       ]

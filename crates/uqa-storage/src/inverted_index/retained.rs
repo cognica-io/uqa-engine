@@ -21,7 +21,7 @@ use uqa_core::memory::{
 mod charge;
 mod staging;
 
-/// Build an immutable text index from borrowed selected fields. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Corpus map/set nodes use exact owned layouts admitted before publication; analyzer field bindings retain their own controlled containers. Allocator bookkeeping remains outside the payload charge. A rejected document leaves previously appended documents unchanged.
+/// Build an admitted text corpus from borrowed selected fields or evaluated images. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Corpus map/set nodes use exact owned layouts admitted before publication; analyzer field bindings retain their own controlled containers. Allocator bookkeeping remains outside the payload charge. A rejected document leaves previously appended documents unchanged.
 pub struct RetainedInvertedIndexBuilder {
     index: MemoryInvertedIndex,
     memory: MemoryReservation,
@@ -141,6 +141,21 @@ impl RetainedInvertedIndexBuilder {
                 copy_name(name, &mut memory, &self.control)
             })?;
         Ok(Budgeted::new(plan, memory))
+    }
+
+    /// Adopt evaluated postings into a writable native owner without analysis or resource resolution. Shared corpus roots retain their original leases; subsequent writes use the native mutation boundary and detach selected roots normally.
+    pub fn finish_writable(mut self) -> StorageBackendResult<MemoryInvertedIndex> {
+        self.control.check()?;
+        self.index.image_memory = Some(
+            self.control
+                .memory()
+                .reserve(size_of::<MemoryInvertedIndex>())?,
+        );
+        self.control.check()?;
+        Arc::get_mut(&mut self.index.state)
+            .expect("unpublished text builder owns its corpus")
+            .image_memory = Some(self.memory);
+        Ok(self.index)
     }
 
     pub fn finish(mut self) -> StorageBackendResult<ReadOnlySnapshot<dyn InvertedIndex>> {

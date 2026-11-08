@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod ownership;
 mod stream;
 use crate::{
     inverted_index::{AnalyzerBindings, AnalyzerPhase, RetainedInvertedIndexBuilder},

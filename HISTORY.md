@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Evaluated memory text images can become writable native indexes without reanalysis. Original corpus and analyzer owners survive shared snapshots, subsequent mutations and source retirement.
+
 - Decoded memory vector indexes retain their original allocation leases through live registration, writes, snapshots and retirement without a separate caller-owned reservation.
 
 - Native table image import retains decoded field names, optional array names, constraints, definitions and unresolved analyzer settings with their original memory admission through shared catalog consumers. Complete Engine restore remains under implementation.

@@ -111,6 +111,7 @@ pub struct MemoryInvertedIndex {
     /// Controlled readers keep the shared generation's allowance after the source changes or closes.
     state_memory: Option<Arc<uqa_core::memory::MemoryReservation>>,
     read_control: Option<crate::read_control::StorageReadControl>,
+    image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 /// Cloning retains the existing independently owned corpus maps; snapshot APIs share them until a write.
@@ -121,6 +122,7 @@ impl Clone for MemoryInvertedIndex {
             state: Arc::new((*self.state).clone()),
             state_memory: None,
             read_control: None,
+            image_memory: None,
         }
     }
 }
@@ -135,6 +137,7 @@ struct MemoryIndexState {
     field_counters: OwnedMap<FieldName, MemoryFieldCounters>,
     doc_count: u64,
     retention: footprint::RetainedPayload,
+    image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 type PostingKey = (FieldName, TokenTermKey);
@@ -212,6 +215,7 @@ impl MemoryInvertedIndex {
             state: Arc::default(),
             state_memory: None,
             read_control: None,
+            image_memory: None,
         }
     }
 
@@ -221,6 +225,7 @@ impl MemoryInvertedIndex {
             state: Arc::clone(&self.state),
             state_memory: self.state_memory.clone(),
             read_control: self.read_control.clone(),
+            image_memory: None,
         }
     }
 
