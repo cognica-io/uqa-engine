@@ -134,7 +134,7 @@ impl CapturedValueIndex {
         control.check()?;
         let reader = match &self.values {
             CapturedValues::Resident(values) => values
-                .get(&id)
+                .get(id)
                 .map(|value| {
                     ImageReader::new(
                         ResidentValue(ValueImageReader::new(

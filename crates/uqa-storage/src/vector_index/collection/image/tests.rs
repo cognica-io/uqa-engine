@@ -43,6 +43,7 @@ fn native_vector_import_retains_original_field_buffers_and_writable_capture() {
     let output = StorageReadControl::with_limit(1 << 20);
     let cut = registry.capture(&output).unwrap();
     let selected = source.captured(&cut).unwrap();
+    let occupied = input.memory().reserve(input.memory().available()).unwrap();
     input.cancellation().cancel();
     source
         .write()
@@ -70,6 +71,8 @@ fn native_vector_import_retains_original_field_buffers_and_writable_capture() {
     image.write_image(&mut bytes, &working).unwrap();
     assert_eq!(bytes, expected);
     drop(image);
+    assert_eq!(input.memory().used(), occupied.bytes());
+    drop(occupied);
     assert_eq!(input.memory().used(), 0);
     assert_eq!(output.memory().used(), 0);
     assert_eq!(working.memory().used(), 0);

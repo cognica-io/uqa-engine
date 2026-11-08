@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -50493,7 +50493,7 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
       "capability": "Native admitted index registration",
-      "workload": "Import an evaluated exact-vector registration, retain a cut, cancel input and mutate live indexes before source retirement.",
+      "workload": "Import exact vector fields with their original admitted names, exhaust and cancel input admission, mutate data and register a new field, then retire the source while retaining its exact captured child.",
       "invariant": "The original field buffer is adopted; the retained image matches its original bytes and every allowance releases after the last reader.",
       "case_names": [
         ""
@@ -50578,6 +50578,149 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_mutation_allowance_transfer_keeps_original_nodes_and_payload_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Native map mutation admission",
+      "workload": "Transfer a retained map under exhausted input admission, mutate its successor and retire independent snapshots.",
+      "invariant": "Changing future allocation ownership copies no entries; original payload and node leases remain live until their last root retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_btree_keys_match_native_ranges_and_keep_original_input_until_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Admitted physical scalar index",
+      "workload": "Compare exact, range, NULL and set probes with the native index, then clone and mutate after input cancellation.",
+      "invariant": "Original field/key buffers and ordered identity buckets survive input, and unchanged predicate results and independent copied indexes retain valid ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_btree_rejection_retires_unfunded_foreign_unordered_and_cancelled_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Physical index input rejection",
+      "workload": "Deny foreign and incomplete leases, repeated bucket identities, exhausted allowance and cancellation.",
+      "invariant": "Rejected construction consumes its complete partial owner and releases every original field, key and identity-buffer allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_preserves_independent_policy_bytes_and_original_value_buffers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Native evaluated-index policy",
+      "workload": "Import 24 historical-policy combinations with full-width identities, NULL, text, negative zero and a selected NaN bit pattern.",
+      "invariant": "Metadata bytes and every evaluated value image remain exact after source retirement and input cancellation, including original text pointers and final lease release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_preserves_probes_and_historical_policy_through_mutation_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Writable evaluated-index input",
+      "workload": "Compare probes and cardinality with a native resident index, preserve an earlier capture through replacement, and force later spill for key and carried policies.",
+      "invariant": "Native queries and mutations preserve selected values; backing migration retains independent historical eligibility instead of deriving it only from surviving keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_rejects_partial_foreign_unordered_unfunded_and_cancelled_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Evaluated input admission",
+      "workload": "Reject missing values, foreign allowance, duplicate identities, unfunded payload, exhausted budget, cancellation and a row-policy contradiction.",
+      "invariant": "Every rejected consuming construction releases the complete partial owner and leaves no original input allocations behind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_mutations_keep_original_owners_under_exhausted_input_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Independent native mutation admission",
+      "workload": "Exhaust and cancel a completed input allowance, then insert and remove values while an earlier capture remains live.",
+      "invariant": "Ordinary mutations use their native production boundary; the retained original value stays admitted until its final consumer retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_value_registrations_preserve_original_names_and_exact_captured_children",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/image/tests.rs",
+      "capability": "Admitted evaluated-index membership",
+      "workload": "Adopt original names and evaluated children, exhaust and cancel input admission, replace and add registrations, then retire all sources while retaining the original selected child.",
+      "invariant": "The live name keeps its original pointer and a selected child remains exact and independently owned after source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_value_registration_rejection_retires_complete_partial_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/image/tests.rs",
+      "capability": "Evaluated membership rejection",
+      "workload": "Reject duplicate names, foreign or incomplete admission, exhausted capacity and cancellation after an existing registration.",
+      "invariant": "Failure consumes and releases every partial name, source registration and native allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_carried_input_preserves_unobserved_policy_and_later_search_key_conversion",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Writable evaluated value image input",
+      "workload": "Decode carried row and temporal values whose original key-to-carried conversion cleared all comparison flags, then convert the restored carrier to a search key.",
+      "invariant": "Carried input preserves exact stored bytes and unobserved flags without rejecting values; later key conversion matches the native owner and releases original reservations on retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cloned_admitted_btree_keeps_shared_opaque_key_payloads_after_original_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Writable evaluated scalar index ownership",
+      "workload": "Clone a writable imported physical index with a 2-MiB opaque Datum key, retire the original owner, then mutate and remove its shared key.",
+      "invariant": "The original payload reservation survives every cloned key alias and ordinary bucket mutation, then retires with the last key; no Datum is interpreted.",
+      "case_names": [
+        ""
       ]
     }
   ]

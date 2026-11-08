@@ -54,6 +54,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs; complete Engine restore activation remains under implementation.
+
 - Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export; public restore activation remains under implementation.
 
 - Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Public Engine restore remains under implementation.

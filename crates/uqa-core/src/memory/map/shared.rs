@@ -171,6 +171,12 @@ impl<K, V> BudgetedSharedMap<K, V> {
         &self.memory
     }
 
+    /// Select the allowance for later path construction without changing existing node owners. `RetainedMap` exposes this transfer with read-only snapshots; the raw map's same-allowance restore API does not expose transferred roots.
+    pub(in crate::memory) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.memory = memory.clone();
+        self
+    }
+
     /// Retain this immutable root without another mutable allowance handle or any allocation.
     pub fn snapshot(&self) -> BudgetedSharedMapSnapshot<K, V> {
         BudgetedSharedMapSnapshot {

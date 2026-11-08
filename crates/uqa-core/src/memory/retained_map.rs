@@ -63,6 +63,12 @@ impl<K, V> RetainedMap<K, V> {
         self.values.budget()
     }
 
+    /// Finish private construction under its input allowance and select the allowance for subsequent mutations. Existing nodes and payloads retain their original reservations through every shared root; this transfer neither visits nor copies entries. Read-only captures keep their independent admission.
+    pub fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.values = self.values.into_mutation_budget(memory);
+        self
+    }
+
     /// Shared roots retain the same entries and their cached payload footprint.
     pub fn shares_root(&self, other: &Self) -> bool {
         self.values.shares_root(&other.values)

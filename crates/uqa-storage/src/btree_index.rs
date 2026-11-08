@@ -11,6 +11,11 @@
 //! [`BTreeMap`] in key order. The result is a [`PostingList`] with
 //! `score = 0.0`, leaving downstream scoring to the operator pipeline.
 
+mod entries;
+mod field;
+mod image;
+mod key;
+pub use image::BTreeIndexImageBuilder;
 pub mod retained;
 
 use std::collections::BTreeMap;
@@ -86,17 +91,17 @@ fn sort_and_dedup_doc_ids(doc_ids: &mut Vec<DocId>) {
 
 #[derive(Debug, Default, Clone)]
 pub struct BTreeIndex {
-    field: String,
+    field: field::IndexField,
     /// `Value -> sorted, deduped Vec<DocId>`. Equal values share the
     /// same key.
-    entries: BTreeMap<Value, Vec<DocId>>,
+    entries: entries::Entries,
 }
 
 impl BTreeIndex {
     pub fn new(field: impl Into<String>) -> Self {
         Self {
-            field: field.into(),
-            entries: BTreeMap::new(),
+            field: field::IndexField::Native(field.into()),
+            entries: entries::Entries::default(),
         }
     }
 
@@ -106,63 +111,43 @@ impl BTreeIndex {
 
     /// Borrow one exact bucket in increasing, unique document order.
     pub fn equality_ids(&self, value: &Value) -> &[DocId] {
-        self.entries.get(value).map_or(&[], Vec::as_slice)
+        self.entries.get(value).unwrap_or(&[])
     }
 
     pub fn insert(&mut self, doc_id: DocId, value: Value) {
-        let bucket = self.entries.entry(value).or_default();
-        if let Err(pos) = bucket.binary_search(&doc_id) {
-            bucket.insert(pos, doc_id);
-        }
+        self.entries.insert(doc_id, value);
     }
 
     pub fn remove(&mut self, doc_id: DocId, value: &Value) {
-        let mut prune = false;
-        if let Some(bucket) = self.entries.get_mut(value) {
-            if let Ok(pos) = bucket.binary_search(&doc_id) {
-                bucket.remove(pos);
-            }
-            prune = bucket.is_empty();
-        }
-        if prune {
-            self.entries.remove(value);
-        }
+        self.entries.remove(doc_id, value);
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    fn matching_entries<'a>(
-        &'a self,
-        predicate: &'a Predicate,
-    ) -> Box<dyn Iterator<Item = (&'a Value, &'a Vec<DocId>)> + 'a> {
+    fn matching_entries<'a>(&'a self, predicate: &'a Predicate) -> entries::Iter<'a> {
         match predicate {
             Predicate::Equals(t) => match self.entries.get_key_value(t) {
                 Some(entry) => Box::new(std::iter::once(entry)),
                 None => Box::new(std::iter::empty()),
             },
-            Predicate::GreaterThan(t) => Box::new(
-                self.entries
-                    .range((Bound::Excluded(t.clone()), Bound::Unbounded)),
-            ),
-            Predicate::GreaterThanOrEqual(t) => Box::new(
-                self.entries
-                    .range((Bound::Included(t.clone()), Bound::Unbounded)),
-            ),
-            Predicate::LessThan(t) => Box::new(
-                self.entries
-                    .range((Bound::Unbounded, Bound::Excluded(t.clone()))),
-            ),
-            Predicate::LessThanOrEqual(t) => Box::new(
-                self.entries
-                    .range((Bound::Unbounded, Bound::Included(t.clone()))),
-            ),
+            Predicate::GreaterThan(t) => self
+                .entries
+                .range((Bound::Excluded(t.clone()), Bound::Unbounded)),
+            Predicate::GreaterThanOrEqual(t) => self
+                .entries
+                .range((Bound::Included(t.clone()), Bound::Unbounded)),
+            Predicate::LessThan(t) => self
+                .entries
+                .range((Bound::Unbounded, Bound::Excluded(t.clone()))),
+            Predicate::LessThanOrEqual(t) => self
+                .entries
+                .range((Bound::Unbounded, Bound::Included(t.clone()))),
             Predicate::Between { low, high } if low > high => Box::new(std::iter::empty()),
-            Predicate::Between { low, high } => Box::new(
-                self.entries
-                    .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
-            ),
+            Predicate::Between { low, high } => self
+                .entries
+                .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
             Predicate::InSet(values) => Box::new(
                 values
                     .iter()
@@ -173,7 +158,7 @@ impl BTreeIndex {
                 // predicates. The caller is expected to combine the
                 // result with a universal-set complement when more
                 // appropriate.
-                Box::new(self.entries.iter())
+                self.entries.iter()
             }
         }
     }

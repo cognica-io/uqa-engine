@@ -13,11 +13,13 @@ use uqa_storage::BTreeIndex;
 
 mod cache;
 mod comparison;
+mod identities;
 mod values;
 pub use cache::{
     apply_cached_values, visit_stored_fields, CapturedValue, CapturedValueIndex,
-    CapturedValueIndexPolicy, CapturedValueIndexes, ValueIndexBuilder, ValueIndexCache,
-    ValueIndexComparison, ValueIndexImageMetadata, ValueIndexes,
+    CapturedValueIndexPolicy, CapturedValueIndexes, MemoryValueIndexesBuilder, ValueIndexBuilder,
+    ValueIndexCache, ValueIndexComparison, ValueIndexImageBuilder, ValueIndexImageMetadata,
+    ValueIndexes,
 };
 use values::StoredValues;
 
@@ -30,7 +32,7 @@ pub struct ColumnValueIndex {
     index: Option<BTreeIndex>,
     values: StoredValues,
     /// Sorted doc ids with a missing or `Value::Null` field, kept for a search key.
-    nulls: Vec<DocId>,
+    nulls: identities::NullIdentities,
     /// Set when any indexed key is temporal; disables acceleration
     /// because string-vs-temporal comparisons need parsing.
     has_temporal: bool,
@@ -195,7 +197,7 @@ impl ColumnValueIndex {
         let mut built = Self {
             index: Some(BTreeIndex::new(field)),
             values: StoredValues::new(),
-            nulls: Vec::new(),
+            nulls: identities::NullIdentities::default(),
             has_temporal: false,
             comparison: comparison::StoredComparison::default(),
             has_row_values: false,
@@ -214,7 +216,7 @@ impl ColumnValueIndex {
         Self {
             index: None,
             values: values.collect(),
-            nulls: Vec::new(),
+            nulls: identities::NullIdentities::default(),
             has_temporal: false,
             comparison: comparison::StoredComparison::default(),
             has_row_values: false,
@@ -390,7 +392,7 @@ impl ColumnValueIndex {
         }
         observe()?;
         if matches!(predicate, Predicate::IsNull) {
-            for &id in &self.nulls {
+            for &id in self.nulls.iter() {
                 visit(id)?;
             }
         } else {

@@ -33,6 +33,12 @@ impl MemoryCaptureRegistry {
 }
 
 impl MemoryCaptureSources {
+    /// Transfer future successor construction to the live owner's allowance without copying identities. Existing immutable nodes retain their original reservations, including through earlier selections and captures.
+    pub fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.memory = memory.clone();
+        self
+    }
+
     pub fn len(&self) -> usize {
         self.root.len()
     }

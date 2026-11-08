@@ -7,6 +7,43 @@
 use super::*;
 
 #[test]
+fn retained_map_mutation_allowance_transfer_keeps_original_nodes_and_payload_owners() {
+    let input = MemoryBudget::new(4096);
+    let runtime = MemoryBudget::new(4096);
+    let capture = MemoryBudget::new(4096);
+    let mut payload = crate::memory::BudgetedString::new(&input);
+    payload.push_str("original").unwrap();
+    let pointer = payload.as_ptr();
+    let mut map = RetainedMap::new(&input);
+    map.insert(1, payload, 8).unwrap();
+    let original = map.capture(&capture).unwrap();
+    let occupied = input.reserve(input.available()).unwrap();
+    let used = input.used();
+    let mut transferred = None;
+    let allocations = allocation_counter::measure(|| {
+        transferred = Some(map.into_mutation_budget(&runtime));
+    });
+    assert_eq!(allocations.count_total, 0);
+    assert_eq!(input.used(), used);
+    let mut map = transferred.unwrap();
+    assert_eq!(map.get(&1).unwrap().as_ptr(), pointer);
+    let mut next = crate::memory::BudgetedString::new(&runtime);
+    next.push_str("later").unwrap();
+    map.insert(2, next, 5).unwrap();
+    assert!(map.remove(&1).unwrap());
+    assert_eq!(original.get(&1).unwrap().as_ptr(), pointer);
+    assert_eq!(&**original.get(&1).unwrap(), "original");
+    drop(map);
+    assert_eq!(runtime.used(), 0);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(capture.used(), 0);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}
+
+#[test]
 fn retained_map_lower_bound_seeks_without_allocating_or_visiting_earlier_keys() {
     use std::{
         cmp::Ordering,

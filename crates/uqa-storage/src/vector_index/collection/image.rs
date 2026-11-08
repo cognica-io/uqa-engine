@@ -11,9 +11,9 @@ use crate::{
     memory_capture::MemoryCaptureRegistry, read_control::StorageReadControl, StorageBackendError,
     StorageBackendResult,
 };
-use uqa_core::memory::Budgeted;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
-/// An unpublished writable registration set. Each vector already owns its decoded allocations; names and native membership use the supplied allowance. A failed addition consumes the whole candidate. Successful publication retains that allowance but not the import cancellation signal.
+/// An unpublished writable registration set. Each vector already owns its decoded allocations; names and native membership use the supplied allowance. A failed addition consumes the whole candidate. Completion keeps every original reservation while subsequent mutations use the ordinary native allowance independently of import limits and cancellation.
 pub struct MemoryVectorIndexesBuilder {
     indexes: NativeIndexes,
     capture: NativeVectorSources,
@@ -57,7 +57,10 @@ impl MemoryVectorIndexesBuilder {
         self.control.check()?;
         Ok(VectorIndexes(Contents::Live {
             indexes: self.indexes,
-            capture: Some(self.capture),
+            capture: Some(
+                self.capture
+                    .into_mutation_budget(&MemoryBudget::new(usize::MAX)),
+            ),
         }))
     }
 }
