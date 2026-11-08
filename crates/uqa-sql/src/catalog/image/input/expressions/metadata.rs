@@ -18,7 +18,7 @@ use crate::{
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 
 impl Input<'_> {
-    pub(super) fn scalar_row_binding(
+    pub(in super::super) fn scalar_row_binding(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<CompositeRowBinding, SQLError> {
@@ -55,7 +55,7 @@ impl Input<'_> {
         })
     }
 
-    pub(super) fn composite_source(
+    pub(in super::super) fn composite_source(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<CompositeConstantSource, SQLError> {
@@ -104,6 +104,16 @@ impl Input<'_> {
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<Expr, SQLError> {
+        let literal = self.retained_scalar_data()?;
+        Ok(Expr::RetainedLiteral(boxed(
+            RetainedInputLiteral(literal),
+            memory,
+        )?))
+    }
+
+    pub(in super::super) fn retained_scalar_data(
+        &mut self,
+    ) -> Result<RetainedScalarLiteral, SQLError> {
         let (declaration, declaration_memory) = self.optional_text()?.into_parts();
         let declaration =
             declaration.map(|name| Produced::from(Budgeted::new(name, declaration_memory)));
@@ -120,11 +130,6 @@ impl Input<'_> {
             self.binary.cancellation,
         );
         let value = RetainedConstantValue::from_produced(value.into(), &control)?;
-        let literal =
-            RetainedScalarLiteral::with_control(value, ty, declaration, collation_oid, &control)?;
-        Ok(Expr::RetainedLiteral(boxed(
-            RetainedInputLiteral(literal),
-            memory,
-        )?))
+        RetainedScalarLiteral::with_control(value, ty, declaration, collation_oid, &control)
     }
 }

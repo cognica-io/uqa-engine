@@ -27,6 +27,9 @@ use uqa_core::{
 mod domains;
 mod nodes;
 mod parts;
+pub(super) mod plans;
+mod scalars;
+pub(super) use scalars::MAGIC as SCALAR_MAGIC;
 mod tables;
 pub use tables::{
     columns_image_reader, dropped_attributes_image_reader, foreign_keys_image_reader,
@@ -39,8 +42,11 @@ pub(super) const MAGIC: [u8; 8] = *b"UQAEXP01";
 const WINDOW: usize = 16384;
 
 enum Frame<'a> {
+    Plan(plans::Frame<'a>),
+    Scalar(scalars::Part<'a>),
     Table(tables::Part<'a>),
     NextDomain,
+    NextView,
     DomainDefinition(&'a crate::ast::CreateDomain),
     DomainChecks(&'a [crate::ast::DomainCheck]),
     DomainNotNull(&'a crate::ast::DomainNotNull),
@@ -78,7 +84,7 @@ enum State {
     Failed,
 }
 
-/// Stream captured scalar or table definitions without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. Query/window nodes are outside the existing stored-definition capture contract. Retained literals must expose their captured resident value.
+/// Stream captured definitions and native query plans without copying syntax or resolving names. Preparation borrows the root without visiting children; subsequent reads admit their traversal stack and return at most 16 KiB. AST query/window nodes remain outside the scalar-definition capture contract. Retained literals must expose their captured resident value.
 pub struct DefinitionImageReader<'a> {
     first: Option<Frame<'a>>,
     domains: Option<
@@ -86,6 +92,13 @@ pub struct DefinitionImageReader<'a> {
             'a,
             String,
             crate::catalog::domain::StoredDomain,
+        >,
+    >,
+    views: Option<
+        crate::catalog::named_definitions::CapturedDefinitionIter<
+            'a,
+            uqa_core::RelationIdentity,
+            crate::catalog::stored_view::StoredView,
         >,
     >,
     frames: BudgetedVec<Frame<'a>>,
@@ -141,6 +154,7 @@ impl<'a> DefinitionImageReader<'a> {
         Ok(Self {
             first: Some(first),
             domains: None,
+            views: None,
             frames: BudgetedVec::new(memory),
             fields,
             field: Field::Bytes(&[]),
@@ -225,6 +239,7 @@ impl<'a> DefinitionImageReader<'a> {
         self.state = State::Failed;
         self.first = None;
         self.domains = None;
+        self.views = None;
         self.child = None;
         self.frames = BudgetedVec::new(self.memory);
         self.fields = Fields::new();

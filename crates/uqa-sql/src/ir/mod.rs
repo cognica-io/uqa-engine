@@ -10,6 +10,7 @@ mod call_arguments;
 pub(crate) use call_arguments::scalar_call_argument_value_owned;
 mod collation;
 mod equality;
+pub(crate) mod ownership;
 pub use collation::ResultCollation;
 pub(crate) mod retained;
 mod traversal;

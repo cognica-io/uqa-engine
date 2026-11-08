@@ -192,6 +192,23 @@ impl RoleBinding {
         }
     }
 
+    /// Share a reconstructed binding while keeping its original admitted name alive through every retained reference. Reference-count bookkeeping follows Core's existing shared-payload allowance.
+    pub(crate) fn from_captured_name(
+        name: uqa_core::memory::Budgeted<String>,
+        oid: u32,
+        object_id: [u8; 16],
+    ) -> Result<Arc<Self>, uqa_core::memory::MemoryError> {
+        let mut memory = name.budget().reserve(size_of::<Self>())?;
+        let (name, payload) = name.into_parts();
+        memory.absorb(payload);
+        Ok(Arc::new(Self {
+            name,
+            oid,
+            object_id,
+            memory: Some(memory),
+        }))
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.memory
             .as_ref()

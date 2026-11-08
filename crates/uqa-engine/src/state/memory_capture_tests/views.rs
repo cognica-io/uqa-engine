@@ -13,6 +13,68 @@ fn fixture(engine: &Engine) {
     sql(engine,"CREATE TABLE docs(id integer); INSERT INTO docs VALUES (1), (2); CREATE VIEW saved AS SELECT id FROM docs; CREATE MATERIALIZED VIEW evaluated AS SELECT id, random() AS sampled FROM docs");
 }
 
+#[test]
+fn memory_view_images_preserve_captured_sql_after_replacement_and_engine_retirement() {
+    let engine = Engine::new();
+    fixture(&engine);
+    sql(
+        &engine,
+        "CREATE ROLE reader; GRANT SELECT ON saved TO reader",
+    );
+    let original = engine.durable.views.snapshot();
+    let key = engine.durable.views.key().unwrap();
+    let control = StorageReadControl::with_limit(4 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "CREATE OR REPLACE VIEW saved AS SELECT id + 10 AS id FROM docs; REFRESH MATERIALIZED VIEW evaluated; REVOKE SELECT ON saved FROM reader");
+    drop(engine);
+    let saved = key.retained(&cut).unwrap().unwrap();
+    drop(cut);
+    let memory = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let token = uqa_core::CancellationToken::new();
+    let mut reader = saved.get().unwrap().image_reader(&memory, &token).unwrap();
+    let mut data = Vec::new();
+    let mut buffer = [0; 31];
+    loop {
+        let count = reader.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..count]);
+    }
+    drop(reader);
+    drop(saved);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(memory.used(), 0);
+    let restored = uqa_sql::catalog::stored_view::ViewDefinitions::read_image(
+        &mut data.as_slice(),
+        &memory,
+        &token,
+    )
+    .unwrap();
+    let capture_memory = uqa_core::memory::MemoryBudget::new(4 << 20);
+    let capture = restored
+        .capture(&uqa_core::memory::ProductionControl::new(
+            &capture_memory,
+            &token,
+            &token,
+        ))
+        .unwrap();
+    same(&capture, &original);
+    for (name, view) in &restored {
+        assert_eq!(view.security, original[name].security);
+    }
+    drop(restored);
+    drop(capture);
+    assert_eq!(memory.used(), 0);
+    assert_eq!(capture_memory.used(), 0);
+}
+
 fn same(
     saved: &CapturedViewDefinitions,
     original: &uqa_sql::catalog::stored_view::ViewDefinitions,

@@ -31,7 +31,9 @@ mod functions;
 mod graph_oids;
 mod memberships;
 mod metadata;
+mod plans;
 mod roles;
+mod scalars;
 mod security;
 mod sequences;
 mod structured_types;
@@ -39,6 +41,7 @@ mod table_security;
 mod tables;
 mod triggers;
 mod types;
+mod views;
 pub(super) use authorities::{builtin_routines, system_relations};
 pub(super) use domains::domains;
 pub(super) use expressions::expression_image;
@@ -47,7 +50,10 @@ pub(super) use foreign_wrappers::foreign_wrappers;
 pub(super) use functions::function_binding_image;
 pub(super) use graph_oids::graph_oids;
 pub(super) use memberships::memberships;
+pub use plans::{CapturedExpressionPlan, CapturedQuery};
 pub(super) use roles::roles;
+pub(super) use scalars::scalar_image;
+pub use scalars::CapturedScalar;
 pub(super) use security::{database, schemas};
 pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
@@ -58,6 +64,7 @@ pub use tables::{
 };
 pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
+pub(super) use views::views;
 
 struct Input<'a> {
     binary: ImageInput<'a>,
