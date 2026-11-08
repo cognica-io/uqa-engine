@@ -7,7 +7,10 @@
 //! Exact owned-node and tensor-buffer sizes advance with the immutable memory root.
 
 use std::sync::OnceLock;
-use uqa_core::{memory::OwnedMap, DocId};
+use uqa_core::{
+    memory::{MemoryReservation, OwnedMap},
+    DocId,
+};
 
 #[derive(Debug, Default)]
 pub(super) struct MemoryVectorState {
@@ -15,6 +18,7 @@ pub(super) struct MemoryVectorState {
     payload_bytes: u128,
     pub(super) vector_count: u128,
     pub(super) fingerprint: OnceLock<[u8; 32]>,
+    pub(super) image_memory: Option<MemoryReservation>,
 }
 
 fn tensor_bytes(vectors: &Vec<Vec<f32>>) -> u128 {
@@ -56,6 +60,7 @@ impl Clone for MemoryVectorState {
             payload_bytes,
             vector_count: self.vector_count,
             fingerprint: self.fingerprint.clone(),
+            image_memory: None,
         }
     }
 }

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decoded memory vector indexes retain their original allocation leases through live registration, writes, snapshots and retirement without a separate caller-owned reservation.
+
 - Native table image import retains decoded field names, optional array names, constraints, definitions and unresolved analyzer settings with their original memory admission through shared catalog consumers. Complete Engine restore remains under implementation.
 
 - Table column, CHECK and partition definitions retain independent immutable generations and complete evaluated-literal ownership across committed memory capture, query readers and transaction rollback.

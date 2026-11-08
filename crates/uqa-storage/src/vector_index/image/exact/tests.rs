@@ -156,7 +156,7 @@ fn owned_exact_images_survive_source_mutation_and_move_without_replaying_coordin
     let restore = StorageReadControl::with_limit(1 << 20);
     let restored = read_vector_image(&mut expected.as_slice(), &restore).unwrap();
     assert_eq!(restored.count().unwrap(), 2);
-    assert_eq!(encode(&**restored), expected);
+    assert_eq!(encode(&*restored), expected);
 }
 
 #[test]

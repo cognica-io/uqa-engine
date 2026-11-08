@@ -29,11 +29,11 @@ pub(crate) fn invalid() -> StorageBackendError {
     StorageBackendError::Other("invalid memory vector image".into())
 }
 
-/// Decode one complete standalone memory vector image into a private candidate. The original allowance owns its decoded state until the value and lease transfer together to an activation owner. No training, graph construction, SQL or application callback is invoked.
+/// Decode one complete standalone memory vector image into a private writable owner. Native allocations retain their original allowance through writes, snapshots and source retirement. No training, graph construction, SQL or application callback is invoked.
 pub fn read_vector_image(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
-) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
+) -> StorageBackendResult<Box<dyn VectorIndex>> {
     read_with_temporary(reader, control, None)
 }
 
@@ -42,7 +42,7 @@ pub fn read_vector_image_with_temporary(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
     temporary: &crate::diskann_index::build::DiskANNTemporaryBudget,
-) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
+) -> StorageBackendResult<Box<dyn VectorIndex>> {
     read_with_temporary(reader, control, Some(temporary))
 }
 
@@ -50,7 +50,7 @@ fn read_with_temporary(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
     temporary: Option<&crate::diskann_index::build::DiskANNTemporaryBudget>,
-) -> StorageBackendResult<Budgeted<Box<dyn VectorIndex>>> {
+) -> StorageBackendResult<Box<dyn VectorIndex>> {
     control.check()?;
     let mut input = ImageInput { reader, control };
     if &input.array::<8>()? != MAGIC {
@@ -83,12 +83,9 @@ fn read_with_temporary(
     Ok(index)
 }
 
-pub(crate) fn boxed<T: VectorIndex + 'static>(
-    value: Budgeted<T>,
-) -> Budgeted<Box<dyn VectorIndex>> {
-    let (value, memory) = value.into_parts();
-    // Each concrete decoder admits its struct before construction; boxing transfers that same payload reservation.
-    Budgeted::new(Box::new(value), memory)
+fn boxed<T: VectorIndex + 'static>(value: T) -> Box<dyn VectorIndex> {
+    // Each concrete decoder retains its admitted header and native payloads.
+    Box::new(value)
 }
 
 pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> StorageBackendResult<()> {

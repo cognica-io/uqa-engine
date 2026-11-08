@@ -50186,6 +50186,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_owners_enter_live_capture_and_preserve_unread_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Register decoded exact, IVF, HNSW and DiskANN indexes, capture their collection, then retire unread native owners.",
+      "invariant": "The selected evaluated image remains byte-exact after source and registry retirement, and every original allowance releases with its last owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_exact_tensor_reservations_follow_shared_roots_after_owner_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Retain ordinary and writable snapshots of a decoded 1024-coordinate tensor; clear the original and replace the fork.",
+      "invariant": "Shared imported tensors retain their original lease until the last original root retires; a detached replacement owns independent state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_mutations_leave_independent_snapshots_and_images_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Mutate all four decoded native vector methods while query and export snapshots retain their preceding generations.",
+      "invariant": "Future queries match original native operations, captured bytes stay unchanged and all retention returns to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "rejected_imported_vector_registration_retires_its_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Attempt live registration of all four decoded vector methods with zero native membership allowance.",
+      "invariant": "Rejected publication leaves the collection empty and releases all imported and provisional registration ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_vector_rejection_and_unwinding_release_every_native_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "Writable vector image ownership",
+      "workload": "Reject trailing input and unwind after successful native import for all four vector methods.",
+      "invariant": "No failed or abandoned private candidate retains original admission or exposes a partial destination.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

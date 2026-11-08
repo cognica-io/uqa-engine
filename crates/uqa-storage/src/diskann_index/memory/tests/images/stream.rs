@@ -47,7 +47,7 @@ fn output(reader: &mut ImageReader<'_>, width: usize) -> Vec<u8> {
 fn memory_diskann_image_readers_preserve_predecessor_bytes_across_every_window_boundary() {
     let original = StorageReadControl::with_limit(1 << 20);
     let source = restore(EVALUATED, &original, &DiskANNTemporaryBudget::new(1 << 20));
-    assert_eq!(encode(&*source), EVALUATED);
+    assert_eq!(encode(&source), EVALUATED);
     let snapshot = source.capture_image_with_control(&original).unwrap();
     let mut positions = None;
     for (width, maximum) in [

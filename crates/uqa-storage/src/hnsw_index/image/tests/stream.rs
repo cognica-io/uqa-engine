@@ -207,11 +207,11 @@ fn hnsw_image_continuations_bound_empty_vectors_and_spilled_topology() {
 #[test]
 fn hnsw_image_continuations_fail_before_output_and_retire_each_cancellation_owner() {
     let source = StorageReadControl::with_limit(1 << 20);
-    let (mut index, lease) = restore(&fixture(), 2, &source).into_parts();
+    let mut index = restore(&fixture(), 2, &source);
     let original = StorageReadControl::with_limit(1 << 20);
     let snapshot = index.capture_image_with_control(&original).unwrap();
     index.clear().unwrap();
-    drop((index, lease));
+    drop(index);
     for cancel_original in [false, true] {
         for before_output in [false, true] {
             let invoking = StorageReadControl::with_limit(64 << 10);
