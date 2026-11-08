@@ -215,9 +215,14 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
 }
 
 #[rstest::rstest]
-#[case::plain(false)]
-#[case::protected(true)]
-fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case] encrypted: bool) {
+#[case::plain(false, false)]
+#[case::protected(true, false)]
+#[case::plain_changed(false, true)]
+#[case::protected_changed(true, true)]
+fn public_memory_backup_publishes_full_and_independent_incremental_roots(
+    #[case] encrypted: bool,
+    #[case] committed_change: bool,
+) {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE saved(id integer PRIMARY KEY, body text); INSERT INTO saved VALUES(1,'original'),(2,'retained')");
@@ -232,6 +237,9 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case]
     let root = full.publish().unwrap();
     drop(full);
     assert_eq!(control.memory().used(), 0);
+    if committed_change {
+        sql(&engine, "UPDATE saved SET body='committed' WHERE id=1");
+    }
     sql(&engine, "BEGIN; UPDATE saved SET body='private'");
     let mut child = engine
         .begin_backup(
@@ -252,8 +260,17 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case]
     drop(engine);
     while child.advance(1, 113).unwrap() == BackupCaptureStep::Pending {}
     let report = child.report().unwrap();
-    assert_eq!(report.image.written_units, 0);
-    assert_eq!(report.image.reused_units, full_report.image.written_units);
+    if committed_change {
+        assert!(report.image.written_units > 0);
+        assert!(report.image.reused_units > 0);
+        assert_eq!(
+            report.image.written_units + report.image.reused_units,
+            full_report.image.written_units
+        );
+    } else {
+        assert_eq!(report.image.written_units, 0);
+        assert_eq!(report.image.reused_units, full_report.image.written_units);
+    }
     let child_root = child.publish().unwrap();
     assert_eq!(child.publish().unwrap(), child_root);
     drop(child);
@@ -311,7 +328,17 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(#[case]
     assert_eq!(catalogs, 24);
     assert_eq!(input.header().unwrap().source, child_root.cut().source);
     assert_eq!(documents.len(), 2);
-    assert_eq!(documents[&1], Value::Str("original".into()));
+    assert_eq!(
+        documents[&1],
+        Value::Str(
+            if committed_change {
+                "committed"
+            } else {
+                "original"
+            }
+            .into()
+        )
+    );
     assert_eq!(documents[&2], Value::Str("retained".into()));
     drop(input);
     assert_eq!(control.memory().used(), 0);

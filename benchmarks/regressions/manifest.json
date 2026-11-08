@@ -49865,14 +49865,16 @@
       "package": "uqa-engine",
       "kind": "test",
       "test": "public_memory_backup_publishes_full_and_independent_incremental_roots",
-      "cases": 2,
+      "cases": 4,
       "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
       "capability": "Public memory full and incremental export",
-      "workload": "Publish plain and protected complete memory backups, capture a no-op child, mutate and close the source, remove the parent and verify the child repository root.",
-      "invariant": "No-op capture reuses every original unit without new payload writes; child publication is idempotent and the verified child remains independent of its removed parent and source.",
+      "workload": "Publish plain and protected memory roots and unchanged or committed-change children; exclude private writes, retire the source, remove the parent and read exact child documents.",
+      "invariant": "Unchanged children reuse every unit; changed children write and reuse units together. Both preserve exact committed documents after parent and source retirement, and publication is idempotent.",
       "case_names": [
         "case_1_plain",
-        "case_2_protected"
+        "case_2_protected",
+        "case_3_plain_changed",
+        "case_4_protected_changed"
       ]
     },
     {
