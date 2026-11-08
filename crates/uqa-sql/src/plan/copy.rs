@@ -439,7 +439,12 @@ impl<'a> Copying<'a> {
         let output = if self.purpose == CopyPurpose::Executable {
             expression.clone_with_control(&self.control)?
         } else {
-            expression.capture_with_control(&self.control)?
+            let (output, children) = expression.capture_with_footprint(&self.control)?;
+            self.retained_children = self
+                .retained_children
+                .checked_add(children)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            output
         };
         Ok(self.take(output))
     }

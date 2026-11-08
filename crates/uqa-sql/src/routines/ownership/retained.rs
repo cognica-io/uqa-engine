@@ -13,6 +13,7 @@ use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation, Produced, P
 /// Immutable native routine storage. A body can outlive its catalog definition without losing its payload allowance or destruction owner.
 pub struct RetainedRoutineValue<T> {
     owner: Owner<T>,
+    bytes: usize,
 }
 
 enum Owner<T> {
@@ -20,7 +21,6 @@ enum Owner<T> {
     Image {
         value: Box<dyn DefinitionImage<T>>,
         _memory: MemoryReservation,
-        bytes: usize,
     },
 }
 
@@ -36,10 +36,7 @@ impl<T> Deref for RetainedRoutineValue<T> {
 
 impl<T> RetainedRoutineValue<T> {
     pub fn reserved_bytes(&self) -> usize {
-        match &self.owner {
-            Owner::Native(value) => value.reserved_bytes(),
-            Owner::Image { bytes, .. } => *bytes,
-        }
+        self.bytes
     }
 
     pub fn is_retained_by(&self, memory: &MemoryBudget) -> bool {
@@ -53,11 +50,24 @@ impl<T> RetainedRoutineValue<T> {
         value: Produced<T>,
         control: &ProductionControl<'_>,
     ) -> Result<Arc<Self>, SQLError> {
+        Self::native_with_children(value, 0, control)
+    }
+
+    pub(super) fn native_with_children(
+        value: Produced<T>,
+        children: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Arc<Self>, SQLError> {
         let header = control.reserve(size_of::<Self>())?;
         let (value, memory) = value.into_parts();
         let value = control.finish(value, control.combine(memory, header))?;
+        let bytes = value
+            .reserved_bytes()
+            .checked_add(children)
+            .ok_or(MemoryError::SizeOverflow)?;
         Ok(Arc::new(Self {
             owner: Owner::Native(value),
+            bytes,
         }))
     }
 
@@ -74,8 +84,8 @@ impl<T> RetainedRoutineValue<T> {
             owner: Owner::Image {
                 value: Box::new(value),
                 _memory: memory,
-                bytes,
             },
+            bytes,
         }))
     }
 }

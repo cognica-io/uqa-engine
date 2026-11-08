@@ -7,6 +7,7 @@
 use super::*;
 use crate::ast::Statement;
 use uqa_core::memory::ProductionControl;
+mod footprints;
 mod resources;
 
 fn routine(sql: &str, id: u8) -> SQLRoutine {
