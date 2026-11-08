@@ -35,7 +35,7 @@ impl PrivateRecordChanges {
         let memory = control.memory().reserve(bytes)?;
         control.check()?;
         Ok(PrivateRecordSnapshot {
-            records: state.records.clone(),
+            records: state.records.read_root(),
             runs: state.runs.clone(),
             sources: Sources::new(control.memory()).snapshot(),
             scopes: None,

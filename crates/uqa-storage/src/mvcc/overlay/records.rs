@@ -8,11 +8,20 @@
 
 use super::{Change, RecordKey};
 use std::ops::Deref;
-use uqa_core::memory::{BudgetedSharedMap, BudgetedSharedMapIter, MemoryBudget, MemoryError};
+use uqa_core::memory::{
+    BudgetedSharedMap, BudgetedSharedMapIter, BudgetedSharedMapSnapshot, MemoryBudget, MemoryError,
+};
 
 #[derive(Clone)]
 pub(super) struct Records {
     values: BudgetedSharedMap<RecordKey, Change>,
+    payload_bytes: usize,
+}
+
+/// Undo retains the selected values and their footprint. The writable owner already retains their common allowance.
+#[derive(Clone)]
+pub(super) struct RetainedRecords {
+    values: BudgetedSharedMapSnapshot<RecordKey, Change>,
     payload_bytes: usize,
 }
 
@@ -30,6 +39,23 @@ impl Records {
             .structural_bytes()?
             .checked_add(self.payload_bytes)
             .ok_or(MemoryError::SizeOverflow)
+    }
+
+    /// Readers retain the exact values and their allowance, but never update the payload footprint. Only writable and undo roots need that cached counter.
+    pub(super) fn read_root(&self) -> BudgetedSharedMap<RecordKey, Change> {
+        self.values.clone()
+    }
+
+    pub(super) fn retain(&self) -> RetainedRecords {
+        RetainedRecords {
+            values: self.values.snapshot(),
+            payload_bytes: self.payload_bytes,
+        }
+    }
+
+    pub(super) fn restore(&mut self, retained: &RetainedRecords) {
+        self.values.restore(&retained.values);
+        self.payload_bytes = retained.payload_bytes;
     }
 
     pub(super) fn try_insert(&mut self, key: RecordKey, value: Change) -> Result<(), MemoryError> {

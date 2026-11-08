@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use triomphe::Arc as StrongArc;
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedSharedMap, BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
 use crate::StorageSavepointId;
@@ -29,7 +29,7 @@ mod policy;
 mod records;
 mod retained;
 use policy::RootPolicy;
-use records::Records;
+use records::{Records, RetainedRecords};
 mod scopes;
 pub use scopes::PrivateRevisionScope;
 use scopes::RevisionScopes;
@@ -106,7 +106,7 @@ impl PrivateRecordKey {
 
 struct Savepoint {
     id: StorageSavepointId,
-    records: Records,
+    records: RetainedRecords,
     resident: usize,
     runs: RunSet,
     sources: RetainedSources,
@@ -120,13 +120,20 @@ struct State {
     /// The estimated bytes the memory tier holds, which decide when it spills.
     resident: usize,
     runs: RunSet,
-    sources: Sources,
+    sources: RetainedSources,
     policy: RootPolicy,
     revision: Option<PrivateRecordRevision>,
     savepoints: BudgetedVec<Savepoint>,
 }
 
 impl State {
+    /// Source entries share this owner's record allowance. Retain only their immutable root between mutations, and stage changes under that original allowance.
+    fn source_writes(&self) -> Sources {
+        let mut sources = Sources::new(self.records.budget());
+        sources.restore(&self.sources);
+        sources
+    }
+
     /// The newest change of `key`, from either tier.
     fn change(
         &self,
@@ -356,7 +363,7 @@ impl PrivateRecordChanges {
                     records: Records::new(memory),
                     resident: 0,
                     runs: RunSet::empty(),
-                    sources: Sources::new(memory),
+                    sources: Sources::new(memory).snapshot(),
                     policy: RootPolicy::new(memory, scope),
                     revision: None,
                     savepoints: BudgetedVec::new(memory),
@@ -428,7 +435,7 @@ impl PrivateRecordChanges {
             return Ok(());
         }
         let mut records = state.records.clone();
-        let mut sources = state.sources.clone();
+        let mut sources = state.source_writes();
         let mut resident = state.resident;
         for write in writes {
             control.cancellation().check()?;
@@ -447,7 +454,7 @@ impl PrivateRecordChanges {
         control.cancellation().check()?;
         // Candidate roots own every reservation before this single atomic publication.
         state.records = records;
-        state.sources = sources;
+        state.sources = sources.snapshot();
         state.policy.restore_scopes(scopes);
         state.resident = resident;
         state.revision = Some(identity);
@@ -510,9 +517,9 @@ impl PrivateRecordChanges {
             .budget()
             .reserve(std::mem::size_of::<PrivateRecordSnapshot>())?;
         Ok(PrivateRecordSnapshot {
-            records: state.records.clone(),
+            records: state.records.read_root(),
             runs: state.runs.clone(),
-            sources: state.sources.snapshot(),
+            sources: state.sources.clone(),
             scopes: state
                 .policy
                 .scopes()
@@ -526,10 +533,10 @@ impl PrivateRecordChanges {
     pub fn savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         state.retain_root()?;
-        let records = state.records.clone();
+        let records = state.records.retain();
         let resident = state.resident;
         let runs = state.runs.clone();
-        let sources = state.sources.snapshot();
+        let sources = state.sources.clone();
         let scopes = state.policy.scopes().map(RevisionScopes::fork);
         let revision = state.revision;
         state.savepoints.push(Savepoint {
@@ -556,11 +563,11 @@ impl PrivateRecordChanges {
     pub fn rollback_to_savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         let position = state.savepoint_position(id)?;
-        state.records = state.savepoints[position].records.clone();
+        let records = state.savepoints[position].records.clone();
+        state.records.restore(&records);
         state.resident = state.savepoints[position].resident;
         state.runs = state.savepoints[position].runs.clone();
-        let sources = state.savepoints[position].sources.clone();
-        state.sources.restore(&sources);
+        state.sources = state.savepoints[position].sources.clone();
         let scopes = state.savepoints[position]
             .scopes
             .as_ref()
@@ -577,7 +584,7 @@ impl PrivateRecordChanges {
         state.records = Records::new(&memory);
         state.resident = 0;
         state.runs = RunSet::empty();
-        state.sources = Sources::new(&memory);
+        state.sources = Sources::new(&memory).snapshot();
         let scopes = state.policy.scopes().map(RevisionScopes::empty);
         state.policy.restore_scopes(scopes);
         state.revision = None;
@@ -641,7 +648,7 @@ impl PrivateRecordChanges {
 
 /// Fixed private visibility for a command or retained source cursor; tombstones remain distinguishable from an unchanged key.
 pub struct PrivateRecordSnapshot {
-    records: Records,
+    records: BudgetedSharedMap<RecordKey, Change>,
     runs: RunSet,
     sources: RetainedSources,
     scopes: Option<Box<PrivateRecordSnapshot>>,
