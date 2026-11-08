@@ -48919,6 +48919,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_capture_admits_original_and_bound_retained_literals",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/footprints.rs",
+      "capability": "native routine capture admits original and bound retained literals",
+      "workload": "Retain independent original defaults and nested bound literals through native publication, body reuse and image reconstruction.",
+      "invariant": "Each independent capture admits exactly its native baseline plus every retained literal payload; insufficient admission releases all ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_routine_capture_admits_each_retained_literal_tree_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/footprints.rs",
+      "capability": "restored routine capture admits each retained literal tree once",
+      "workload": "Retain independent original defaults and nested bound literals through native publication, body reuse and image reconstruction.",
+      "invariant": "Each independent capture admits exactly its native baseline plus every retained literal payload; insufficient admission releases all ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

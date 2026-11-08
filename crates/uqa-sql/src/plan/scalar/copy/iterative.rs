@@ -43,6 +43,7 @@ struct Copied {
     // The copied tree is destroyed before any of its reservations.
     expression: ScalarExpr,
     memory: Memory,
+    retained_children: usize,
 }
 
 struct Frame<'s, 'c> {
@@ -53,6 +54,7 @@ struct Frame<'s, 'c> {
     stage: usize,
     index: usize,
     pending: Option<Slot>,
+    retained_children: usize,
 }
 
 impl<'s, 'c> Frame<'s, 'c> {
@@ -65,11 +67,12 @@ impl<'s, 'c> Frame<'s, 'c> {
                 .filter(|_| mode == CopyMode::Mutable)
                 .map(BudgetedVec::new),
         };
-        let parts = match (mode, source) {
-            (CopyMode::Capture, ScalarExpr::RetainedLiteral(literal)) => Parts::Leaf(
-                ScalarExpr::RetainedLiteral(literal.capture_with_control(&control)?),
-            ),
-            _ => Parts::new(source, &mut lowering)?,
+        let (parts, retained_children) = match (mode, source) {
+            (CopyMode::Capture, ScalarExpr::RetainedLiteral(literal)) => {
+                let (literal, bytes) = literal.capture_with_footprint(&control)?;
+                (Parts::Leaf(ScalarExpr::RetainedLiteral(literal)), bytes)
+            }
+            _ => (Parts::new(source, &mut lowering)?, 0),
         };
         Ok(Self {
             source,
@@ -78,6 +81,7 @@ impl<'s, 'c> Frame<'s, 'c> {
             stage: 0,
             index: 0,
             pending: None,
+            retained_children,
         })
     }
 
@@ -98,7 +102,15 @@ impl<'s, 'c> Frame<'s, 'c> {
     fn attach(&mut self, child: Copied) -> Result<()> {
         self.lowering.check()?;
         let slot = self.pending.take().expect("suspended scalar child");
-        let Copied { expression, memory } = child;
+        let Copied {
+            expression,
+            memory,
+            retained_children,
+        } = child;
+        self.retained_children = self
+            .retained_children
+            .checked_add(retained_children)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
         // The metadata slot was admitted before descending into this child. Installing its completed fields cannot allocate except for already-admitted parent boxes.
         match memory {
             Memory::Ordinary => assert!(self.lowering.control.is_none()),
@@ -135,7 +147,11 @@ impl<'s, 'c> Frame<'s, 'c> {
                 None => Memory::Immutable(control.memory),
             },
         };
-        Ok(Copied { expression, memory })
+        Ok(Copied {
+            expression,
+            memory,
+            retained_children: self.retained_children,
+        })
     }
 
     fn reserve_box(&mut self) -> Result<()> {
@@ -223,7 +239,9 @@ pub(super) fn mutable(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr> {
-    let Copied { expression, memory } = copy(source, control, CopyMode::Mutable)?;
+    let Copied {
+        expression, memory, ..
+    } = copy(source, control, CopyMode::Mutable)?;
     Ok(OwnedScalarExpr {
         expression,
         memory: match memory {
@@ -238,13 +256,13 @@ pub(super) fn immutable(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<Produced<ScalarExpr>> {
-    retained(source, control, CopyMode::Immutable)
+    Ok(retained(source, control, CopyMode::Immutable)?.0)
 }
 
 pub(super) fn capture(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
-) -> Result<Produced<ScalarExpr>> {
+) -> Result<(Produced<ScalarExpr>, usize)> {
     retained(source, control, CopyMode::Capture)
 }
 
@@ -252,16 +270,23 @@ fn retained(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
     mode: CopyMode,
-) -> Result<Produced<ScalarExpr>> {
-    let Copied { expression, memory } = copy(source, control, mode)?;
-    Ok(control.finish(
+) -> Result<(Produced<ScalarExpr>, usize)> {
+    let Copied {
         expression,
-        match memory {
-            Memory::Ordinary => None,
-            Memory::Immutable(memory) => Some(memory),
-            Memory::Mutable(_) => unreachable!("immutable copy output"),
-        },
-    )?)
+        memory,
+        retained_children,
+    } = copy(source, control, mode)?;
+    Ok((
+        control.finish(
+            expression,
+            match memory {
+                Memory::Ordinary => None,
+                Memory::Immutable(memory) => Some(memory),
+                Memory::Mutable(_) => unreachable!("immutable copy output"),
+            },
+        )?,
+        retained_children,
+    ))
 }
 
 fn vector<T>(count: usize, lowering: &mut Lowering<'_>) -> Result<Vec<T>> {

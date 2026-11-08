@@ -293,13 +293,6 @@ impl RetainedScalarLiteral {
     }
 
     /// Copy an evaluated literal and its selected metadata into independent capture ownership without consulting an unrelated statement's cancellation.
-    pub(crate) fn capture_with_control(
-        &self,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        Ok(self.capture_with_footprint(control)?.0)
-    }
-
     pub(crate) fn capture_with_footprint(
         &self,
         control: &ProductionControl<'_>,

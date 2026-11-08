@@ -23,10 +23,10 @@ impl ScalarExpr {
     }
 
     /// Capture scalar syntax and evaluated literals under independent ownership; query-arena references keep their original positions.
-    pub(crate) fn capture_with_control(
+    pub(crate) fn capture_with_footprint(
         &self,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<Self>> {
+    ) -> Result<(Produced<Self>, usize)> {
         iterative::capture(self, *control)
     }
 

@@ -22,6 +22,7 @@ impl Input<'_> {
         &mut self,
         kind: N::Kind,
     ) -> Result<Owner<N>, SQLError> {
+        let retained_before = self.retained_children;
         let mut owner = Owner::<N>::new(self.binary.memory);
         owner.begin(kind)?;
         loop {
@@ -37,6 +38,9 @@ impl Input<'_> {
                         N::attach(parent, frame);
                     } else {
                         owner.root = frame.node;
+                        owner
+                            .memory
+                            .retain_child(self.retained_children - retained_before)?;
                         return Ok(owner);
                     }
                 }
