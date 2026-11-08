@@ -12,6 +12,51 @@ mod resources;
 mod scopes;
 mod sources;
 
+#[test]
+fn native_query_input_rejects_default_positions_outside_original_value_width() {
+    for inline in [false, true] {
+        for defaults in [
+            vec![],
+            vec![0],
+            vec![1, 0],
+            vec![2],
+            vec![3],
+            vec![usize::MAX],
+        ] {
+            let mut original =
+                query("WITH q AS (INSERT INTO t(a,b) VALUES (1,2) RETURNING a) SELECT * FROM q");
+            let CtePlanBody::Command(command) = &mut original.ctes[0].body else {
+                panic!("command")
+            };
+            let CommandPlan::Insert(insert) = command.as_mut() else {
+                panic!("insert")
+            };
+            insert.rule_values_input = Some(crate::plan::RuleValuesInput {
+                width: 2,
+                inline,
+                unresolved: defaults.iter().copied().collect(),
+                written: [0, 1].into_iter().collect(),
+                defaults: defaults.clone(),
+            });
+            let bytes = encode(&original);
+            let memory = MemoryBudget::new(1 << 20);
+            let token = CancellationToken::new();
+            let restored = QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token);
+            if defaults.iter().all(|position| *position < 2) {
+                let restored = restored.unwrap();
+                assert_eq!(encode(&restored), bytes);
+                drop(restored);
+            } else {
+                let Err(error) = restored else {
+                    panic!("out-of-range default was accepted: {inline} {defaults:?}")
+                };
+                assert!(error.to_string().contains("query VALUES default position"));
+            }
+            assert_eq!(memory.used(), 0, "{inline} {defaults:?}");
+        }
+    }
+}
+
 fn query(sql: &str) -> QueryPlan {
     let UnifiedPlan::Query(value) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
     else {
