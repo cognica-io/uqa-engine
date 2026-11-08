@@ -50,7 +50,7 @@ fn scalar_capture_detaches_nested_evaluated_constants_without_changing_ordinary_
         let ordinary = source.clone_with_control(&control).unwrap();
         let mut saved = None;
         let allocations = allocation_counter::measure(|| {
-            saved = Some(source.capture_with_control(&control).unwrap());
+            saved = Some(source.capture_with_footprint(&control).unwrap().0);
         });
         let saved = saved.unwrap();
         if !uncontrolled {
@@ -128,7 +128,7 @@ fn scalar_capture_releases_prior_constants_on_payload_denial_and_preserves_read_
         let memory = MemoryBudget::new(4096);
         let token = CancellationToken::new();
         let error: crate::SQLError = source
-            .capture_with_control(&ProductionControl::new(&memory, &token, &token))
+            .capture_with_footprint(&ProductionControl::new(&memory, &token, &token))
             .unwrap_err()
             .into();
         assert_eq!(error.sqlstate(), Some(state));
@@ -142,7 +142,7 @@ fn scalar_capture_releases_prior_constants_on_payload_denial_and_preserves_read_
                 second.cancel();
             }
             assert!(source
-                .capture_with_control(&ProductionControl::new(&memory, &first, &second))
+                .capture_with_footprint(&ProductionControl::new(&memory, &first, &second))
                 .is_err());
             assert_eq!(memory.used(), 0);
         }

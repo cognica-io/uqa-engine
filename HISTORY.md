@@ -32,6 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Nested scalar type binding no longer retains unrelated constructor and call-coercion workspace across recursive argument descent, preventing default-thread stack overflow in collation-aware expressions.
 
+- Reject saved query images whose DEFAULT positions exceed the original VALUES width, before rule rewriting can use those positions.
+
 - Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation; complete stored catalog integration and Engine restore remain in progress.
 
 - Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
@@ -180,6 +182,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
 
 - Capture transaction rollback state after catalog admission, releasing obsolete cached analysis before replanning large statements and keeping rollback on the selected catalog view.
 

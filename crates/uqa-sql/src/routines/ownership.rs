@@ -7,7 +7,7 @@
 //! Shared routine definitions and bodies retain their own complete syntax allowances.
 
 use super::{CompiledFunctionBody, RoutineBody, SQLUserFunction};
-use crate::{plan::copy::capture_stored_with_control, SQLError};
+use crate::{plan::copy::capture_stored_with_footprint, SQLError};
 use std::sync::Arc;
 use uqa_core::memory::{MemoryError, ProductionControl};
 
@@ -46,7 +46,7 @@ impl SQLUserFunction {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<SQLRoutine, SQLError> {
-        let definition = capture_stored_with_control(&self.def, control)?;
+        let (definition, children) = capture_stored_with_footprint(&self.def, control)?;
         let body = match &self.body {
             RoutineBody::Source => RoutineBody::Source,
             RoutineBody::Bound(body) => {
@@ -61,17 +61,20 @@ impl SQLUserFunction {
                 {
                     RoutineBody::Bound(body.clone())
                 } else {
-                    let (plans, memory) = capture_stored_with_control(plans, control)?.into_parts();
-                    RoutineBody::Bound(RetainedRoutineValue::native(
+                    let (plans, children) = capture_stored_with_footprint(plans, control)?;
+                    let (plans, memory) = plans.into_parts();
+                    RoutineBody::Bound(RetainedRoutineValue::native_with_children(
                         control.finish(CompiledFunctionBody::SQL(plans), memory)?,
+                        children,
                         control,
                     )?)
                 }
             }
         };
         let (definition, memory) = definition.into_parts();
-        RetainedRoutineValue::native(
+        RetainedRoutineValue::native_with_children(
             control.finish(Self::new(definition, body), memory)?,
+            children,
             control,
         )
     }
