@@ -50017,6 +50017,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_retains_admission_in_every_shared_consumer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Decode megabyte key names and native foreign-key/dropped-attribute images under the decoder allowance plus one shared header; retain a detached consumer through source and parent closure on another thread.",
+      "invariant": "Each consumer keeps the original admitted payload alive; independent capture is allocation-free and charges the complete cached footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_mutation_detaches_admission_and_preserves_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Mutate an imported generation through unwinding and a forgotten write guard while retaining its preceding metadata snapshot.",
+      "invariant": "Mutation preserves the original fields and reservation until the final old consumer retires; native capacity publication and failed-closed capture remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_metadata_releases_failed_input_and_shared_owner_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/image.rs",
+      "capability": "Imported table metadata ownership",
+      "workload": "Reject truncated/trailing images, cancellation and insufficient decoder/shared-owner admission.",
+      "invariant": "Failed private construction leaves no payload reservation and preserves typed memory errors before any catalog publication.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

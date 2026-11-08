@@ -56,10 +56,10 @@ fn independent_sessions_share_committed_catalog_allocations() {
         &first.columns.generation(),
         &second.columns.generation()
     ));
-    assert!(Arc::ptr_eq(
-        &first.key_constraints.snapshot(),
-        &second.key_constraints.snapshot()
-    ));
+    assert!(first
+        .key_constraints
+        .snapshot()
+        .shares_definition(&second.key_constraints.snapshot()));
     assert!(Arc::ptr_eq(
         &engine.durable.schemas.snapshot(),
         &session.durable.schemas.snapshot()

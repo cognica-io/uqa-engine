@@ -5,11 +5,12 @@
 //
 
 use super::{TableMetadata, TableMetadataValue};
-use std::sync::Arc;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
+
+mod image;
 
 fn capture_bytes<T: TableMetadataValue>(value: &TableMetadata<T>, bytes: usize) {
     let memory = MemoryBudget::new(bytes);
@@ -18,7 +19,7 @@ fn capture_bytes<T: TableMetadataValue>(value: &TableMetadata<T>, bytes: usize) 
     let control = ProductionControl::new(&memory, &original, &invoking);
     let captured = value.capture_with_control(&control).unwrap();
     assert_eq!(memory.used(), bytes);
-    assert!(Arc::ptr_eq(&value.snapshot(), &captured.snapshot()));
+    assert!(value.snapshot().shares_definition(&captured.snapshot()));
     drop(captured);
     assert_eq!(memory.used(), 0);
     let denied = MemoryBudget::new(bytes - 1);
@@ -75,7 +76,7 @@ fn table_metadata_publication_keeps_original_snapshots_and_recounts_detached_cap
     }
     assert_eq!(original.as_deref(), Some("original"));
     assert_eq!(value.as_deref(), Some("original replacement"));
-    assert!(!Arc::ptr_eq(&first, &value.snapshot()));
+    assert!(!first.shares_definition(&value.snapshot()));
     capture_bytes(&original, size_of::<Option<String>>() + 1024);
     let bytes = size_of::<Option<String>>() + value.as_ref().unwrap().capacity();
     capture_bytes(&value, bytes);
@@ -84,9 +85,9 @@ fn table_metadata_publication_keeps_original_snapshots_and_recounts_detached_cap
         let write = TableMetadata::write(&mut value);
         assert!(write.is_some());
     }
-    assert!(Arc::ptr_eq(&retained, &value.snapshot()));
+    assert!(retained.shares_definition(&value.snapshot()));
     value = original.clone();
-    assert!(Arc::ptr_eq(&first, &value.snapshot()));
+    assert!(first.shares_definition(&value.snapshot()));
 }
 
 #[test]

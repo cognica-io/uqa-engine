@@ -163,7 +163,7 @@ fn descendant_names_borrow_the_candidate_without_copying_unrelated_tables() {
             if name.name.starts_with("unrelated_") {
                 let after = &candidate.tables[name];
                 assert!(before.columns.shares_definition(&after.columns));
-                assert!(Arc::ptr_eq(&before.keys, &after.keys));
+                assert!(before.keys.shares_definition(&after.keys));
                 assert!(before.hierarchy.shares_definition(&after.hierarchy));
             }
         }

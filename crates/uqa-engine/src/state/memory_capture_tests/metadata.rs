@@ -9,7 +9,6 @@ use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCapt
 
 #[test]
 fn committed_memory_table_names_and_constraints_capture_original_native_generations() {
-    use std::sync::Arc;
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE parent(id integer, PRIMARY KEY(id)); CREATE TABLE saved(id integer, old text, PRIMARY KEY(id), FOREIGN KEY(id) REFERENCES parent(id)); ALTER TABLE saved DROP COLUMN old");
     let table = engine.table("saved").unwrap().unwrap();
@@ -18,11 +17,11 @@ fn committed_memory_table_names_and_constraints_capture_original_native_generati
     table.foreign_keys.write()[0].name = Some("f".repeat(1 << 20));
     table.key_constraints.write()[0].name = Some("k".repeat(1 << 20));
     table.dropped_attributes.write()[0].identity = "d".repeat(1 << 20);
-    let names = Arc::as_ptr(&table.fts_fields.snapshot());
-    let array = Arc::as_ptr(&table.row_type_array_name.snapshot());
-    let foreign = Arc::as_ptr(&table.foreign_keys.snapshot());
-    let keys = Arc::as_ptr(&table.key_constraints.snapshot());
-    let dropped = Arc::as_ptr(&table.dropped_attributes.snapshot());
+    let names = std::ptr::from_ref(&*table.fts_fields.snapshot());
+    let array = std::ptr::from_ref(&*table.row_type_array_name.snapshot());
+    let foreign = std::ptr::from_ref(&*table.foreign_keys.snapshot());
+    let keys = std::ptr::from_ref(&*table.key_constraints.snapshot());
+    let dropped = std::ptr::from_ref(&*table.dropped_attributes.snapshot());
     sql(&engine, "BEGIN");
     table.fts_fields.write().clear();
     *table.row_type_array_name.write() = None;
@@ -42,28 +41,28 @@ fn committed_memory_table_names_and_constraints_capture_original_native_generati
     assert!(control.memory().used() >= 5 << 20);
     let retained = retained.unwrap();
     assert_eq!(
-        Arc::as_ptr(&retained.fts_fields.get().unwrap().snapshot()),
+        std::ptr::from_ref(&*retained.fts_fields.get().unwrap().snapshot()),
         names
     );
     assert_eq!(
-        Arc::as_ptr(&retained.row_type_array_name.get().unwrap().snapshot()),
+        std::ptr::from_ref(&*retained.row_type_array_name.get().unwrap().snapshot()),
         array
     );
     assert_eq!(
-        Arc::as_ptr(&retained.foreign_keys.get().unwrap().snapshot()),
+        std::ptr::from_ref(&*retained.foreign_keys.get().unwrap().snapshot()),
         foreign
     );
     assert_eq!(
-        Arc::as_ptr(&retained.key_constraints.get().unwrap().snapshot()),
+        std::ptr::from_ref(&*retained.key_constraints.get().unwrap().snapshot()),
         keys
     );
     assert_eq!(
-        Arc::as_ptr(&retained.dropped_attributes.get().unwrap().snapshot()),
+        std::ptr::from_ref(&*retained.dropped_attributes.get().unwrap().snapshot()),
         dropped
     );
     sql(&engine, "ROLLBACK");
-    assert_eq!(Arc::as_ptr(&table.fts_fields.snapshot()), names);
-    assert_eq!(Arc::as_ptr(&table.foreign_keys.snapshot()), foreign);
+    assert_eq!(std::ptr::from_ref(&*table.fts_fields.snapshot()), names);
+    assert_eq!(std::ptr::from_ref(&*table.foreign_keys.snapshot()), foreign);
     table.fts_fields.write().clear();
     *table.row_type_array_name.write() = None;
     table.foreign_keys.write().clear();

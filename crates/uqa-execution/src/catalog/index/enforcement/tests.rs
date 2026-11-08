@@ -20,7 +20,7 @@ use uqa_storage::CatalogIndexRow;
 
 fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
     CatalogTableSnapshot {
-        dropped_attributes: std::sync::Arc::new(Vec::new()),
+        dropped_attributes: Vec::new().into(),
         row_type_array_name: None,
         object_id: [1; 16],
         catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
@@ -33,8 +33,8 @@ fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
         columns: SharedTableDefinition::default(),
         columns_declared: true,
         checks: SharedTableDefinition::default(),
-        foreign_keys: Arc::default(),
-        keys: Arc::default(),
+        foreign_keys: Vec::new().into(),
+        keys: Vec::new().into(),
         hierarchy: Arc::new(hierarchy).into(),
         persistence: RelationPersistence::Permanent,
     }

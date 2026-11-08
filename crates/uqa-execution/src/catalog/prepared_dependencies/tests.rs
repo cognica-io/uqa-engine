@@ -80,7 +80,7 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
     snapshot.tables.insert(
         RelationIdentity::new("public", "docs"),
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
+            dropped_attributes: Vec::new().into(),
             row_type_array_name: None,
             object_id: object,
             catalog_oids: oids,
@@ -90,8 +90,8 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),
-            foreign_keys: Arc::default(),
-            keys: Arc::default(),
+            foreign_keys: Vec::new().into(),
+            keys: Vec::new().into(),
             hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },

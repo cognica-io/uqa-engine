@@ -9,7 +9,9 @@
 use super::{CatalogCell, CatalogSnapshot};
 use parking_lot::MappedRwLockReadGuard;
 use std::sync::Arc;
-use uqa_sql::catalog::table_metadata::{TableMetadata, TableMetadataValue, TableMetadataWrite};
+use uqa_sql::catalog::table_metadata::{
+    SharedTableMetadata, TableMetadata, TableMetadataValue, TableMetadataWrite,
+};
 use uqa_storage::{
     memory_capture::{
         CapturedMemoryValue, MemoryCaptureKey, MemoryCaptureRegistry, MemoryCaptureWriteGuard,
@@ -47,7 +49,7 @@ impl<T: TableMetadataValue> TableMetadataCell<T> {
         MappedRwLockReadGuard::map(self.0.read(), |value| &**value)
     }
 
-    pub(crate) fn snapshot(&self) -> Arc<T> {
+    pub(crate) fn snapshot(&self) -> SharedTableMetadata<T> {
         self.0.read().snapshot()
     }
 
