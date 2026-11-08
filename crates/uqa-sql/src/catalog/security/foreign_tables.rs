@@ -68,6 +68,11 @@ impl ForeignTableSecurities {
     pub fn with_budget(memory: &MemoryBudget) -> Self {
         Self(DefinitionRegistry::with_budget(memory))
     }
+    /// Select the allowance for future authority changes without copying or releasing original admitted entries. Existing captured roots retain their own reservations.
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self(self.0.into_mutation_budget(memory))
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }

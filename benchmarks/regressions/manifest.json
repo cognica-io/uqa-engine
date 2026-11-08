@@ -50828,6 +50828,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_catalog_edits_preserve_original_input_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_edits_preserve_original_input_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_edits_keep_paired_original_input_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
     }
   ]
 }

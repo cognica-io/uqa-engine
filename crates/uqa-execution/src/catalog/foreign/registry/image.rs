@@ -10,7 +10,10 @@ use super::{CapturedForeignCatalog, ForeignCatalog, StoredForeignTable};
 use std::{cmp::Ordering, io::Read, ops::Bound, sync::Arc};
 use uqa_core::{
     image_io::ImageInput,
-    memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryReservation, OwnedMap, ProductionControl},
+    memory::{
+        Budgeted, BudgetedMap, BudgetedVec, MemoryBudget, MemoryReservation, OwnedMap,
+        ProductionControl,
+    },
     CancellationToken, RelationIdentity,
 };
 use uqa_sql::{
@@ -248,6 +251,15 @@ impl ForeignCatalog {
         reader: &mut dyn Read,
         control: &StorageReadControl,
     ) -> Result<Self, SQLError> {
+        Self::read_image_with_mutation_budget(reader, control, control.memory())
+    }
+
+    /// Transfer complete paired definitions and authority to the destination's mutation allowance. Decoded keys, declarations and ACLs retain the original input allowance; no catalog binding or callback is rerun.
+    pub fn read_image_with_mutation_budget(
+        reader: &mut dyn Read,
+        control: &StorageReadControl,
+        mutations: &MemoryBudget,
+    ) -> Result<Self, SQLError> {
         let mut input = Decoder(ImageInput {
             reader,
             memory: control.memory(),
@@ -257,7 +269,11 @@ impl ForeignCatalog {
             return Err(invalid("version header"));
         }
         let count = input.0.count()?;
-        let mut result = Self::with_budget(control.memory());
+        let mut tables = super::ForeignTables::with_budget(control.memory());
+        let mut securities =
+            uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities::with_budget(
+                control.memory(),
+            );
         let production = ProductionControl::new(
             control.memory(),
             control.cancellation(),
@@ -269,7 +285,7 @@ impl ForeignCatalog {
                 schema: input.text(&mut key_memory, true)?,
                 name: input.text(&mut key_memory, true)?,
             };
-            if let Some((previous, _)) = result.tables.durable.last_before(Bound::Unbounded) {
+            if let Some((previous, _)) = tables.durable.last_before(Bound::Unbounded) {
                 let mut order = compare(&previous.schema, &key.schema, control.cancellation())?;
                 if order == Ordering::Equal {
                     order = compare(&previous.name, &key.name, control.cancellation())?;
@@ -283,7 +299,7 @@ impl ForeignCatalog {
             let (schema, mut security_memory) = production.copy_text(&key.schema)?.into_parts();
             let (name, name_memory) = production.copy_text(&key.name)?.into_parts();
             security_memory = production.combine(security_memory, name_memory);
-            Arc::make_mut(&mut result.security).insert_image_entry(
+            securities.insert_image_entry(
                 Budgeted::new(
                     RelationIdentity { schema, name },
                     security_memory.expect("admitted foreign key"),
@@ -297,14 +313,17 @@ impl ForeignCatalog {
                 .bytes()
                 .checked_add(children)
                 .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-            Arc::make_mut(&mut result.tables).durable.insert(
-                key,
-                Budgeted::new(table, memory),
-                bytes,
-            )?;
+            tables
+                .durable
+                .insert(key, Budgeted::new(table, memory), bytes)?;
         }
         input.0.end()?;
-        Ok(result)
+        tables.durable = tables.durable.into_mutation_budget(mutations);
+        tables.temporary = tables.temporary.into_mutation_budget(mutations);
+        Ok(Self {
+            tables: Arc::new(tables),
+            security: Arc::new(securities.into_mutation_budget(mutations)),
+        })
     }
 }
 

@@ -7,6 +7,7 @@
 use super::*;
 use uqa_sql::ast::RelationPersistence;
 
+mod native;
 mod resources;
 
 fn row(name: &str, definition: Option<&str>) -> CatalogIndexRow {

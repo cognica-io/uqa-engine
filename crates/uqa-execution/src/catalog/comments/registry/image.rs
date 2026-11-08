@@ -36,6 +36,16 @@ impl CommentRegistry {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
+        Self::read_image_with_mutation_budget(reader, memory, memory, cancellation)
+    }
+
+    /// Decode original entries under `memory` and fund later native edits from `mutations`. Original payloads and retained predecessors keep their input reservations independently of future mutations and input cancellation.
+    pub fn read_image_with_mutation_budget(
+        reader: &mut dyn Read,
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
         let mut input = ImageInput {
             reader,
             memory,
@@ -72,6 +82,8 @@ impl CommentRegistry {
             previous = Some(address);
         }
         input.end()?;
+        registry.durable = registry.durable.into_mutation_budget(mutations);
+        registry.temporary = registry.temporary.into_mutation_budget(mutations);
         Ok(registry)
     }
 }
