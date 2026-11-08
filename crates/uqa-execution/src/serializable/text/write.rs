@@ -6,8 +6,9 @@
 
 //! Capture evaluated logical keys inside the provider, then publish intents outside its non-reentrant mutation scope.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_core::{memory::BudgetedVec, DocId, FieldName};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{
     inverted_index::{InvertedIndexChange, InvertedIndexChangeVisitor},
@@ -51,7 +52,7 @@ impl Mutation {
 pub fn add_document(
     writes: &dyn SerializableWrites,
     table: &str,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     index: &mut dyn InvertedIndex,
     doc: DocId,
     fields: BTreeMap<FieldName, String>,
@@ -62,7 +63,7 @@ pub fn add_document(
 pub fn add_documents(
     writes: &dyn SerializableWrites,
     table: &str,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     index: &mut dyn InvertedIndex,
     documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
 ) -> Result<(), SQLError> {
@@ -72,7 +73,7 @@ pub fn add_documents(
 pub fn remove_document(
     writes: &dyn SerializableWrites,
     table: &str,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     index: &mut dyn InvertedIndex,
     doc: DocId,
 ) -> Result<(), SQLError> {
@@ -82,7 +83,7 @@ pub fn remove_document(
 fn mutate(
     writes: &dyn SerializableWrites,
     table: &str,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     index: &mut dyn InvertedIndex,
     mutation: Mutation,
 ) -> Result<(), SQLError> {

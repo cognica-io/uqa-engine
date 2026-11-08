@@ -53,8 +53,8 @@ fn independent_sessions_share_committed_catalog_allocations() {
         "physical handles must stay session-bound"
     );
     assert!(Arc::ptr_eq(
-        &first.columns.snapshot(),
-        &second.columns.snapshot()
+        &first.columns.generation(),
+        &second.columns.generation()
     ));
     assert!(Arc::ptr_eq(
         &first.key_constraints.snapshot(),
@@ -93,13 +93,13 @@ fn independent_sessions_share_committed_catalog_allocations() {
     );
     assert!(
         Arc::ptr_eq(
-            &first.columns.snapshot(),
+            &first.columns.generation(),
             &session
                 .try_table("items")
                 .unwrap()
                 .unwrap()
                 .columns
-                .snapshot()
+                .generation()
         ),
         "first query must reuse its shared schema"
     );

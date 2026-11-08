@@ -6,6 +6,7 @@
 
 use super::*;
 use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 mod expression_metadata;
 mod output_cache;
@@ -65,12 +66,12 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
             catalog_oids: oids,
             row_type_array_name: None,
             security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
-            columns: Arc::default(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
+            checks: SharedTableDefinition::default(),
             foreign_keys: Arc::default(),
             keys: Arc::default(),
-            hierarchy: Arc::default(),
+            hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },
     );

@@ -105,13 +105,22 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
         self.state.hierarchy.read().clone()
     }
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy) {
-        *self.state.hierarchy.write() = hierarchy;
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
+        self.state.hierarchy.write().publish(hierarchy)
     }
-    fn write_columns(&self) -> SchemaWrite<'_, ColumnDef> {
+    fn write_columns(
+        &self,
+    ) -> Box<dyn uqa_execution::schema::publication::removal::DefinitionWrite<Vec<ColumnDef>> + '_>
+    {
         Box::new(self.state.columns.write())
     }
-    fn write_checks(&self) -> SchemaWrite<'_, TableCheck> {
+    fn write_checks(
+        &self,
+    ) -> Box<dyn uqa_execution::schema::publication::removal::DefinitionWrite<Vec<TableCheck>> + '_>
+    {
         Box::new(self.state.table_checks.write())
     }
     fn write_keys(&self) -> SchemaWrite<'_, TableKeyConstraint> {

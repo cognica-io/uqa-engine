@@ -66,7 +66,7 @@ impl Engine {
         }
         let tables_changed = !table_updates.is_empty();
         for (_, table, columns) in table_updates {
-            *table.columns.write() = columns;
+            table.columns.write().publish(columns)?;
         }
         let foreign_tables_changed = !foreign_updates.is_empty();
         if foreign_tables_changed {

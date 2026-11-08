@@ -45,7 +45,14 @@ fn native_mutation_target_names_observe_only_demanded_columns(#[case] provider: 
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
     let mut unused = table.columns.read()[0].clone();
     unused.name = "x".repeat(4 << 20);
-    table.columns.write().push(unused);
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns.push(unused);
+            Ok(())
+        })
+        .unwrap();
     let statement = command("INSERT INTO public.items VALUES(1)");
     let CommandPlan::Insert(statement) = &*statement else {
         panic!("insert");
@@ -111,7 +118,14 @@ fn native_mutation_target_names_observe_only_demanded_columns(#[case] provider: 
         token.reset();
     }
     drop(occupied);
-    table.columns.write().pop();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns.pop();
+            Ok(())
+        })
+        .unwrap();
     drop(table);
     engine
         .sql("INSERT INTO items VALUES(1); UPDATE items SET id=2", &[])

@@ -9,6 +9,7 @@
 use crate::catalog::{domain::DomainRegistry, CatalogReadSnapshot, CatalogTableSnapshot};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint},
     catalog::events::TriggerCatalog,
@@ -17,11 +18,11 @@ use uqa_sql::{
 
 pub struct ConstraintTableMetadata {
     pub object_id: [u8; 16],
-    pub columns: Arc<Vec<ColumnDef>>,
-    pub checks: Arc<Vec<TableCheck>>,
+    pub columns: SharedTableDefinition<Vec<ColumnDef>>,
+    pub checks: SharedTableDefinition<Vec<TableCheck>>,
     pub foreign_keys: Arc<Vec<ForeignKey>>,
     pub keys: Arc<Vec<TableKeyConstraint>>,
-    pub hierarchy: Arc<TableHierarchy>,
+    pub hierarchy: SharedTableDefinition<TableHierarchy>,
 }
 
 impl ConstraintTableMetadata {
@@ -45,11 +46,11 @@ impl From<&CatalogTableSnapshot> for ConstraintTableMetadata {
     fn from(table: &CatalogTableSnapshot) -> Self {
         Self {
             object_id: table.object_id,
-            columns: Arc::clone(&table.columns),
-            checks: Arc::clone(&table.checks),
+            columns: table.columns.clone(),
+            checks: table.checks.clone(),
             foreign_keys: Arc::clone(&table.foreign_keys),
             keys: Arc::clone(&table.keys),
-            hierarchy: Arc::clone(&table.hierarchy),
+            hierarchy: table.hierarchy.clone(),
         }
     }
 }

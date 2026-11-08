@@ -18,6 +18,7 @@ use uqa_execution::operator_tree::driver::{
     PhysicalRetrievalDriver,
 };
 use uqa_operators::{base::ExecutionContext, TextTopKPlan};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType},
     SQLError, SQLParam,
@@ -26,7 +27,7 @@ use uqa_storage::{document_store::Document, CatalogIndexRow, DocumentStore, Stor
 
 struct TableIndexState(Arc<TableState>);
 impl RetrievalIndexState for TableIndexState {
-    fn columns(&self) -> Arc<Vec<ColumnDef>> {
+    fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>> {
         self.0.columns.snapshot()
     }
     fn inverted_index(&self) -> TextIndexRead<'_> {

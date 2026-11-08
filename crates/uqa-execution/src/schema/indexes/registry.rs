@@ -185,7 +185,7 @@ impl IndexRegistryChange {
         }
         for change in self.schema {
             let state = change.current(context.tables)?;
-            state.publish_constraints(change.columns, change.constraints);
+            state.publish_constraints(change.columns, change.constraints)?;
         }
         publication.publish_indexes(candidate);
         for table in tables {

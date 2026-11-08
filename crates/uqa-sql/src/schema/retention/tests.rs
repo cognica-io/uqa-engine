@@ -41,7 +41,7 @@ fn retained_generations_preserve_identity_and_share_one_lease_at_full_allowance(
         + source.capacity() * size_of::<ColumnDef>()
         + source[0].name.capacity()
         + default.capacity()
-        + size_of::<Budgeted<Arc<Vec<ColumnDef>>>>();
+        + size_of::<Budgeted<SharedTableDefinition<Vec<ColumnDef>>>>();
     assert_eq!(retained.reserved_bytes(), expected);
     assert_eq!(budget.used(), expected);
     let remainder = budget.reserve(budget.limit() - budget.used()).unwrap();

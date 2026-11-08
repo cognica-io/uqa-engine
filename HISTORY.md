@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Table column, CHECK and partition definitions retain independent immutable generations and complete evaluated-literal ownership across committed memory capture, query readers and transaction rollback.
+
 - Committed memory captures share immutable table field names, foreign and key constraints, row-array names and dropped-attribute metadata under independent capacity admission; publication and rollback preserve original generations.
 
 - Committed memory captures share the original table analyzer configuration image while preserving deferred validation and resource loading.

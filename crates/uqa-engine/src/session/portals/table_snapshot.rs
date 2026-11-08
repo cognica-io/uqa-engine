@@ -168,7 +168,9 @@ impl Engine {
             fts_fields: crate::state::TableMetadataCell::from_generation(
                 metadata.fts_fields.generation(),
             ),
-            columns: crate::state::CatalogCell::from_snapshot(metadata.columns.snapshot()),
+            columns: crate::state::TableDefinitionCell::from_generation(
+                metadata.columns.generation(),
+            ),
             columns_declared: crate::state::CatalogCell::from_snapshot(
                 metadata.columns_declared.snapshot(),
             ),
@@ -185,8 +187,8 @@ impl Engine {
             statistics_maintenance: crate::state::CatalogCell::new(
                 metadata.statistics_maintenance.read().clone(),
             ),
-            table_checks: crate::state::CatalogCell::from_snapshot(
-                metadata.table_checks.snapshot(),
+            table_checks: crate::state::TableDefinitionCell::from_generation(
+                metadata.table_checks.generation(),
             ),
             foreign_keys: crate::state::TableMetadataCell::from_generation(
                 metadata.foreign_keys.generation(),
@@ -194,7 +196,9 @@ impl Engine {
             key_constraints: crate::state::TableMetadataCell::from_generation(
                 metadata.key_constraints.generation(),
             ),
-            hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
+            hierarchy: crate::state::TableDefinitionCell::from_generation(
+                metadata.hierarchy.generation(),
+            ),
             value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 uqa_execution::catalog::index::value::ValueIndexes::default(),
             ),

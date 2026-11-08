@@ -17,7 +17,7 @@ pub type VirtualRelationSchema = Vec<(String, ColumnType)>;
 
 #[derive(Clone)]
 pub struct TableDefinition {
-    pub columns: Arc<Vec<ColumnDef>>,
+    pub columns: crate::catalog::table_definition::SharedTableDefinition<Vec<ColumnDef>>,
     pub columns_declared: bool,
 }
 

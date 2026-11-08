@@ -53,7 +53,7 @@ fn text_readers_share_the_original_memory_limit_without_observing_metadata() {
         let control = context.read_control(&cancellation);
         // This wrapper deliberately has no SQL schema: its dynamic address and all scratch space still use the original participant's allowance.
         let read = SerializableRelationRead::new([81; 16], context, &cancellation);
-        let reader = ObservedTextIndex::new(index(&a), Some(read), Arc::new(Vec::new()));
+        let reader = ObservedTextIndex::new(index(&a), Some(read), Arc::new(Vec::new()).into());
         let occupied = control
             .memory()
             .reserve(control.memory().limit() - control.memory().used())

@@ -39,7 +39,7 @@ impl Engine {
         let table = self
             .try_table(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        *table.hierarchy.write() = hierarchy;
+        table.hierarchy.write().publish(hierarchy)?;
         Ok(())
     }
 

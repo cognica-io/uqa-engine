@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use uqa_core::memory::{BudgetedMap, BudgetedVec, MemoryReservation};
 use uqa_core::{DocId, FieldName, Value};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{ast::ColumnDef, schema::retention::RetainedColumns, ColumnType, SQLError};
 use uqa_storage::inverted_index::RetainedInvertedIndexBuilder;
 use uqa_storage::{
@@ -33,7 +34,7 @@ mod tests;
 
 /// The selected catalog supplies immutable column definitions, field revisions and registered vector dimensions. The reconstruction does not consult live catalog state.
 pub struct SnapshotSchema<'a> {
-    pub columns: Arc<Vec<ColumnDef>>,
+    pub columns: SharedTableDefinition<Vec<ColumnDef>>,
     pub text_fields: &'a [FieldName],
     pub text_revisions: &'a dyn InvertedIndex,
     pub vector_dimensions: &'a dyn VectorDimensions,

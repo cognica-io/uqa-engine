@@ -10,6 +10,7 @@ use crate::catalog::{
     RelationLookupMode,
 };
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::{RelationPersistence, TableHierarchy},
     catalog::index::IndexDefinition,
@@ -49,12 +50,12 @@ fn fixture() -> (KeyValueCatalog, CatalogReadView, RelationNameResolution) {
             security: Arc::new(BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
             )),
-            columns: Arc::default(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
+            checks: SharedTableDefinition::default(),
             foreign_keys: Arc::default(),
             keys: Arc::default(),
-            hierarchy: Arc::new(TableHierarchy::default()),
+            hierarchy: Arc::new(TableHierarchy::default()).into(),
             persistence: RelationPersistence::Permanent,
         },
     );

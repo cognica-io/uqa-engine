@@ -142,7 +142,7 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
         &format!("CREATE TABLE docs(id integer PRIMARY KEY, body text DEFAULT '{default}')"),
     );
     let table = engine.table("docs").unwrap().unwrap();
-    let columns = table.columns.snapshot();
+    let columns = table.columns.generation();
     let constraints = table.key_constraints.snapshot();
     let mut snapshot = None;
     let allocated = allocation_counter::measure(|| {
@@ -160,9 +160,9 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
     ));
 
     sql(&engine, "BEGIN; ALTER TABLE docs ALTER COLUMN body SET DEFAULT 'changed'; ALTER TABLE docs ADD COLUMN extra boolean");
-    assert!(!Arc::ptr_eq(&columns, &table.columns.snapshot()));
+    assert!(!Arc::ptr_eq(&columns, &table.columns.generation()));
     sql(&engine, "ROLLBACK");
-    assert!(Arc::ptr_eq(&columns, &table.columns.snapshot()));
+    assert!(Arc::ptr_eq(&columns, &table.columns.generation()));
     assert!(Arc::ptr_eq(&constraints, &table.key_constraints.snapshot()));
     sql(&engine, "INSERT INTO docs(id) VALUES(1)");
     let result = engine

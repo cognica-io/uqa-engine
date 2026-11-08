@@ -115,7 +115,7 @@ impl Engine {
                 &relation.qualified_name(),
             )?
             .ok_or_else(|| StorageBackendError::Other("restored index owner disappeared".into()))?;
-            state.publish_constraints(columns, constraints);
+            state.publish_constraints(columns, constraints)?;
         }
         uqa_execution::schema::indexes::restoration::restore_constructors(
             catalog,

@@ -15,6 +15,7 @@ use uqa_sql::ast::{
     ConstraintCatalogIdentity, Expr, PartitionBound, PartitionSpec, PartitionStrategy,
     RelationPersistence, TableHierarchy,
 };
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_storage::CatalogIndexRow;
 
 fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
@@ -29,12 +30,12 @@ fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
         security: Arc::new(BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         )),
-        columns: Arc::default(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
+        checks: SharedTableDefinition::default(),
         foreign_keys: Arc::default(),
         keys: Arc::default(),
-        hierarchy: Arc::new(hierarchy),
+        hierarchy: Arc::new(hierarchy).into(),
         persistence: RelationPersistence::Permanent,
     }
 }

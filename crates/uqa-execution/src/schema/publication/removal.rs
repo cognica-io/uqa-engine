@@ -19,6 +19,10 @@ use uqa_sql::{
 };
 use uqa_storage::{document_store::Document, StorageBackendError, StorageBackendResult};
 pub type SchemaWrite<'a, T> = Box<dyn DerefMut<Target = Vec<T>> + 'a>;
+pub trait DefinitionWrite<T> {
+    fn value(&self) -> &T;
+    fn publish(&mut self, value: T) -> StorageBackendResult<()>;
+}
 pub type VectorIndexesWrite<'a> =
     Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub type IndexRowsRead<'a> =
@@ -29,13 +33,16 @@ pub type IndexRowsWrite<'a> =
 pub trait ColumnDropTable: ColumnDependencyState {
     fn object_id(&self) -> [u8; 16];
     fn clear_value_indexes(&self) -> StorageBackendResult<()>;
-    fn write_columns(&self) -> SchemaWrite<'_, ColumnDef>;
+    fn write_columns(&self) -> Box<dyn DefinitionWrite<Vec<ColumnDef>> + '_>;
     fn write_dropped_attributes(
         &self,
     ) -> SchemaWrite<'_, uqa_sql::catalog::relation_attributes::DroppedAttribute>;
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
-    fn write_checks(&self) -> SchemaWrite<'_, TableCheck>;
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()>;
+    fn write_checks(&self) -> Box<dyn DefinitionWrite<Vec<TableCheck>> + '_>;
     fn write_keys(&self) -> SchemaWrite<'_, TableKeyConstraint>;
     fn write_foreign_keys(&self) -> SchemaWrite<'_, ForeignKey>;
     fn remove_column_acl(&self, column: &str);
@@ -145,19 +152,20 @@ pub fn drop_column(
     state.clear_value_indexes()?;
     state.write_dropped_attributes().push(dropped);
     uqa_sql::schema::columns::publication::remove_local_column(&mut hierarchy, column);
-    state.publish_hierarchy(hierarchy);
-    let retained_checks =
-        removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
+    state.publish_hierarchy(hierarchy)?;
+    let mut columns = state.write_columns();
+    let mut next_columns = columns.value().clone();
+    let retained_checks = removal_metadata::remove_column_declarations(&mut next_columns, column);
     {
         let mut checks = state.write_checks();
-        checks.extend(retained_checks);
-        removal_metadata::remove_column_checks(&mut checks, column);
+        let mut next_checks = checks.value().clone();
+        next_checks.extend(retained_checks);
+        removal_metadata::remove_column_checks(&mut next_checks, column);
+        checks.publish(next_checks)?;
     }
-    removal_metadata::remove_column_keys(
-        &mut state.write_columns(),
-        &mut state.write_keys(),
-        column,
-    );
+    removal_metadata::remove_column_keys(&mut next_columns, &mut state.write_keys(), column);
+    columns.publish(next_columns)?;
+    drop(columns);
     removal_metadata::remove_column_foreign_keys(&mut state.write_foreign_keys(), column);
     state.remove_column_acl(column);
     state.remove_text_field(column);

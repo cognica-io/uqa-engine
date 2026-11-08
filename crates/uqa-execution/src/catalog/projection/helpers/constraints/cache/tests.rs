@@ -142,7 +142,12 @@ fn retained_constraint_definitions_survive_rename_and_removal() {
         .unwrap();
     let mut snapshot = catalog.snapshot().clone();
     let table = snapshot.tables.get_mut(&table_name(0)).unwrap();
-    Arc::make_mut(&mut table.checks)[0].name = Some("renamed".into());
+    {
+        let target = &mut table.checks;
+        let mut value = (**target).clone();
+        value[0].name = Some("renamed".into());
+        *target = value.into();
+    }
     let current = CatalogReadView::new(snapshot.clone());
     let selected = constraint_catalog_row_by_oid(&current, &resolution, 70_000)
         .unwrap()
@@ -169,13 +174,22 @@ fn constraint_cache_keeps_complete_validation_order_and_retries_errors() {
     let resolution = CatalogServices::default().resolution;
     let mut snapshot = catalog.snapshot().clone();
     for table in snapshot.tables.values_mut() {
-        Arc::make_mut(&mut table.checks)[0].name = None;
+        {
+            let target = &mut table.checks;
+            let mut value = (**target).clone();
+            value[0].name = None;
+            *target = value.into();
+        }
     }
     let invalid = CatalogReadView::new(snapshot.clone());
     let error = constraint_catalog_row_by_oid(&invalid, &resolution, 70_000).unwrap_err();
     assert!(error.to_string().contains("public.items_000` has no name"));
-    Arc::make_mut(&mut snapshot.tables.get_mut(&table_name(0)).unwrap().checks)[0].name =
-        Some("positive".into());
+    {
+        let target = &mut snapshot.tables.get_mut(&table_name(0)).unwrap().checks;
+        let mut value = (**target).clone();
+        value[0].name = Some("positive".into());
+        *target = value.into();
+    }
     let invalid = CatalogReadView::new(snapshot);
     let before = TABLE_READS.get();
     for _ in 0..2 {
@@ -196,8 +210,12 @@ fn constraint_cache_keeps_complete_validation_order_and_retries_errors() {
 fn duplicate_constraint_oid_selects_the_first_validated_row() {
     let catalog = fixture(1);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.tables.get_mut(&table_name(1)).unwrap().checks)[0].catalog_oid =
-        Some(70_000);
+    {
+        let target = &mut snapshot.tables.get_mut(&table_name(1)).unwrap().checks;
+        let mut value = (**target).clone();
+        value[0].catalog_oid = Some(70_000);
+        *target = value.into();
+    }
     let catalog = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     assert_eq!(

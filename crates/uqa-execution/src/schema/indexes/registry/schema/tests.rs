@@ -108,6 +108,11 @@ fn descendant_names_borrow_the_candidate_without_copying_unrelated_tables() {
         } = fixture(unrelated);
         let observed =
             &original.snapshot().tables[&RelationIdentity::new("public", "unrelated_0")].columns;
+        let uqa_sql::catalog::table_definition::SharedTableDefinition::External(observed) =
+            observed
+        else {
+            panic!("external fixture columns")
+        };
         assert_eq!(Arc::strong_count(observed), 2);
         let mut allocations = 0;
         let mut allocate = |_: &str| {
@@ -157,9 +162,9 @@ fn descendant_names_borrow_the_candidate_without_copying_unrelated_tables() {
         for (name, before) in &original.snapshot().tables {
             if name.name.starts_with("unrelated_") {
                 let after = &candidate.tables[name];
-                assert!(Arc::ptr_eq(&before.columns, &after.columns));
+                assert!(before.columns.shares_definition(&after.columns));
                 assert!(Arc::ptr_eq(&before.keys, &after.keys));
-                assert!(Arc::ptr_eq(&before.hierarchy, &after.hierarchy));
+                assert!(before.hierarchy.shares_definition(&after.hierarchy));
             }
         }
     }

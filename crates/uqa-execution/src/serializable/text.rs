@@ -6,9 +6,10 @@
 
 //! Logical text reads and evaluated writes retain their original transaction and field identities.
 
-use std::{ops::Bound, sync::Arc};
+use std::ops::Bound;
 use uqa_core::{memory::BudgetedVec, DocId};
 use uqa_sql::ast::ColumnDef;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_storage::{
     mvcc::{SerializableKeySpace, SerializablePredicate},
     StorageBackendResult, TokenTermKey,
@@ -29,7 +30,7 @@ const STATISTICS: u8 = 2;
 #[derive(Clone)]
 struct TextObservation {
     read: SerializableRelationRead,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
 }
 
 impl TextObservation {

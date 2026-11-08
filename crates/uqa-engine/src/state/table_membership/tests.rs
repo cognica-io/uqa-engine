@@ -193,7 +193,14 @@ fn table_membership_capture_does_not_copy_the_relation_corpus_or_temporary_paylo
         }
         sql(&engine, "CREATE TEMP TABLE private_temp(value text)");
         let temporary = engine.table("private_temp").unwrap().unwrap();
-        temporary.columns.write()[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+        temporary
+            .columns
+            .write()
+            .edit(|columns| {
+                columns[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+                Ok(())
+            })
+            .unwrap();
         drop(temporary);
         let control = StorageReadControl::with_limit(16 << 20);
         let mut result = None;

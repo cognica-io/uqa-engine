@@ -114,8 +114,14 @@ fn native_conflict_metadata_borrows_defaults_and_releases_catalog_guards(
         .unwrap(),
     );
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
-    table.columns.write()[1].default =
-        Some(uqa_sql::ast::Expr::Literal(Value::Str("x".repeat(4 << 20))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = Some(uqa_sql::ast::Expr::Literal(Value::Str("x".repeat(4 << 20))));
+            Ok(())
+        })
+        .unwrap();
     let baseline = memory.used();
     let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
     let mut output = None;
@@ -164,16 +170,37 @@ fn native_conflict_metadata_borrows_defaults_and_releases_catalog_guards(
         token.reset();
     }
     drop(occupied);
-    table.columns.write()[1].default = None;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = None;
+            Ok(())
+        })
+        .unwrap();
     assert!(engine
         .with_column_metadata_with_control("public.items", &control, &mut |columns| {
             assert!(!table.columns.is_locked());
-            table.columns.write()[1].name = "changed".into();
+            table
+                .columns
+                .write()
+                .edit(|columns| {
+                    columns[1].name = "changed".into();
+                    Ok(())
+                })
+                .unwrap();
             assert_eq!(columns[1].name, "payload");
             Ok(())
         })
         .unwrap());
-    table.columns.write()[1].name = "payload".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].name = "payload".into();
+            Ok(())
+        })
+        .unwrap();
     drop(table);
     engine
         .sql("INSERT INTO items VALUES(1,'x'); SELECT * FROM items", &[])
@@ -214,7 +241,14 @@ fn native_conflict_metadata_preserves_sequence_dependency_observation(#[case] pr
     else {
         panic!("table")
     };
-    table.columns.write()[1].default = missing.columns.remove(0).default;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = missing.columns.remove(0).default;
+            Ok(())
+        })
+        .unwrap();
     let ordinary = engine
         .describe_table_in_execution("public.items")
         .unwrap_err();
@@ -228,7 +262,14 @@ fn native_conflict_metadata_preserves_sequence_dependency_observation(#[case] pr
         uqa_sql::SQLError::Internal(ordinary.to_string()).to_string()
     );
     assert_eq!(memory.used(), baseline);
-    table.columns.write()[1].default = original;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = original;
+            Ok(())
+        })
+        .unwrap();
     drop(table);
     assert_eq!(
         engine

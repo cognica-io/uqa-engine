@@ -9,7 +9,6 @@
 use super::{CatalogCell, StorageContext};
 use crate::TableState;
 use std::sync::Arc;
-use uqa_sql::catalog::definition_capture;
 use uqa_storage::StorageBackendResult;
 
 impl StorageContext {
@@ -26,13 +25,9 @@ impl StorageContext {
                     CatalogCell::capture_source(table.$field.snapshot(), Some(registry), $copy)?;
             };
         }
-        capture!(columns, |value, control| definition_capture::columns(
-            value, control
-        ));
-        capture!(table_checks, |value, control| definition_capture::checks(
-            value, control
-        ));
-        capture!(hierarchy, definition_capture::hierarchy);
+        table.columns = table.columns.capture_source(registry)?;
+        table.table_checks = table.table_checks.capture_source(registry)?;
+        table.hierarchy = table.hierarchy.capture_source(registry)?;
         table.foreign_keys = table.foreign_keys.capture_source(registry)?;
         table.key_constraints = table.key_constraints.capture_source(registry)?;
         table.fts_fields = table.fts_fields.capture_source(registry)?;

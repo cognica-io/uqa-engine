@@ -132,8 +132,12 @@ fn malformed_partition_collection_is_not_published() {
         .tables
         .get_mut(&RelationIdentity::new("public", "items"))
         .unwrap();
-    Arc::make_mut(&mut table.hierarchy).partition_bound =
-        Some(uqa_sql::ast::PartitionBound::Default);
+    {
+        let target = &mut table.hierarchy;
+        let mut value = (**target).clone();
+        value.partition_bound = Some(uqa_sql::ast::PartitionBound::Default);
+        *target = value.into();
+    }
     let invalid = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     let before = TRIGGER_COPIES.get();

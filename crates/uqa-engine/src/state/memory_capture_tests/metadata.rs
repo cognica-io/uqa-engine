@@ -631,7 +631,14 @@ fn memory_table_definition_capture_failure_does_not_interrupt_schema_publication
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE metadata(payload text)");
     let table = engine.table("metadata").unwrap().unwrap();
-    table.columns.write()[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+            Ok(())
+        })
+        .unwrap();
     let key = table.columns.key().unwrap();
     let registry = engine.storage.memory_capture.as_ref().unwrap();
     let small = StorageReadControl::with_limit(32 << 10);

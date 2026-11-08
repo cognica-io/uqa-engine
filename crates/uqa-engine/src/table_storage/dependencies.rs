@@ -183,10 +183,10 @@ impl Engine {
             }
         }
         for (table, columns, checks, foreign_keys, hierarchy) in updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
             *table.foreign_keys.write() = foreign_keys;
-            *table.hierarchy.write() = hierarchy;
+            table.hierarchy.write().publish(hierarchy)?;
         }
         Ok(())
     }
@@ -293,8 +293,8 @@ impl Engine {
             }
         }
         for (table, columns, checks, foreign_keys) in updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
             *table.foreign_keys.write() = foreign_keys;
         }
         Ok(())

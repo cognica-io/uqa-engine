@@ -212,7 +212,9 @@ fn publish(
             state
                 .persist_candidate(&columns, &constraints)
                 .map_err(storage)?;
-            state.publish_constraints(columns, constraints);
+            state
+                .publish_constraints(columns, constraints)
+                .map_err(storage)?;
             context.changes.table_catalog_changed();
         }
         HolderKind::View => {

@@ -80,7 +80,7 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
             columns: definition.columns.clone(),
             documents: RwLock::new(Box::new(base)),
         }),
-        column_definitions: Arc::new(definition.columns),
+        column_definitions: Arc::new(definition.columns).into(),
         columns: columns.clone(),
         schema: columns.clone(),
         physical_schema: crate::RowSchema::new(columns),

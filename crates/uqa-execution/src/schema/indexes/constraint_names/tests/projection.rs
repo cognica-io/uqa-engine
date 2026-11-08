@@ -54,22 +54,26 @@ fn changed_key_names_copy_only_changed_constraint_collections() {
             Arc::make_mut(&mut table.keys)[0].name = Some("old".into());
         }
         if inherited {
-            Arc::make_mut(&mut table.hierarchy).partition_inherited_key_constraints[0].name =
-                Some("old".into());
+            {
+                let target = &mut table.hierarchy;
+                let mut value = (**target).clone();
+                value.partition_inherited_key_constraints[0].name = Some("old".into());
+                *target = value.into();
+            }
         }
         let catalog = CatalogReadView::new(snapshot);
         let (projected, changed) = names.project(&catalog).unwrap();
         assert_eq!(changed, BTreeSet::from([relation.clone()]));
         for (name, before) in &catalog.snapshot().tables {
             let after = &projected.snapshot().tables[name];
-            assert!(Arc::ptr_eq(&before.columns, &after.columns));
-            assert!(Arc::ptr_eq(&before.checks, &after.checks));
+            assert!(before.columns.shares_definition(&after.columns));
+            assert!(before.checks.shares_definition(&after.checks));
             assert_eq!(
                 Arc::ptr_eq(&before.keys, &after.keys),
                 name != &relation || !keys
             );
             assert_eq!(
-                Arc::ptr_eq(&before.hierarchy, &after.hierarchy),
+                before.hierarchy.shares_definition(&after.hierarchy),
                 name != &relation || !inherited
             );
         }
@@ -150,8 +154,12 @@ fn invalid_inherited_owner_does_not_publish_an_earlier_name_change() {
     let relation = RelationIdentity::new("public", "t");
     let table = snapshot.tables.get_mut(&relation).unwrap();
     Arc::make_mut(&mut table.keys)[0].name = Some("old".into());
-    Arc::make_mut(&mut table.hierarchy).partition_inherited_key_constraints[0].catalog_identity =
-        None;
+    {
+        let target = &mut table.hierarchy;
+        let mut value = (**target).clone();
+        value.partition_inherited_key_constraints[0].catalog_identity = None;
+        *target = value.into();
+    }
     let catalog = CatalogReadView::new(snapshot);
     assert!(names.project(&catalog).is_err());
     assert_eq!(

@@ -148,16 +148,14 @@ fn same_definition(before: &CatalogIndexRow, current: &CatalogIndexRow) -> bool 
 }
 
 fn rebind_names(candidate: &mut CatalogTableSnapshot, current: &CatalogTableSnapshot) {
+    let mut hierarchy = (*candidate.hierarchy).clone();
     crate::schema::indexes::constraint_names::rebind_current_key_names(
         std::sync::Arc::make_mut(&mut candidate.keys)
             .iter_mut()
-            .chain(
-                std::sync::Arc::make_mut(&mut candidate.hierarchy)
-                    .partition_inherited_key_constraints
-                    .iter_mut(),
-            ),
+            .chain(hierarchy.partition_inherited_key_constraints.iter_mut()),
         current,
     );
+    candidate.hierarchy = hierarchy.into();
 }
 
 fn declaration(table: &CatalogTableSnapshot) -> StorageBackendResult<Vec<u8>> {

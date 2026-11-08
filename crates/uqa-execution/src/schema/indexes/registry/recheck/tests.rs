@@ -8,6 +8,7 @@ use super::*;
 use std::sync::Arc;
 use uqa_sql::ast::TableConstraintSet;
 use uqa_sql::catalog::index::IndexRelationships;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 fn fixture() -> (RelationIdentity, CatalogReadView) {
     let relation = RelationIdentity::new("public", "t");
@@ -53,10 +54,10 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
             )),
             columns: columns.clone().into(),
             columns_declared: true,
-            checks: Arc::default(),
+            checks: SharedTableDefinition::default(),
             foreign_keys: Arc::default(),
             keys: constraints.key_constraints.clone().into(),
-            hierarchy: Arc::default(),
+            hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },
     );
@@ -194,7 +195,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
                 uqa_sql::catalog::relation_oids::RelationOidKind::Table,
                 &table.object_id,
             );
-            table.columns = Arc::new(plain.columns.clone());
+            table.columns = Arc::new(plain.columns.clone()).into();
             table.keys = Arc::default();
             let mut row = original.clone();
             row.relation = RelationIdentity::new("public", format!("unrelated_index_{index}"));
@@ -231,7 +232,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
         let mut unindexed = catalog.snapshot().clone();
         unindexed.definitions.catalog_indexes = Arc::default();
         for table in unindexed.tables.values_mut() {
-            table.columns = Arc::new(plain.columns.clone());
+            table.columns = Arc::new(plain.columns.clone()).into();
             table.keys = Arc::default();
         }
         let unindexed = CatalogReadView::new(unindexed);
@@ -259,7 +260,7 @@ fn catalog_recheck_keeps_missing_partition_index_errors() {
         panic!("partitioned table")
     };
     let mut snapshot = catalog.snapshot().clone();
-    snapshot.tables.get_mut(&root).unwrap().hierarchy = Arc::new(parent.hierarchy);
+    snapshot.tables.get_mut(&root).unwrap().hierarchy = Arc::new(parent.hierarchy).into();
     let child = RelationIdentity::new("public", "child");
     let child_table = crate::catalog::test_support::table_snapshot(
         [20; 16],

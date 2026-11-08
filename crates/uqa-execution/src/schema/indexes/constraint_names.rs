@@ -152,8 +152,9 @@ impl KeyConstraintNames {
                     table.keys = keys.into();
                 }
                 if let Some(inherited) = inherited {
-                    std::sync::Arc::make_mut(&mut table.hierarchy)
-                        .partition_inherited_key_constraints = inherited;
+                    let mut hierarchy = (*table.hierarchy).clone();
+                    hierarchy.partition_inherited_key_constraints = inherited;
+                    table.hierarchy = hierarchy.into();
                 }
                 changed.insert(relation.clone());
             }

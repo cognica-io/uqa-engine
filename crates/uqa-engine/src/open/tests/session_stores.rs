@@ -159,8 +159,8 @@ fn shared_sessions_open_each_store_once_and_keep_current_counts(#[case] kind: us
         );
         assert!(!Arc::ptr_eq(original, copied));
         assert!(Arc::ptr_eq(
-            &original.columns.snapshot(),
-            &copied.columns.snapshot()
+            &original.columns.generation(),
+            &copied.columns.generation()
         ));
     }
     let item = seeded.storage.tables.read()

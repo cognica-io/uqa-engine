@@ -90,7 +90,15 @@ fn tables(
     }
     if !updates.is_empty() {
         for (position, columns, constraints) in updates {
-            tables[position].1.publish_constraints(columns, constraints);
+            tables[position]
+                .1
+                .publish_constraints(columns, constraints)
+                .map_err(|error| {
+                    crate::storage_errors::storage_error(
+                        "rewrite stored composite definitions",
+                        &error,
+                    )
+                })?;
         }
         context.changes.table_catalog_changed();
     }

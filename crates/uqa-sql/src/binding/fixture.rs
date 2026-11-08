@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub(crate) fn table_definition(columns: Vec<crate::ast::ColumnDef>) -> TableDefinition {
     TableDefinition {
-        columns: Arc::new(columns),
+        columns: Arc::new(columns).into(),
         columns_declared: true,
     }
 }

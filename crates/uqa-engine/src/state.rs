@@ -28,6 +28,8 @@ pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod table_capture;
+mod table_definition;
+pub(crate) use table_definition::{TableDefinitionCell, TableDefinitionWrite};
 mod table_metadata;
 pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;

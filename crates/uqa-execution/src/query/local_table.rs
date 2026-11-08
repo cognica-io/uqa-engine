@@ -9,6 +9,7 @@
 use crate::RowSchemaExecution;
 use std::sync::Arc;
 use uqa_core::Value;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{plan::source_projection::RelationMetadataProjection, ResultRow, SQLError};
 
 mod borrowed;
@@ -26,7 +27,7 @@ pub struct LocalTableRowSource {
     serializable: crate::serializable::SerializableScan,
     table_name: String,
     table: Arc<dyn super::table_read::TableRead>,
-    column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    column_definitions: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     columns: Vec<String>,
     schema: Vec<String>,
     physical_schema: crate::RowSchema,
@@ -141,7 +142,7 @@ pub struct LocalTableScanConfig {
     pub serializable: Option<crate::serializable::SerializableRelationRead>,
     pub table_name: String,
     pub table: Arc<dyn super::table_read::TableRead>,
-    pub column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    pub column_definitions: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns: Vec<String>,
     pub schema: Vec<String>,
     pub physical_schema: crate::RowSchema,

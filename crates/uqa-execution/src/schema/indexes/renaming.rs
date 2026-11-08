@@ -43,7 +43,7 @@ pub(crate) fn rename_owned_constraint(
         .tables
         .table_state(table)?
         .ok_or_else(|| StorageBackendError::Other("index owner disappeared".into()))?
-        .publish_constraints(columns, constraints);
+        .publish_constraints(columns, constraints)?;
     Ok(())
 }
 

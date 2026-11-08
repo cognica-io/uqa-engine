@@ -8,6 +8,7 @@ use super::*;
 use crate::catalog::{CatalogReadSnapshot, CatalogTableSnapshot};
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::{catalog_role::RoleIdentity, Value};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::RelationPersistence,
     catalog::{
@@ -31,12 +32,12 @@ fn table(oid: u32) -> CatalogTableSnapshot {
         },
         row_type_array_name: None,
         security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
-        columns: Arc::default(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
+        checks: SharedTableDefinition::default(),
         foreign_keys: Arc::default(),
         keys: Arc::default(),
-        hierarchy: Arc::default(),
+        hierarchy: SharedTableDefinition::default(),
         persistence: RelationPersistence::Permanent,
     }
 }

@@ -10,7 +10,7 @@ mod sampling;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 use uqa_sql::ast::{ColumnDef, ColumnType, GeneratedColumnKind};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
@@ -24,7 +24,7 @@ pub(super) type DataGenerations = Vec<(String, Option<u64>)>;
 struct AutomaticAnalysis {
     object_id: [u8; 16],
     maintenance: MaintenanceState,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     /// Catalog and statistics identities are independent of ordinary row writes.
     publication: Option<(u64, u64, Option<u64>)>,
     /// The data generation of every table the sample read, where the provider reports generations. A committed row write advances its table's generation, whether or not it rewrote the maintenance record.

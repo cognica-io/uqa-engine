@@ -6,6 +6,7 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 mod projection;
 
@@ -132,12 +133,12 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
         security: std::sync::Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         )),
-        columns: Arc::default(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
+        checks: SharedTableDefinition::default(),
         foreign_keys: Arc::default(),
         keys: vec![current_key].into(),
-        hierarchy: Arc::default(),
+        hierarchy: SharedTableDefinition::default(),
         persistence: uqa_sql::ast::RelationPersistence::Permanent,
     };
     rebind_current_key_names(
