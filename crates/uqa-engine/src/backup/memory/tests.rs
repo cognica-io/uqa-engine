@@ -230,7 +230,10 @@ fn memory_table_units_preserve_native_properties_and_bound_metadata_after_retire
     .unwrap();
     assert_eq!(&*fields, &**table.fts_fields.get().unwrap());
     assert_eq!(&*array_name, &**table.row_type_array_name.get().unwrap());
-    drop((properties.analyzer, parent_memory));
+    let analyzer =
+        uqa_analysis::AnalyzerDefinition::from_image(properties.analyzer, input.cancellation())
+            .unwrap();
+    drop(parent_memory);
     assert!(input.memory().used() > 0);
     engine.sql("BEGIN; UPDATE saved SET body='private'; ROLLBACK; DROP TABLE saved; CREATE TABLE saved(replacement integer)", &[]).unwrap();
     drop((cut, engine));
@@ -238,6 +241,14 @@ fn memory_table_units_preserve_native_properties_and_bound_metadata_after_retire
         assert_eq!(table_bytes(&table), expected);
         assert_eq!(&*fields, &**table.fts_fields.get().unwrap());
         assert_eq!(&*array_name, &**table.row_type_array_name.get().unwrap());
+        assert_eq!(
+            serde_json::to_vec(&analyzer).unwrap(),
+            table.analyzer.get().unwrap().as_bytes()
+        );
+        let image = analyzer
+            .capture_image(&uqa_core::memory::ProductionControl::uncontrolled())
+            .unwrap();
+        assert_eq!(image.as_bytes(), table.analyzer.get().unwrap().as_bytes());
     })
     .join()
     .unwrap();

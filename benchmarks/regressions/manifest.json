@@ -50095,6 +50095,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_every_common_stage_and_native_setting",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Original analyzer configuration",
+      "workload": "Decode original common tokenizer, character-filter, token-filter and normalization settings, including deferred invalid settings.",
+      "invariant": "Native enum values, option presence, ordered payloads and original encoded buffer addresses survive under the input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_literal_wire_and_defers_resource_access",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Deferred analyzer execution",
+      "workload": "Decode independent literal images with an invalid regex and unavailable reloadable synonym file.",
+      "invariant": "Import preserves exact publication bytes and configuration; ordinary execution retains its original validation and file errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_rejects_partial_and_ambiguous_native_shapes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer image input validation",
+      "workload": "Decode every truncated prefix and malformed, duplicate, unordered, overflowing and trailing native image shapes.",
+      "invariant": "Invalid input fails before publication and releases every partial native allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_retains_admission_through_independent_consumers",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer input ownership",
+      "workload": "Decode a one-MiB configuration, clone its native owner, independently capture bytes and retire the configuration on another thread.",
+      "invariant": "Encoded bytes outlive configuration without retaining it; original and independent leases survive until their corresponding final owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_releases_cancelled_and_underfunded_construction",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
+      "capability": "Analyzer input admission",
+      "workload": "Cancel input and exhaust allowances during construction of a large original stop-word list.",
+      "invariant": "Typed cancellation or memory errors release partial values; measured admission never exceeds the original limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_unresolved_korean_options",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
+      "capability": "Original Korean configuration",
+      "workload": "Decode every Korean tokenizer mode and POS tag, omitted and empty options, and unresolved original Unicode profiles.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without resolving or compiling dictionaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "original_analyzer_input_preserves_unresolved_japanese_options",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
+      "capability": "Original Japanese configuration",
+      "workload": "Decode every Japanese tokenizer mode and filter shape, omitted and empty options, and unresolved profiles and probes.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without expanding defaults, validating deferred settings or resolving resources.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

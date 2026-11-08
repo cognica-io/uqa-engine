@@ -142,3 +142,5 @@ fn published_analyzer_encoding_errors_leave_the_original_configuration_usable() 
     };
     assert_eq!(path.as_os_str().as_bytes(), [0xff]);
 }
+
+mod image;
