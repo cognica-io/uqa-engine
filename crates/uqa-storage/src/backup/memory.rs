@@ -9,7 +9,10 @@
 mod address;
 mod header;
 mod table;
-pub use address::{memory_image_namespace, MemoryImageFamily, MemoryImageKey, MemoryTableUnit};
+pub use address::{
+    memory_image_namespace, read_memory_image_address, DecodedMemoryImageAddress,
+    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageKey, MemoryTableUnit,
+};
 pub use header::MemoryImageHeader;
 pub use table::{
     memory_table_metadata_reader, read_memory_table_metadata, DecodedMemoryTableMetadata,

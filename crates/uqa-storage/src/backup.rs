@@ -43,8 +43,9 @@ pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, Recor
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use memory::{
-    memory_image_namespace, memory_table_metadata_reader, read_memory_table_metadata,
-    DecodedMemoryTableMetadata, MemoryImageFamily, MemoryImageHeader, MemoryImageKey,
+    memory_image_namespace, memory_table_metadata_reader, read_memory_image_address,
+    read_memory_table_metadata, DecodedMemoryImageAddress, DecodedMemoryTableMetadata,
+    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageHeader, MemoryImageKey,
     MemoryRelationIdentities, MemoryTableMetadata, MemoryTableProperties, MemoryTableStatistics,
     MemoryTableUnit,
 };

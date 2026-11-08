@@ -20988,7 +20988,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -49804,6 +49804,58 @@
       "case_names": [
         "case_1_plain",
         "case_2_protected"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_preserves_independent_wire_identities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Decode independent byte fixtures for every family and table component, full-width identities, NUL and UTF-8 names, and compare table encodings with the literal wire.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_rejects_malformed_envelopes_and_names",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Reject foreign namespace/generation, unknown structural families, bad lengths, malformed escapes and invalid UTF-8 after a partially admitted first name.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_table_address_decode_rejects_noncanonical_components",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Reject every truncated prefix of a complete table key, unknown component/presence tags and trailing bytes.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_address_decode_owns_admitted_names_and_releases_partial_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Canonical memory image address decoding",
+      "workload": "Decode a large escaped resource name, retire its source buffer, account retained capacity, and reject denied or cancelled construction without a leaked lease.",
+      "invariant": "The address inverse preserves all original bytes and identities; malformed or denied input publishes no decoded owner and releases partial admission.",
+      "case_names": [
+        ""
       ]
     }
   ]
