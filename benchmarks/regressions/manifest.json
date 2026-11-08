@@ -49978,6 +49978,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_transfer_native_ownership_without_reconstruction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Decode original column, CHECK and hierarchy images into native owners, encode them again and retain shared consumers after their input and parent owners close.",
+      "invariant": "The decoded population transfers with its original leases and exact wire observations; independent capture admits the complete cached footprint without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_admit_every_retained_literal_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Restore megabyte resident literals in columns, CHECK expressions and partition bounds under the original decoder peak plus one fixed native header.",
+      "invariant": "No second population copy fits the allowance; every independently owned literal is included in capture admission and remains available after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_table_definition_images_release_failed_input_and_native_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/image.rs",
+      "capability": "Native table image ownership transfer",
+      "workload": "Exercise truncated and trailing images, denied payload/header admission and cancelled input for all three native table definition families.",
+      "invariant": "Failed private construction releases every decoded reservation and cannot expose a native generation; exact original budget errors remain typed.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

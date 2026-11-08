@@ -26,6 +26,15 @@ pub fn read_table_hierarchy_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<TableHierarchy>, SQLError> {
+    Ok(read_table_hierarchy_image_with_footprint(reader, memory, cancellation)?.0)
+}
+
+/// Reconstruct native hierarchy metadata and report the independently retained scalar payloads. Their constructor leases remain attached to the decoded literals.
+pub fn read_table_hierarchy_image_with_footprint(
+    reader: &mut dyn Read,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(Budgeted<TableHierarchy>, usize), SQLError> {
     let mut input = Input::new(reader, memory, cancellation);
     if input.header(*b"UQATHR01")? != 1 {
         return Err(invalid("table hierarchy count"));
@@ -33,7 +42,10 @@ pub fn read_table_hierarchy_image(
     let mut reservation = memory.empty_reservation();
     let hierarchy = input.table_hierarchy(&mut reservation)?;
     input.binary.end()?;
-    Ok(Budgeted::new(hierarchy, reservation))
+    Ok((
+        Budgeted::new(hierarchy, reservation),
+        input.retained_children,
+    ))
 }
 
 impl Input<'_> {

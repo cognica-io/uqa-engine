@@ -12,6 +12,8 @@ use crate::{
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_core::Value;
 
+mod image;
+
 #[derive(Debug)]
 struct Source(Arc<AtomicUsize>);
 impl ConstantValueSource for Source {
