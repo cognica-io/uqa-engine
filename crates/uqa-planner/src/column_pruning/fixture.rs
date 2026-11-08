@@ -42,7 +42,7 @@ impl Fixture {
                 lookup_mode: RelationLookupMode::Dynamic,
             },
             table: TableDefinition {
-                columns: Arc::new(definition.columns),
+                columns: Arc::new(definition.columns).into(),
                 columns_declared: true,
             },
         }
