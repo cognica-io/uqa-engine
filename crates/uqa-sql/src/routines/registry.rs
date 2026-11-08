@@ -76,6 +76,12 @@ impl RoutineRegistry {
             definitions: NamedDefinitions::with_budget(memory),
         }
     }
+
+    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            definitions: self.definitions.into_mutation_budget(memory),
+        }
+    }
     pub fn get(&self, name: &str) -> Option<&Vec<SQLRoutine>> {
         self.definitions.get(name)
     }

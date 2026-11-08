@@ -275,3 +275,50 @@ fn native_rule_images_retire_deep_original_and_bound_conditions_without_stack_gr
         .join()
         .unwrap();
 }
+
+#[test]
+fn native_rule_input_keeps_bound_plans_after_destination_edits() {
+    let bytes = encode(&fixture());
+    let input = MemoryBudget::new(1 << 24);
+    let mutations = MemoryBudget::new(1 << 24);
+    let token = CancellationToken::new();
+    let mut restored = RuleCatalog::read_image_with_mutation_budget(
+        &mut bytes.as_slice(),
+        &input,
+        &mutations,
+        &token,
+    )
+    .unwrap();
+    let original = restored.clone();
+    let relation = RelationIdentity::new("public", "items");
+    let occupied = input.reserve(input.available()).unwrap();
+    token.cancel();
+    restored
+        .edit(&relation, |entries| {
+            entries.edit("watch", |value| {
+                value.enabled = EventEnableMode::Disabled;
+                Ok(())
+            })?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        restored
+            .get(&relation)
+            .unwrap()
+            .get("watch")
+            .unwrap()
+            .enabled,
+        EventEnableMode::Disabled
+    );
+    assert_eq!(encode(&original), bytes);
+    assert!(restored.remove(&relation).unwrap());
+    assert_eq!(restored.len(), 1);
+    drop(restored);
+    assert_eq!(mutations.used(), 0);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}

@@ -55,6 +55,11 @@ impl DatabaseAuthority {
         Ok(Self { value, memory })
     }
 
+    pub(crate) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.memory = memory.clone();
+        self
+    }
+
     /// Unchanged authority shares its generation; a changed successor is fully funded before the caller can install it.
     pub fn successor(&self, value: &BoundDatabaseSecurity) -> Result<Self, SQLError> {
         if self.as_ref() == value {

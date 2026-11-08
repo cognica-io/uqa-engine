@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native SQL catalog image readers can assign a separate destination mutation budget while preserving original input reservations through retained generations.
+
 - Table authority images retain original ACL payloads and native map-node admission through shared catalog and privilege readers, rollback and Engine retirement.
 
 - Native vector registration imports retain decoded field buffers and admit ordered membership before publication; later writes and captured snapshots preserve those original owners.

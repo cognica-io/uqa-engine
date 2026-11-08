@@ -169,6 +169,13 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
         }
     }
 
+    /// Select the destination allowance for future edits. Original entries and all captured predecessors keep their own reservations.
+    pub(crate) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.durable = self.durable.into_mutation_budget(memory);
+        self.temporary = self.temporary.into_mutation_budget(memory);
+        self
+    }
+
     /// Observe both immutable membership roots without comparing or copying declarations.
     pub fn shares_roots(&self, other: &Self) -> bool {
         self.durable.shares_root(&other.durable) && self.temporary.shares_root(&other.temporary)

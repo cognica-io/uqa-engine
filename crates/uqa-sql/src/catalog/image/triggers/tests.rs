@@ -219,3 +219,86 @@ fn native_trigger_images_preserve_empty_relations_and_quoted_membership() {
             .is_empty()
     );
 }
+
+#[test]
+fn native_trigger_input_keeps_nested_originals_after_destination_edits() {
+    let bytes = wire::fixture().bytes;
+    let input = MemoryBudget::new(1 << 20);
+    let mutations = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let mut restored = TriggerCatalog::read_image_with_mutation_budget(
+        &mut bytes.as_slice(),
+        &input,
+        &mutations,
+        &token,
+    )
+    .unwrap();
+    let original = restored.clone();
+    let relation = RelationIdentity::new("s", "t");
+    let pointer = original
+        .get(&relation)
+        .unwrap()
+        .get("watch")
+        .unwrap()
+        .definition
+        .arguments[0]
+        .as_ptr();
+    let occupied = input.reserve(input.available()).unwrap();
+    token.cancel();
+    restored
+        .edit(&relation, |entries| {
+            entries.edit("watch", |value| {
+                value.enabled = EventEnableMode::Disabled;
+                Ok(())
+            })?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        restored
+            .get(&relation)
+            .unwrap()
+            .get("watch")
+            .unwrap()
+            .enabled,
+        EventEnableMode::Disabled
+    );
+    restored
+        .rewrite(|_, _, value| {
+            let mut value = value.clone();
+            value.enabled = EventEnableMode::Always;
+            Ok(Some(value))
+        })
+        .unwrap();
+    let before = encode(&restored, 7);
+    let denied = mutations.reserve(mutations.available()).unwrap();
+    assert!(restored
+        .edit(&relation, |entries| {
+            entries.edit("watch", |value| {
+                value.enabled = EventEnableMode::Origin;
+                Ok(())
+            })?;
+            Ok(())
+        })
+        .is_err());
+    assert_eq!(encode(&restored, 31), before);
+    assert_eq!(
+        original
+            .get(&relation)
+            .unwrap()
+            .get("watch")
+            .unwrap()
+            .definition
+            .arguments[0]
+            .as_ptr(),
+        pointer
+    );
+    assert_eq!(encode(&original, 1), bytes);
+    drop((restored, denied));
+    assert_eq!(mutations.used(), 0);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}
