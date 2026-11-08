@@ -228,13 +228,9 @@ impl Engine {
         let read_only = read_only || characteristics.read_only;
         let outer = stack.is_empty();
         let started_at_micros = self.statement_timestamp_micros();
-        let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
-            let (data_snapshot, baseline) = self.begin_outer_transaction_with_notifications(
-                read_only,
-                defer_write_lock,
-                &session_snapshot,
-            )?;
+            let (data_snapshot, baseline) =
+                self.begin_outer_transaction_with_notifications(read_only, defer_write_lock)?;
             (None, data_snapshot, baseline)
         } else {
             let baseline = stack[0].snapshot_change_baseline.clone();
@@ -251,6 +247,8 @@ impl Engine {
                 (Some(savepoint), snapshot, baseline)
             }
         };
+        // Successful admission selects the rollback state from the same refreshed catalog as the data snapshot. The preceding state belongs only to failed-BEGIN recovery; retaining it would keep invalidated analysis alive and resurrect its cache on rollback.
+        let session_snapshot = self.snapshot_session_state();
         let (constraint_modes, deferred_foreign_key_checks, deferred_constraint_trigger_events) =
             stack.last().map_or_else(
                 || (ConstraintModeState::default(), Vec::new(), Vec::new()),
@@ -336,7 +334,6 @@ impl Engine {
         &self,
         read_only: bool,
         defer_write_lock: bool,
-        session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
             Option<std::sync::Arc<EngineDataSnapshot>>,
@@ -344,8 +341,9 @@ impl Engine {
         ),
         SQLError,
     > {
+        let before_admission = self.snapshot_session_state();
         self.begin_notification_transaction()?;
-        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, session_snapshot)
+        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, &before_admission)
             .map_err(|error| match self.rollback_notification_state() {
                 Ok(()) => error,
                 Err(notification_error) => SQLError::Internal(format!(

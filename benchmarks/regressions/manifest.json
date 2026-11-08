@@ -49318,6 +49318,21 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_begin_retires_analysis_from_the_previous_catalog_view",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/transactions/tests/admission.rs",
+      "capability": "Statement catalog admission and transaction recovery",
+      "workload": "A retained 256-KiB SQL literal, a separately committed sibling catalog change, direct BEGIN and rollback on native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Successful transaction admission retires the obsolete catalog analysis before publishing its rollback snapshot; rollback cannot resurrect that cache, the committed sibling table remains visible and subsequent SQL preserves the literal. Closing the engine releases its complete query allowance.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }
