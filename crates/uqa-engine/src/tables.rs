@@ -324,7 +324,7 @@ impl Engine {
             document_store: self.storage.memory_cell(docs, persistence)?,
             inverted_index: self.storage.memory_cell(inv, persistence)?,
             vector_indexes: self.storage.memory_vector_indexes(persistence)?,
-            fts_fields: CatalogCell::new(fts_fields),
+            fts_fields: crate::state::TableMetadataCell::new(fts_fields),
             columns: CatalogCell::new(Vec::new()),
             columns_declared: CatalogCell::new(false),
             next_id: CatalogCell::new(1),
@@ -335,8 +335,8 @@ impl Engine {
             column_stats_dirty: CatalogCell::new(true),
             statistics_maintenance: CatalogCell::new(MaintenanceState::default()),
             table_checks: CatalogCell::new(Vec::new()),
-            foreign_keys: CatalogCell::new(Vec::new()),
-            key_constraints: CatalogCell::new(Vec::new()),
+            foreign_keys: crate::state::TableMetadataCell::new(Vec::new()),
+            key_constraints: crate::state::TableMetadataCell::new(Vec::new()),
             hierarchy: CatalogCell::new(uqa_sql::ast::TableHierarchy::default()),
             value_indexes: self.storage.memory_value_indexes(persistence)?,
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
@@ -344,8 +344,8 @@ impl Engine {
             persistence,
             on_commit,
             catalog_oids: Some(catalog_oids),
-            row_type_array_name: CatalogCell::new(Some(row_type_array_name)),
-            dropped_attributes: CatalogCell::new(Vec::new()),
+            row_type_array_name: crate::state::TableMetadataCell::new(Some(row_type_array_name)),
+            dropped_attributes: crate::state::TableMetadataCell::new(Vec::new()),
         };
         let table_arc = self.storage.table_state(table)?;
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {

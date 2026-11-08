@@ -28,6 +28,8 @@ pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod table_capture;
+mod table_metadata;
+pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 pub(crate) use table_membership::PersistentTableRegistrySnapshot;

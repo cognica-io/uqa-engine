@@ -49240,6 +49240,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_capture_shares_native_capacities_without_population_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain 2,048 metadata names with spare payload and vector capacities.",
+      "invariant": "Capture shares the original native generation with zero allocation, exact independent admission, both cancellation scopes and complete release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_publication_keeps_original_snapshots_and_recounts_detached_capacities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Mutate a shared metadata value and restore its original generation.",
+      "invariant": "Mutation detaches before changing values, publishes actual destination capacities and preserves original snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_write_publishes_capacities_during_unwind_and_fails_closed_when_forgotten",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Unwind during publication and deliberately forget a borrowed writer.",
+      "invariant": "Unwinding publishes the changed footprint; a forgotten writer cannot admit mutated payload using stale capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_constraints_charge_all_nested_names_and_vector_capacities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain key and foreign-key metadata including all nested name buffers and spare vector capacity.",
+      "invariant": "The original immutable generation requires the exact complete payload allowance and releases it on every failure and completion path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_dropped_attributes_preserve_original_owned_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests.rs",
+      "capability": "Native table metadata preservation",
+      "workload": "Retain a dropped attribute with spare alignment-name capacity and original physical metadata.",
+      "invariant": "Capture preserves all native fields and independently charges original exposed capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "committed_memory_table_names_and_constraints_capture_original_native_generations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/metadata.rs",
+      "capability": "Committed native table metadata selection",
+      "workload": "Select five original one-MiB metadata values during private replacements, roll back, replace them and retire the Engine.",
+      "invariant": "Capture preserves native addresses and values with less than 64 KiB of allocation, independent admission and complete cancellation and lifetime handling.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

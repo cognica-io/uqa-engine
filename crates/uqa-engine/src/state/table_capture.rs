@@ -32,20 +32,12 @@ impl StorageContext {
         capture!(table_checks, |value, control| definition_capture::checks(
             value, control
         ));
-        capture!(foreign_keys, |value, control| {
-            definition_capture::foreign_keys(value, control)
-        });
-        capture!(key_constraints, |value, control| definition_capture::keys(
-            value, control
-        ));
         capture!(hierarchy, definition_capture::hierarchy);
-        capture!(fts_fields, |value, control| definition_capture::names(
-            value, control
-        ));
-        capture!(row_type_array_name, definition_capture::optional_name);
-        capture!(dropped_attributes, |value, control| {
-            definition_capture::dropped_attributes(value, control)
-        });
+        table.foreign_keys = table.foreign_keys.capture_source(registry)?;
+        table.key_constraints = table.key_constraints.capture_source(registry)?;
+        table.fts_fields = table.fts_fields.capture_source(registry)?;
+        table.row_type_array_name = table.row_type_array_name.capture_source(registry)?;
+        table.dropped_attributes = table.dropped_attributes.capture_source(registry)?;
         capture!(columns_declared, |value, control| Ok(
             control.finish(*value, control.empty_reservation())?
         ));

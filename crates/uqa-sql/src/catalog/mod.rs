@@ -22,6 +22,7 @@ pub mod node_tree;
 pub mod oids;
 pub mod resolution;
 pub mod result_type;
+pub mod table_metadata;
 pub mod type_definitions;
 pub mod type_metadata;
 mod type_production;

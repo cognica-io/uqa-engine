@@ -8,6 +8,106 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+fn committed_memory_table_names_and_constraints_capture_original_native_generations() {
+    use std::sync::Arc;
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE parent(id integer, PRIMARY KEY(id)); CREATE TABLE saved(id integer, old text, PRIMARY KEY(id), FOREIGN KEY(id) REFERENCES parent(id)); ALTER TABLE saved DROP COLUMN old");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.fts_fields.write() = vec!["x".repeat(1 << 20)];
+    *table.row_type_array_name.write() = Some("a".repeat(1 << 20));
+    table.foreign_keys.write()[0].name = Some("f".repeat(1 << 20));
+    table.key_constraints.write()[0].name = Some("k".repeat(1 << 20));
+    table.dropped_attributes.write()[0].identity = "d".repeat(1 << 20);
+    let names = Arc::as_ptr(&table.fts_fields.snapshot());
+    let array = Arc::as_ptr(&table.row_type_array_name.snapshot());
+    let foreign = Arc::as_ptr(&table.foreign_keys.snapshot());
+    let keys = Arc::as_ptr(&table.key_constraints.snapshot());
+    let dropped = Arc::as_ptr(&table.dropped_attributes.snapshot());
+    sql(&engine, "BEGIN");
+    table.fts_fields.write().clear();
+    *table.row_type_array_name.write() = None;
+    table.foreign_keys.write().clear();
+    table.key_constraints.write().clear();
+    table.dropped_attributes.write().clear();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 5 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(
+        Arc::as_ptr(&retained.fts_fields.get().unwrap().snapshot()),
+        names
+    );
+    assert_eq!(
+        Arc::as_ptr(&retained.row_type_array_name.get().unwrap().snapshot()),
+        array
+    );
+    assert_eq!(
+        Arc::as_ptr(&retained.foreign_keys.get().unwrap().snapshot()),
+        foreign
+    );
+    assert_eq!(
+        Arc::as_ptr(&retained.key_constraints.get().unwrap().snapshot()),
+        keys
+    );
+    assert_eq!(
+        Arc::as_ptr(&retained.dropped_attributes.get().unwrap().snapshot()),
+        dropped
+    );
+    sql(&engine, "ROLLBACK");
+    assert_eq!(Arc::as_ptr(&table.fts_fields.snapshot()), names);
+    assert_eq!(Arc::as_ptr(&table.foreign_keys.snapshot()), foreign);
+    table.fts_fields.write().clear();
+    *table.row_type_array_name.write() = None;
+    table.foreign_keys.write().clear();
+    table.key_constraints.write().clear();
+    table.dropped_attributes.write().clear();
+    drop((table, engine));
+    assert_eq!(retained.fts_fields.get().unwrap()[0].len(), 1 << 20);
+    assert_eq!(
+        retained
+            .row_type_array_name
+            .get()
+            .unwrap()
+            .as_deref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.foreign_keys.get().unwrap()[0]
+            .name
+            .as_ref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.key_constraints.get().unwrap()[0]
+            .name
+            .as_ref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.dropped_attributes.get().unwrap()[0].identity.len(),
+        1 << 20
+    );
+    control.cancellation().cancel();
+    assert!(retained.fts_fields.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn committed_memory_analyzer_capture_shares_the_original_published_image() {
     use uqa_analysis::{Analyzer, AnalyzerDefinition, Tokenizer};
     let engine = Engine::new();
