@@ -15,6 +15,7 @@ use uqa_core::{
 };
 
 mod image;
+mod input;
 pub use image::CapturedFieldAnalyzers;
 use image::ImageBinding;
 
@@ -63,7 +64,23 @@ impl StoredKey {
     }
 }
 
-type Runtime = RetainedMap<StoredKey, FieldAnalyzerBinding>;
+#[derive(Clone)]
+enum RuntimeBinding {
+    Native(FieldAnalyzerBinding),
+    Image(Arc<uqa_core::memory::Budgeted<FieldAnalyzerBinding>>),
+}
+
+impl std::ops::Deref for RuntimeBinding {
+    type Target = FieldAnalyzerBinding;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Native(value) => value,
+            Self::Image(value) => value,
+        }
+    }
+}
+
+type Runtime = RetainedMap<StoredKey, RuntimeBinding>;
 
 /// Only the native owner publishes membership. Temporary entries participate in ordinary runtime lookup, but never prepare or retain an encoded image.
 #[derive(Clone)]
@@ -97,7 +114,10 @@ impl FieldAnalyzerCatalog {
     }
 
     pub fn get(&self, key: &Key) -> Option<&FieldAnalyzerBinding> {
-        self.durable.get(key).or_else(|| self.temporary.get(key))
+        self.durable
+            .get(key)
+            .or_else(|| self.temporary.get(key))
+            .map(|value| &**value)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Key, &FieldAnalyzerBinding)> {
@@ -110,7 +130,7 @@ impl FieldAnalyzerCatalog {
                 (Some(_), None) => durable.next(),
                 (None, None) => None,
             };
-            item.map(|(key, value)| (&*key.0, value))
+            item.map(|(key, value)| (&*key.0, &**value))
         })
     }
 
@@ -139,9 +159,11 @@ impl FieldAnalyzerCatalog {
         if temporary {
             candidate.durable.remove(key)?;
             candidate.images.remove(key)?;
-            candidate
-                .temporary
-                .insert(runtime_key, value, runtime_bytes)?;
+            candidate.temporary.insert(
+                runtime_key,
+                RuntimeBinding::Native(value),
+                runtime_bytes,
+            )?;
         } else {
             let image = ImageBinding::prepare(&value, &production)?;
             let image_key = StoredKey::copy(key, &production)?;
@@ -153,7 +175,7 @@ impl FieldAnalyzerCatalog {
             candidate.images.insert(image_key, image, bytes)?;
             candidate
                 .durable
-                .insert(runtime_key, value, runtime_bytes)?;
+                .insert(runtime_key, RuntimeBinding::Native(value), runtime_bytes)?;
         }
         cancellation.check()?;
         *self = candidate;
@@ -222,7 +244,7 @@ impl FieldAnalyzerCatalog {
                 }
                 candidate.insert(
                     &(to.to_owned(), key.0 .1.clone()),
-                    value.clone(),
+                    (**value).clone(),
                     temporary,
                     &CancellationToken::new(),
                 )?;

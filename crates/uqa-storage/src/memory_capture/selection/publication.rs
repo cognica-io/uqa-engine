@@ -16,6 +16,7 @@ struct Published {
     sources: MemoryCaptureSources,
     members: OwnedMap<u64, MemoryCaptureSources>,
     next_member: u64,
+    memory: MemoryBudget,
 }
 
 type Owner = Budgeted<Mutex<Published>>;
@@ -41,6 +42,7 @@ impl MemoryCaptureMembership {
                     sources: registry.sources(memory),
                     members: OwnedMap::new(),
                     next_member: 1,
+                    memory: memory.clone(),
                 }),
                 memory.empty_reservation(),
             )
@@ -50,6 +52,16 @@ impl MemoryCaptureMembership {
 
     pub fn snapshot(&self) -> MemoryCaptureSources {
         self.0.lock().sources.clone()
+    }
+
+    /// Select the live mutation allowance after private construction. Existing nodes and selections retain their original leases; child update addresses keep the same publication identity. Changing the allowance visits no members or source identities.
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        {
+            let mut state = self.0.lock();
+            state.memory = memory.clone();
+            state.sources = state.sources.clone().into_mutation_budget(memory);
+        }
+        self
     }
 
     /// Replace one member or publish a new one. The previous selection and update address remain valid if any identity, overlap or allocation check fails. The owning caller publishes its corresponding live handles only after this preparation succeeds.
@@ -78,9 +90,10 @@ impl MemoryCaptureMembership {
         let next_id = id.checked_add(1).ok_or_else(|| {
             StorageBackendError::Other("memory membership identity space exhausted".into())
         })?;
+        let memory = state.memory.clone();
         state
             .members
-            .insert_budgeted(id, sources.clone(), self.0.budget())?;
+            .insert_budgeted(id, sources.clone(), &memory)?;
         if let Some(previous) = previous {
             state.members.remove(&previous.id);
         }
@@ -155,7 +168,7 @@ impl MemoryCaptureMember {
         };
         check_domain(original, previous)?;
         check_domain(original, sources)?;
-        let mut member = original.clone();
+        let mut member = original.clone().into_mutation_budget(&state.memory);
         let mut selected = state.sources.clone();
         for (&id, ()) in &previous.root {
             if original.root.get(&id).is_none() {

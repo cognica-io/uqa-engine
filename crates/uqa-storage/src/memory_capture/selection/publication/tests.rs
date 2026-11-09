@@ -35,6 +35,42 @@ fn cell(registry: &MemoryCaptureRegistry, value: u64) -> MemoryCaptureCell<Value
 }
 
 #[test]
+fn publication_mutation_budget_keeps_existing_addresses_and_original_node_owners() {
+    let registry = MemoryCaptureRegistry::new();
+    let original = MemoryBudget::new(1 << 20);
+    let runtime = MemoryBudget::new(1 << 20);
+    let first = cell(&registry, 1);
+    let second = cell(&registry, 2);
+    let one = registry
+        .sources(&original)
+        .with_source(&first.key().unwrap())
+        .unwrap();
+    let two = registry
+        .sources(&runtime)
+        .with_source(&second.key().unwrap())
+        .unwrap();
+    let publisher = MemoryCaptureMembership::new(&registry, &original).unwrap();
+    let address = publisher.publish(None, &one).unwrap();
+    let retained = publisher.snapshot();
+    let publisher = publisher.into_mutation_budget(&runtime);
+    let full = original.reserve(original.available()).unwrap();
+    assert!(address.replace_sources(&one, &two).unwrap());
+    let control = StorageReadControl::with_limit(1 << 20);
+    let current = registry
+        .capture_selected(&publisher.snapshot(), &control)
+        .unwrap();
+    assert!(first.captured(&current).is_err());
+    assert_eq!(**second.captured(&current).unwrap(), 2);
+    assert!(publisher.remove(&address).unwrap());
+    let old = registry.capture_selected(&retained, &control).unwrap();
+    assert_eq!(**first.captured(&old).unwrap(), 1);
+    drop((publisher, retained, old, current, one, two, full));
+    assert_eq!(original.used(), 0);
+    assert_eq!(runtime.used(), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn published_membership_preserves_selected_incarnations_after_retirement_and_replacement() {
     let registry = MemoryCaptureRegistry::new();
     let memory = MemoryBudget::new(1 << 20);
