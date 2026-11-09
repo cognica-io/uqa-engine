@@ -34,6 +34,7 @@ pub struct PersistentGraphStore {
     storage: Arc<dyn GraphStorage>,
     resource: Option<Arc<dyn Send + Sync>>,
     read: Option<observations::GraphRead>,
+    pub(crate) image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl Clone for PersistentGraphStore {
@@ -42,6 +43,7 @@ impl Clone for PersistentGraphStore {
             storage: Arc::clone(&self.storage),
             resource: self.resource.clone(),
             read: self.read.clone(),
+            image_memory: None,
         }
     }
 }
@@ -68,6 +70,7 @@ impl PersistentGraphStore {
             storage,
             resource: None,
             read: None,
+            image_memory: None,
         }
     }
 
@@ -99,6 +102,7 @@ impl PersistentGraphStore {
                 .unwrap_or_else(|| Arc::clone(&self.storage)),
             resource: self.resource.clone(),
             read: self.read.clone(),
+            image_memory: None,
         }
     }
 
@@ -122,31 +126,39 @@ impl PersistentGraphStore {
         E: std::fmt::Display,
     {
         let mut checkpoint = self.storage.begin_write().map_err(&map_error)?;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
-        match result {
-            Ok(Ok(value)) => match checkpoint.commit() {
-                Ok(()) => Ok(value),
+        let mut backup = self.clone();
+        backup.image_memory = self.image_memory.take();
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match operation(self) {
+                Ok(value) => match checkpoint.commit() {
+                    Ok(()) => Ok(value),
+                    Err(error) => {
+                        checkpoint.rollback().map_err(|rollback| {
+                            map_error(GraphStoreError::Storage(format!(
+                                "{error}; rollback failed: {rollback}"
+                            )))
+                        })?;
+                        Err(map_error(error))
+                    }
+                },
                 Err(error) => {
                     checkpoint.rollback().map_err(|rollback| {
                         map_error(GraphStoreError::Storage(format!(
                             "{error}; rollback failed: {rollback}"
                         )))
                     })?;
-                    Err(map_error(error))
+                    Err(error)
                 }
-            },
-            Ok(Err(error)) => {
-                checkpoint.rollback().map_err(|rollback| {
-                    map_error(GraphStoreError::Storage(format!(
-                        "{error}; rollback failed: {rollback}"
-                    )))
-                })?;
-                Err(error)
-            }
-            Err(panic) => {
-                drop(checkpoint);
-                std::panic::resume_unwind(panic)
-            }
+            }));
+        drop(checkpoint);
+        if matches!(&outcome, Ok(Ok(_))) {
+            self.image_memory = backup.image_memory.take();
+        } else {
+            *self = backup;
+        }
+        match outcome {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
         }
     }
 

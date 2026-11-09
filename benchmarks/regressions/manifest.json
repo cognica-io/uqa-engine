@@ -51699,6 +51699,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_error_preserves_image_header_and_original_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_panic_preserves_image_header_and_original_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_error_restores_replaced_handle_and_original_header",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_panic_restores_replaced_handle_and_original_header",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_trait_transactions_preserve_image_headers_through_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_transactions_preserve_image_headers_through_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_transaction_success_keeps_original_header_across_resource_replacement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "nested_mapped_graph_transactions_restore_the_enclosing_image_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "replaced_persistent_graph_keeps_original_header_through_native_transactions",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

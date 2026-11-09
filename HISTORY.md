@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve imported graph handle reservations through transaction errors, panics, nesting and complete handle replacement. Native and mapped transaction boundaries retain the original allocation and restore the selected generation on failure.
+
 - Add SQL/Execution validation of concrete stored-view and bound SQL routine relation references, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Complete logical validation and public Engine restore remain under implementation.
 
 - Add SQL/Execution checks for declared user types and relation row types against the selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships.

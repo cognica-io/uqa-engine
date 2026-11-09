@@ -62,17 +62,17 @@ impl GraphStore for MemoryGraphStore {
         &mut self,
         operation: impl FnOnce(&mut Self) -> GraphStoreResult<T>,
     ) -> GraphStoreResult<T> {
-        let backup = self.clone();
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self))) {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => {
-                self.publish_generation(backup);
-                Err(error)
-            }
-            Err(panic) => {
-                self.publish_generation(backup);
-                std::panic::resume_unwind(panic)
-            }
+        let mut backup = self.clone();
+        backup.image_memory = self.image_memory.take();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
+        if matches!(&outcome, Ok(Ok(_))) {
+            self.image_memory = backup.image_memory.take();
+        } else {
+            *self = backup;
+        }
+        match outcome {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
         }
     }
 

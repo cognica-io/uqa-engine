@@ -140,3 +140,281 @@ fn graph_input_retires_failed_native_payloads_and_preceding_membership() {
         assert_eq!(runtime.used(), 0);
     }
 }
+
+#[derive(Clone, Copy)]
+enum EntryPoint {
+    Mapped,
+    Handle,
+    Native,
+}
+
+fn failed_operation<G: GraphStore + Default>(
+    graph: &mut G,
+    input: &StorageReadControl,
+    panics: bool,
+    replace: bool,
+) -> Result<(), GraphStoreError> {
+    graph.remove_vertex(1, "g")?;
+    if replace {
+        *graph = G::default();
+    }
+    assert_eq!(input.memory().available(), 0);
+    assert!(!panics, "mapped rollback");
+    Err(GraphStoreError::InvalidQuery("mapped rollback".into()))
+}
+
+fn rollback(entry: EntryPoint, panics: bool, replace: bool) {
+    let input = StorageReadControl::with_limit(1 << 20);
+    let runtime = MemoryBudget::new(1 << 20);
+    let catalog = GraphCatalog::new(input.memory())
+        .read_image(name(&input), &mut encoded().as_slice(), &runtime, &input)
+        .unwrap();
+    let mut handle = catalog.get("g").unwrap().clone();
+    drop(catalog);
+    let full = input.memory().reserve(input.memory().available()).unwrap();
+    input.cancellation().cancel();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let handle = Arc::get_mut(&mut handle).unwrap();
+        match entry {
+            EntryPoint::Mapped => handle.transaction_mapped(
+                |graph| failed_operation(graph, &input, panics, replace),
+                std::convert::identity,
+            ),
+            EntryPoint::Handle => {
+                handle.transaction(|graph| failed_operation(graph, &input, panics, replace))
+            }
+            EntryPoint::Native => {
+                let GraphStoreHandle::Memory(store) = handle else {
+                    unreachable!()
+                };
+                store.transaction(|graph| failed_operation(graph, &input, panics, replace))
+            }
+        }
+    }));
+    if panics {
+        assert_eq!(
+            result.unwrap_err().downcast_ref::<&str>(),
+            Some(&"mapped rollback")
+        );
+    } else {
+        assert!(
+            matches!(result.unwrap(), Err(GraphStoreError::InvalidQuery(message)) if message == "mapped rollback")
+        );
+    }
+    assert_eq!(
+        handle.vertex_ids_in_graph("g").unwrap(),
+        [1, 2].into_iter().collect()
+    );
+    let GraphStoreHandle::Memory(store) = handle.as_ref() else {
+        unreachable!()
+    };
+    assert_eq!(
+        store
+            .image_memory
+            .as_ref()
+            .map(uqa_core::memory::MemoryReservation::bytes),
+        Some(size_of::<GraphStoreHandle>())
+    );
+    assert_eq!(input.memory().available(), 0);
+    assert_eq!(runtime.used(), 0);
+    drop((handle, full));
+    assert_eq!(input.memory().used(), 0);
+}
+
+#[test]
+fn mapped_graph_error_preserves_image_header_and_original_generation() {
+    rollback(EntryPoint::Mapped, false, false);
+}
+
+#[test]
+fn mapped_graph_panic_preserves_image_header_and_original_generation() {
+    rollback(EntryPoint::Mapped, true, false);
+}
+
+#[test]
+fn mapped_graph_error_restores_replaced_handle_and_original_header() {
+    rollback(EntryPoint::Mapped, false, true);
+}
+
+#[test]
+fn mapped_graph_panic_restores_replaced_handle_and_original_header() {
+    rollback(EntryPoint::Mapped, true, true);
+}
+
+#[test]
+fn graph_trait_transactions_preserve_image_headers_through_error_and_unwind() {
+    for panics in [false, true] {
+        for replace in [false, true] {
+            rollback(EntryPoint::Handle, panics, replace);
+        }
+    }
+}
+
+#[test]
+fn native_graph_transactions_preserve_image_headers_through_error_and_unwind() {
+    for panics in [false, true] {
+        for replace in [false, true] {
+            rollback(EntryPoint::Native, panics, replace);
+        }
+    }
+}
+
+#[test]
+fn graph_transaction_success_keeps_original_header_across_resource_replacement() {
+    for entry in [EntryPoint::Mapped, EntryPoint::Handle, EntryPoint::Native] {
+        for persistent in [false, true] {
+            if persistent && matches!(entry, EntryPoint::Native) {
+                continue;
+            }
+            let input = StorageReadControl::with_limit(1 << 20);
+            let runtime = MemoryBudget::new(1 << 20);
+            let catalog = GraphCatalog::new(input.memory())
+                .read_image(name(&input), &mut encoded().as_slice(), &runtime, &input)
+                .unwrap();
+            let mut handle = catalog.get("g").unwrap().clone();
+            drop(catalog);
+            let full = input.memory().reserve(input.memory().available()).unwrap();
+            input.cancellation().cancel();
+            let replacement = if persistent {
+                let records = Arc::new(uqa_storage::MemoryKeyValueStore::new());
+                GraphStoreHandle::from_catalog(
+                    Arc::new(uqa_storage::KeyValueCatalog::new(records.clone())),
+                    Arc::new(uqa_storage::KeyValueStorageBackend::new(records)),
+                )
+            } else {
+                GraphStoreHandle::default()
+            };
+            let operation = |graph: &mut GraphStoreHandle| {
+                *graph = replacement;
+                assert_eq!(input.memory().available(), 0);
+                Ok::<_, GraphStoreError>(7)
+            };
+            let graph = Arc::get_mut(&mut handle).unwrap();
+            let result = match entry {
+                EntryPoint::Mapped => graph.transaction_mapped(operation, std::convert::identity),
+                EntryPoint::Handle => graph.transaction(operation),
+                EntryPoint::Native => {
+                    let GraphStoreHandle::Memory(store) = graph else {
+                        unreachable!()
+                    };
+                    store.transaction(|store| {
+                        *store = MemoryGraphStore::default();
+                        assert_eq!(input.memory().available(), 0);
+                        Ok(7)
+                    })
+                }
+            };
+            assert_eq!(result.unwrap(), 7);
+            let reservation = match handle.as_ref() {
+                GraphStoreHandle::Memory(store) => &store.image_memory,
+                GraphStoreHandle::Persistent(store) => &store.image_memory,
+            };
+            assert_eq!(
+                reservation.as_ref().unwrap().bytes(),
+                size_of::<GraphStoreHandle>()
+            );
+            drop(full);
+            assert_eq!(input.memory().used(), size_of::<GraphStoreHandle>());
+            assert_eq!(runtime.used(), 0);
+            drop(handle);
+            assert_eq!(input.memory().used(), 0);
+        }
+    }
+}
+
+#[test]
+fn nested_mapped_graph_transactions_restore_the_enclosing_image_generation() {
+    let input = StorageReadControl::with_limit(1 << 20);
+    let runtime = MemoryBudget::new(1 << 20);
+    let catalog = GraphCatalog::new(input.memory())
+        .read_image(name(&input), &mut encoded().as_slice(), &runtime, &input)
+        .unwrap();
+    let mut handle = catalog.get("g").unwrap().clone();
+    drop(catalog);
+    let used = input.memory().used();
+    let result = Arc::get_mut(&mut handle).unwrap().transaction_mapped(
+        |graph| {
+            graph.transaction(|inner| inner.add_vertex(Vertex::new(4, "p"), "g"))?;
+            assert!(graph
+                .transaction(|inner| {
+                    inner.remove_vertex(2, "g")?;
+                    Err::<(), _>(GraphStoreError::InvalidQuery("inner".into()))
+                })
+                .is_err());
+            assert_eq!(
+                graph.vertex_ids_in_graph("g")?,
+                [1, 2, 4].into_iter().collect()
+            );
+            Err::<(), _>(GraphStoreError::InvalidQuery("outer".into()))
+        },
+        std::convert::identity,
+    );
+    assert!(matches!(result, Err(GraphStoreError::InvalidQuery(message)) if message == "outer"));
+    assert_eq!(
+        handle.vertex_ids_in_graph("g").unwrap(),
+        [1, 2].into_iter().collect()
+    );
+    assert_eq!(input.memory().used(), used);
+    assert_eq!(runtime.used(), 0);
+    drop(handle);
+    assert_eq!(input.memory().used(), 0);
+}
+
+#[test]
+fn replaced_persistent_graph_keeps_original_header_through_native_transactions() {
+    fn persistent() -> crate::PersistentGraphStore {
+        let records = Arc::new(uqa_storage::MemoryKeyValueStore::new());
+        crate::PersistentGraphStore::from_catalog(
+            Arc::new(uqa_storage::KeyValueCatalog::new(records.clone())),
+            Arc::new(uqa_storage::KeyValueStorageBackend::new(records)),
+        )
+    }
+    for panics in [false, true] {
+        let input = StorageReadControl::with_limit(1 << 20);
+        let mut handle = MemoryGraphStore::new().into_image_handle(&input).unwrap();
+        Arc::get_mut(&mut handle)
+            .unwrap()
+            .transaction_mapped(
+                |graph| {
+                    *graph = GraphStoreHandle::Persistent(persistent());
+                    Ok::<_, GraphStoreError>(())
+                },
+                std::convert::identity,
+            )
+            .unwrap();
+        let full = input.memory().reserve(input.memory().available()).unwrap();
+        let GraphStoreHandle::Persistent(store) = Arc::get_mut(&mut handle).unwrap() else {
+            unreachable!()
+        };
+        store.create_graph("original").unwrap();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            store.transaction(|store| {
+                store.create_graph("temporary")?;
+                *store = persistent();
+                assert_eq!(input.memory().available(), 0);
+                assert!(!panics, "persistent rollback");
+                Err::<(), _>(GraphStoreError::InvalidQuery("persistent rollback".into()))
+            })
+        }));
+        if panics {
+            assert_eq!(
+                outcome.unwrap_err().downcast_ref::<&str>(),
+                Some(&"persistent rollback")
+            );
+        } else {
+            assert!(
+                matches!(outcome.unwrap(), Err(GraphStoreError::InvalidQuery(message)) if message == "persistent rollback")
+            );
+        }
+        assert!(store.has_graph("original").unwrap());
+        assert!(!store.has_graph("temporary").unwrap());
+        assert_eq!(
+            store.image_memory.as_ref().unwrap().bytes(),
+            size_of::<GraphStoreHandle>()
+        );
+        drop(full);
+        assert_eq!(input.memory().used(), size_of::<GraphStoreHandle>());
+        drop(handle);
+        assert_eq!(input.memory().used(), 0);
+    }
+}

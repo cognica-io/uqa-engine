@@ -49,7 +49,7 @@ pub struct MemoryGraphStore {
     label_registries: NativeMap<String, NativeLabels>,
     next_vertex_id: VertexId,
     next_edge_id: EdgeId,
-    image_memory: Option<uqa_core::memory::MemoryReservation>,
+    pub(crate) image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl Clone for MemoryGraphStore {
