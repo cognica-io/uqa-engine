@@ -16,13 +16,15 @@ use uqa_storage::{
 };
 
 mod builder;
+mod image;
+pub use image::ValueIndexImageBuilder;
 mod capture;
 pub use capture::{
     CapturedValue, CapturedValueIndex, CapturedValueIndexPolicy, ValueIndexComparison,
     ValueIndexImageMetadata,
 };
 mod collection;
-pub use collection::{CapturedValueIndexes, ValueIndexes};
+pub use collection::{CapturedValueIndexes, MemoryValueIndexesBuilder, ValueIndexes};
 mod probes;
 mod projection;
 mod publication;
@@ -35,7 +37,7 @@ pub struct ValueIndexCache {
     // With retained storage this holds eligibility flags and no row population.
     policy: ColumnValueIndex,
     retained: Option<RetainedValueIndex>,
-    field: String,
+    field: uqa_sql::catalog::table_metadata::SharedTableMetadata<String>,
     limit: usize,
     resident_bytes: usize,
 }
@@ -177,7 +179,7 @@ impl ValueIndexCache {
             );
             self.policy = previous.with_use(field, carried);
         }
-        self.field = field.to_string();
+        self.field = field.to_string().into();
     }
 
     pub fn clear(&mut self) {

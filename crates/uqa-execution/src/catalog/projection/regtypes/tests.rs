@@ -19,9 +19,10 @@ fn routine_pseudo_types_have_catalog_backed_names_and_reserved_identities() {
         test_support::{empty_catalog, CatalogServices},
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([(
             "uqa".into(),
             uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
@@ -65,7 +66,7 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
             object_id: [7; 16],
             catalog_oids: oids,
             row_type_array_name: None,
-            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
+            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)).into(),
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),
@@ -270,9 +271,10 @@ fn missing_retained_type_identity_uses_the_missing_type_diagnostic() {
         test_support::{empty_catalog, CatalogServices},
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([(
             "uqa".into(),
             uqa_sql::catalog::roles::RoleDefinition::bootstrap(),

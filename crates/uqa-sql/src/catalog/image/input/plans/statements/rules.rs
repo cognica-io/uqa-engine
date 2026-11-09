@@ -172,6 +172,7 @@ impl Input<'_> {
 pub(in crate::catalog::image) fn read(
     reader: &mut dyn Read,
     memory: &MemoryBudget,
+    mutations: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<RuleCatalog, SQLError> {
     let mut input = Input::new(reader, memory, cancellation);
@@ -189,8 +190,8 @@ pub(in crate::catalog::image) fn read(
             let value = input.rule(&key, &relation, &mut identities)?;
             entries.insert_owned_image(key, value)?;
         }
-        result.insert_image_entry(relation, entries)?;
+        result.insert_image_entry(relation, entries.into_mutation_budget(mutations))?;
     }
     input.binary.end()?;
-    Ok(result)
+    Ok(result.into_mutation_budget(mutations))
 }

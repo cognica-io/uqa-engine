@@ -104,7 +104,7 @@ fn durable_refresh_preserves_only_temporary_foreign_definitions_and_security() {
     let merged = crate::catalog::security::relation_authority::merge_private_foreign(
         None,
         &current,
-        latest_catalog.into(),
+        uqa_core::memory::RetainedValue::new(latest_catalog),
     )
     .unwrap();
     assert_eq!(merged.tables().len(), 2);

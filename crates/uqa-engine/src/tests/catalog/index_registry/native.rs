@@ -62,7 +62,7 @@ fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] pro
         );
         let indexes = engine.durable.catalog_indexes.snapshot();
         assert!(
-            Arc::ptr_eq(&original, &indexes),
+            uqa_core::memory::RetainedValue::ptr_eq(&original, &indexes),
             "{provider:?}, {statement}"
         );
         assert_eq!(original.len(), indexes.len());

@@ -168,7 +168,7 @@ fn transaction_resource_sources_preserve_original_images_across_private_mutation
         .unwrap();
     let original = original_images(&engine);
     let original_oids = engine.durable.graph_catalog_oids.snapshot();
-    let root = Arc::downgrade(&engine.durable.graphs.snapshot());
+    let root = engine.durable.graphs.snapshot().identity();
     sql(&engine, "BEGIN; UPDATE docs SET id=2");
     populate(&engine, 0.5);
     engine
@@ -198,7 +198,7 @@ fn transaction_resource_sources_preserve_original_images_across_private_mutation
     populate(&engine, 0.75);
     assert_ne!(original_images(&engine)[0], original[0]);
     drop(engine);
-    assert!(root.upgrade().is_none());
+    assert!(!root.is_alive());
     let graphs = selected.resources.graphs.captured(&selected.cut).unwrap();
     let models = selected.resources.models.captured(&selected.cut).unwrap();
     let analyzers = selected

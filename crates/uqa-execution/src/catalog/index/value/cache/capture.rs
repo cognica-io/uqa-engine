@@ -9,7 +9,7 @@
 use super::{comparison::StoredComparison, ValueIndexCache};
 use std::ops::Deref;
 use uqa_core::{
-    memory::{Budgeted, BudgetedString, RetainedMapSnapshot},
+    memory::{Budgeted, BudgetedString},
     DocId, Value, ValueRetentionError,
 };
 use uqa_storage::{
@@ -45,7 +45,7 @@ pub struct CapturedValueIndex {
 }
 
 enum CapturedValues {
-    Resident(Budgeted<RetainedMapSnapshot<DocId, Value>>),
+    Resident(super::super::values::StoredValuesSnapshot),
     Spilled(Budgeted<RetainedValueIndexSnapshot>),
 }
 
@@ -133,7 +133,7 @@ impl CapturedValueIndex {
     pub fn value(&self, id: DocId) -> StorageBackendResult<Option<CapturedValue<'_>>> {
         self.control.check()?;
         Ok(match &self.values {
-            CapturedValues::Resident(values) => values.get(&id).map(CapturedValue::Borrowed),
+            CapturedValues::Resident(values) => values.get(id).map(CapturedValue::Borrowed),
             CapturedValues::Spilled(values) => {
                 values.get(id, &self.control)?.map(CapturedValue::Owned)
             }

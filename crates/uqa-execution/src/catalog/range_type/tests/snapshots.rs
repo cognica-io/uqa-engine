@@ -6,6 +6,7 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[test]
 fn range_descriptors_share_both_oids_and_retain_their_generation_without_repeat_allocations() {
@@ -86,7 +87,7 @@ fn restored_ranges_reject_cross_family_identity_and_namespace_collisions() {
                 .name
                 .clone_from(&range.multirange.identity.name),
         }
-        snapshot.definitions.shells = Arc::new(
+        snapshot.definitions.shells = uqa_core::memory::RetainedValue::new(
             uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
                 shell.identity.qualified_name(),
                 shell,

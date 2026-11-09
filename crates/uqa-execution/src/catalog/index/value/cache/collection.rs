@@ -8,7 +8,7 @@
 
 use super::{CapturedValueIndex, ValueIndexCache};
 use std::collections::BTreeMap;
-use uqa_core::memory::MemoryBudget;
+use uqa_core::memory::{MemoryBudget, OwnedMap};
 use uqa_storage::{
     memory_capture::{MemoryCaptureCell, MemoryCaptureRegistry},
     StorageBackendResult, ValueIndexKey,
@@ -16,9 +16,11 @@ use uqa_storage::{
 
 mod capture;
 mod guards;
+mod image;
 mod native;
 pub use capture::CapturedValueIndexes;
 pub use guards::{ValueIndexRead, ValueIndexWrite};
+pub use image::MemoryValueIndexesBuilder;
 use native::NativeValueSources;
 
 enum Entry {
@@ -45,7 +47,7 @@ impl Entry {
 /// The enclosing table source owns collection admission. Named children preserve their own evaluated roots before mutation or retirement; derived column caches remain ordinary query state.
 #[derive(Default)]
 pub struct ValueIndexes {
-    indexes: BTreeMap<ValueIndexKey, Entry>,
+    indexes: OwnedMap<ValueIndexKey, Entry>,
     native: Option<NativeValueSources>,
 }
 
@@ -68,7 +70,7 @@ impl ValueIndexes {
 
     pub fn memory_with_budget(registry: &MemoryCaptureRegistry, memory: &MemoryBudget) -> Self {
         Self {
-            indexes: BTreeMap::new(),
+            indexes: OwnedMap::new(),
             native: Some(NativeValueSources::new(registry, memory)),
         }
     }

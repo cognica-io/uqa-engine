@@ -152,7 +152,10 @@ fn domain_conversion_is_initial_only_and_later_failure_restores_the_legacy_catal
             assert!(first
                 .restore_domains_from_catalog(raw.catalog.as_ref(), false)
                 .is_err());
-            assert!(Arc::ptr_eq(&before, &first.durable.domains.snapshot()));
+            assert!(uqa_core::memory::RetainedValue::ptr_eq(
+                &before,
+                &first.durable.domains.snapshot()
+            ));
             raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
             drop((first, second));
             let Err(failure) = Engine::from_persistent_provider(Arc::clone(&factory)) else {
@@ -221,7 +224,10 @@ fn current_domain_owner_corruption_never_rebinds_on_refresh_or_reopen() {
             failure.to_string().contains("missing role incarnation"),
             "{failure}"
         );
-        assert!(Arc::ptr_eq(&before, &first.durable.domains.snapshot()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &before,
+            &first.durable.domains.snapshot()
+        ));
         assert!(first.new_session().is_err());
         drop(second);
         drop(first);

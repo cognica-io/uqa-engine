@@ -133,3 +133,43 @@ impl Payload for DroppedAttribute {
         ])
     }
 }
+
+/// Nested admitted map nodes retain their own leases inside the native value. Include their actual footprint as well as the shared payload header; an outer reservation alone need not own those nodes.
+pub(super) fn admitted<T: Payload>(value: &uqa_core::memory::Budgeted<T>) -> Option<usize> {
+    retained(&**value)?
+        .checked_add(size_of::<uqa_core::memory::MemoryReservation>())
+        .map(|bytes| bytes.max(value.reserved_bytes()))
+}
+
+impl Payload for crate::catalog::security::BoundTableSecurity {
+    fn payload_bytes(&self) -> Option<usize> {
+        let Self {
+            role_owner: _,
+            acl,
+            column_acls,
+            acl_revisions,
+        } = self;
+        let acl_bytes =
+            |entries: &Vec<crate::catalog::security::table_binding::BoundTableAclEntry>| {
+                entries.capacity().checked_mul(size_of::<
+                    crate::catalog::security::table_binding::BoundTableAclEntry,
+                >())
+            };
+        let relation = acl.as_ref().map_or(Some(0), acl_bytes)?;
+        let columns =
+            column_acls
+                .iter()
+                .try_fold(column_acls.allocated_bytes(), |bytes, (name, acl)| {
+                    bytes
+                        .checked_add(name.capacity())?
+                        .checked_add(acl_bytes(acl)?)
+                })?;
+        let revisions = acl_revisions
+            .columns
+            .keys()
+            .try_fold(acl_revisions.columns.allocated_bytes(), |bytes, name| {
+                bytes.checked_add(name.capacity())
+            })?;
+        sum(&[Some(relation), Some(columns), Some(revisions)])
+    }
+}

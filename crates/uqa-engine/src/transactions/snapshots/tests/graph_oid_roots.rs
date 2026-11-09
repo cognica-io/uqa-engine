@@ -22,7 +22,7 @@ fn committed_graph_oid_roots_preserve_original_labels_with_bounded_capture_work(
             .iter()
             .map(|(name, graph)| (name.clone(), graph.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(&engine, "BEGIN");
         engine
@@ -61,7 +61,7 @@ fn committed_graph_oid_roots_preserve_original_labels_with_bounded_capture_work(
         engine.create_graph("saved_000").unwrap();
         engine.rename_graph("saved_000", "moved").unwrap();
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert!(graphs
             .get()
             .unwrap()

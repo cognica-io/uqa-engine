@@ -6,7 +6,8 @@
 
 //! Versioned enum authority: per-type records, public OID claims, private overlays and durable publication.
 
-use std::{ops::Deref, sync::Arc};
+use std::ops::Deref;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::enum_type::{validate_enum_registry, StoredEnum};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
@@ -40,10 +41,10 @@ pub fn restore(
 /// Overlay private enum replacements and deletions without losing independently committed definitions.
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<EnumRegistry>,
-    committed: Arc<EnumRegistry>,
+    current: &RetainedValue<EnumRegistry>,
+    committed: RetainedValue<EnumRegistry>,
     roles: &RoleDefinitions,
-) -> StorageBackendResult<Arc<EnumRegistry>> {
+) -> StorageBackendResult<RetainedValue<EnumRegistry>> {
     let committed = records::FORMAT.merge_private(catalog, current, committed)?;
     validate_enum_registry(&committed, roles).map_err(StorageBackendError::Other)?;
     Ok(committed)

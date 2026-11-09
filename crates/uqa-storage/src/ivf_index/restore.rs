@@ -115,18 +115,7 @@ impl IVFData {
         if assignments.keys().any(|key| !seen.contains(key)) {
             return Err(corrupt("assignment references a missing canonical vector"));
         }
-        let mut previous = None;
-        for &(document, ordinal) in &seen {
-            super::prepare::check(control)?;
-            let expected = match previous {
-                Some((prior, order)) if prior == document => u64::from(order) + 1,
-                _ => 0,
-            };
-            if u64::from(ordinal) != expected {
-                return Err(corrupt("canonical tensor has non-contiguous ordinals"));
-            }
-            previous = Some((document, ordinal));
-        }
+        validate_tensor_ordinals(&seen, control)?;
         let mut inverted_lists = vec![Vec::new(); snapshot.centroids.len()];
         for (key, vector) in &persisted {
             super::prepare::check(control)?;
@@ -145,8 +134,28 @@ impl IVFData {
             inverted_lists,
             trained_size: snapshot.trained_size,
             deletes_since_train: snapshot.deletes_since_train,
+            image_memory: None,
         })
     }
+}
+
+fn validate_tensor_ordinals(
+    vectors: &BTreeSet<(DocId, u32)>,
+    control: Option<&StorageReadControl>,
+) -> StorageBackendResult<()> {
+    let mut previous = None;
+    for &(document, ordinal) in vectors {
+        super::prepare::check(control)?;
+        let expected = match previous {
+            Some((prior, order)) if prior == document => u64::from(order) + 1,
+            _ => 0,
+        };
+        if u64::from(ordinal) != expected {
+            return Err(corrupt("canonical tensor has non-contiguous ordinals"));
+        }
+        previous = Some((document, ordinal));
+    }
+    Ok(())
 }
 
 fn validate_state_shape(snapshot: &IVFMetadataSnapshot) -> StorageBackendResult<()> {

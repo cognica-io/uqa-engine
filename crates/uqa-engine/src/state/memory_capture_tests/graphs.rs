@@ -28,7 +28,7 @@ fn committed_graph_capture_keeps_original_membership_after_rename_and_retirement
     }
     let source = Arc::downgrade(&engine.durable.graphs.read()["g-00"]);
     let unread = Arc::downgrade(&engine.durable.graphs.read()["g-01"]);
-    let root = Arc::downgrade(&engine.durable.graphs.snapshot());
+    let root = engine.durable.graphs.snapshot().identity();
     let expected = image(
         &engine.durable.graphs.read()["g-00"]
             .capture_image_with_control(&StorageReadControl::with_limit(1 << 20))
@@ -46,7 +46,7 @@ fn committed_graph_capture_keeps_original_membership_after_rename_and_retirement
     engine.rename_graph("g-00", "renamed").unwrap();
     engine.drop_graph("g-01").unwrap();
     drop(engine);
-    assert!(root.upgrade().is_none());
+    assert!(!root.is_alive());
     let graphs = cut.resources.graphs.captured(&cut.cut).unwrap();
     assert_eq!(graphs.get().unwrap().len(), 64);
     assert_eq!(graphs.get().unwrap().names().next(), Some("g-00"));

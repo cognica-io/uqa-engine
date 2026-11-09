@@ -8,6 +8,7 @@
 
 use crate::Engine;
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::constraints::names::catalog::{
     ConstraintNameCatalog, ConstraintTableMetadata,
@@ -64,10 +65,10 @@ impl ConstraintNameCatalog for Engine {
     fn constraint_foreign_tables(&self) -> Arc<uqa_execution::catalog::foreign::ForeignTables> {
         self.durable.foreign_catalog.snapshot().tables_snapshot()
     }
-    fn constraint_domains(&self) -> Arc<uqa_execution::catalog::domain::DomainRegistry> {
+    fn constraint_domains(&self) -> RetainedValue<uqa_execution::catalog::domain::DomainRegistry> {
         self.durable.domains.snapshot()
     }
-    fn constraint_triggers(&self) -> Arc<uqa_sql::catalog::events::TriggerCatalog> {
+    fn constraint_triggers(&self) -> RetainedValue<uqa_sql::catalog::events::TriggerCatalog> {
         self.durable.triggers.snapshot()
     }
 }

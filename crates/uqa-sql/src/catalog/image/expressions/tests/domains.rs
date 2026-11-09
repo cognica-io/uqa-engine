@@ -226,3 +226,41 @@ fn domain_images_keep_each_optional_field_and_constraint_validation_independent(
         assert_eq!(memory.used(), 0);
     }
 }
+
+#[test]
+fn native_domain_input_keeps_original_definitions_after_destination_edits() {
+    let input = MemoryBudget::new(1 << 20);
+    let mutations = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let mut restored = TypeDefinitions::<StoredDomain>::read_image_with_mutation_budget(
+        &mut expected().as_slice(),
+        &input,
+        &mutations,
+        &token,
+    )
+    .unwrap();
+    let original = restored.clone();
+    let pointer = original["s.d"].definition.name.as_ptr();
+    let occupied = input.reserve(input.available()).unwrap();
+    token.cancel();
+    restored
+        .edit("s.d", |value| {
+            value.definition.default = None;
+            Ok(())
+        })
+        .unwrap();
+    assert!(restored["s.d"].definition.default.is_none());
+    assert_eq!(original["s.d"].definition.name.as_ptr(), pointer);
+    assert!(matches!(
+        &original["s.d"].definition.default,
+        Some(Expr::Literal(Value::Int(17)))
+    ));
+    assert!(restored.remove("s.d").unwrap());
+    assert_eq!(mutations.used(), 0);
+    drop(restored);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}

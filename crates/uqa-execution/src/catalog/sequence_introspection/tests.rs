@@ -13,10 +13,7 @@ use crate::catalog::sequence::{
     registry::{SequenceCatalog, SequenceRecord},
     snapshot::SequenceReadSnapshot,
 };
-use std::{
-    cell::{Cell, RefCell},
-    sync::Arc,
-};
+use std::cell::{Cell, RefCell};
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
@@ -45,7 +42,7 @@ fn sequence_introspection_retains_metadata_and_roles_together_across_complete_re
     };
     let catalog = TestCatalog {
         snapshot: RefCell::new(SequenceReadSnapshot {
-            catalog: Arc::new(
+            catalog: uqa_core::memory::RetainedValue::new(
                 SequenceCatalog::try_from_iter([(
                     relation.clone(),
                     SequenceRecord {
@@ -60,8 +57,8 @@ fn sequence_introspection_retains_metadata_and_roles_together_across_complete_re
                 .unwrap(),
             ),
             roles: RoleCatalogSnapshot {
-                roles: Arc::new(roles),
-                memberships: Arc::new(RoleMemberships::new()),
+                roles: uqa_core::memory::RetainedValue::new(roles),
+                memberships: uqa_core::memory::RetainedValue::new(RoleMemberships::new()),
             },
         }),
         reads: Cell::new(0),
@@ -72,10 +69,10 @@ fn sequence_introspection_retains_metadata_and_roles_together_across_complete_re
     assert_eq!(catalog.reads.get(), 1);
     {
         let mut current = catalog.snapshot.borrow_mut();
-        Arc::make_mut(&mut current.catalog)
+        uqa_core::memory::RetainedValue::make_mut(&mut current.catalog)
             .remove(&relation)
             .unwrap();
-        Arc::make_mut(&mut current.roles.roles).clear();
+        uqa_core::memory::RetainedValue::make_mut(&mut current.roles.roles).clear();
     }
     assert_eq!(sequence.relation, relation);
     assert_eq!(sequence.state, state);

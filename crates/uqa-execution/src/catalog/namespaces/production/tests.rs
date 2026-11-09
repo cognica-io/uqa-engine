@@ -6,7 +6,6 @@
 
 use super::super::tests::{catalog, resolution};
 use super::*;
-use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::security::BoundSchemaSecurity;
 
@@ -18,7 +17,7 @@ fn controlled_namespace_selection_preserves_implicit_order_and_privilege_errors(
         oid: 500,
         object_id: [50; 16],
     };
-    Arc::make_mut(&mut snapshot.definitions.schemas)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.schemas)
         .insert("invalid".into(), invalid)
         .unwrap();
     let catalog = CatalogReadView::new(snapshot);
@@ -117,7 +116,7 @@ fn controlled_namespace_selection_preserves_implicit_order_and_privilege_errors(
 fn controlled_namespace_rejection_and_cancellation_release_partial_results() {
     let name = "long_namespace_".repeat(64 * 1024);
     let mut snapshot = catalog().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.schemas)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.schemas)
         .insert(
             name.clone(),
             BoundSchemaSecurity::with_public_privileges(true),

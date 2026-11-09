@@ -6,7 +6,6 @@
 
 use super::build_pg_database;
 use crate::catalog::{test_support::empty_catalog, CatalogReadView};
-use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinitions;
 
 #[test]
@@ -55,14 +54,14 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
         ]),
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.database_security = Arc::new(
+    snapshot.definitions.database_security = uqa_core::memory::RetainedValue::new(
         snapshot
             .definitions
             .database_security
             .successor(&BoundDatabaseSecurity::bind(&security, &roles).unwrap())
             .unwrap(),
     );
-    snapshot.definitions.roles = Arc::new(roles.clone());
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
     for name in ["uqa", "reader"] {
         let mut renamed = roles.get(name).unwrap().clone();
@@ -74,7 +73,7 @@ fn database_catalog_snapshots_keep_owner_oids_and_project_current_acl_names() {
         roles.insert(renamed.name.clone(), renamed).unwrap();
         roles.insert(name.into(), replacement).unwrap();
     }
-    snapshot.definitions.roles = Arc::new(roles);
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles);
     let renamed = CatalogReadView::new(snapshot);
     assert_eq!(original.database_security(), renamed.database_security());
     for (catalog, expected) in [

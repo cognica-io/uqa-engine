@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::catalog::test_support::index_rows;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{Expr, TableConstraintSet},
@@ -48,7 +49,7 @@ impl uqa_sql::semantics::partition::PartitionExpressions for Context {
     }
 }
 
-fn rows(incarnation: u8, predicate: bool) -> Arc<IndexRows> {
+fn rows(incarnation: u8, predicate: bool) -> RetainedValue<IndexRows> {
     let row = CatalogIndexRow {
         relation: RelationIdentity::new("public", "same_name"),
         table_name: "public.t".into(),
@@ -74,7 +75,7 @@ fn rows(incarnation: u8, predicate: bool) -> Arc<IndexRows> {
             .unwrap(),
         ),
     };
-    Arc::new(index_rows([row]))
+    uqa_core::memory::RetainedValue::new(index_rows([row]))
 }
 
 fn values(definitions: &PhysicalIndexDefinitions, key: &ValueIndexKey) -> Result<Value, SQLError> {
@@ -138,7 +139,9 @@ fn publication_barriers_follow_expression_predicate_and_catalog_replacement() {
         row.columns_json = serde_json::to_string(&[IndexKey::Column("id".into())]).unwrap();
         columns.replace(row).unwrap();
     }
-    let predicates = cache.bind(Arc::new(columns.clone())).unwrap();
+    let predicates = cache
+        .bind(uqa_core::memory::RetainedValue::new(columns.clone()))
+        .unwrap();
     assert!(predicates.row_publication_uses_expressions("public.t"));
     for mut row in columns.clone().values().cloned() {
         let mut definition = super::super::index_definition(&row).unwrap();
@@ -146,7 +149,9 @@ fn publication_barriers_follow_expression_predicate_and_catalog_replacement() {
         row.definition_json = Some(serde_json::to_string(&definition).unwrap());
         columns.replace(row).unwrap();
     }
-    let plain = cache.bind(Arc::new(columns)).unwrap();
+    let plain = cache
+        .bind(uqa_core::memory::RetainedValue::new(columns))
+        .unwrap();
     assert!(!plain.row_publication_uses_expressions("public.t"));
     assert!(cache
         .bind(source)
@@ -384,7 +389,9 @@ fn shared_physical_index_preparation_does_not_publish_invalid_definitions() {
     row.definition_json = Some("invalid JSON".into());
     invalid.replace(row).unwrap();
     let sibling = cache.clone();
-    assert!(sibling.bind(Arc::new(invalid)).is_err());
+    assert!(sibling
+        .bind(uqa_core::memory::RetainedValue::new(invalid))
+        .is_err());
     assert!(Arc::ptr_eq(&prepared, &cache.bind(source.clone()).unwrap()));
     assert!(Arc::ptr_eq(&prepared, &sibling.bind(source).unwrap()));
 }

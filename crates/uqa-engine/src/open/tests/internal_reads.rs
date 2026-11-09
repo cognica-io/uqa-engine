@@ -31,7 +31,7 @@ fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
         let original = root.visible_graph_handles().unwrap();
         let retained = root.freeze_graph_read_handles(None, true).unwrap();
         assert!(
-            Arc::ptr_eq(&original, &retained),
+            uqa_core::memory::RetainedValue::ptr_eq(&original, &retained),
             "an empty graph view must not create another storage owner"
         );
         root.create_graph("later").unwrap();

@@ -104,7 +104,7 @@ fn view_descriptors_preserve_analyzed_output_collations() {
         let mut snapshot = crate::catalog::test_support::empty_catalog()
             .snapshot()
             .clone();
-        Arc::make_mut(&mut snapshot.definitions.views)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
             .insert(RelationIdentity::new("public", "v"), view.clone())
             .unwrap();
         let catalog = CatalogReadView::new(snapshot);

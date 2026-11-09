@@ -7,7 +7,7 @@
 //! Capture retains a paired native generation; durable membership is established at publication.
 
 use crate::catalog::foreign::{registry::CapturedForeignCatalog, ForeignCatalog};
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::SQLError;
 use uqa_storage::{
@@ -17,7 +17,7 @@ use uqa_storage::{
 };
 
 pub struct ForeignTableCaptureSource {
-    pub catalog: Arc<ForeignCatalog>,
+    pub catalog: RetainedValue<ForeignCatalog>,
 }
 
 impl ForeignTableCaptureSource {

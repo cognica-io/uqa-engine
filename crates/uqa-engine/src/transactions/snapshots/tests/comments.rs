@@ -107,7 +107,7 @@ fn transaction_comment_sources_preserve_original_object_eligibility_after_closur
     let engine = Engine::new();
     let excluded = definitions(&engine);
     let original = engine.durable.comments.snapshot();
-    let weak = Arc::downgrade(&original);
+    let weak = original.identity();
     let expected = original
         .iter()
         .filter(|(address, _)| !excluded.contains(address))
@@ -121,7 +121,7 @@ fn transaction_comment_sources_preserve_original_object_eligibility_after_closur
     sql(&engine, completion);
     sql(&engine, "DROP TYPE saved_type; CREATE TYPE saved_type AS ENUM('new'); COMMENT ON TYPE saved_type IS 'new generation'");
     drop(engine);
-    assert!(weak.upgrade().is_none());
+    assert!(!weak.is_alive());
     let captured = selected.comments.captured(&selected.cut).unwrap();
     let saved = captured
         .get()
@@ -146,7 +146,7 @@ fn committed_comment_roots_capture_original_text_with_bounded_work() {
             sql(&engine, &format!("CREATE TYPE saved_{index:03} AS ENUM ('one'); COMMENT ON TYPE saved_{index:03} IS 'original 한글'"));
         }
         let original = engine.durable.comments.snapshot();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         let expected = original
             .iter()
             .map(|(address, text)| (*address, text.clone()))
@@ -166,7 +166,7 @@ fn committed_comment_roots_capture_original_text_with_bounded_work() {
         let retained = retained.unwrap();
         sql(&engine, "COMMIT; DROP TYPE saved_000; CREATE TYPE saved_000 AS ENUM ('replacement'); COMMENT ON TYPE saved_000 IS 'replacement'");
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert!(retained.get().unwrap().iter().eq(expected.iter()));
         drop(selected);
         control.cancellation().cancel();

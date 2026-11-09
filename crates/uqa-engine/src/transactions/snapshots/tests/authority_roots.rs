@@ -31,8 +31,8 @@ fn committed_authority_roots_preserve_original_acl_revisions_with_bounded_captur
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect::<Vec<_>>();
-        let weak_routines = Arc::downgrade(&original_routines);
-        let weak_systems = Arc::downgrade(&original_systems);
+        let weak_routines = original_routines.identity();
+        let weak_systems = original_systems.identity();
         drop((original_routines, original_systems));
         sql(&engine, "BEGIN; REVOKE EXECUTE ON FUNCTION lower(text) FROM saved_000; REVOKE UPDATE ON pg_class FROM saved_000; SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -87,8 +87,8 @@ fn committed_authority_roots_preserve_original_acl_revisions_with_bounded_captur
             expected_systems[0].1.columns["relname"].revision
         );
         drop(engine);
-        assert!(weak_routines.upgrade().is_none());
-        assert!(weak_systems.upgrade().is_none());
+        assert!(!weak_routines.is_alive());
+        assert!(!weak_systems.is_alive());
         assert!(routines
             .get()
             .unwrap()

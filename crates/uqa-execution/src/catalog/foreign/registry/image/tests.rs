@@ -8,6 +8,8 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::roles::RoleIdentity;
 
+mod native;
+
 fn key() -> RelationIdentity {
     RelationIdentity::new("Quoted.Schema", "Foreign.Name")
 }

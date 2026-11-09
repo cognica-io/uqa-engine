@@ -36,8 +36,9 @@ pub(crate) use canonical::{
 };
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
-    CapturedVectorIndexes, LiveVectorIndexesMut, RetainedVectorIndexesBuilder, VectorIndexSource,
-    VectorIndexes, VectorIndexesIter, VectorSourcePublication,
+    CapturedVectorIndexes, LiveVectorIndexesMut, MemoryVectorIndexesBuilder,
+    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
+    VectorSourcePublication,
 };
 pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
@@ -177,6 +178,17 @@ pub trait VectorIndex: Send + Sync {
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Err(StorageBackendError::Other(
             "memory capture registration is not supported by this vector owner".into(),
+        ))
+    }
+
+    /// Register a private native image while admitting every new source allocation under its input allowance. The completed owner does not retain input cancellation for ordinary mutations.
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        _registry: &crate::memory_capture::MemoryCaptureRegistry,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "controlled memory capture registration is not supported by this vector owner".into(),
         ))
     }
 

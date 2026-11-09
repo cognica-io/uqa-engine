@@ -6,6 +6,7 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleDefinitions;
@@ -56,8 +57,8 @@ fn restore(
     let mut snapshot = crate::catalog::test_support::empty_catalog()
         .snapshot()
         .clone();
-    snapshot.definitions.roles = Arc::new(roles.clone());
-    snapshot.definitions.domains = Arc::new(loaded.registry);
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles.clone());
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(loaded.registry);
     let catalog = crate::catalog::CatalogReadView::new(snapshot);
     let resolution = crate::catalog::RelationNameResolution {
         search_path: vec!["public".into()],
@@ -199,13 +200,21 @@ fn empty_catalog_conversion_is_initial_only_and_idempotent() {
 #[test]
 fn unchanged_domain_metadata_selects_the_committed_registry_and_validates_its_authority() {
     let (catalog, roles) = fixture();
-    let committed = Arc::new(
+    let committed = uqa_core::memory::RetainedValue::new(
         DomainRegistry::try_from_iter([("public.positive".into(), records::domain("positive", 1))])
             .unwrap(),
     );
-    let current = Arc::default();
-    let selected = merge_private(Some(&catalog), &current, Arc::clone(&committed), &roles).unwrap();
-    assert!(Arc::ptr_eq(&selected, &committed));
+    let current = uqa_core::memory::RetainedValue::default();
+    let selected = merge_private(
+        Some(&catalog),
+        &current,
+        uqa_core::memory::RetainedValue::clone(&committed),
+        &roles,
+    )
+    .unwrap();
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &selected, &committed
+    ));
     assert!(current.is_empty());
     assert!(merge_private(Some(&catalog), &current, committed, &RoleDefinitions::new()).is_err());
     assert!(catalog

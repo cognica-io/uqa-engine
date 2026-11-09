@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::catalog::{test_support::empty_catalog, RelationLookupMode, RelationNameResolution};
-use std::sync::Arc;
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::{roles::RoleDefinition, security::BoundSchemaSecurity};
@@ -20,7 +19,7 @@ fn namespace_oid_projection_reads_the_captured_incarnation_after_name_reuse() {
         object_id: [1; 16],
         revision: [2; 16],
     });
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
             "s".into(),
             first.clone(),
@@ -33,7 +32,7 @@ fn namespace_oid_projection_reads_the_captured_incarnation_after_name_reuse() {
         object_id: [3; 16],
         revision: [4; 16],
     });
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
             "s".into(),
             first,
@@ -54,14 +53,14 @@ fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_na
     let owner = RoleDefinition::bootstrap();
     let mut roles = RoleDefinitions::try_from_iter([(owner.name.clone(), owner)]).unwrap();
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([(
             "public".into(),
             BoundSchemaSecurity::bootstrap("public"),
         )])
         .unwrap(),
     );
-    snapshot.definitions.roles = Arc::new(roles.clone());
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles.clone());
     let original = CatalogReadView::new(snapshot.clone());
     let mut owner = roles.get("uqa").unwrap().clone();
     roles.remove("uqa").unwrap();
@@ -71,7 +70,7 @@ fn namespace_snapshots_keep_owner_oids_and_project_acl_and_information_schema_na
     replacement.object_id = [9; 16];
     roles.insert(owner.name.clone(), owner).unwrap();
     roles.insert(replacement.name.clone(), replacement).unwrap();
-    snapshot.definitions.roles = Arc::new(roles);
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(roles);
     let renamed = CatalogReadView::new(snapshot);
     let resolution = RelationNameResolution {
         search_path: vec!["public".into()],

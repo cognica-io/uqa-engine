@@ -26,6 +26,8 @@ mod controlled_rows;
 pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
 mod controlled_presence;
 pub use controlled_presence::read_field_presence;
+mod shared_values;
+pub use shared_values::{SharedDocumentProjection, SharedDocumentValues};
 pub mod decoding;
 pub mod identifiers;
 pub mod image;
@@ -115,12 +117,12 @@ static SHARED_NULL_VALUE: Value = Value::Null;
 /// cloning them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SharedDocumentRow {
-    values: Arc<Vec<Value>>,
-    projection: Arc<[usize]>,
+    values: SharedDocumentValues,
+    projection: SharedDocumentProjection,
 }
 
 impl SharedDocumentRow {
-    pub(crate) fn new(values: Arc<Vec<Value>>, projection: Arc<[usize]>) -> Self {
+    pub(crate) fn new(values: SharedDocumentValues, projection: SharedDocumentProjection) -> Self {
         debug_assert!(projection
             .iter()
             .all(|slot| *slot == MISSING_SHARED_SLOT || *slot < values.len()));
@@ -173,9 +175,17 @@ impl SharedDocumentRow {
         (&self.values, &self.projection)
     }
 
-    /// Transfer the shared vector and its fragment-local projection into a
-    /// physical row without cloning either allocation.
+    /// Export an ordinary shared vector through the legacy unbudgeted result boundary. Ordinary rows preserve their original value allocation and every row preserves its original projection; retained image rows copy their values while the source lease is live. Internal physical scans use `into_shared_parts` to preserve the original owner without copying.
     pub fn into_parts(self) -> (Arc<Vec<Value>>, Arc<[usize]>) {
+        let values = match self.values {
+            SharedDocumentValues::Ordinary(values) => values,
+            SharedDocumentValues::Retained(values) => Arc::new((**values).clone()),
+        };
+        (values, self.projection.shared_slots())
+    }
+
+    /// Transfer the exact native value owner, including its original admission, and the fragment-local projection without copying either allocation.
+    pub fn into_shared_parts(self) -> (SharedDocumentValues, SharedDocumentProjection) {
         (self.values, self.projection)
     }
 }
@@ -718,4 +728,4 @@ pub fn eval_path_in_document(doc: &Document, path: &[PathSegment]) -> Option<Val
 
 mod memory;
 
-pub use memory::MemoryDocumentStore;
+pub use memory::{MemoryDocumentStore, MemoryDocumentStoreBuilder};

@@ -132,7 +132,8 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
         ),
         security: std::sync::Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
+        ))
+        .into(),
         columns: SharedTableDefinition::default(),
         columns_declared: true,
         checks: SharedTableDefinition::default(),

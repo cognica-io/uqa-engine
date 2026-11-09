@@ -58,7 +58,12 @@ impl TablePrivilegeState for TableState {
     fn security_snapshot_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, uqa_sql::SQLError> {
+    ) -> Result<
+        uqa_core::memory::Produced<
+            uqa_sql::catalog::table_metadata::SharedTableMetadata<BoundTableSecurity>,
+        >,
+        uqa_sql::SQLError,
+    > {
         Ok(control.finish(self.security.snapshot(), control.empty_reservation())?)
     }
     fn with_columns_with_control(

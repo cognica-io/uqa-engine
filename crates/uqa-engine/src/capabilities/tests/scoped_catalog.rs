@@ -85,7 +85,7 @@ fn scoped_permissions_and_overloads_reuse_catalog_inputs() {
     for _ in 0..16 {
         hook.require_builtin_execute(&binding).unwrap();
         let current = engine.routine_type_snapshot();
-        assert!(Arc::ptr_eq(&domains, &current));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(&domains, &current));
     }
     assert_eq!(CATALOG_CAPTURES.get(), 0);
 }
@@ -246,7 +246,10 @@ fn scoped_runtime_catalog_keeps_the_portal_generation() {
     let hook = ScopedEngineHook::new(&engine, &scope);
     CATALOG_CAPTURES.set(0);
     assert_eq!(hook.resolve_regtype_input("amount").unwrap(), original);
-    assert!(Arc::ptr_eq(&domains, &engine.routine_type_snapshot()));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
+        &domains,
+        &engine.routine_type_snapshot()
+    ));
     let Some(ColumnType::Composite(ref ty)) = hook.resolve_type_name("items").unwrap() else {
         panic!("expected relation type");
     };

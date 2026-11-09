@@ -15,14 +15,21 @@ use uqa_core::{memory::BudgetedVec, DocId, Value};
 use crate::backend::StorageBackendResult;
 use crate::read_control::StorageReadControl;
 
-use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
+use super::{
+    Document, DocumentMetadata, DocumentStore, SharedDocumentRow, SharedDocumentValues,
+    StoredDocument,
+};
 
+mod image;
 mod layouts;
 mod projection;
+mod rows;
 mod snapshot;
 
+pub use image::MemoryDocumentStoreBuilder;
 use layouts::DocumentLayouts;
 use projection::ProjectionCache;
+use rows::DocumentRows;
 
 #[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
@@ -49,16 +56,17 @@ impl Clone for MemoryDocumentStore {
 
 #[derive(Debug, Default)]
 struct MemoryDocumentState {
-    documents: BTreeMap<DocId, MemoryDocumentRow>,
+    documents: DocumentRows,
     layouts: DocumentLayouts,
     row_payload_bytes: u128,
     retention: crate::retained_memory::RetainedMemory,
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct MemoryDocumentRow {
     layout_id: usize,
-    values: Arc<Vec<Value>>,
+    values: SharedDocumentValues,
     metadata: DocumentMetadata,
     payload_bytes: u128,
 }
@@ -121,7 +129,7 @@ impl MemoryDocumentStore {
             doc_id,
             MemoryDocumentRow {
                 layout_id,
-                values: Arc::new(values),
+                values: SharedDocumentValues::Ordinary(Arc::new(values)),
                 metadata,
                 payload_bytes,
             },
@@ -142,7 +150,7 @@ impl DocumentStore for MemoryDocumentStore {
         self.check_retained_read()?;
         self.state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|row| {
                 let cursor = super::image::DocumentImageCursor::new(
                     self.state.layouts[row.layout_id]
@@ -173,7 +181,7 @@ impl DocumentStore for MemoryDocumentStore {
             |output| {
                 self.state
                     .documents
-                    .get(&doc_id)
+                    .get(doc_id)
                     .map(|row| {
                         super::image::write(
                             self.state.layouts[row.layout_id]
@@ -194,7 +202,7 @@ impl DocumentStore for MemoryDocumentStore {
         let metadata = self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map_or_else(DocumentMetadata::default, |stored| stored.metadata);
         self.put_stored_inner(doc_id, StoredDocument::with_metadata(document, metadata))
     }
@@ -204,7 +212,7 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_document(stored)))
     }
 
@@ -217,7 +225,7 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_stored_document(stored)))
     }
 
@@ -236,7 +244,7 @@ impl DocumentStore for MemoryDocumentStore {
             let row = self
                 .state
                 .documents
-                .get(id)
+                .get(*id)
                 .map(|row| -> StorageBackendResult<_> {
                     let fields = super::controlled_rows::copy_fields(
                         self.state.layouts[row.layout_id]
@@ -268,7 +276,7 @@ impl DocumentStore for MemoryDocumentStore {
             .filter_map(|doc_id| {
                 self.state
                     .documents
-                    .get(doc_id)
+                    .get(*doc_id)
                     .map(|stored| (*doc_id, self.materialize_stored_document(stored)))
             })
             .collect())
@@ -279,13 +287,13 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| stored.metadata))
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         self.check_retained_read()?;
-        Ok(self.state.documents.contains_key(&doc_id))
+        Ok(self.state.documents.contains_key(doc_id))
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
@@ -293,7 +301,7 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .and_then(|stored| self.field(stored, field).cloned()))
     }
 
@@ -306,7 +314,7 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
-                let stored = self.state.documents.get(doc_id)?;
+                let stored = self.state.documents.get(*doc_id)?;
                 let values = fields
                     .iter()
                     .map(|field| self.field(stored, field).cloned().unwrap_or(Value::Null))
@@ -325,7 +333,7 @@ impl DocumentStore for MemoryDocumentStore {
         self.check_retained_read()?;
         for doc_id in doc_ids {
             self.check_retained_read()?;
-            let values = self.state.documents.get(doc_id).map_or_else(
+            let values = self.state.documents.get(*doc_id).map_or_else(
                 || vec![Value::Null; fields.len()],
                 |stored| {
                     fields
@@ -398,7 +406,7 @@ impl DocumentStore for MemoryDocumentStore {
         let value = self
             .state
             .documents
-            .get(&id)
+            .get(id)
             .and_then(|row| self.field(row, field));
         visitor(value)?;
         self.check_retained_read()?;
@@ -416,7 +424,7 @@ impl DocumentStore for MemoryDocumentStore {
         let mut present = BudgetedVec::new(control.memory());
         for id in ids {
             self.check_retained_read()?;
-            let row = self.state.documents.get(id);
+            let row = self.state.documents.get(*id);
             for field in fields {
                 control.check()?;
                 present.push(row.is_some_and(|row| self.field(row, field).is_some()))?;
@@ -477,7 +485,7 @@ impl DocumentStore for MemoryDocumentStore {
         let Some(mut document) = self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_stored_document(stored))
         else {
             return Ok(false);
@@ -495,10 +503,10 @@ impl DocumentStore for MemoryDocumentStore {
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         self.admit_write()?;
-        if self.state.documents.contains_key(&doc_id) {
+        if self.state.documents.contains_key(doc_id) {
             let state = Arc::make_mut(&mut self.state);
             state.retention.invalidate();
-            let previous = state.documents.remove(&doc_id).expect("selected document");
+            let previous = state.documents.remove(doc_id).expect("selected document");
             state.row_payload_bytes -= previous.payload_bytes;
         }
         Ok(())
@@ -526,7 +534,7 @@ impl DocumentStore for MemoryDocumentStore {
             Some(after) => self
                 .state
                 .documents
-                .range((Excluded(after), Unbounded))
+                .range_from(Excluded(&after))
                 .next()
                 .map(|(doc_id, _)| *doc_id),
             None => self.state.documents.keys().next().copied(),
@@ -542,7 +550,7 @@ impl DocumentStore for MemoryDocumentStore {
             Some(after) => self
                 .state
                 .documents
-                .range((Excluded(after), Unbounded))
+                .range_from(Excluded(&after))
                 .take(limit)
                 .map(|(doc_id, _)| *doc_id)
                 .collect(),
@@ -559,8 +567,8 @@ impl DocumentStore for MemoryDocumentStore {
         self.check_retained_read()?;
         control.check()?;
         let mut ids = BudgetedVec::new(control.memory());
-        let after = after.map_or(Unbounded, Excluded);
-        for (&id, _) in self.state.documents.range((after, Unbounded)).take(limit) {
+        let after = after.as_ref().map_or(Unbounded, Excluded);
+        for (&id, _) in self.state.documents.range_from(after).take(limit) {
             self.check_retained_read()?;
             control.check()?;
             ids.push(id)?;

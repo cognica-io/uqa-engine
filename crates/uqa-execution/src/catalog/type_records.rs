@@ -8,7 +8,7 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::type_definitions::{StoredTypeDefinition, TypeDefinitions};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -39,8 +39,8 @@ impl TypeRecordFormat {
         &self,
         catalog: Option<&dyn CatalogFacade>,
         current: &TypeDefinitions<T>,
-        mut committed: Arc<TypeDefinitions<T>>,
-    ) -> StorageBackendResult<Arc<TypeDefinitions<T>>> {
+        mut committed: RetainedValue<TypeDefinitions<T>>,
+    ) -> StorageBackendResult<RetainedValue<TypeDefinitions<T>>> {
         let names = current
             .keys()
             .chain(committed.keys())
@@ -51,13 +51,13 @@ impl TypeRecordFormat {
                 catalog.metadata_has_private_changes(&self.key(&name))
             })? {
                 if let Some(definition) = current.get(&name) {
-                    Arc::make_mut(&mut committed)
+                    RetainedValue::make_mut(&mut committed)
                         .insert(name, definition.clone())
                         .map_err(|error| {
                             StorageBackendError::backend(self.definition_context, error)
                         })?;
                 } else {
-                    Arc::make_mut(&mut committed)
+                    RetainedValue::make_mut(&mut committed)
                         .remove(&name)
                         .map_err(|error| {
                             StorageBackendError::backend(self.definition_context, error)

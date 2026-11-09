@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
 use uqa_graph::{GraphStore, GraphStoreHandle, PersistentGraphStore};
 use uqa_storage::{CatalogFacade, PersistentStorageBackend, StorageBackendResult};
@@ -76,9 +77,11 @@ impl Engine {
     }
 
     /// Only graph names and storage handles are collected here, not entities.
-    pub(crate) fn visible_graph_handles(&self) -> StorageBackendResult<Arc<GraphHandles>> {
+    pub(crate) fn visible_graph_handles(
+        &self,
+    ) -> StorageBackendResult<RetainedValue<GraphHandles>> {
         if let Some(snapshot) = &self.query_catalog_snapshot {
-            return Ok(Arc::clone(&snapshot.graphs));
+            return Ok(snapshot.graphs.clone());
         }
         if let Some(overlay) = &self.session.state.read().graph_overlay {
             let store = Arc::new(GraphStoreHandle::Persistent(overlay.store.as_ref().clone()));
@@ -87,7 +90,7 @@ impl Engine {
                 .graphs
                 .read()
                 .bind_names(overlay.names.iter().map(String::as_str), &store)
-                .map(Arc::new);
+                .map(RetainedValue::new);
         }
         Ok(self.durable.graphs.snapshot())
     }
@@ -193,7 +196,7 @@ impl Engine {
         &self,
         required: Option<&BTreeSet<String>>,
         catalog_required: bool,
-    ) -> Result<Arc<GraphHandles>, SQLError> {
+    ) -> Result<RetainedValue<GraphHandles>, SQLError> {
         let graphs = self.visible_graph_handles().map_err(snapshot_error)?;
         let Some(backend) = &self.storage.backend else {
             return Ok(graphs);
@@ -227,7 +230,7 @@ impl Engine {
             self.detach_selected_graph_storage_snapshot(&graphs, required)?
         };
         let handle = Arc::new(GraphStoreHandle::Persistent(store));
-        Ok(Arc::new(
+        Ok(RetainedValue::new(
             graphs
                 .bind_names(graphs.keys().map(String::as_str), &handle)
                 .map_err(snapshot_error)?,

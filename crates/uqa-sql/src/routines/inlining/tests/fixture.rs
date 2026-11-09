@@ -22,7 +22,7 @@ use crate::{
 };
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, Mutex,
+    Mutex,
 };
 
 pub(super) struct Catalog {
@@ -199,7 +199,7 @@ impl VolatilityCatalog for Catalog {
 }
 impl RoutineOverloadCatalog for Catalog {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::default()
+        RoutineTypeSnapshot::default()
     }
     fn routine_search_path(&self) -> Vec<String> {
         vec!["public".into()]

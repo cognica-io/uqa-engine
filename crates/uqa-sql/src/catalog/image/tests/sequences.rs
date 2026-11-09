@@ -154,3 +154,47 @@ fn sequence_authority_capture_excludes_temporary_members_and_keeps_admission() {
     ));
     assert_eq!(native.used(), 0);
 }
+
+#[test]
+fn native_sequence_authority_input_keeps_original_keys_after_destination_edits() {
+    let bytes = encode(&singleton(None));
+    let input = MemoryBudget::new(1 << 20);
+    let mutations = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let mut restored = SequenceSecurities::read_image_with_mutation_budget(
+        &mut bytes.as_slice(),
+        &input,
+        &mutations,
+        &token,
+    )
+    .unwrap();
+    let original = restored.clone();
+    let occupied = input.reserve(input.available()).unwrap();
+    token.cancel();
+    let relation = RelationIdentity::new("s", "q");
+    restored
+        .edit(&relation, |value| {
+            value.acl = Some(vec![]);
+            Ok(())
+        })
+        .unwrap();
+    restored
+        .insert(
+            RelationIdentity::new("s", "new"),
+            RelationPersistence::Permanent,
+            BoundSequenceSecurity {
+                role_owner: RoleIdentity::BOOTSTRAP,
+                acl: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(restored.get(&relation).unwrap().acl, Some(vec![]));
+    assert_eq!(encode(&original), bytes);
+    drop(restored);
+    assert_eq!(mutations.used(), 0);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}

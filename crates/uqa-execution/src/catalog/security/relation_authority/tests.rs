@@ -9,6 +9,7 @@
 use super::*;
 use crate::catalog::foreign::StoredForeignTable;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{
     catalog::stored_view::{StoredView, StoredViewDefinition, ViewDefinitions},
@@ -49,7 +50,7 @@ fn relation(name: &str) -> RelationIdentity {
 
 #[test]
 fn private_view_records_preserve_complete_definitions_and_peer_changes() {
-    let latest = Arc::new(
+    let latest = uqa_core::memory::RetainedValue::new(
         ViewDefinitions::try_from_iter([
             (relation("dropped"), view(1)),
             (relation("renamed_from"), view(2)),
@@ -98,10 +99,12 @@ fn private_view_records_preserve_complete_definitions_and_peer_changes() {
 
 #[test]
 fn unchanged_views_share_the_committed_map_and_provenance_errors_do_not_publish() {
-    let latest = Arc::new(ViewDefinitions::try_from_iter([(relation("saved"), view(1))]).unwrap());
+    let latest = uqa_core::memory::RetainedValue::new(
+        ViewDefinitions::try_from_iter([(relation("saved"), view(1))]).unwrap(),
+    );
     let current = ViewDefinitions::try_from_iter([(relation("saved"), view(2))]).unwrap();
     let merged = merge_private_view_definitions(&current, latest.clone(), |_| Ok(false)).unwrap();
-    assert!(Arc::ptr_eq(&latest, &merged));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(&latest, &merged));
     let error = merge_private_view_definitions(&current, latest.clone(), |_| {
         Err(uqa_storage::StorageBackendError::Other(
             "provenance unavailable".into(),

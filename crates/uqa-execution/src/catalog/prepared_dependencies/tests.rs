@@ -30,7 +30,7 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
     let mut snapshot = super::super::test_support::empty_catalog()
         .snapshot()
         .clone();
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .insert("public.f".into(), vec![function(1, 10)])
         .unwrap();
     let dependencies = PreparedAnalysisDependencies {
@@ -38,24 +38,24 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
         routines: uqa_core::memory::OwnedSet::from([[1; 16]]),
     };
     let original = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .insert("public.other".into(), vec![function(2, 20)])
         .unwrap();
     assert_eq!(
         capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap(),
         original
     );
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .insert("public.f".into(), vec![function(1, 11)])
         .unwrap();
     let replaced = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_ne!(replaced, original);
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .remove("public.f")
         .unwrap();
     let missing = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_eq!(missing.routines[&[1; 16]], None);
-    Arc::make_mut(&mut snapshot.definitions.schemas)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.schemas)
         .insert(
             "new_namespace".into(),
             super::super::security::BoundSchemaSecurity::bootstrap("new_namespace"),
@@ -86,7 +86,8 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
             catalog_oids: oids,
             security: Arc::new(super::super::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
+            ))
+            .into(),
             columns: SharedTableDefinition::default(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),

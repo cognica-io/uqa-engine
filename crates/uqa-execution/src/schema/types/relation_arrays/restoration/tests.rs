@@ -20,7 +20,8 @@ fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> Cat
         row_type_array_name: name.map(str::to_owned),
         security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
+        ))
+        .into(),
         columns: SharedTableDefinition::default(),
         columns_declared: true,
         checks: SharedTableDefinition::default(),
@@ -160,7 +161,7 @@ fn duplicate_arrays_and_explicit_type_collisions_are_rejected() {
     snapshot
         .tables
         .remove(&RelationIdentity::new("public", "second"));
-    Arc::make_mut(&mut snapshot.definitions.enums)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.enums)
         .insert(
             "public._same".into(),
             uqa_sql::catalog::enum_type::StoredEnum {

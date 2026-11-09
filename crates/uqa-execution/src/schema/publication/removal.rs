@@ -11,6 +11,7 @@ use std::{
     collections::BTreeSet,
     ops::{Deref, DerefMut},
 };
+use uqa_core::memory::RetainedValue;
 use uqa_core::{DocId, RelationIdentity};
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableCheck, TableKeyConstraint},
@@ -69,7 +70,7 @@ pub trait ColumnDropIndexes {
     ) -> StorageBackendResult<()>;
     fn field_analyzers(
         &self,
-    ) -> std::sync::Arc<uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog>;
+    ) -> RetainedValue<uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog>;
     fn publish_field_analyzers(
         &self,
         catalog: uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog,

@@ -7,7 +7,7 @@
 //! Fresh authority retains private relation definitions and ACL tuples from the active transaction.
 
 use crate::catalog::foreign::ForeignCatalog;
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::security::BoundTableSecurity;
 use uqa_storage::{
@@ -46,8 +46,8 @@ pub fn merge_private(
 pub fn merge_private_views(
     catalog: Option<&dyn CatalogFacade>,
     current: &uqa_sql::catalog::stored_view::ViewDefinitions,
-    mut latest: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-) -> StorageBackendResult<Arc<uqa_sql::catalog::stored_view::ViewDefinitions>> {
+    mut latest: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
+) -> StorageBackendResult<RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>> {
     latest = merge_private_view_definitions(current, latest, |relation| {
         catalog.map_or(Ok(false), |catalog| {
             catalog.view_has_private_changes(relation)
@@ -81,14 +81,14 @@ pub fn merge_private_views(
                 })?;
         }
     }
-    Ok(Arc::new(next))
+    Ok(RetainedValue::new(next))
 }
 
 fn merge_private_view_definitions(
     current: &uqa_sql::catalog::stored_view::ViewDefinitions,
-    mut latest: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
+    mut latest: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
     mut is_private: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
-) -> StorageBackendResult<Arc<uqa_sql::catalog::stored_view::ViewDefinitions>> {
+) -> StorageBackendResult<RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>> {
     let relations = current
         .keys()
         .chain(latest.keys())
@@ -98,14 +98,14 @@ fn merge_private_view_definitions(
         if is_private(&relation)? {
             if let Some(view) = current.get(&relation) {
                 if !current.shares_definition(&relation, &latest) {
-                    Arc::make_mut(&mut latest)
+                    RetainedValue::make_mut(&mut latest)
                         .insert(relation, view.clone())
                         .map_err(|error| {
                             StorageBackendError::backend("merge private view definition", error)
                         })?;
                 }
             } else {
-                Arc::make_mut(&mut latest)
+                RetainedValue::make_mut(&mut latest)
                     .remove(&relation)
                     .map_err(|error| {
                         StorageBackendError::backend("merge private view removal", error)
@@ -119,8 +119,8 @@ fn merge_private_view_definitions(
 pub fn merge_private_foreign(
     catalog: Option<&dyn CatalogFacade>,
     current: &ForeignCatalog,
-    latest: Arc<ForeignCatalog>,
-) -> StorageBackendResult<Arc<ForeignCatalog>> {
+    latest: RetainedValue<ForeignCatalog>,
+) -> StorageBackendResult<RetainedValue<ForeignCatalog>> {
     let mut next = (*latest).clone();
     merge_private_foreign_definitions(current, &mut next, |relation| {
         catalog.map_or(Ok(false), |catalog| {
@@ -149,7 +149,7 @@ pub fn merge_private_foreign(
         }
     }
     crate::catalog::foreign::restoration::merge_session_relations(current, &mut next)?;
-    Ok(Arc::new(next))
+    Ok(RetainedValue::new(next))
 }
 
 fn merge_private_foreign_definitions(

@@ -27,6 +27,7 @@ use uqa_core::{
 mod authorities;
 mod functions;
 mod metadata;
+mod native;
 mod retention;
 mod sequences;
 mod validation;

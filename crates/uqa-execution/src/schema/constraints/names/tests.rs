@@ -11,6 +11,7 @@ use std::{
     cell::{Cell, RefCell},
     sync::Arc,
 };
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::events::TriggerCatalog;
 
 const OWNER: [u8; 16] = [1; 16];
@@ -100,10 +101,10 @@ impl ConstraintNameCatalog for Session {
     fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables> {
         self.current.borrow().constraint_foreign_tables()
     }
-    fn constraint_domains(&self) -> Arc<DomainRegistry> {
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry> {
         self.current.borrow().constraint_domains()
     }
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog> {
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog> {
         self.current.borrow().constraint_triggers()
     }
 }

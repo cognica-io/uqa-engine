@@ -6,9 +6,8 @@
 
 //! Table metadata locks adapt SQL's native immutable generations to retained source identities.
 
-use super::{CatalogCell, CatalogSnapshot};
+use super::{CatalogCell, CatalogGeneration, CatalogSnapshot};
 use parking_lot::MappedRwLockReadGuard;
-use std::sync::Arc;
 use uqa_sql::catalog::table_metadata::{
     SharedTableMetadata, TableMetadata, TableMetadataValue, TableMetadataWrite,
 };
@@ -19,30 +18,22 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
-pub(crate) struct TableMetadataCell<T: TableMetadataValue>(CatalogCell<TableMetadata<T>>);
+pub(crate) struct TableMetadataCell<
+    T: TableMetadataValue,
+    F: Send + Sync + 'static = TableMetadata<T>,
+>(CatalogCell<TableMetadata<T>, F>);
 
-impl<T: TableMetadataValue> TableMetadataCell<T> {
+impl<T: TableMetadataValue, F: Send + Sync + 'static> TableMetadataCell<T, F> {
     pub(crate) fn new(value: T) -> Self {
         Self(CatalogCell::new(TableMetadata::new(value)))
     }
 
-    pub(crate) fn from_generation(value: Arc<TableMetadata<T>>) -> Self {
+    pub(crate) fn from_generation(value: impl Into<CatalogGeneration<TableMetadata<T>>>) -> Self {
         Self(CatalogCell::from_snapshot(value))
     }
 
-    pub(crate) fn generation(&self) -> Arc<TableMetadata<T>> {
+    pub(crate) fn generation(&self) -> CatalogGeneration<TableMetadata<T>> {
         self.0.snapshot()
-    }
-
-    pub(crate) fn capture_source(
-        self,
-        registry: &MemoryCaptureRegistry,
-    ) -> StorageBackendResult<Self> {
-        Ok(Self(CatalogCell::capture_source(
-            self.0.snapshot(),
-            Some(registry),
-            TableMetadata::capture_with_control,
-        )?))
     }
 
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
@@ -56,17 +47,15 @@ impl<T: TableMetadataValue> TableMetadataCell<T> {
     pub(crate) fn source_snapshot(
         &self,
         registry: Option<&MemoryCaptureRegistry>,
-    ) -> StorageBackendResult<CatalogSnapshot<TableMetadata<T>>> {
+    ) -> StorageBackendResult<CatalogSnapshot<TableMetadata<T>, F>> {
         self.0.source_snapshot(registry)
     }
 
-    pub(crate) fn restore(&self, snapshot: &Arc<TableMetadata<T>>) {
+    pub(crate) fn restore(&self, snapshot: &CatalogGeneration<TableMetadata<T>>) {
         self.0.restore(snapshot);
     }
 
-    pub(crate) fn key(
-        &self,
-    ) -> StorageBackendResult<MemoryCaptureKey<CapturedMemoryValue<TableMetadata<T>>>> {
+    pub(crate) fn key(&self) -> StorageBackendResult<MemoryCaptureKey<CapturedMemoryValue<F>>> {
         self.0.key()
     }
 
@@ -74,5 +63,36 @@ impl<T: TableMetadataValue> TableMetadataCell<T> {
         &self,
     ) -> TableMetadataWrite<T, MemoryCaptureWriteGuard<'_, TableMetadata<T>>> {
         TableMetadata::write(self.0.write())
+    }
+}
+
+impl<T: TableMetadataValue> TableMetadataCell<T> {
+    pub(crate) fn capture_source(
+        self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self(CatalogCell::capture_source(
+            self.0.snapshot(),
+            Some(registry),
+            TableMetadata::capture_with_control,
+        )?))
+    }
+}
+
+impl
+    TableMetadataCell<
+        uqa_sql::catalog::security::BoundTableSecurity,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >
+{
+    pub(crate) fn capture_source(
+        self,
+        registry: &MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self(CatalogCell::capture_source(
+            self.0.snapshot(),
+            Some(registry),
+            |value, control| value.capture_security(control),
+        )?))
     }
 }

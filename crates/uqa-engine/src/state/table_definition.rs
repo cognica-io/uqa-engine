@@ -6,9 +6,8 @@
 
 //! Table expression locks publish SQL-owned immutable generations before changing retained source identities.
 
-use super::{CatalogCell, CatalogSnapshot};
+use super::{CatalogCell, CatalogGeneration, CatalogSnapshot};
 use parking_lot::MappedRwLockReadGuard;
-use std::sync::Arc;
 use uqa_sql::catalog::table_definition::{
     SharedTableDefinition, TableDefinition, TableDefinitionValue,
 };
@@ -28,11 +27,11 @@ impl<T: TableDefinitionValue> TableDefinitionCell<T> {
         )))
     }
 
-    pub(crate) fn from_generation(value: Arc<TableDefinition<T>>) -> Self {
+    pub(crate) fn from_generation(value: impl Into<CatalogGeneration<TableDefinition<T>>>) -> Self {
         Self(CatalogCell::from_snapshot(value))
     }
 
-    pub(crate) fn generation(&self) -> Arc<TableDefinition<T>> {
+    pub(crate) fn generation(&self) -> CatalogGeneration<TableDefinition<T>> {
         self.0.snapshot()
     }
 
@@ -67,7 +66,7 @@ impl<T: TableDefinitionValue> TableDefinitionCell<T> {
         self.0.source_snapshot(registry)
     }
 
-    pub(crate) fn restore(&self, snapshot: &Arc<TableDefinition<T>>) {
+    pub(crate) fn restore(&self, snapshot: &CatalogGeneration<TableDefinition<T>>) {
         self.0.restore(snapshot);
     }
 

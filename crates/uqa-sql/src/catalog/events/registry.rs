@@ -93,6 +93,12 @@ impl<T> EventDefinitions<T> {
             entries: RetainedMap::new(memory),
         }
     }
+
+    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            entries: self.entries.into_mutation_budget(memory),
+        }
+    }
     pub fn get(&self, name: &str) -> Option<&T> {
         self.entries.get(name).map(|value| &**value)
     }
@@ -201,6 +207,12 @@ impl<T> EventCatalog<T> {
     pub fn with_budget(memory: &MemoryBudget) -> Self {
         Self {
             relations: DefinitionRegistry::with_budget(memory),
+        }
+    }
+
+    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            relations: self.relations.into_mutation_budget(memory),
         }
     }
     pub fn get(&self, relation: &RelationIdentity) -> Option<&EventDefinitions<T>> {

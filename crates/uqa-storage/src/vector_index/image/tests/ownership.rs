@@ -155,3 +155,94 @@ fn imported_vector_rejection_and_unwinding_release_every_native_owner() {
         assert_eq!(memory.memory().used(), 0);
     }
 }
+
+#[test]
+fn controlled_vector_registration_admits_exact_headers_and_retires_failed_inputs() {
+    for source in owners() {
+        let bytes = encode(&*source);
+        drop(source);
+        let registry = MemoryCaptureRegistry::new();
+        let payload = StorageReadControl::with_limit(32 << 20);
+        let probe = StorageReadControl::with_limit(4096);
+        let restored = read_vector_image(&mut bytes.as_slice(), &payload).unwrap();
+        let registered = restored
+            .into_memory_capture_with_control(&registry, &probe)
+            .unwrap();
+        let required = probe.memory().used();
+        assert!(required > 0);
+        drop(registered);
+        assert_eq!(probe.memory().used(), 0);
+        assert_eq!(payload.memory().used(), 0);
+
+        for limit in [0, 1, required - 1, required] {
+            let input = StorageReadControl::with_limit(limit);
+            let restored = read_vector_image(&mut bytes.as_slice(), &payload).unwrap();
+            let result = restored.into_memory_capture_with_control(&registry, &input);
+            if limit < required {
+                assert!(matches!(result, Err(crate::StorageBackendError::Memory(_))));
+            } else {
+                let registered = result.unwrap();
+                assert_eq!(input.memory().used(), required);
+                let key = registered.memory_capture().unwrap().key().unwrap();
+                let denied = StorageReadControl::with_limit(0);
+                let registered = registered
+                    .into_memory_capture_with_control(&registry, &denied)
+                    .unwrap();
+                assert!(key.same_source(&registered.memory_capture().unwrap().key().unwrap()));
+                assert_eq!(input.memory().used(), required);
+                assert_eq!(denied.memory().used(), 0);
+                assert!(registered
+                    .into_memory_capture_with_control(&MemoryCaptureRegistry::new(), &input)
+                    .is_err());
+            }
+            assert_eq!(input.memory().used(), 0);
+            assert_eq!(payload.memory().used(), 0);
+            assert!(input.memory().peak() <= limit);
+        }
+        let cancelled = StorageReadControl::with_limit(required);
+        let restored = read_vector_image(&mut bytes.as_slice(), &payload).unwrap();
+        cancelled.cancellation().cancel();
+        assert!(matches!(
+            restored.into_memory_capture_with_control(&registry, &cancelled),
+            Err(crate::StorageBackendError::Cancelled(_))
+        ));
+        assert_eq!(cancelled.memory().used(), 0);
+        assert_eq!(payload.memory().used(), 0);
+    }
+}
+
+#[test]
+fn controlled_vector_sources_preserve_original_cuts_after_input_cancellation() {
+    for source in owners() {
+        let expected = encode(&*source);
+        drop(source);
+        let input = StorageReadControl::with_limit(32 << 20);
+        let registry = MemoryCaptureRegistry::new();
+        let mut restored = read_vector_image(&mut expected.as_slice(), &input)
+            .unwrap()
+            .into_memory_capture_with_control(&registry, &input)
+            .unwrap();
+        let key = restored.memory_capture().unwrap().key().unwrap();
+        let output = StorageReadControl::with_limit(32 << 20);
+        let cut = registry.capture(&output).unwrap();
+        input.cancellation().cancel();
+        restored.delete(9).unwrap();
+        restored.add(41, vec![0.25, 0.75]).unwrap();
+        let before_training = (restored.index_kind() == "ivf").then(|| encode(&*restored));
+        restored.search_knn(&[1.0, 0.0], 8).unwrap();
+        if let Some(before_training) = before_training {
+            assert_ne!(encode(&*restored), before_training);
+        }
+        drop(restored);
+        let image = key.captured(&cut).unwrap();
+        drop((cut, registry));
+        let working = StorageReadControl::with_limit(1 << 20);
+        let mut actual = Vec::new();
+        image.write_image(&mut actual, &working).unwrap();
+        assert_eq!(actual, expected);
+        drop(image);
+        assert_eq!(input.memory().used(), 0);
+        assert_eq!(output.memory().used(), 0);
+        assert_eq!(working.memory().used(), 0);
+    }
+}

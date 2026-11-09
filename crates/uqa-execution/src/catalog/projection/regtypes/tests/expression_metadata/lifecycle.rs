@@ -12,7 +12,7 @@ fn expression_output_metadata_follows_its_retained_generation() {
     let resolution = CatalogServices::default().resolution;
     let old = AliasConstantOutput::build(&catalog, &resolution).unwrap();
     let mut snapshot = catalog.snapshot().clone();
-    let domains = Arc::make_mut(&mut snapshot.definitions.domains);
+    let domains = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains);
     let mut domain = domains.get("hidden.positive").unwrap().clone();
     domains.remove("hidden.positive").unwrap();
     domain.identity.name = "renamed".into();
@@ -29,7 +29,7 @@ fn expression_output_metadata_follows_its_retained_generation() {
         Some("hidden.positive".into())
     );
     assert!(!Arc::ptr_eq(&old.catalog, &new.catalog));
-    snapshot.definitions.domains = Arc::default();
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::default();
     let removed = CatalogReadView::new(snapshot);
     let removed = AliasConstantOutput::build(&removed, &resolution).unwrap();
     assert_eq!(removed.text(&ColumnType::Regtype, 60_000), None);
@@ -45,7 +45,7 @@ fn expression_output_metadata_follows_its_retained_generation() {
 fn failed_expression_output_metadata_is_not_published() {
     let catalog = fixture(0);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .edit("hidden.echo", |overloads| {
             let mut definition = overloads[0].def.clone();
             definition.catalog_oid = None;

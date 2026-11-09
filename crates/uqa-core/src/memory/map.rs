@@ -12,13 +12,15 @@ mod shared;
 mod tests;
 mod tree;
 
-pub use owned::{OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter};
+pub use owned::{
+    OwnedMap, OwnedMapIntoIter, OwnedMapRange, OwnedSet, OwnedSetIntoIter, OwnedSetIter,
+};
 pub use shared::{
     BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
     BudgetedSharedMapSnapshot, PreparedSharedMapInsert,
 };
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, ops::Bound};
 
 use super::{Budgeted, MemoryBudget, MemoryError, MemoryReservation};
 
@@ -188,21 +190,45 @@ impl<K: Ord + Borrow<Q>, V, Q: Ord + ?Sized> std::ops::Index<&Q> for BudgetedMap
 // Every two AVL levels at least double the minimum node count. Even zero-sized keys and values need nonzero links, so this exceeds every addressable tree's height.
 const MAX_HEIGHT: usize = usize::BITS as usize * 2;
 
-pub struct BudgetedMapIter<'a, K, V> {
+struct MapCursor<'a, K, V> {
     stack: [Option<&'a Node<K, V>>; MAX_HEIGHT],
     depth: usize,
-    remaining: usize,
 }
 
-impl<'a, K, V> BudgetedMapIter<'a, K, V> {
-    fn new(root: &'a Link<K, V>, len: usize) -> Self {
-        let mut iter = Self {
+impl<'a, K, V> MapCursor<'a, K, V> {
+    fn new(root: &'a Link<K, V>) -> Self {
+        let mut cursor = Self {
             stack: [None; MAX_HEIGHT],
             depth: 0,
-            remaining: len,
         };
-        iter.push_left(root.as_ref().map(|node| &***node));
-        iter
+        cursor.push_left(root.as_ref().map(|node| &***node));
+        cursor
+    }
+
+    fn from_bound<Q: Ord + ?Sized>(root: &'a Link<K, V>, start: Bound<&Q>) -> Self
+    where
+        K: Borrow<Q>,
+    {
+        let mut cursor = Self {
+            stack: [None; MAX_HEIGHT],
+            depth: 0,
+        };
+        let mut link = root;
+        while let Some(node) = link {
+            let included = match start {
+                Bound::Unbounded => true,
+                Bound::Included(key) => node.key.borrow() >= key,
+                Bound::Excluded(key) => node.key.borrow() > key,
+            };
+            if included {
+                cursor.stack[cursor.depth] = Some(&node.value);
+                cursor.depth += 1;
+                link = &node.left;
+            } else {
+                link = &node.right;
+            }
+        }
+        cursor
     }
 
     fn push_left(&mut self, mut node: Option<&'a Node<K, V>>) {
@@ -212,15 +238,34 @@ impl<'a, K, V> BudgetedMapIter<'a, K, V> {
             node = current.left.as_ref().map(|node| &***node);
         }
     }
+
+    fn next(&mut self) -> Option<&'a Node<K, V>> {
+        self.depth = self.depth.checked_sub(1)?;
+        let node = self.stack[self.depth].take().expect("retained map node");
+        self.push_left(node.right.as_ref().map(|node| &***node));
+        Some(node)
+    }
+}
+
+pub struct BudgetedMapIter<'a, K, V> {
+    cursor: MapCursor<'a, K, V>,
+    remaining: usize,
+}
+
+impl<'a, K, V> BudgetedMapIter<'a, K, V> {
+    fn new(root: &'a Link<K, V>, len: usize) -> Self {
+        Self {
+            cursor: MapCursor::new(root),
+            remaining: len,
+        }
+    }
 }
 
 impl<'a, K, V> Iterator for BudgetedMapIter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.depth = self.depth.checked_sub(1)?;
-        let node = self.stack[self.depth].take().expect("retained map node");
-        self.push_left(node.right.as_ref().map(|node| &***node));
+        let node = self.cursor.next()?;
         self.remaining -= 1;
         Some((&node.key, &node.value))
     }

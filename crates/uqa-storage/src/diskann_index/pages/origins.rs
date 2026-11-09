@@ -112,6 +112,16 @@ impl DiskANNOriginReader {
         maximum: usize,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::open_with_owner(source, maximum, control, control)
+    }
+
+    /// Validate and admit the complete origin stream before installing the destination owner's runtime control. Existing source and decoded allocations retain their admission leases.
+    pub(in crate::diskann_index) fn open_with_owner(
+        source: Arc<dyn DiskANNPageSource>,
+        maximum: usize,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
         let bytes = read_record(&*source, DiskANNRecordKey::Manifest, maximum, control)?;
         let manifest = DiskANNManifest::decode(source.generation(), &bytes, control)?;
         drop(bytes);
@@ -132,7 +142,7 @@ impl DiskANNOriginReader {
         control.check()?;
         let retained = Retained {
             source,
-            control: control.clone(),
+            control: owner.clone(),
             manifest,
             layout,
             documents,

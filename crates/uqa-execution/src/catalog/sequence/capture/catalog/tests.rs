@@ -7,7 +7,6 @@
 use super::*;
 use crate::catalog::security::roles::persistence::RoleCatalogSnapshot;
 use crate::catalog::sequence::registry::{SequenceCatalog, SequenceRecord};
-use std::sync::Arc;
 use uqa_core::{catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken};
 
 fn state() -> SequenceState {
@@ -70,10 +69,10 @@ fn fixture() -> SequenceReadSnapshot {
         .replace_catalog_oids([([2; 16], 31_001), ([3; 16], 31_002), ([9; 16], 31_999)])
         .unwrap();
     SequenceReadSnapshot {
-        catalog: Arc::new(catalog),
+        catalog: uqa_core::memory::RetainedValue::new(catalog),
         roles: RoleCatalogSnapshot {
-            roles: Arc::default(),
-            memberships: Arc::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            memberships: uqa_core::memory::RetainedValue::default(),
         },
     }
 }
@@ -87,7 +86,7 @@ fn durable_sequence_capture_joins_exact_metadata_and_excludes_temporary_capacity
     let original = durable_sequences(&source, &control).unwrap();
     let retained = memory.used();
     let temp = RelationIdentity::new("pg_temp_1", "t".repeat(1 << 20));
-    Arc::make_mut(&mut source.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut source.catalog)
         .insert(
             temp,
             SequenceRecord {
@@ -134,7 +133,7 @@ fn durable_sequence_capture_retains_complete_metadata_after_rejected_publication
         ..*source.catalog.get(&selected).unwrap()
     };
     assert_eq!(
-        Arc::make_mut(&mut source.catalog)
+        uqa_core::memory::RetainedValue::make_mut(&mut source.catalog)
             .insert(
                 selected.clone(),
                 replacement,
@@ -180,7 +179,7 @@ fn sequence_capture_preserves_extreme_positions_definition_and_owner_identity() 
     drop(captured);
     assert_eq!(memory.used(), 0);
     let mut source = fixture();
-    let catalog = Arc::make_mut(&mut source.catalog);
+    let catalog = uqa_core::memory::RetainedValue::make_mut(&mut source.catalog);
     catalog
         .insert(
             RelationIdentity::new("s", "x".repeat(32768)),

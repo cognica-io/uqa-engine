@@ -207,3 +207,38 @@ fn native_routine_image_output_borrows_large_source_and_has_terminal_failure() {
     assert!(failed.read(&mut buffer).is_err());
     assert_eq!(scratch.used(), 0);
 }
+
+#[test]
+fn native_routine_input_keeps_original_overloads_after_destination_edits() {
+    let bytes = encode(&fixture());
+    let input = MemoryBudget::new(1 << 24);
+    let mutations = MemoryBudget::new(1 << 24);
+    let token = CancellationToken::new();
+    let mut restored = RoutineRegistry::read_image_with_mutation_budget(
+        &mut bytes.as_slice(),
+        &input,
+        &mutations,
+        &token,
+    )
+    .unwrap();
+    let original = restored.clone();
+    let occupied = input.reserve(input.available()).unwrap();
+    token.cancel();
+    restored
+        .edit("public.f", |overloads| {
+            overloads.truncate(1);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(restored["public.f"].len(), 1);
+    assert_eq!(original["public.f"].len(), 6);
+    assert_eq!(encode(&original), bytes);
+    assert!(restored.remove("public.f").unwrap());
+    drop(restored);
+    assert_eq!(mutations.used(), 0);
+    assert!(input.used() > occupied.bytes());
+    drop(original);
+    assert_eq!(input.used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(input.used(), 0);
+}

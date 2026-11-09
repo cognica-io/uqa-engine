@@ -49,7 +49,20 @@ impl ViewDefinitions {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
-        super::super::super::input::views(reader, memory, cancellation)
+        Self::read_image_with_mutation_budget(reader, memory, memory, cancellation)
+    }
+
+    /// Construct original definitions under the input allowance and fund subsequent native mutations through the destination owner. Captures and untouched definitions retain their original reservations without keeping input cancellation.
+    pub fn read_image_with_mutation_budget(
+        reader: &mut dyn std::io::Read,
+        input: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        Ok(
+            super::super::super::input::views(reader, input, cancellation)?
+                .into_mutation_budget(mutations),
+        )
     }
 }
 

@@ -53,12 +53,24 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> RetainedDiskANNIndex<S> {
         limits: DiskANNReadLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::open_with_owner(canonical, source, parameters, limits, control, control)
+    }
+
+    /// Keep private preparation under admission control while every completed canonical/query/origin owner uses the destination lifetime.
+    pub(in crate::diskann_index) fn open_with_owner(
+        canonical: S,
+        source: Arc<dyn DiskANNPageSource>,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
         let DiskANNQuery {
             reader,
             origins,
             control: original,
             ..
-        } = DiskANNQuery::open(&canonical, source, parameters, limits, control)?;
+        } = DiskANNQuery::open_with_owner(&canonical, source, parameters, limits, control, owner)?;
         let retained = Retained {
             canonical,
             reader,

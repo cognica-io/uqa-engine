@@ -303,7 +303,7 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
         object_id: [91; 16],
         oid,
     });
-    snapshot.definitions.domains =
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter([(
             "hidden_schema.peer".into(),
             uqa_sql::catalog::domain::StoredDomain {
@@ -317,8 +317,8 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
                 usage_acl: None,
             },
         )])
-        .unwrap()
-        .into();
+        .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 
@@ -649,7 +649,7 @@ fn type_reservations_check_both_catalog_generations_without_projecting_type_rows
         let session = Session::new();
         let candidate = 16_384;
         let mut snapshot = domain_occupied(50_001).snapshot().clone();
-        std::sync::Arc::make_mut(&mut snapshot.definitions.domains)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
             .edit("hidden_schema.peer", |domain| {
                 domain.oid = candidate;
                 domain.array_oid = Some(candidate + 1);

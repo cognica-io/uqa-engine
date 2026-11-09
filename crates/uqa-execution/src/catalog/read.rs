@@ -14,6 +14,7 @@ mod production;
 mod tests;
 
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::catalog::roles::RoleReference;
 
@@ -540,7 +541,7 @@ impl CatalogReadView {
     /// Share the captured domain allocation with static signature analysis.
     pub fn domain_snapshot(
         &self,
-    ) -> Arc<
+    ) -> RetainedValue<
         uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
     > {
         self.snapshot.definitions.domains.clone()

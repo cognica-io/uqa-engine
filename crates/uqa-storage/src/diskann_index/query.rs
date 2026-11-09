@@ -58,6 +58,18 @@ impl<'a> DiskANNQuery<'a> {
         limits: DiskANNReadLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::open_with_owner(canonical, source, parameters, limits, control, control)
+    }
+
+    /// Admission controls preparation; the completed owner supplies its runtime cancellation. Prepared allocations retain their original admission leases.
+    pub(in crate::diskann_index) fn open_with_owner(
+        canonical: &'a dyn DiskANNQueryRead,
+        source: Arc<dyn DiskANNPageSource>,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
         canonical.check_control(control)?;
         let reader = DiskANNReader::open(
             source.clone(),
@@ -66,7 +78,8 @@ impl<'a> DiskANNQuery<'a> {
             limits,
             control,
         )?;
-        let origins = DiskANNOriginReader::open(source, limits.max_record_bytes, control)?;
+        let origins =
+            DiskANNOriginReader::open_with_owner(source, limits.max_record_bytes, control, owner)?;
         if reader.manifest() != origins.manifest() {
             return Err(invalid(
                 "physical manifest changed while preparing the query",
@@ -77,7 +90,7 @@ impl<'a> DiskANNQuery<'a> {
             canonical,
             reader,
             origins,
-            control: control.clone(),
+            control: owner.clone(),
         })
     }
 

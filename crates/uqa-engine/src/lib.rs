@@ -139,6 +139,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, Value};
@@ -217,8 +218,9 @@ pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
-type SessionPortalViewSnapshots = Arc<uqa_sql::catalog::stored_view::ViewDefinitions>;
-type SessionPortalSQLFunctionSnapshots = Arc<uqa_sql::routines::registry::RoutineRegistry>;
+type SessionPortalViewSnapshots = RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>;
+type SessionPortalSQLFunctionSnapshots =
+    RetainedValue<uqa_sql::routines::registry::RoutineRegistry>;
 type SessionPortalCatalogSnapshot = Arc<session::RetainedCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
@@ -575,7 +577,7 @@ struct TableDataSnapshot {
     persistence: uqa_sql::ast::RelationPersistence,
     on_commit: uqa_sql::ast::OnCommitAction,
     security: state::CatalogSnapshot<
-        state::BoundTableSecurity,
+        uqa_sql::catalog::table_metadata::TableMetadata<state::BoundTableSecurity>,
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,
     storage_generation: state::CatalogSnapshot<[u8; 16]>,
@@ -634,7 +636,7 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<
+    security: state::TableMetadataCell<
         state::BoundTableSecurity,
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,

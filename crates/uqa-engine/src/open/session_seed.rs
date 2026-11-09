@@ -103,7 +103,9 @@ impl Engine {
         Arc::new(TableState {
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
-            security: CatalogCell::from_snapshot(source.security.snapshot()),
+            security: crate::state::TableMetadataCell::from_generation(
+                source.security.generation(),
+            ),
             storage_generation: crate::state::CatalogCell::new(source.storage_generation()),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
                 storage.backend.document_store(name),

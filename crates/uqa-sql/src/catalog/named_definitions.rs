@@ -94,6 +94,21 @@ impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K
     }
 }
 
+impl<T, K: DefinitionKey, V: NamedDefinitionView<T, K>> NamedDefinitionView<T, K>
+    for uqa_core::memory::RetainedValue<V>
+{
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a K, &'a T)>
+    where
+        T: 'a,
+        K: 'a,
+    {
+        self.as_ref().iter()
+    }
+    fn get(&self, name: &K::View) -> Option<&T> {
+        self.as_ref().get(name)
+    }
+}
+
 pub(crate) mod sealed {
     pub trait Definition {}
     pub trait Key {}
@@ -167,6 +182,13 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
             durable: RetainedMap::new(memory),
             temporary: RetainedMap::new(memory),
         }
+    }
+
+    /// Select the destination allowance for future edits. Original entries and all captured predecessors keep their own reservations.
+    pub(crate) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.durable = self.durable.into_mutation_budget(memory);
+        self.temporary = self.temporary.into_mutation_budget(memory);
+        self
     }
 
     /// Observe both immutable membership roots without comparing or copying declarations.

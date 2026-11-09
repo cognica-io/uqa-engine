@@ -389,7 +389,7 @@ impl Engine {
                         load,
                     )?
                 };
-                table.column_stats.restore(&stats);
+                table.column_stats.restore(&stats.into());
                 *table.column_stats_loaded.write() = true;
             }
             let dirty = (table.column_stats.read().is_empty() && !table.columns.read().is_empty())

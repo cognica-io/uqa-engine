@@ -7,7 +7,7 @@
 //! A temporary type reference follows the invoking session, including array syntax and quoted names.
 
 use crate::catalog::{cache::RegtypeOutputCache, test_support, CatalogReadView};
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_sql::{catalog::domain::StoredDomain, ColumnType};
 
@@ -41,7 +41,7 @@ fn qualified_temporary_types_follow_the_session_namespace() {
         })
         .collect();
     let mut snapshot = test_support::empty_catalog().snapshot().clone();
-    snapshot.definitions.domains = Arc::new(
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(domains.clone())
             .unwrap(),
     );

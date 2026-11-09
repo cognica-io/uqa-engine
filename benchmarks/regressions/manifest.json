@@ -49865,14 +49865,16 @@
       "package": "uqa-engine",
       "kind": "test",
       "test": "public_memory_backup_publishes_full_and_independent_incremental_roots",
-      "cases": 2,
+      "cases": 4,
       "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
       "capability": "Public memory full and incremental export",
-      "workload": "Publish plain and protected complete memory backups, capture a no-op child, mutate and close the source, remove the parent and verify the child repository root.",
-      "invariant": "No-op capture reuses every original unit without new payload writes; child publication is idempotent and the verified child remains independent of its removed parent and source.",
+      "workload": "Publish plain and protected memory roots and unchanged or committed-change children; exclude private writes, retire the source, remove the parent and read exact child documents.",
+      "invariant": "Unchanged children reuse every unit; changed children write and reuse units together. Both preserve exact committed documents after parent and source retirement, and publication is idempotent.",
       "case_names": [
         "case_1_plain",
-        "case_2_protected"
+        "case_2_protected",
+        "case_3_plain_changed",
+        "case_4_protected_changed"
       ]
     },
     {
@@ -50313,6 +50315,724 @@
       "capability": "Writable text publication admission",
       "workload": "Exhaust final header admission, cancel private publication and unwind after native adoption.",
       "invariant": "No rejected destination escapes; payload and binding owners release their original admission on every failure path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "lower_bound_ranges_match_ordered_reference_without_allocating_or_retaining_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/ranges.rs",
+      "capability": "Native ordered document traversal",
+      "workload": "Compare inclusive, exclusive and unbounded lower bounds with BTreeMap including zero and the maximum identity.",
+      "invariant": "Exact ordered membership, fused exhaustion and zero traversal allocations preserve all live node leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_document_images_preserve_exact_input_and_native_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Writable native document input",
+      "workload": "Adopt an independent wire fixture and original payloads, then apply native writes, patches, deletes and snapshots.",
+      "invariant": "Original field/value allocations and private tuple metadata survive; ordinary mutations preserve snapshot contents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "shared_document_rows_retain_original_payload_after_all_store_roots_retire",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Escaping document ownership",
+      "workload": "Retain projected aliases after clearing and dropping their source store.",
+      "invariant": "The original payload stays charged and byte-identical until the last native reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "writable_document_snapshots_keep_image_names_and_values_through_copy_on_write",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Native document snapshot ownership",
+      "workload": "Clone, independently capture and mutate a restored document corpus.",
+      "invariant": "Selected names and values retain their original leases through copy-on-write and release every allowance on final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_document_publication_rejects_partial_foreign_duplicate_and_cancelled_corpora",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Atomic document input admission",
+      "workload": "Reject foreign, incomplete and exhausted allowances, duplicate identities, cancellation and unwinding.",
+      "invariant": "No partially constructed corpus escapes and every allocation lease is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "completed_document_import_is_writable_after_input_cancellation_and_legacy_export",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Completed document input lifecycle",
+      "workload": "Cancel the input after publication, mutate native storage and export a fresh document image.",
+      "invariant": "Completed native owners remain writable, independently exported values remain correct and source leases retire exactly.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_physical_readers_retain_input_through_projection_and_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Physical document lifetime",
+      "workload": "Project, join and prefix retained input, then retire every source store and predecessor.",
+      "invariant": "Original selected payload pointers and NULL projection remain correct with admission retained through the final fragment.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_selected_output_moves_original_payload_after_row_aliases_retire",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Selected native result ownership",
+      "workload": "Materialize one selected field from joined aliases and a large unused payload.",
+      "invariant": "The selected original allocation moves without copying unused values; output allocation stays within the unchanged 8192-byte bound.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_selected_output_keeps_unconsumed_input_admitted_during_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Failed native result consumer",
+      "workload": "Panic while consuming a selected value after source retirement.",
+      "invariant": "Unconsumed values remain charged during the callback and all original leases retire during unwinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_document_cached_physical_projection_has_no_per_row_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/batch/tests/document_ownership.rs",
+      "capability": "Cached native projection allocation",
+      "workload": "Create 128 physical readers from one cached nonidentity projection.",
+      "invariant": "Every reader shares original values and slots with zero per-row allocation and complete final allowance release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_document_identity_collection_allocates_only_its_complete_output_buffer",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Exact native document collection capacity",
+      "workload": "Collect all identities from ordinary and admitted 1024-row corpora and advance each complete native iterator.",
+      "invariant": "Exact ordered identities allocate only the output buffer, iterator size hints remain exact and original admission retires completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_keys_keep_original_buffers_and_leases_through_native_map_mutations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Adopt a string key, replace its value under a different allowance, mutate in sorted order and transfer its node.",
+      "invariant": "Original key pointer and complete key/node reservation survive replacement and extraction; mutable traversal allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_key_node_rejection_releases_input_without_changing_the_map",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Use a fully occupied key allowance before native node admission.",
+      "invariant": "Node rejection retires the incoming key and preserves the original map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_import_retains_original_field_buffers_and_writable_capture",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Import exact vector fields with their original admitted names, exhaust and cancel input admission, mutate data and register a new field, then retire the source while retaining its exact captured child.",
+      "invariant": "The original field buffer is adopted; the retained image matches its original bytes and every allowance releases after the last reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_import_rejects_duplicate_foreign_short_and_cancelled_names",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Add duplicate, foreign-allowance, under-admitted and cancelled field registrations after a valid first index.",
+      "invariant": "Each rejected consuming transition retires all partial membership and input payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_registration_admission_failure_retires_all_partial_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests.rs",
+      "capability": "Native admitted index registration",
+      "workload": "Exhaust remaining admission before adding a second decoded native index.",
+      "invariant": "No partial collection escapes; only the independently held blocker reservation survives rejection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_authority_metadata_keeps_native_acl_buffers_and_nested_node_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Adopt a native authority image, retain shared readers, detach a mutation and release the source.",
+      "invariant": "Original ACL/name buffers and complete native map-node admission survive until the final reader; exact capture admission includes nested nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "imported_authority_metadata_rejects_header_exhaustion_and_cancelled_adoption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Exhaust the remaining sharing-header allowance or cancel after native authority decoding.",
+      "invariant": "Adoption returns no generation and releases every decoded payload and node reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "authority_metadata_mutation_after_input_cancellation_recounts_native_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Cancel the completed input and mutate the adopted ACL and revision maps through the existing metadata write owner.",
+      "invariant": "The detached native generation remains writable; old image admission retires and surviving tuple revisions are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_table_authority_survives_sql_rollback_and_retained_reader_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/memory_capture_tests/table_authority.rs",
+      "capability": "Native table authority ownership",
+      "workload": "Adopt an authority generation, retain a privilege reader, cancel input, revoke with rollback and finally revoke/drop across all four providers.",
+      "invariant": "Rollback restores the original ACL bytes; the independent reader preserves original buffers through Engine closure and releases the final input allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_mutation_allowance_transfer_keeps_original_nodes_and_payload_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Native map mutation admission",
+      "workload": "Transfer a retained map under exhausted input admission, mutate its successor and retire independent snapshots.",
+      "invariant": "Changing future allocation ownership copies no entries; original payload and node leases remain live until their last root retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_btree_keys_match_native_ranges_and_keep_original_input_until_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Admitted physical scalar index",
+      "workload": "Compare exact, range, NULL and set probes with the native index, then clone and mutate after input cancellation.",
+      "invariant": "Original field/key buffers and ordered identity buckets survive input, and unchanged predicate results and independent copied indexes retain valid ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_btree_rejection_retires_unfunded_foreign_unordered_and_cancelled_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Physical index input rejection",
+      "workload": "Deny foreign and incomplete leases, repeated bucket identities, exhausted allowance and cancellation.",
+      "invariant": "Rejected construction consumes its complete partial owner and releases every original field, key and identity-buffer allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_preserves_independent_policy_bytes_and_original_value_buffers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Native evaluated-index policy",
+      "workload": "Import 24 historical-policy combinations with full-width identities, NULL, text, negative zero and a selected NaN bit pattern.",
+      "invariant": "Metadata bytes and every evaluated value image remain exact after source retirement and input cancellation, including original text pointers and final lease release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_preserves_probes_and_historical_policy_through_mutation_and_spill",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Writable evaluated-index input",
+      "workload": "Compare probes and cardinality with a native resident index, preserve an earlier capture through replacement, and force later spill for key and carried policies.",
+      "invariant": "Native queries and mutations preserve selected values; backing migration retains independent historical eligibility instead of deriving it only from surviving keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_input_rejects_partial_foreign_unordered_unfunded_and_cancelled_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Evaluated input admission",
+      "workload": "Reject missing values, foreign allowance, duplicate identities, unfunded payload, exhausted budget, cancellation and a row-policy contradiction.",
+      "invariant": "Every rejected consuming construction releases the complete partial owner and leaves no original input allocations behind.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_evaluated_mutations_keep_original_owners_under_exhausted_input_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Independent native mutation admission",
+      "workload": "Exhaust and cancel a completed input allowance, then insert and remove values while an earlier capture remains live.",
+      "invariant": "Ordinary mutations use their native production boundary; the retained original value stays admitted until its final consumer retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_value_registrations_preserve_original_names_and_exact_captured_children",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/image/tests.rs",
+      "capability": "Admitted evaluated-index membership",
+      "workload": "Adopt original names and evaluated children, exhaust and cancel input admission, replace and add registrations, then retire all sources while retaining the original selected child.",
+      "invariant": "The live name keeps its original pointer and a selected child remains exact and independently owned after source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_value_registration_rejection_retires_complete_partial_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/collection/image/tests.rs",
+      "capability": "Evaluated membership rejection",
+      "workload": "Reject duplicate names, foreign or incomplete admission, exhausted capacity and cancellation after an existing registration.",
+      "invariant": "Failure consumes and releases every partial name, source registration and native allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_carried_input_preserves_unobserved_policy_and_later_search_key_conversion",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests.rs",
+      "capability": "Writable evaluated value image input",
+      "workload": "Decode carried row and temporal values whose original key-to-carried conversion cleared all comparison flags, then convert the restored carrier to a search key.",
+      "invariant": "Carried input preserves exact stored bytes and unobserved flags without rejecting values; later key conversion matches the native owner and releases original reservations on retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cloned_admitted_btree_keeps_shared_opaque_key_payloads_after_original_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Writable evaluated scalar index ownership",
+      "workload": "Clone a writable imported physical index with a 2-MiB opaque Datum key, retire the original owner, then mutate and remove its shared key.",
+      "invariant": "The original payload reservation survives every cloned key alias and ordinary bucket mutation, then retires with the last key; no Datum is interpreted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "immutable_successors_keep_original_entries_across_construction_allowances",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/tests.rs",
+      "capability": "Immutable native source succession",
+      "workload": "Retain an immutable root, exhaust its original allowance and create insertion/removal successors under another allowance; then exhaust successor admission and reject changes.",
+      "invariant": "Unchanged entries keep their exact buffers and original reservations; only new paths use the selected budget, failed changes preserve every predecessor, and final retirement releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_catalog_input_keeps_original_roles_while_destination_mutations_are_independent",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/native.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_database_input_retains_authority_until_its_last_reader_retires",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/native.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_authority_input_keeps_original_keys_after_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_input_keeps_original_definitions_after_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tests/domains.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_input_keeps_nested_originals_after_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_input_keeps_bound_plans_after_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_input_keeps_original_overloads_after_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests.rs",
+      "capability": "Native catalog input ownership",
+      "workload": "Decode original catalog images under one allowance, exhaust and cancel input, then edit the completed native owner under a separate destination allowance while retaining its predecessor.",
+      "invariant": "Original definitions, keys and bound plans remain readable with their original reservations; destination mutations use their own admission and final retirement releases every retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_catalog_edits_preserve_original_input_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_edits_preserve_original_input_leases",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_edits_keep_paired_original_input_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests/native.rs",
+      "capability": "backup native catalog ownership",
+      "workload": "Decode original catalog entries, exhaust and cancel their input allowance, mutate through a separate destination allowance and retain an unchanged predecessor.",
+      "invariant": "Original entries keep their exact payload reservations; destination rejection preserves both current and retained roots, and final retirement releases each allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_registration_failure_keeps_the_original_source_usable",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Reject a fixed source header one byte below its allocation, then register and mutate the same original source under an exact allowance.",
+      "invariant": "Failed registration leaves the source unregistered and usable; completed ownership survives input exhaustion/cancellation and preserves the original capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_source_headers_live_until_promoted_readers_retire",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Promote an existing weak source reader, retire its public owner and retain an independent captured image.",
+      "invariant": "The original header reservation remains owned until the last promoted source reader retires; surviving frozen values retain their separate allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_registration_observes_cancellation_while_publication_is_blocked",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Hold exclusive publication admission while an incoming source registers under a cancellable allowance.",
+      "invariant": "Cancellation terminates the blocked registration without consuming its value or publishing an identity; later native registration and mutation remain valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_shared_values_keep_original_bytes_until_the_last_reader_retires",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Exhaust an input allowance, detach an ordinary writable successor and retire independently shared original readers.",
+      "invariant": "The shared header retires with its last generation reader; shared payload reservations remain with native owners, including detached successors. Mutation neither consumes the input allowance nor changes retained values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_shared_values_preserve_identity_and_detach_only_shared_writes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Adopt the same native Arc twice, mutate one shared owner and then mutate its unique successor.",
+      "invariant": "Original pointer identity and native copy-on-write behavior are preserved; an unshared mutable successor keeps its allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "denied_shared_header_retires_the_consumed_payload_with_its_reservation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Admit a payload with a total allowance one byte below the required shared header.",
+      "invariant": "Header rejection consumes no published owner and releases all original payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "weak_value_identity_does_not_retain_admitted_bytes_or_match_reused_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Keep a non-owning cache identity after all readers retire and construct 64 equal replacement values.",
+      "invariant": "The key pins no admitted payload or header, preserves native shared identity, and never matches a replacement allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_catalog_generation_survives_snapshot_sources_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/catalog_cell.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Capture an admitted native catalog through independent source identities, cancel input, mutate and restore the saved generation.",
+      "invariant": "Undo and source readers preserve the original header; retirement releases original admission while the independently frozen cut remains readable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_native_catalog_projection_retains_original_header_without_allocating_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_index/snapshot/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Project an admitted registry through the public erased index snapshot and keep an independent snapshot after source retirement.",
+      "invariant": "Projection allocates no wrapper and keeps the original header admitted until the final projected reader retires; a non-owning identity pins no admitted bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "equal_shared_generations_preserve_constant_work_for_dependency_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_value/tests.rs",
+      "capability": "native shared catalog ownership",
+      "workload": "Compare the same and distinct equal native/admitted generations while independently counting payload comparisons.",
+      "invariant": "Shared dependency generations require no payload traversal; distinct equal owners preserve native equality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_registration_admits_exact_headers_and_retires_failed_inputs",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "backup native source ownership",
+      "workload": "Register exact, IVF, HNSW and DiskANN decoded owners under zero, short and exact header allowances, repeat the original registration and reject a different capture domain.",
+      "invariant": "Every new source and exclusive adapter is admitted before publication; rejection releases all consumed input allocations and repeated registration preserves the original identity and reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_sources_preserve_original_cuts_after_input_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
+      "capability": "backup native source ownership",
+      "workload": "Capture each decoded native vector kind, cancel construction, perform ordinary writes and query-triggered training, then retire the mutable source.",
+      "invariant": "Completed mutation remains independent of input cancellation, the retained image preserves the exact original bytes, and every input, capture and output allowance retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "imported_ivf_payload_admission_follows_promoted_native_source_readers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/tests/admission.rs",
+      "capability": "backup native source ownership",
+      "workload": "Build a named IVF registration, promote its native source reader and retire the complete collection while retaining an independent captured image.",
+      "invariant": "The builder admits the source header, decoded payload and header reservations survive the public collection until the promoted reader retires, and the independent image retains the original exact bytes.",
       "case_names": [
         ""
       ]

@@ -17,8 +17,8 @@ fn committed_event_roots_preserve_original_definitions_with_bounded_capture_work
         let relation = RelationIdentity::new("public", "items");
         let original_triggers = engine.durable.triggers.snapshot();
         let original_rules = engine.durable.rules.snapshot();
-        let trigger_owner = Arc::downgrade(&original_triggers);
-        let rule_owner = Arc::downgrade(&original_rules);
+        let trigger_owner = original_triggers.identity();
+        let rule_owner = original_rules.identity();
         let expected_triggers = serde_json::to_value(&original_triggers[&relation]).unwrap();
         let expected_rules = serde_json::to_value(&original_rules[&relation]).unwrap();
         drop((original_triggers, original_rules));
@@ -39,8 +39,8 @@ fn committed_event_roots_preserve_original_definitions_with_bounded_capture_work
         let (triggers, rules) = saved.unwrap();
         sql(&engine,"DROP TRIGGER saved_000 ON items; DROP RULE saved_000 ON items; ROLLBACK TO changed; COMMIT; DROP TABLE items; CREATE TABLE items(replacement text)");
         drop(engine);
-        assert!(trigger_owner.upgrade().is_none());
-        assert!(rule_owner.upgrade().is_none());
+        assert!(!trigger_owner.is_alive());
+        assert!(!rule_owner.is_alive());
         assert_eq!(triggers.get().unwrap().len(), 1);
         assert_eq!(rules.get().unwrap().len(), 1);
         assert_eq!(

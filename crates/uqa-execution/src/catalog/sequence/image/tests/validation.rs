@@ -13,7 +13,7 @@ fn sequence_image_rejects_duplicate_names_objects_and_effective_oids() {
         .catalog
         .get(&RelationIdentity::new("s", "q"))
         .unwrap();
-    Arc::make_mut(&mut source.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut source.catalog)
         .insert(
             RelationIdentity::new("s", "r"),
             SequenceRecord {

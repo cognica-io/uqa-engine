@@ -171,7 +171,7 @@ impl RoutineTypeCatalog for Catalog {
 }
 impl RoutineOverloadCatalog for Catalog {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::default()
+        uqa_core::memory::RetainedValue::default()
     }
     fn routine_search_path(&self) -> Vec<String> {
         vec!["public".into()]

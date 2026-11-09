@@ -20,7 +20,7 @@ fn committed_routine_roots_preserve_original_bodies_and_authority_with_bounded_c
             .iter()
             .map(|(name, values)| (name.clone(), values.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(&engine, "BEGIN; DROP FUNCTION saved_000(); CREATE FUNCTION saved_000() RETURNS integer LANGUAGE SQL RETURN 999; GRANT EXECUTE ON FUNCTION saved_000(text) TO PUBLIC; SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -55,7 +55,7 @@ fn committed_routine_roots_preserve_original_bodies_and_authority_with_bounded_c
             original_identity
         );
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert_eq!(saved.get().unwrap().len(), expected.len());
         for ((name, routines), (old_name, originals)) in saved.get().unwrap().iter().zip(&expected)
         {

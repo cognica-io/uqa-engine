@@ -67,6 +67,10 @@ impl SequenceSecurities {
     pub fn with_budget(memory: &MemoryBudget) -> Self {
         Self(DefinitionRegistry::with_budget(memory))
     }
+
+    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self(self.0.into_mutation_budget(memory))
+    }
     pub fn shares_roots(&self, other: &Self) -> bool {
         self.0.shares_roots(&other.0)
     }

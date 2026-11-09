@@ -22,7 +22,7 @@ fn committed_view_roots_retain_original_definitions_and_rows_with_bounded_captur
             .iter()
             .map(|(name, view)| (name.clone(), view.clone()))
             .collect::<Vec<_>>();
-        let weak = Arc::downgrade(&original);
+        let weak = original.identity();
         drop(original);
         sql(&engine, "BEGIN; DROP VIEW saved_000; CREATE VIEW saved_000 AS SELECT 999 AS value; REFRESH MATERIALIZED VIEW evaluated; SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -47,7 +47,7 @@ fn committed_view_roots_retain_original_definitions_and_rows_with_bounded_captur
             engine.durable.views.read()[&relation].object_id
         );
         drop(engine);
-        assert!(weak.upgrade().is_none());
+        assert!(!weak.is_alive());
         assert_eq!(saved.get().unwrap().len(), expected.len());
         for ((name, view), (old_name, old)) in saved.get().unwrap().iter().zip(&expected) {
             assert_eq!(name, old_name);

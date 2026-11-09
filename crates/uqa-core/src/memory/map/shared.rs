@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Immutable ordered roots share entries and unchanged subtrees under one allowance.
+//! Immutable ordered roots retain original entries and admit successor paths under their owning allowance.
 
 mod bidirectional;
 #[cfg(test)]
@@ -88,6 +88,38 @@ impl<K, V> BudgetedSharedMapSnapshot<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
+    /// Construct an immutable successor under the selected construction allowance. The selected root remains unchanged; existing entries and subtrees keep their original reservations. Unlike restoring a mutable owner, this operation admits every newly allocated path before publication and retains no writable access to the selected predecessor.
+    pub fn with_insert(
+        &self,
+        key: K,
+        value: V,
+        memory: &MemoryBudget,
+    ) -> Result<Self, MemoryError> {
+        let mut candidate = BudgetedSharedMap {
+            root: self.root.clone(),
+            len: self.len,
+            memory: memory.clone(),
+        };
+        candidate.try_insert(key, value)?;
+        Ok(candidate.snapshot())
+    }
+
+    /// Remove one identity in a new immutable generation, admitting only its new path under the selected allowance. Failure leaves the predecessor and every retained payload unchanged.
+    pub fn with_remove<Q: Ord + ?Sized>(
+        &self,
+        key: &Q,
+        memory: &MemoryBudget,
+    ) -> Result<Self, MemoryError>
+    where
+        K: Borrow<Q>,
+    {
+        let (root, removed) = tree::remove(&self.root, key, memory)?;
+        Ok(Self {
+            root,
+            len: self.len - usize::from(removed),
+        })
+    }
+
     /// Select the least entry at a lower bound without allocating or retaining a mutable map.
     pub fn first_from<Q: Ord + ?Sized>(&self, start: Bound<&Q>) -> Option<(&K, &V)>
     where
@@ -169,6 +201,12 @@ impl<K, V> BudgetedSharedMap<K, V> {
 
     pub fn budget(&self) -> &MemoryBudget {
         &self.memory
+    }
+
+    /// Select the allowance for later path construction without changing existing node owners. `RetainedMap` exposes this transfer with read-only snapshots; the raw map's same-allowance restore API does not expose transferred roots.
+    pub(in crate::memory) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.memory = memory.clone();
+        self
     }
 
     /// Retain this immutable root without another mutable allowance handle or any allocation.

@@ -45,11 +45,16 @@ pub trait TablePrivilegeState {
     fn security_snapshot_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, SQLError> {
+    ) -> Result<
+        uqa_core::memory::Produced<
+            uqa_sql::catalog::table_metadata::SharedTableMetadata<BoundTableSecurity>,
+        >,
+        SQLError,
+    > {
         control.check()?;
         let security = self.security();
         let memory = control.reserve(size_of::<BoundTableSecurity>())?;
-        Ok(control.finish(Arc::new(security), memory)?)
+        Ok(control.finish(security.into(), memory)?)
     }
     /// Keep the selected table's declaration guard only while the consumer observes its columns.
     fn with_columns_with_control(

@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 
+use super::CatalogGeneration;
+
 use parking_lot::MappedRwLockReadGuard;
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 use uqa_storage::{
@@ -25,7 +27,7 @@ enum Capture<T, F> {
 }
 
 struct CatalogRoot<T, F> {
-    value: Arc<T>,
+    value: CatalogGeneration<T>,
     capture: Option<Capture<T, F>>,
 }
 
@@ -59,11 +61,11 @@ pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static
 /// Undo retains the immutable value; a registered source gives that exact generation its own capture identity.
 pub(crate) struct CatalogSnapshot<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
     source: Option<MemoryCaptureCell<CatalogRoot<T, F>>>,
-    value: Arc<T>,
+    value: CatalogGeneration<T>,
 }
 
 impl<T: Send + Sync + 'static, F: Send + Sync + 'static> std::ops::Deref for CatalogSnapshot<T, F> {
-    type Target = Arc<T>;
+    type Target = CatalogGeneration<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.value
@@ -87,7 +89,8 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         Self::from_snapshot(Arc::new(value))
     }
 
-    pub(crate) fn from_snapshot(value: Arc<T>) -> Self {
+    pub(crate) fn from_snapshot(value: impl Into<CatalogGeneration<T>>) -> Self {
+        let value = value.into();
         Self(MemoryCaptureCell::new(CatalogRoot {
             value,
             capture: None,
@@ -95,23 +98,23 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     }
 
     pub(crate) fn capture_source(
-        value: Arc<T>,
+        value: impl Into<CatalogGeneration<T>>,
         registry: Option<&MemoryCaptureRegistry>,
         capture: fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>,
     ) -> StorageBackendResult<Self> {
-        Self::with_source(value, registry, Capture::Definition(capture))
+        Self::with_source(value.into(), registry, Capture::Definition(capture))
     }
 
     pub(crate) fn capture_resource(
-        value: Arc<T>,
+        value: impl Into<CatalogGeneration<T>>,
         registry: &MemoryCaptureRegistry,
         capture: fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>,
     ) -> StorageBackendResult<Self> {
-        Self::with_source(value, Some(registry), Capture::Resource(capture))
+        Self::with_source(value.into(), Some(registry), Capture::Resource(capture))
     }
 
     fn with_source(
-        value: Arc<T>,
+        value: CatalogGeneration<T>,
         registry: Option<&MemoryCaptureRegistry>,
         capture: Capture<T, F>,
     ) -> StorageBackendResult<Self> {
@@ -141,8 +144,8 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         self.0.is_locked()
     }
 
-    pub(crate) fn snapshot(&self) -> Arc<T> {
-        Arc::clone(&self.0.read().value)
+    pub(crate) fn snapshot(&self) -> CatalogGeneration<T> {
+        self.0.read().value.clone()
     }
 
     pub(crate) fn source_snapshot(
@@ -171,14 +174,16 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         Ok(CatalogSnapshot { source, value })
     }
 
-    pub(crate) fn restore(&self, snapshot: &Arc<T>) {
-        self.0.write().value = Arc::clone(snapshot);
+    pub(crate) fn restore(&self, snapshot: &CatalogGeneration<T>) {
+        self.0.write().value = snapshot.clone();
     }
 }
 
 impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
-        MemoryCaptureWriteGuard::map(self.0.write(), |root| Arc::make_mut(&mut root.value))
+        MemoryCaptureWriteGuard::map(self.0.write(), |root| {
+            CatalogGeneration::make_mut(&mut root.value)
+        })
     }
 }
 
@@ -224,20 +229,23 @@ mod tests {
     fn snapshots_share_until_a_writer_detaches() {
         let first = CatalogCell::<Vec<i32>>::new(vec![1]);
         let saved = first.snapshot();
-        let second = CatalogCell::<Vec<i32>>::from_snapshot(Arc::clone(&saved));
-        assert!(Arc::ptr_eq(&saved, &second.snapshot()));
+        let second = CatalogCell::<Vec<i32>>::from_snapshot(saved.clone());
+        assert!(super::CatalogGeneration::ptr_eq(&saved, &second.snapshot()));
         first.write().push(2);
         assert_eq!(&*second.read(), &[1]);
         assert_eq!(&*first.read(), &[1, 2]);
-        assert!(!Arc::ptr_eq(&first.snapshot(), &saved));
+        assert!(!super::CatalogGeneration::ptr_eq(&first.snapshot(), &saved));
         first.restore(&saved);
-        assert!(Arc::ptr_eq(&first.snapshot(), &second.snapshot()));
+        assert!(super::CatalogGeneration::ptr_eq(
+            &first.snapshot(),
+            &second.snapshot()
+        ));
     }
 
     #[test]
     fn catalog_capture_preserves_the_displaced_root_before_snapshot_restoration() {
         let registry = uqa_storage::memory_capture::MemoryCaptureRegistry::new();
-        let original = Arc::new(vec!["original".to_owned()]);
+        let original = super::CatalogGeneration::from(Arc::new(vec!["original".to_owned()]));
         let cell = CatalogCell::<Vec<String>>::capture_source(
             original.clone(),
             Some(&registry),
@@ -250,11 +258,50 @@ mod tests {
         let cut = registry.capture(&control).unwrap();
         assert!(key.retained(&cut).unwrap().is_none());
         cell.restore(&original);
-        assert!(Arc::ptr_eq(&cell.snapshot(), &original));
+        assert!(super::CatalogGeneration::ptr_eq(
+            &cell.snapshot(),
+            &original
+        ));
         let captured = key.retained(&cut).unwrap().unwrap();
         drop((cell, registry, cut));
         assert_eq!(captured.get().unwrap(), &["private"]);
         drop(captured);
         assert_eq!(control.memory().used(), 0);
+    }
+
+    #[test]
+    fn admitted_catalog_generation_survives_snapshot_sources_and_rollback() {
+        use uqa_core::memory::RetainedValue;
+        use uqa_storage::{
+            memory_capture::MemoryCaptureRegistry, read_control::StorageReadControl,
+        };
+
+        let registry = MemoryCaptureRegistry::new();
+        let input = StorageReadControl::with_limit(4096);
+        let generation = RetainedValue::with_budget(7_u64, input.memory()).unwrap();
+        let cell =
+            CatalogCell::<u64>::capture_source(generation, Some(&registry), |value, control| {
+                Ok(control.finish(*value, control.empty_reservation())?)
+            })
+            .unwrap();
+        let saved = cell.source_snapshot(Some(&registry)).unwrap();
+        let bytes = input.memory().used();
+        assert!(bytes > 0);
+        let output = StorageReadControl::with_limit(4096);
+        let cut = registry.capture(&output).unwrap();
+        input.cancellation().cancel();
+        *cell.write() = 8;
+        assert_eq!(**saved, 7);
+        assert!(!RetainedValue::ptr_eq(&cell.snapshot(), &saved));
+        cell.restore(&saved);
+        assert!(RetainedValue::ptr_eq(&cell.snapshot(), &saved));
+        let captured = saved.key().unwrap().captured(&cut).unwrap();
+        drop(cell);
+        assert_eq!(input.memory().used(), bytes);
+        drop(saved);
+        assert_eq!(input.memory().used(), 0);
+        assert_eq!(*captured.get().unwrap(), 7);
+        drop((cut, captured));
+        assert_eq!(output.memory().used(), 0);
     }
 }

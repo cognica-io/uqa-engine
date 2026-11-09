@@ -6,7 +6,8 @@
 
 //! Range definitions publish their four type claims in the caller's definition transaction. Generated routines remain in the routine catalog.
 
-use std::{collections::BTreeSet, ops::Deref, sync::Arc};
+use std::{collections::BTreeSet, ops::Deref};
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::range_type::{validate_range_registry, StoredRange};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
@@ -59,10 +60,10 @@ pub fn restore(
 
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<RangeRegistry>,
-    committed: Arc<RangeRegistry>,
+    current: &RetainedValue<RangeRegistry>,
+    committed: RetainedValue<RangeRegistry>,
     roles: &RoleDefinitions,
-) -> StorageBackendResult<Arc<RangeRegistry>> {
+) -> StorageBackendResult<RetainedValue<RangeRegistry>> {
     let registry = FORMAT.merge_private(catalog, current, committed)?;
     validate_range_registry(&registry, roles).map_err(StorageBackendError::Other)?;
     Ok(registry)
@@ -84,7 +85,7 @@ pub fn publish(
             })?;
         validate_range_registry(&registry, &publication.range_role_definitions())
             .map_err(uqa_sql::SQLError::Internal)?;
-        snapshot.definitions.ranges = Arc::new(registry.clone());
+        snapshot.definitions.ranges = RetainedValue::new(registry.clone());
         validate_catalog(&super::CatalogReadView::new(snapshot))?;
         if let Some(catalog) = publication.range_catalog() {
             FORMAT

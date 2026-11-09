@@ -5,7 +5,6 @@
 //
 
 use super::*;
-use std::sync::Arc;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
@@ -33,14 +32,14 @@ fn admitted_relation_resolution_preserves_namespace_usage_and_bound_identity_ord
     reader.oid = 42;
     reader.object_id = [42; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
         RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
         ])
         .unwrap(),
     );
-    snapshot.definitions.schemas = Arc::new(
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
         uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([
             (
                 "public".into(),

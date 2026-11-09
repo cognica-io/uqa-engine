@@ -179,7 +179,17 @@ macro_rules! catalog_image {
                 memory: &MemoryBudget,
                 cancellation: &CancellationToken,
             ) -> Result<Self, SQLError> {
-                input::$read(reader, memory, cancellation)
+                Self::read_image_with_mutation_budget(reader, memory, memory, cancellation)
+            }
+
+            /// Decode under the input allowance and transfer only future native edits to the destination owner's allowance. Original nodes, keys, payloads and captured predecessors retain their input reservations; completion neither copies the population nor retains input cancellation.
+            pub fn read_image_with_mutation_budget(
+                reader: &mut dyn Read,
+                input: &MemoryBudget,
+                mutations: &MemoryBudget,
+                cancellation: &CancellationToken,
+            ) -> Result<Self, SQLError> {
+                Ok(input::$read(reader, input, cancellation)?.into_mutation_budget(mutations))
             }
         }
     };
@@ -300,7 +310,17 @@ impl DatabaseAuthority {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
-        input::database(reader, memory, cancellation)
+        Self::read_image_with_mutation_budget(reader, memory, memory, cancellation)
+    }
+
+    /// Preserve the original admitted authority tuple and use the destination allowance for later successors.
+    pub fn read_image_with_mutation_budget(
+        reader: &mut dyn Read,
+        input: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        Ok(input::database(reader, input, cancellation)?.into_mutation_budget(mutations))
     }
 }
 

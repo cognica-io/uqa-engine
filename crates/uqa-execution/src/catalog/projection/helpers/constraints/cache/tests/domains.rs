@@ -33,7 +33,7 @@ fn with_domains(catalog: &CatalogReadView, unrelated: usize) -> CatalogReadView 
             array_name: None,
             usage_acl: None,
         };
-        Arc::make_mut(&mut snapshot.definitions.domains)
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
             .insert(domain.identity.qualified_name(), domain)
             .unwrap();
     }
@@ -119,7 +119,7 @@ fn concurrent_domain_readers_collect_addresses_once() {
 fn domain_addresses_preserve_first_match_and_ignore_unassigned_identities() {
     let catalog = with_domains(&fixture(0), 1);
     let mut snapshot = catalog.snapshot().clone();
-    let domains = Arc::make_mut(&mut snapshot.definitions.domains);
+    let domains = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains);
     domains
         .edit("public.positive_000", |first| {
             first.definition.checks[0]
@@ -174,7 +174,7 @@ fn domain_addresses_remain_with_their_original_generation() {
         panic!("check");
     };
     let mut snapshot = catalog.snapshot().clone();
-    let domains = Arc::make_mut(&mut snapshot.definitions.domains);
+    let domains = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains);
     domains
         .edit("public.positive_000", |domain| {
             domain.definition.checks[0].validated = false;
@@ -190,7 +190,7 @@ fn domain_addresses_remain_with_their_original_generation() {
     };
     assert!(!changed.validated);
     assert!(original.validated);
-    Arc::make_mut(&mut snapshot.definitions.domains).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains).clear();
     let removed = CatalogReadView::new(snapshot);
     assert!(domain_constraint_by_oid(&removed, &resolution, 90_003)
         .unwrap()

@@ -151,7 +151,7 @@ impl ValueIndexBuilder {
         Ok(ValueIndexCache {
             policy: self.policy,
             retained,
-            field: self.field,
+            field: self.field.into(),
             limit: self.limit,
             resident_bytes: self.bytes,
         })

@@ -16,8 +16,8 @@ pub use set::{OwnedSet, OwnedSetIntoIter, OwnedSetIter};
 
 use std::{borrow::Borrow, ops::Bound};
 
-use super::{tree, BudgetedMapIter, Link, Node, OwnedNode, MAX_HEIGHT};
-use crate::memory::{MemoryBudget, MemoryError};
+use super::{tree, BudgetedMapIter, Link, MapCursor, Node, OwnedNode, MAX_HEIGHT};
+use crate::memory::{Budgeted, MemoryBudget, MemoryError};
 
 /// A mutable ordered map with exact node ownership. Ordinary insertion leaves admission to its enclosing owner; `insert_budgeted` admits and retains each new node under the supplied allowance. An enclosing controlled producer may instead reserve `entry_bytes()` before ordinary insertion and retain that lease until the node is dropped. Separately allocated key/value payloads require their own reservations.
 pub struct OwnedMap<K, V> {
@@ -65,11 +65,18 @@ impl<K, V> OwnedMap<K, V> {
         self.iter().map(|(key, _)| key)
     }
 
+    /// Mutate values in key order while keeping keys and node ownership unchanged. The fixed traversal stack allocates no heap storage.
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl ExactSizeIterator<Item = (&K, &mut V)> + std::iter::FusedIterator {
+        iter_mut::IterMut::new(&mut self.root, self.len)
+    }
+
     /// Mutate values without changing keys, node ownership or traversal storage.
     pub fn values_mut(
         &mut self,
     ) -> impl ExactSizeIterator<Item = &mut V> + std::iter::FusedIterator {
-        iter_mut::IterMut::new(&mut self.root, self.len).map(|(_, value)| value)
+        self.iter_mut().map(|(_, value)| value)
     }
 
     pub fn values(&self) -> impl ExactSizeIterator<Item = &V> + std::iter::FusedIterator {
@@ -93,6 +100,14 @@ impl<K: Ord, V> OwnedMap<K, V> {
         K: Borrow<Q>,
     {
         tree::get(&self.root, key).map(|node| &node.value)
+    }
+
+    /// Borrow the original stored key together with its value without copying either allocation.
+    pub fn get_key_value<Q: Ord + ?Sized>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        tree::get(&self.root, key).map(|node| (&node.key, &node.value))
     }
 
     pub fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
@@ -153,6 +168,33 @@ impl<K: Ord, V> OwnedMap<K, V> {
         }
         let memory = budget.reserve(Self::entry_bytes())?;
         let value = produce()?;
+        let entry = OwnedNode {
+            value: Box::new(Node {
+                key,
+                value,
+                left: None,
+                right: None,
+                height: 1,
+            }),
+            memory: Some(memory),
+        };
+        let previous = tree::insert(&mut self.root, entry);
+        self.len += 1;
+        Ok(previous)
+    }
+
+    /// Adopt an admitted key and reserve its new node under the same allowance. Replacement preserves the original key, node and lease. Values retain their own payload owners; removing or consuming entries transfers keys to the existing unbudgeted result boundary.
+    pub fn insert_admitted_key(
+        &mut self,
+        key: Budgeted<K>,
+        value: V,
+    ) -> Result<Option<V>, MemoryError> {
+        if let Some(previous) = self.get_mut(&*key) {
+            return Ok(Some(std::mem::replace(previous, value)));
+        }
+        let mut memory = key.budget().reserve(Self::entry_bytes())?;
+        let (key, payload) = key.into_parts();
+        memory.absorb(payload);
         let entry = OwnedNode {
             value: Box::new(Node {
                 key,
@@ -240,7 +282,47 @@ impl<K: Ord, V> OwnedMap<K, V> {
         }
         candidate
     }
+
+    /// Seek a lower bound once, then visit ordered successors without allocating traversal scratch. The bound is borrowed only during the initial logarithmic seek.
+    pub fn range_from<Q: Ord + ?Sized>(&self, start: Bound<&Q>) -> OwnedMapRange<'_, K, V>
+    where
+        K: Borrow<Q>,
+    {
+        OwnedMapRange {
+            cursor: MapCursor::from_bound(&self.root, start),
+            remaining_upper: self.len,
+        }
+    }
 }
+
+/// An allocation-free lower-bound traversal. Unlike a complete map iterator, the number of remaining entries is not known without visiting them.
+pub struct OwnedMapRange<'a, K, V> {
+    cursor: MapCursor<'a, K, V>,
+    remaining_upper: usize,
+}
+
+impl<'a, K, V> Iterator for OwnedMapRange<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.cursor.next()?;
+        self.remaining_upper -= 1;
+        Some((&node.key, &node.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (
+            0,
+            Some(if self.cursor.depth == 0 {
+                0
+            } else {
+                self.remaining_upper
+            }),
+        )
+    }
+}
+
+impl<K, V> std::iter::FusedIterator for OwnedMapRange<'_, K, V> {}
 
 impl<K: Ord + Borrow<Q>, V, Q: Ord + ?Sized> std::ops::Index<&Q> for OwnedMap<K, V> {
     type Output = V;

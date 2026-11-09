@@ -8,9 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
+
+- Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; vector and evaluated-index reconstruction use this ownership boundary, including exclusive vector adapters and IVF payload lifetime.
+
+- Native SQL and Execution catalog image readers can assign a separate destination mutation budget while preserving original input reservations through retained generations, including paired foreign definitions and authority, secondary-index metadata and comments.
+
+- Table authority images retain original ACL payloads and native map-node admission through shared catalog and privilege readers, rollback and Engine retirement.
+
+- Native vector registration imports retain decoded field buffers and admit ordered membership before publication; later writes and captured snapshots preserve those original owners.
+
+- Decoded memory documents can enter writable native storage while preserving tuple metadata and original payload admission through snapshots, physical query readers and source retirement. Complete Engine restore remains under implementation.
+
 - Evaluated memory text images can become writable native indexes without reanalysis. Original corpus and analyzer owners survive shared snapshots, subsequent mutations and source retirement.
 
-- Decoded memory vector indexes retain their original allocation leases through live registration, writes, snapshots and retirement without a separate caller-owned reservation.
+- Decoded memory vector indexes retain their original allocation leases through live registration, writes, snapshots and retirement without a separate caller-owned reservation. Completed DiskANN owners separate input cancellation from subsequent reads, mutations and rebuilding while preserving the original memory allowance.
 
 - Native table image import retains decoded field names, optional array names, constraints, definitions and unresolved analyzer settings with their original memory admission through shared catalog consumers. Complete Engine restore remains under implementation.
 
@@ -47,6 +59,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
 
 ### Added
+
+- Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs; complete Engine restore activation remains under implementation.
 
 - Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export; public restore activation remains under implementation.
 

@@ -51,7 +51,8 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
             ),
             security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
+            ))
+            .into(),
             columns: columns.clone().into(),
             columns_declared: true,
             checks: SharedTableDefinition::default(),
@@ -70,8 +71,9 @@ fn fixture() -> (RelationIdentity, CatalogReadView) {
         &mut allocate,
     )
     .unwrap();
-    snapshot.definitions.catalog_indexes =
-        Arc::new(crate::catalog::test_support::index_rows(change.upserts));
+    snapshot.definitions.catalog_indexes = uqa_core::memory::RetainedValue::new(
+        crate::catalog::test_support::index_rows(change.upserts),
+    );
     (relation, CatalogReadView::new(snapshot))
 }
 
@@ -82,7 +84,8 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
     let old = RelationIdentity::new("public", "one");
     let new = RelationIdentity::new("public", "renamed");
     let mut refreshed = before.snapshot().clone();
-    let current_rows = Arc::make_mut(&mut refreshed.definitions.catalog_indexes);
+    let current_rows =
+        uqa_core::memory::RetainedValue::make_mut(&mut refreshed.definitions.catalog_indexes);
     let mut renamed = current_rows.get(&old).unwrap().clone();
     renamed.relation = new.clone();
     current_rows.rename(&old, renamed).unwrap();
@@ -103,7 +106,9 @@ fn refresh_accepts_only_name_changes_on_the_same_unmodified_index() {
                 .columns
                 .push("other".into()),
             _ => {
-                let rows = Arc::make_mut(&mut changed.definitions.catalog_indexes);
+                let rows = uqa_core::memory::RetainedValue::make_mut(
+                    &mut changed.definitions.catalog_indexes,
+                );
                 let mut row = rows.get(&new).unwrap().clone();
                 let mut definition = super::super::index_definition(&row).unwrap();
                 definition.catalog.as_mut().unwrap().identity.object_id = [99; 16];
@@ -153,7 +158,8 @@ fn catalog_recheck_validates_metadata_without_planning_physical_builds() {
     );
 
     let mut invalid = before.snapshot().clone();
-    let invalid_rows = Arc::make_mut(&mut invalid.definitions.catalog_indexes);
+    let invalid_rows =
+        uqa_core::memory::RetainedValue::make_mut(&mut invalid.definitions.catalog_indexes);
     let mut row = invalid_rows.values().next().unwrap().clone();
     row.definition_json = Some("invalid JSON".into());
     invalid_rows.replace(row).unwrap();
@@ -208,7 +214,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
             definition.relationships = IndexRelationships::default();
             row.definition_json = Some(serde_json::to_string(&definition).unwrap());
             snapshot.tables.insert(relation, table);
-            Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
+            uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes)
                 .insert(row, uqa_sql::ast::RelationPersistence::Permanent)
                 .unwrap();
         }
@@ -229,7 +235,7 @@ fn catalog_recheck_partition_validation_visits_unrelated_tables_once() {
         );
 
         let mut unindexed = catalog.snapshot().clone();
-        unindexed.definitions.catalog_indexes = Arc::default();
+        unindexed.definitions.catalog_indexes = uqa_core::memory::RetainedValue::default();
         for table in unindexed.tables.values_mut() {
             table.columns = Arc::new(plain.columns.clone()).into();
             table.keys = Vec::new().into();

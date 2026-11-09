@@ -24,8 +24,8 @@ fn committed_role_roots_preserve_original_memberships_with_bounded_capture_work(
             .iter()
             .map(|(key, edge)| (*key, edge.clone()))
             .collect::<Vec<_>>();
-        let weak_roles = Arc::downgrade(&original_roles);
-        let weak_memberships = Arc::downgrade(&original_memberships);
+        let weak_roles = original_roles.identity();
+        let weak_memberships = original_memberships.identity();
         drop((original_roles, original_memberships));
         sql(&engine, "BEGIN; ALTER ROLE saved_000 NOLOGIN CONNECTION LIMIT 3; REVOKE ADMIN OPTION FOR team FROM saved_000; SAVEPOINT changed");
         let control = StorageReadControl::with_limit(8 << 20);
@@ -62,8 +62,8 @@ fn committed_role_roots_preserve_original_memberships_with_bounded_capture_work(
             .eq(expected_memberships.iter().map(|(k, v)| (k, v))));
         sql(&engine, "REVOKE team FROM saved_000; ROLLBACK TO changed; COMMIT; REVOKE team FROM saved_000; DROP ROLE saved_000; CREATE ROLE saved_000; ALTER ROLE team RENAME TO moved");
         drop(engine);
-        assert!(weak_roles.upgrade().is_none());
-        assert!(weak_memberships.upgrade().is_none());
+        assert!(!weak_roles.is_alive());
+        assert!(!weak_memberships.is_alive());
         assert!(roles
             .get()
             .unwrap()

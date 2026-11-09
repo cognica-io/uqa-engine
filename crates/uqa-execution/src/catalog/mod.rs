@@ -6,6 +6,7 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
@@ -94,7 +95,9 @@ pub struct CatalogTableSnapshot {
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     pub row_type_array_name: Option<String>,
-    pub security: Arc<crate::catalog::security::BoundTableSecurity>,
+    pub security: uqa_sql::catalog::table_metadata::SharedTableMetadata<
+        crate::catalog::security::BoundTableSecurity,
+    >,
     pub columns: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
     pub checks: SharedTableDefinition<Vec<uqa_sql::ast::TableCheck>>,
@@ -125,36 +128,36 @@ pub use uqa_sql::catalog::resolution::RelationResolution;
 #[derive(Clone)]
 pub struct CatalogDefinitionSnapshot {
     pub builtin_routine_security:
-        Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
+        RetainedValue<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub foreign_tables: Arc<foreign::ForeignTables>,
-    pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
-    pub role_memberships: Arc<RoleMemberships>,
+    pub foreign_wrappers: RetainedValue<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
+    pub foreign_servers: RetainedValue<uqa_sql::catalog::foreign_server::ForeignServers>,
+    pub sql_user_functions: RetainedValue<uqa_sql::routines::registry::RoutineRegistry>,
+    pub role_memberships: RetainedValue<RoleMemberships>,
 
-    pub domains: Arc<
+    pub domains: RetainedValue<
         uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
     >,
-    pub enums: Arc<enum_type::EnumRegistry>,
-    pub ranges: Arc<range_type::RangeRegistry>,
-    pub shells: Arc<shell_type::ShellRegistry>,
-    pub comments: Arc<comments::CommentRegistry>,
-    pub composites: Arc<composite_type::CompositeRegistry>,
-    pub graphs: Arc<uqa_graph::GraphCatalog>,
-    pub views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub catalog_indexes: Arc<crate::catalog::index::registry::CatalogIndexes>,
-    pub database_security: Arc<uqa_sql::catalog::security::database::DatabaseAuthority>,
-    pub schemas: Arc<SchemaRegistry>,
-    pub sequences: Arc<sequence::registry::SequenceCatalog>,
+    pub enums: RetainedValue<enum_type::EnumRegistry>,
+    pub ranges: RetainedValue<range_type::RangeRegistry>,
+    pub shells: RetainedValue<shell_type::ShellRegistry>,
+    pub comments: RetainedValue<comments::CommentRegistry>,
+    pub composites: RetainedValue<composite_type::CompositeRegistry>,
+    pub graphs: RetainedValue<uqa_graph::GraphCatalog>,
+    pub views: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
+    pub catalog_indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
+    pub database_security: RetainedValue<uqa_sql::catalog::security::database::DatabaseAuthority>,
+    pub schemas: RetainedValue<SchemaRegistry>,
+    pub sequences: RetainedValue<sequence::registry::SequenceCatalog>,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
+    pub graph_catalog_oids: RetainedValue<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
     pub foreign_table_security:
         Arc<uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>,
     pub system_relation_security:
-        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub roles: Arc<RoleDefinitions>,
-    pub triggers: Arc<uqa_sql::catalog::events::TriggerCatalog>,
-    pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
+        RetainedValue<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
+    pub roles: RetainedValue<RoleDefinitions>,
+    pub triggers: RetainedValue<uqa_sql::catalog::events::TriggerCatalog>,
+    pub rules: RetainedValue<uqa_sql::catalog::events::RuleCatalog>,
 }
 
 impl CatalogReadView {

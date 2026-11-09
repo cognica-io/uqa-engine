@@ -8,8 +8,6 @@
 //!
 //! Sequence values resolve names, definitions and authority against the latest commit and not against the caller's statement snapshot, and one inserted row asks for them several times. A read through an independent session costs more than everything else the row needs, so the session keeps the last read with what it depended on: the commits of the database, its own private records and its registries. While all three are unchanged, a new read returns the same catalog.
 
-use std::sync::Arc;
-
 use uqa_execution::catalog::security::roles::persistence::RoleCatalogSnapshot;
 use uqa_execution::catalog::sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot};
 use uqa_storage::key_value::KeyValueReadRevision;
@@ -40,8 +38,11 @@ pub(crate) struct SequenceSnapshotMemo {
 
 fn same_registries(left: &SequenceReadSnapshot, right: &SequenceReadSnapshot) -> bool {
     left.catalog.shares_generation(&right.catalog)
-        && Arc::ptr_eq(&left.roles.roles, &right.roles.roles)
-        && Arc::ptr_eq(&left.roles.memberships, &right.roles.memberships)
+        && uqa_core::memory::RetainedValue::ptr_eq(&left.roles.roles, &right.roles.roles)
+        && uqa_core::memory::RetainedValue::ptr_eq(
+            &left.roles.memberships,
+            &right.roles.memberships,
+        )
 }
 
 impl SequenceSnapshotMemo {

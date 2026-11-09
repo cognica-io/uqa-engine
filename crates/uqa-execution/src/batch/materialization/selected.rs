@@ -6,7 +6,10 @@
 
 //! Move selected physical values into positional result owners.
 
-use super::{Arc, PhysicalRow, RowFragment, RowSchema, SmallVec, Value, NULL_SLOT};
+use super::{
+    unwrap_shared_values, PhysicalRow, RowFragment, RowSchema, SmallVec, Value, NULL_SLOT,
+};
+use uqa_storage::document_store::SharedDocumentValues;
 
 /// Output positions are retained independently of labels and visited in physical
 /// slot order. The consumer initializes absent positions with SQL NULL.
@@ -91,27 +94,29 @@ impl SelectedRowMaterializer {
             let end = offset + fragment.len();
             let count = pending.partition_point(|(slot, _)| *slot < end);
             let (selected, rest) = pending.split_at(count);
-            match fragment {
+            let stored = match fragment {
                 RowFragment::Constant { value, .. } => {
                     for (_, output) in selected {
                         emit(*output, value.clone());
                     }
+                    None
                 }
-                RowFragment::Stored { values, projection } => {
-                    let selected = selected
-                        .iter()
-                        .filter_map(|(slot, output)| {
-                            let local = slot - offset;
-                            let stored = match &projection {
-                                Some(projection) => *projection.get(local)?,
-                                None => local,
-                            };
-                            (stored != NULL_SLOT).then_some((stored, *output))
-                        })
-                        .collect::<SmallVec<[(usize, usize); 16]>>();
-                    if !selected.is_empty() {
-                        groups.push(SelectedFragment { values, selected });
-                    }
+                RowFragment::Stored { values, projection } => Some((values, projection)),
+            };
+            if let Some((values, projection)) = stored {
+                let selected = selected
+                    .iter()
+                    .filter_map(|(slot, output)| {
+                        let local = slot - offset;
+                        let stored = match &projection {
+                            Some(projection) => *projection.get(local)?,
+                            None => local,
+                        };
+                        (stored != NULL_SLOT).then_some((stored, *output))
+                    })
+                    .collect::<SmallVec<[(usize, usize); 16]>>();
+                if !selected.is_empty() {
+                    groups.push(SelectedFragment { values, selected });
                 }
             }
             pending = rest;
@@ -119,11 +124,11 @@ impl SelectedRowMaterializer {
         }
         // Discard unselected aliases and merge selected aliases before testing
         // exclusivity. Row-local Arc handles do not require payload copies.
-        groups.sort_unstable_by_key(|group| Arc::as_ptr(&group.values));
+        groups.sort_unstable_by_key(|group| group.values.as_ptr());
         while let Some(mut group) = groups.pop() {
             while groups
                 .last()
-                .is_some_and(|other| Arc::ptr_eq(&group.values, &other.values))
+                .is_some_and(|other| group.values.as_ptr() == other.values.as_ptr())
             {
                 let other = groups.pop().expect("matching fragment exists");
                 group.selected.extend(other.selected);
@@ -135,7 +140,7 @@ impl SelectedRowMaterializer {
 }
 
 struct SelectedFragment {
-    values: Arc<Vec<Value>>,
+    values: SharedDocumentValues,
     selected: SmallVec<[(usize, usize); 16]>,
 }
 
@@ -183,17 +188,18 @@ impl RowFragment {
 }
 
 fn emit_selected_values(
-    values: Arc<Vec<Value>>,
+    values: SharedDocumentValues,
     selected: impl IntoIterator<Item = (usize, usize)>,
     emit: &mut impl FnMut(usize, Value),
 ) {
     #[cfg(test)]
     OWNERSHIP_ATTEMPTS.with(|count| count.set(count.get() + 1));
+    let owned = unwrap_shared_values(values);
     let mut selected = selected.into_iter().peekable();
-    match Arc::try_unwrap(values) {
-        Ok(mut values) => {
+    match owned {
+        Ok(mut owned) => {
             while let Some((slot, output)) = selected.next() {
-                let Some(value) = values.get_mut(slot) else {
+                let Some(value) = owned.values.get_mut(slot) else {
                     continue;
                 };
                 let repeated = selected.peek().is_some_and(|(next, _)| *next == slot);
@@ -206,6 +212,7 @@ fn emit_selected_values(
                     },
                 );
             }
+            // Legacy result materialization hands selected payloads to the output owner. The remaining values precede their reservation in the native owner, including during unwinding.
         }
         Err(values) => {
             for (slot, output) in selected {

@@ -30,6 +30,12 @@ pub(super) struct NativeValueSources {
 }
 
 impl NativeValueSources {
+    pub(super) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.names = self.names.into_mutation_budget(memory);
+        self.sources = self.sources.into_mutation_budget(memory);
+        self
+    }
+
     pub(super) fn new(registry: &MemoryCaptureRegistry, memory: &MemoryBudget) -> Self {
         Self {
             registry: registry.clone(),

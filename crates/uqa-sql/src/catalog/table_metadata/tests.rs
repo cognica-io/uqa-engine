@@ -205,3 +205,5 @@ fn table_metadata_dropped_attributes_preserve_original_owned_payloads() {
         serde_json::to_value(&*value).unwrap()
     );
 }
+
+mod authority;

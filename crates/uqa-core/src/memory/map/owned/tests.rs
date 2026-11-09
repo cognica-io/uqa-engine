@@ -16,6 +16,7 @@ use std::{
 };
 
 mod admission;
+mod ranges;
 mod serialization;
 
 #[test]

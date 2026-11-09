@@ -193,6 +193,7 @@ impl Input<'_> {
 pub(in super::super) fn triggers(
     reader: &mut dyn Read,
     memory: &MemoryBudget,
+    mutations: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<TriggerCatalog, SQLError> {
     let mut input = Input::new(reader, memory, cancellation);
@@ -211,8 +212,8 @@ pub(in super::super) fn triggers(
             let value = input.trigger(&key, &relation, &mut identities, &mut constraints)?;
             entries.insert_image_entry(key, value)?;
         }
-        result.insert_image_entry(relation, entries)?;
+        result.insert_image_entry(relation, entries.into_mutation_budget(mutations))?;
     }
     input.binary.end()?;
-    Ok(result)
+    Ok(result.into_mutation_budget(mutations))
 }

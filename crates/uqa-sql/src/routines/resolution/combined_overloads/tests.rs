@@ -10,7 +10,6 @@ use crate::routines::{
     resolution::{RoutineCallKind, RoutineOverloadCatalog, RoutineTypeSnapshot},
     CompiledFunctionBody, RoutineBody, SQLUserFunction,
 };
-use std::sync::Arc;
 
 struct Catalog {
     routines: Vec<crate::routines::SQLRoutine>,
@@ -68,7 +67,7 @@ impl RoutineTypeCatalog for Catalog {
 
 impl RoutineOverloadCatalog for Catalog {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot {
-        Arc::default()
+        RoutineTypeSnapshot::default()
     }
 
     fn routine_search_path(&self) -> Vec<String> {

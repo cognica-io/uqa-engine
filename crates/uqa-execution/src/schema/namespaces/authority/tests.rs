@@ -29,7 +29,7 @@ fn private_schema_authority_preserves_deletions_and_uses_fresh_unmodified_record
         })
         .unwrap()
         .unwrap();
-    let committed = Arc::new(schemas(&["changed", "removed", "peer"]));
+    let committed = uqa_core::memory::RetainedValue::new(schemas(&["changed", "removed", "peer"]));
     let roles =
         RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let merged = merge_private_records(&current, committed.clone(), &roles, |name| {
@@ -57,7 +57,7 @@ fn private_schema_authority_validates_role_incarnations_and_provenance_errors() 
         })
         .unwrap()
         .unwrap();
-    let committed = Arc::new(schemas(&["peer"]));
+    let committed = uqa_core::memory::RetainedValue::new(schemas(&["peer"]));
     assert!(merge_private_records(&current, committed.clone(), &roles, |_| Ok(true)).is_err());
     assert!(
         merge_private_records(&current, committed.clone(), &roles, |_| {
@@ -68,5 +68,5 @@ fn private_schema_authority_validates_role_incarnations_and_provenance_errors() 
         .contains("provenance unavailable")
     );
     let merged = merge_private_records(&current, committed.clone(), &roles, |_| Ok(false)).unwrap();
-    assert!(Arc::ptr_eq(&merged, &committed));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(&merged, &committed));
 }

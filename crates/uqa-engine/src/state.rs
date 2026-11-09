@@ -36,6 +36,7 @@ pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 pub(crate) use table_membership::SnapshotTableCut;
 pub(crate) use table_membership::{CapturedTable, PersistentTableRegistrySnapshot};
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
+pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
@@ -260,36 +261,42 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) domains: Arc<TypeDefinitions<super::domains::StoredDomain>>,
-    pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
-    pub(super) ranges: Arc<uqa_execution::catalog::range_type::RangeRegistry>,
-    pub(super) shells: Arc<uqa_execution::catalog::shell_type::ShellRegistry>,
-    pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
-    pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: Arc<uqa_graph::GraphCatalog>,
-    pub(super) models: Arc<uqa_ml::model_catalog::ModelCatalog>,
-    pub(super) scoring_params: Arc<uqa_storage::catalog::scoring_params::ScoringParameters>,
-    pub(super) views: Arc<uqa_sql::catalog::stored_view::ViewDefinitions>,
-    pub(super) catalog_indexes: Arc<uqa_execution::catalog::index::registry::CatalogIndexes>,
-    pub(super) database_security: Arc<DatabaseAuthority>,
-    pub(super) schemas: Arc<SchemaRegistry>,
-    pub(super) path_indexes: Arc<uqa_graph::PathIndexCatalog>,
-    pub(super) sequences: Arc<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
-    pub(super) graph_catalog_oids: Arc<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
-    pub(super) named_analyzers: Arc<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
-    pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
-    pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub(super) foreign_servers: Arc<uqa_sql::catalog::foreign_server::ForeignServers>,
-    pub(super) foreign_catalog: Arc<uqa_execution::catalog::foreign::ForeignCatalog>,
+    pub(super) domains: CatalogGeneration<TypeDefinitions<super::domains::StoredDomain>>,
+    pub(super) enums: CatalogGeneration<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) ranges: CatalogGeneration<uqa_execution::catalog::range_type::RangeRegistry>,
+    pub(super) shells: CatalogGeneration<uqa_execution::catalog::shell_type::ShellRegistry>,
+    pub(super) comments: CatalogGeneration<uqa_execution::catalog::comments::CommentRegistry>,
+    pub(super) composites:
+        CatalogGeneration<uqa_execution::catalog::composite_type::CompositeRegistry>,
+    pub(super) graphs: CatalogGeneration<uqa_graph::GraphCatalog>,
+    pub(super) models: CatalogGeneration<uqa_ml::model_catalog::ModelCatalog>,
+    pub(super) scoring_params:
+        CatalogGeneration<uqa_storage::catalog::scoring_params::ScoringParameters>,
+    pub(super) views: CatalogGeneration<uqa_sql::catalog::stored_view::ViewDefinitions>,
+    pub(super) catalog_indexes:
+        CatalogGeneration<uqa_execution::catalog::index::registry::CatalogIndexes>,
+    pub(super) database_security: CatalogGeneration<DatabaseAuthority>,
+    pub(super) schemas: CatalogGeneration<SchemaRegistry>,
+    pub(super) path_indexes: CatalogGeneration<uqa_graph::PathIndexCatalog>,
+    pub(super) sequences:
+        CatalogGeneration<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
+    pub(super) graph_catalog_oids:
+        CatalogGeneration<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
+    pub(super) named_analyzers: CatalogGeneration<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
+    pub(super) table_field_analyzers: CatalogGeneration<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_wrappers:
+        CatalogGeneration<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
+    pub(super) foreign_servers: CatalogGeneration<uqa_sql::catalog::foreign_server::ForeignServers>,
+    pub(super) foreign_catalog: CatalogGeneration<uqa_execution::catalog::foreign::ForeignCatalog>,
     pub(super) builtin_routine_security:
-        Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
+        CatalogGeneration<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
-        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub(super) sql_user_functions: Arc<uqa_sql::routines::registry::RoutineRegistry>,
-    pub(super) roles: Arc<RoleDefinitions>,
-    pub(super) role_memberships: Arc<RoleMemberships>,
-    pub(super) triggers: Arc<TriggerCatalog>,
-    pub(super) rules: Arc<RuleCatalog>,
+        CatalogGeneration<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
+    pub(super) sql_user_functions: CatalogGeneration<uqa_sql::routines::registry::RoutineRegistry>,
+    pub(super) roles: CatalogGeneration<RoleDefinitions>,
+    pub(super) role_memberships: CatalogGeneration<RoleMemberships>,
+    pub(super) triggers: CatalogGeneration<TriggerCatalog>,
+    pub(super) rules: CatalogGeneration<RuleCatalog>,
 }
 
 impl DurableCatalogState {

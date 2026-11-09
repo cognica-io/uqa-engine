@@ -49,7 +49,7 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
     let engine = Engine::new();
     definitions(&engine);
     let original_domains = engine.durable.domains.snapshot();
-    let weak = Arc::downgrade(&original_domains);
+    let weak = original_domains.identity();
     let mut original = std::collections::BTreeMap::new();
     macro_rules! remember {
         ($($field:ident),+) => {$ (
@@ -109,7 +109,7 @@ fn transaction_catalog_sources_preserve_original_definitions_after_unread_retire
     sql(&engine, completion);
     sql(&engine, "DROP SCHEMA saved CASCADE; CREATE SCHEMA saved; CREATE TYPE saved.enum_type AS ENUM('replacement'); DROP TABLE docs; CREATE TABLE docs(replacement boolean)");
     drop(engine);
-    assert!(weak.upgrade().is_none());
+    assert!(!weak.is_alive());
     macro_rules! exact {
         ($($field:ident),+) => {$ ({
             let captured = selected.catalogs.$field.captured(&selected.cut).unwrap();

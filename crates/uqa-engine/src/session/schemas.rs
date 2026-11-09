@@ -32,14 +32,14 @@ impl Engine {
     ) -> StorageBackendResult<uqa_core::catalog_index::CatalogIndexSnapshot> {
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
             return Ok(
-                uqa_core::catalog_index::CatalogIndexSnapshot::from_registry(
+                uqa_core::catalog_index::CatalogIndexSnapshot::from_retained_registry(
                     snapshot.catalog_indexes.clone(),
                 ),
             );
         }
         self.synchronize_catalog_registries()?;
         Ok(
-            uqa_core::catalog_index::CatalogIndexSnapshot::from_registry(
+            uqa_core::catalog_index::CatalogIndexSnapshot::from_retained_registry(
                 self.durable.catalog_indexes.snapshot(),
             ),
         )

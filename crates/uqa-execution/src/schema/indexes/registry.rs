@@ -9,6 +9,7 @@
 use crate::catalog::index::registry::CatalogIndexes;
 use crate::catalog::{identity::CatalogIdentityReservationContext, index::index_definition};
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{ColumnDef, IndexKey, TableConstraintSet},
@@ -37,7 +38,7 @@ pub enum IndexPublicationKind {
 }
 
 pub trait IndexRegistryPublication {
-    fn index_catalog(&self) -> std::sync::Arc<CatalogIndexes>;
+    fn index_catalog(&self) -> RetainedValue<CatalogIndexes>;
     fn index_table_persistence(
         &self,
         table: &str,

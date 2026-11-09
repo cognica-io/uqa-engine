@@ -11,12 +11,16 @@ use super::{
     INLINE_ROW_FRAGMENTS, NULL_SLOT, NULL_VALUE,
 };
 
+use uqa_storage::document_store::{
+    SharedDocumentProjection, SharedDocumentRow, SharedDocumentValues,
+};
+
 #[derive(Debug, Clone)]
 pub(super) enum RowFragment {
     Stored {
-        values: Arc<Vec<Value>>,
+        values: SharedDocumentValues,
         /// Fragment-local output slot -> stored value slot; absent for contiguous values.
-        projection: Option<Arc<[usize]>>,
+        projection: Option<SharedDocumentProjection>,
     },
     /// NULL extension and Boolean presence have no width-sized value storage.
     Constant { value: &'static Value, width: usize },
@@ -56,14 +60,14 @@ impl PartialEq for RowFragment {
 }
 
 impl RowFragment {
-    fn contiguous(values: Arc<Vec<Value>>) -> Self {
+    fn contiguous(values: SharedDocumentValues) -> Self {
         Self::Stored {
             values,
             projection: None,
         }
     }
 
-    fn projected(values: Arc<Vec<Value>>, projection: Arc<[usize]>) -> Self {
+    fn projected(values: SharedDocumentValues, projection: SharedDocumentProjection) -> Self {
         debug_assert!(projection
             .iter()
             .all(|slot| *slot == NULL_SLOT || *slot < values.len()));
@@ -107,7 +111,7 @@ impl RowFragment {
     }
 
     pub(super) fn has_shared_values(&self) -> bool {
-        matches!(self, Self::Stored { values, .. } if Arc::strong_count(values) > 1)
+        matches!(self, Self::Stored { values, .. } if values.is_shared())
     }
 
     pub(super) fn can_copy_directly(&self) -> bool {
@@ -133,11 +137,19 @@ impl RowFragment {
             Self::Constant { width: old, .. } => *old = width,
             Self::Stored { values, projection } => {
                 if let Some(slots) = projection.as_ref() {
-                    *projection = Some(Arc::from(&slots[..width]));
-                } else if let Some(values) = Arc::get_mut(values) {
-                    values.truncate(width);
+                    *projection = Some(SharedDocumentProjection::new(&slots[..width]));
+                } else if let SharedDocumentValues::Ordinary(values) = values {
+                    if let Some(values) = Arc::get_mut(values) {
+                        values.truncate(width);
+                    } else {
+                        *projection = Some(SharedDocumentProjection::new(
+                            (0..width).collect::<Vec<_>>(),
+                        ));
+                    }
                 } else {
-                    *projection = Some((0..width).collect::<Arc<[usize]>>());
+                    *projection = Some(SharedDocumentProjection::new(
+                        (0..width).collect::<Vec<_>>(),
+                    ));
                 }
             }
         }
@@ -149,11 +161,14 @@ impl RowFragment {
         let Self::Stored { values, .. } = self else {
             panic!("expected stored fragment")
         };
+        let SharedDocumentValues::Ordinary(values) = values else {
+            panic!("expected ordinary stored values")
+        };
         values
     }
 
     #[cfg(test)]
-    pub(super) fn projection(&self) -> Option<&Arc<[usize]>> {
+    pub(super) fn projection(&self) -> Option<&SharedDocumentProjection> {
         match self {
             Self::Stored { projection, .. } => projection.as_ref(),
             Self::Constant { .. } => None,
@@ -191,7 +206,9 @@ impl PhysicalRow {
     pub fn from_values(values: Vec<Value>) -> Self {
         let mut fragments = RowFragments::new();
         if !values.is_empty() {
-            fragments.push(RowFragment::contiguous(Arc::new(values)));
+            fragments.push(RowFragment::contiguous(SharedDocumentValues::Ordinary(
+                Arc::new(values),
+            )));
         }
         Self {
             fragments,
@@ -203,6 +220,26 @@ impl PhysicalRow {
     /// fragment-local slot projection. Neither the values nor contained
     /// strings are cloned.
     pub fn from_shared_values(values: Arc<Vec<Value>>, projection: Arc<[usize]>) -> Self {
+        let mut fragments = RowFragments::new();
+        if !projection.is_empty() {
+            let values = SharedDocumentValues::Ordinary(values);
+            let identity = projection.len() == values.len()
+                && projection.iter().enumerate().all(|(i, slot)| i == *slot);
+            fragments.push(if identity {
+                RowFragment::contiguous(values)
+            } else {
+                RowFragment::projected(values, SharedDocumentProjection::new(projection))
+            });
+        }
+        Self {
+            fragments,
+            lock_origins: None,
+        }
+    }
+
+    /// Preserve the native values and their original image allowance through physical projection and joins. The cached thin projection keeps ordinary and retained fragments within the same inline footprint.
+    pub(crate) fn from_document_row(row: SharedDocumentRow) -> Self {
+        let (values, projection) = row.into_shared_parts();
         let mut fragments = RowFragments::new();
         if !projection.is_empty() {
             fragments.push(RowFragment::projected(values, projection));
@@ -244,7 +281,9 @@ impl PhysicalRow {
     pub fn append_values(mut self, values: Vec<Value>) -> Self {
         if !values.is_empty() {
             self.fragments
-                .push(RowFragment::contiguous(Arc::new(values)));
+                .push(RowFragment::contiguous(SharedDocumentValues::Ordinary(
+                    Arc::new(values),
+                )));
         }
         self
     }
@@ -322,8 +361,8 @@ impl PhysicalRow {
                 output.push(match fragment {
                     RowFragment::Constant { value, .. } => RowFragment::Constant { value, width },
                     RowFragment::Stored { values, .. } => RowFragment::projected(
-                        Arc::clone(values),
-                        Arc::from(std::mem::take(projection)),
+                        values.clone(),
+                        SharedDocumentProjection::new(std::mem::take(projection)),
                     ),
                 });
             }
@@ -390,7 +429,9 @@ impl PhysicalRow {
             if owned.is_empty() {
                 return;
             }
-            output.push(RowFragment::contiguous(Arc::new(std::mem::take(owned))));
+            output.push(RowFragment::contiguous(SharedDocumentValues::Ordinary(
+                Arc::new(std::mem::take(owned)),
+            )));
         }
 
         let mut fragments = RowFragments::new();

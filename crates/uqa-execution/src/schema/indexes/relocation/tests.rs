@@ -7,7 +7,7 @@
 use super::*;
 use crate::catalog::index::registry::CatalogIndexes;
 use std::cell::RefCell;
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_storage::StorageBackendResult;
 
 #[derive(Default)]
@@ -19,8 +19,8 @@ struct Publication {
 }
 
 impl IndexRegistryPublication for Publication {
-    fn index_catalog(&self) -> Arc<CatalogIndexes> {
-        Arc::new(self.rows.borrow().clone())
+    fn index_catalog(&self) -> RetainedValue<CatalogIndexes> {
+        uqa_core::memory::RetainedValue::new(self.rows.borrow().clone())
     }
 
     fn index_table_persistence(

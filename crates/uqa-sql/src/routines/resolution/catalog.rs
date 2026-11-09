@@ -11,10 +11,11 @@ use crate::{
     ast::FunctionBinding, catalog::domain::StoredDomain, routines::declaration::RoutineTypeCatalog,
     SQLError,
 };
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
 /// The original immutable domain allocation captured for one signature-matching pass.
-pub type RoutineTypeSnapshot = Arc<crate::catalog::type_definitions::TypeDefinitions<StoredDomain>>;
+pub type RoutineTypeSnapshot =
+    RetainedValue<crate::catalog::type_definitions::TypeDefinitions<StoredDomain>>;
 pub trait RoutineOverloadCatalog: RoutineTypeCatalog + Send + Sync {
     fn routine_type_snapshot(&self) -> RoutineTypeSnapshot;
     fn routine_search_path(&self) -> Vec<String>;

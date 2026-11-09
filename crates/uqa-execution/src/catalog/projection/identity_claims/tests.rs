@@ -22,12 +22,13 @@ fn oid_initialization_excludes_bootstrap_namespaces_but_observes_user_claims() {
         lookup_mode: RelationLookupMode::Bound,
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas = Arc::new(BoundSchemaSecurity::initial_catalog());
+    snapshot.definitions.schemas =
+        uqa_core::memory::RetainedValue::new(BoundSchemaSecurity::initial_catalog());
     assert_eq!(
         largest_catalog_oid(&CatalogReadView::new(snapshot.clone()), &resolution).unwrap(),
         None
     );
-    Arc::make_mut(&mut snapshot.definitions.schemas)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.schemas)
         .insert(
             "retained".into(),
             BoundSchemaSecurity::bootstrap_with_oid("retained", 70_000),

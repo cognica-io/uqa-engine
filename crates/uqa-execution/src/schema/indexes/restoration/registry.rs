@@ -145,7 +145,7 @@ impl MigrationAllocator {
     ) -> StorageBackendResult<Self> {
         let mut empty = catalog.snapshot().clone();
         empty.definitions.catalog_indexes =
-            std::sync::Arc::new(CatalogIndexes::with_budget(rows.budget()));
+            uqa_core::memory::RetainedValue::new(CatalogIndexes::with_budget(rows.budget()));
         for table in empty.tables.values_mut() {
             table.keys = Vec::new().into();
         }

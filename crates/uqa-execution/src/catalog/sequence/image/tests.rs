@@ -15,7 +15,6 @@ use crate::catalog::{
         SequenceState,
     },
 };
-use std::sync::Arc;
 use uqa_core::{
     catalog_role::RoleIdentity,
     catalog_sequence::{SequenceOwner, SequenceOwnerDependency},
@@ -47,10 +46,10 @@ fn sequence_image_native_clones_and_captures_retain_decoded_allowance() {
     drop(restored);
     assert_eq!(memory.used(), used);
     let source = SequenceReadSnapshot {
-        catalog: Arc::new(clone),
+        catalog: uqa_core::memory::RetainedValue::new(clone),
         roles: RoleCatalogSnapshot {
-            roles: Arc::default(),
-            memberships: Arc::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            memberships: uqa_core::memory::RetainedValue::default(),
         },
     };
     let control = StorageReadControl::with_limit(65536);
@@ -87,7 +86,7 @@ fn fixture() -> SequenceReadSnapshot {
         }),
     };
     SequenceReadSnapshot {
-        catalog: Arc::new(
+        catalog: uqa_core::memory::RetainedValue::new(
             SequenceCatalog::try_from_iter([(
                 RelationIdentity::new("s", "q"),
                 SequenceRecord {
@@ -101,8 +100,8 @@ fn fixture() -> SequenceReadSnapshot {
             .unwrap(),
         ),
         roles: RoleCatalogSnapshot {
-            roles: Arc::default(),
-            memberships: Arc::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            memberships: uqa_core::memory::RetainedValue::default(),
         },
     }
 }
@@ -189,7 +188,7 @@ fn sequence_images_keep_all_numeric_boundaries_types_persistence_and_owner_modes
             ] {
                 let mut source = fixture();
                 let relation = RelationIdentity::new("s", "q");
-                let catalog = Arc::make_mut(&mut source.catalog);
+                let catalog = uqa_core::memory::RetainedValue::make_mut(&mut source.catalog);
                 let mut record = *catalog.get(&relation).unwrap();
                 let (min, max) = data_type.bounds();
                 record.state = SequenceState {
@@ -296,7 +295,7 @@ fn sequence_image_retains_selected_autonomous_position_after_source_retirement()
 fn sequence_image_preparation_and_fragmented_output_allocate_no_payloads() {
     let mut source = fixture();
     let from = RelationIdentity::new("s", "q");
-    Arc::make_mut(&mut source.catalog)
+    uqa_core::memory::RetainedValue::make_mut(&mut source.catalog)
         .rename(
             &from,
             &RelationIdentity::new("Quoted.Schema", "x".repeat(65536)),

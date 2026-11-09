@@ -24,6 +24,7 @@ mod roles;
 mod routines;
 mod rules;
 mod security_images;
+mod table_authority;
 mod table_definitions;
 mod triggers;
 mod types;

@@ -53,7 +53,7 @@ impl Fixture {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
-            catalog: Arc::new(
+            catalog: uqa_core::memory::RetainedValue::new(
                 SequenceCatalog::try_from_iter([(
                     relation,
                     SequenceRecord {
@@ -78,19 +78,19 @@ impl Fixture {
                 .unwrap(),
             ),
             roles: RoleCatalogSnapshot {
-                roles: Arc::new(
+                roles: uqa_core::memory::RetainedValue::new(
                     RoleDefinitions::try_from_iter([
                         ("uqa".into(), RoleDefinition::bootstrap()),
                         (reader.name.clone(), reader),
                     ])
                     .unwrap(),
                 ),
-                memberships: Arc::new(RoleMemberships::new()),
+                memberships: uqa_core::memory::RetainedValue::new(RoleMemberships::new()),
             },
         };
         let mut catalog = empty_catalog().snapshot().clone();
-        catalog.definitions.sequences = Arc::clone(&retained.catalog);
-        catalog.definitions.roles = Arc::clone(&retained.roles.roles);
+        catalog.definitions.sequences = uqa_core::memory::RetainedValue::clone(&retained.catalog);
+        catalog.definitions.roles = uqa_core::memory::RetainedValue::clone(&retained.roles.roles);
         Self {
             current: RefCell::new(retained.clone()),
             retained,

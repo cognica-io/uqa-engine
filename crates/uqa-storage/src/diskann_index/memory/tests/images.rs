@@ -130,7 +130,9 @@ fn memory_diskann_restore_retains_build_options_but_establishes_independent_futu
     assert_ne!(restored.clock.database, source.clock.database);
     assert_eq!(temporary.used(), 0);
     let base_generation = *restored.manifest();
-    let old = restored.capture_image_with_control(&target).unwrap();
+    let capture = StorageReadControl::with_limit(1 << 20);
+    let old = restored.capture_image_with_control(&capture).unwrap();
+    target.cancellation().cancel();
     for index in [&mut source, &mut restored] {
         index.add(1, vec![0.0, -1.0]).unwrap();
         index.delete(8).unwrap();
@@ -163,6 +165,7 @@ fn memory_diskann_restore_retains_build_options_but_establishes_independent_futu
     assert_eq!(old_bytes, bytes);
     drop((old, restored));
     assert_eq!(target.memory().used(), 0);
+    assert_eq!(capture.memory().used(), 0);
 }
 
 #[test]
@@ -212,6 +215,24 @@ fn memory_diskann_image_capture_is_constant_size_and_retains_original_cancellati
     assert_eq!(source_control.memory().used(), 0);
 }
 
+struct CancelInput<'a> {
+    bytes: &'a [u8],
+    remaining: usize,
+    control: &'a StorageReadControl,
+}
+
+impl std::io::Read for CancelInput<'_> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        let count = output.len().min(self.remaining);
+        let count = std::io::Read::read(&mut self.bytes, &mut output[..count])?;
+        self.remaining -= count;
+        if self.remaining == 0 {
+            self.control.cancellation().cancel();
+        }
+        Ok(count)
+    }
+}
+
 #[test]
 fn memory_diskann_image_rejects_truncated_corrupt_and_unfunded_candidates() {
     let source_control = StorageReadControl::with_limit(1 << 20);
@@ -227,6 +248,19 @@ fn memory_diskann_image_rejects_truncated_corrupt_and_unfunded_candidates() {
     }
     let source = populated(&source_control);
     let bytes = encode(&source);
+    for remaining in [1, bytes.len() / 2, bytes.len()] {
+        let control = StorageReadControl::with_limit(1 << 20);
+        let mut input = CancelInput {
+            bytes: &bytes,
+            remaining,
+            control: &control,
+        };
+        assert!(matches!(
+            read_vector_image(&mut input, &control),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert_eq!(control.memory().used(), 0);
+    }
     for position in [13, 29, 45, 65, bytes.len() / 2, bytes.len() - 1] {
         let mut corrupt = bytes.clone();
         corrupt[position] ^= 0xff;
