@@ -22,6 +22,8 @@ macro_rules! table_sources {
             pub(super) persistence: uqa_sql::ast::RelationPersistence,
             pub(super) on_commit: uqa_sql::ast::OnCommitAction,
             payload_bytes: usize,
+            // This key and its source value share the same immutable membership entry.
+            pub(super) name_memory: Option<uqa_core::memory::MemoryReservation>,
             $(pub(super) $field: MemoryCaptureKey<$frozen>,)*
         }
 
@@ -49,6 +51,7 @@ macro_rules! table_sources {
                     persistence: table.persistence,
                     on_commit: table.on_commit,
                     payload_bytes: relation.schema.capacity().checked_add(relation.name.capacity()).ok_or(MemoryError::SizeOverflow)?,
+                    name_memory: None,
                     $($field: table.$field.key()?,)*
                 };
                 $(source.payload_bytes = source.payload_bytes.checked_add(source.$field.retained_source_bytes()).ok_or(MemoryError::SizeOverflow)?;)*
@@ -66,6 +69,7 @@ macro_rules! table_sources {
                     persistence: table.persistence,
                     on_commit: table.on_commit,
                     payload_bytes: relation.schema.capacity().checked_add(relation.name.capacity()).ok_or(MemoryError::SizeOverflow)?,
+                    name_memory: None,
                     $($field: table.$field.key()?,)*
                 };
                 $(source.payload_bytes = source.payload_bytes.checked_add(source.$field.retained_source_bytes()).ok_or(MemoryError::SizeOverflow)?;)*
@@ -90,6 +94,7 @@ macro_rules! table_sources {
                     persistence: self.persistence,
                     on_commit: self.on_commit,
                     payload_bytes: relation.schema.capacity().checked_add(relation.name.capacity()).ok_or(MemoryError::SizeOverflow)?,
+                    name_memory: None,
                     $($field: self.$field.clone(),)*
                 };
                 $(source.payload_bytes = source.payload_bytes.checked_add(source.$field.retained_source_bytes()).ok_or(MemoryError::SizeOverflow)?;)*

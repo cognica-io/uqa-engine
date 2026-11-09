@@ -225,6 +225,7 @@ impl Engine {
         );
         let maps_integer_keys = Self::restored_key_mapping(catalog, &columns, schema.object_id)?;
         Ok(Arc::new(TableState {
+            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
             security: crate::state::TableMetadataCell::new(security),

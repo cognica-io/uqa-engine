@@ -12,6 +12,7 @@ mod entries;
 mod field_analyzers;
 mod readers;
 mod resources;
+mod restore;
 mod table_cursor;
 mod tables;
 

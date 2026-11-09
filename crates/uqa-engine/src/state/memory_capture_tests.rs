@@ -267,11 +267,14 @@ fn memory_engine_capture_membership_registration_has_no_relation_or_document_cop
         assert!(allocated.bytes_total < 4096, "{count}: {allocated:?}");
         let (cut, tables) = captured.unwrap();
         assert_eq!(tables.len(), count);
-        assert!(Arc::ptr_eq(&tables, &engine.storage.tables.live_snapshot()));
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
+            &tables,
+            &engine.storage.tables.live_snapshot()
+        ));
         sql(&engine, "CREATE TABLE later(id integer)");
         assert_eq!(tables.len(), count);
         assert_eq!(engine.storage.tables.read().len(), count + 1);
-        assert!(!Arc::ptr_eq(
+        assert!(!uqa_core::memory::RetainedValue::ptr_eq(
             &tables,
             &engine.storage.tables.live_snapshot()
         ));

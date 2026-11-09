@@ -67,6 +67,19 @@ impl<T: TableMetadataValue, F: Send + Sync + 'static> TableMetadataCell<T, F> {
 }
 
 impl<T: TableMetadataValue> TableMetadataCell<T> {
+    pub(crate) fn capture_source_with_control(
+        self,
+        registry: &MemoryCaptureRegistry,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self(CatalogCell::capture_source_with_control(
+            self.0.snapshot(),
+            registry,
+            TableMetadata::capture_with_control,
+            control,
+        )?))
+    }
+
     pub(crate) fn capture_source(
         self,
         registry: &MemoryCaptureRegistry,
@@ -85,6 +98,19 @@ impl
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >
 {
+    pub(crate) fn capture_source_with_control(
+        self,
+        registry: &MemoryCaptureRegistry,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self(CatalogCell::capture_source_with_control(
+            self.0.snapshot(),
+            registry,
+            |value, production| value.capture_security(production),
+            control,
+        )?))
+    }
+
     pub(crate) fn capture_source(
         self,
         registry: &MemoryCaptureRegistry,

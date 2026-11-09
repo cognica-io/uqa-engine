@@ -217,7 +217,7 @@ pub use uqa_storage::FtsIndexStat;
 pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
-type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
+type SessionPortalTableSnapshots = Arc<crate::state::TableRegistryMap>;
 type SessionPortalViewSnapshots = RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots =
     RetainedValue<uqa_sql::routines::registry::RoutineRegistry>;
@@ -631,6 +631,8 @@ struct TableDataSnapshot {
 }
 
 pub(crate) struct TableState {
+    /// A restored table retains admission for its own header; child definitions and stores retain their native allocations independently.
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
     /// Session-local relation generation. Reloads of the same catalog object preserve this value, while CREATE allocates a new value even when a dropped relation's name is reused.
     lifecycle_id: std::sync::atomic::AtomicU64,
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.

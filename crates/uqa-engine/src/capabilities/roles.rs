@@ -7,7 +7,7 @@
 //! Bind role lifecycle consumers to live catalog guards, provider writes and session state.
 
 use crate::{Engine, TableState};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::role_lifecycle::context::{
     RoleDefinitionWrite, RoleExecutionContext, RoleMembershipWrite, RolePublication, RoleRegistry,
@@ -152,7 +152,7 @@ impl RoleNotices for Engine {
     }
 }
 struct RoleTableRegistryRead<'a>(
-    parking_lot::MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    parking_lot::MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>,
 );
 impl RoleTableSecurity for TableState {
     fn persistence(&self) -> uqa_sql::ast::RelationPersistence {

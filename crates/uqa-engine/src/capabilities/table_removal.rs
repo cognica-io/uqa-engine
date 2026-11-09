@@ -6,7 +6,6 @@
 
 //! Lend actual table generations and guard lifetimes to native DROP execution.
 use crate::{Engine, TableState};
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::table_removal::context::{
     TableRemovalCatalog, TableRemovalContext, TableRemovalPublication,
@@ -19,9 +18,7 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
-struct HierarchyTables<'a>(
-    parking_lot::MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
-);
+struct HierarchyTables<'a>(parking_lot::MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>);
 impl HierarchyDropCatalog for Engine {
     fn tables(&self) -> Box<dyn HierarchyDropTables + '_> {
         Box::new(HierarchyTables(self.storage.tables.read()))

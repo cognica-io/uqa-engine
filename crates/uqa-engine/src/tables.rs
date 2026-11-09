@@ -317,6 +317,7 @@ impl Engine {
         )
         .map_err(|error| StorageBackendError::backend("CREATE TABLE array type", error))?;
         let table = TableState {
+            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
             security: TableMetadataCell::new(BoundTableSecurity::owner(owner.identity())),

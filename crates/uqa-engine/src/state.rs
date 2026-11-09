@@ -34,7 +34,9 @@ pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
 pub(crate) use table_membership::SnapshotTableCut;
-pub(crate) use table_membership::{CapturedTable, PersistentTableRegistrySnapshot};
+pub(crate) use table_membership::{
+    CapturedTable, PersistentTableRegistrySnapshot, TableRegistryInput, TableRegistryMap,
+};
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;

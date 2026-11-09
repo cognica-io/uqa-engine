@@ -101,6 +101,7 @@ impl Engine {
     ) -> Arc<TableState> {
         let analyzer = source.analyzer.read().configuration().clone();
         Arc::new(TableState {
+            _image_memory: None,
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
             security: crate::state::TableMetadataCell::from_generation(

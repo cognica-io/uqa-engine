@@ -8,10 +8,13 @@
 
 use super::{Membership, TableSources, Tables};
 use crate::TableState;
-use std::collections::BTreeMap;
-use uqa_core::{memory::MemoryBudget, RelationIdentity};
+use uqa_core::{
+    memory::{MemoryBudget, OwnedMap, ProductionControl},
+    RelationIdentity,
+};
 use uqa_storage::{
     memory_capture::{MemoryCaptureMember, MemoryCaptureMembership, MemoryCaptureRegistry},
+    read_control::StorageReadControl,
     StorageBackendResult,
 };
 
@@ -19,7 +22,7 @@ pub(super) struct Publication {
     registry: MemoryCaptureRegistry,
     memory: MemoryBudget,
     owner: MemoryCaptureMembership,
-    members: BTreeMap<RelationIdentity, MemoryCaptureMember>,
+    members: OwnedMap<RelationIdentity, MemoryCaptureMember>,
 }
 
 #[cfg(test)]
@@ -34,7 +37,7 @@ impl Publication {
             registry: registry.clone(),
             memory: memory.clone(),
             owner: MemoryCaptureMembership::new(registry, memory)?,
-            members: BTreeMap::new(),
+            members: OwnedMap::new(),
         })
     }
 
@@ -52,6 +55,26 @@ impl Publication {
         table: &TableState,
         source: Option<&TableSources>,
     ) -> StorageBackendResult<()> {
+        self.insert_source(name, table, source, None)
+    }
+
+    pub(super) fn insert_with_control(
+        &mut self,
+        name: &RelationIdentity,
+        table: &TableState,
+        source: &TableSources,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.insert_source(name, table, Some(source), Some(control))
+    }
+
+    fn insert_source(
+        &mut self,
+        name: &RelationIdentity,
+        table: &TableState,
+        source: Option<&TableSources>,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<()> {
         let Some(source) = source else {
             return self.remove(name);
         };
@@ -66,8 +89,24 @@ impl Publication {
         let member = self.owner.publish(self.members.get(name), &sources)?;
         publication.bind(member.clone());
         value_publication.bind(member.clone());
-        self.members.insert(name.clone(), member);
+        if let Some(control) = control {
+            let production = ProductionControl::new(
+                control.memory(),
+                control.cancellation(),
+                control.cancellation(),
+            );
+            let name = super::input::copy_name(name, &production)?;
+            self.members.insert_admitted_key(name, member)?;
+        } else {
+            self.members.insert(name.clone(), member);
+        }
         Ok(())
+    }
+
+    pub(super) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.owner = self.owner.into_mutation_budget(memory);
+        self.memory = memory.clone();
+        self
     }
 
     pub(super) fn remove(&mut self, name: &RelationIdentity) -> StorageBackendResult<()> {

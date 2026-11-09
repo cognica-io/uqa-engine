@@ -358,7 +358,7 @@ impl Engine {
         sources: Vec<SessionPortalTableSource>,
         mut transaction_overlay: std::collections::BTreeMap<String, DocumentChanges>,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
-        let mut snapshots = std::collections::BTreeMap::new();
+        let mut snapshots = crate::state::TableRegistryMap::new();
         for (relation, data, metadata) in sources {
             let canonical = relation.qualified_name();
             // A live source already includes this session's evaluated private writes.
@@ -380,7 +380,7 @@ impl Engine {
     pub(crate) fn capture_detached_fixed_transaction_snapshot(
         &self,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
-        let mut snapshots = std::collections::BTreeMap::new();
+        let mut snapshots = crate::state::TableRegistryMap::new();
         let live_tables = self
             .storage
             .tables
