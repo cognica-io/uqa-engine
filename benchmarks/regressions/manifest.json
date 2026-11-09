@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -51070,8 +51070,8 @@
       "cases": 1,
       "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
       "capability": "Complete private memory image assembly",
-      "workload": "Read an actual repository backup after source retirement, compare every native component, execute later writes and inject cancellation or exhausted input admission.",
-      "invariant": "Original catalogs, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
+      "workload": "Read an actual repository backup after source retirement, compare every native component and ACL, enforce restored role privileges, execute later writes and inject cancellation or exhausted input admission.",
+      "invariant": "Original catalogs, authority, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
       "case_names": [
         ""
       ]
@@ -51397,6 +51397,149 @@
       "capability": "Independent native mutation allowance",
       "workload": "Exhaust and cancel the input owner, mutate resident and spilled destinations, and retain the original ordered roots.",
       "invariant": "Future workspace and path allocations use the destination allowance; original immutable records and page reservations survive until the last reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_rejects_missing_and_replaced_incarnations_without_resolving_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native authority incarnation closure",
+      "workload": "Validate owner, grantor and grantee identities before and after role replacement.",
+      "invariant": "Only the original live OID/incarnation pair resolves; display names do not rebind authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_grant_graph_matches_existing_acl_validation_for_all_three_role_graphs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native ACL grant graph",
+      "workload": "Compare all 64 three-role grant-option graphs with the existing independent object ACL validator.",
+      "invariant": "The admitted owner-rooted reachability predicate accepts exactly the existing ACL authority relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_combines_relation_options_with_column_grants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native column authority",
+      "workload": "Validate column grants using relation-level grant options and reject missing columns or unsupported privilege paths.",
+      "invariant": "Column grants use the matching relation privilege option while retaining independent ACL path scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_rejects_unrooted_duplicate_and_public_grant_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Malformed native authority rejection",
+      "workload": "Validate disconnected grant cycles, duplicate paths and PUBLIC grant options.",
+      "invariant": "Malformed authority fails without changing the selected catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_membership_validation_preserves_parallel_grantors_and_rejects_cycles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Retained role membership graph",
+      "workload": "Validate parallel membership grantors and inject a cyclic role-membership path.",
+      "invariant": "Independent grantors remain valid and cyclic memberships are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_membership_validation_preserves_deleted_endpoints_without_name_or_oid_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Retained membership incarnation isolation",
+      "workload": "Delete a role endpoint, recreate its name and OID with another incarnation, and remove a membership grantor.",
+      "invariant": "Deleted target/member identities remain retained without rebinding, but every grantor must still exist.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_schema_grants_cannot_borrow_a_different_privilege_option",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Independent ACL privilege paths",
+      "workload": "Attempt to support schema CREATE authority using an owner-rooted USAGE grant-option path.",
+      "invariant": "Reachability is independent for each privilege bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_validation_retires_admitted_workspace_on_quota_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Authority validation allocation lifetime",
+      "workload": "Sweep original allocation limits through success and denial, then cancel native authority validation.",
+      "invariant": "Failed and successful validation retire all temporary graph allocations and preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_authority_rejects_missing_and_recreated_table_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog authority integration",
+      "workload": "Validate one immutable catalog with a real table owner, remove the role, then reuse its name and OID.",
+      "invariant": "The selected table cannot acquire authority from a replacement role incarnation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_authority_validation_is_read_only_and_cancellation_releases_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Immutable native authority traversal",
+      "workload": "Validate a complete bootstrap catalog and cancel a subsequent traversal.",
+      "invariant": "Catalog state remains unchanged and validation workspace returns to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_and_replaced_authority_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Private image authority rejection",
+      "workload": "Read actual verified archives with a deleted or replaced table owner after source retirement.",
+      "invariant": "Malformed authority cannot escape the unpublished runtime and all decoded allocations retire on failure.",
       "case_names": [
         ""
       ]

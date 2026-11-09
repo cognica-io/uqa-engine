@@ -32,6 +32,38 @@ pub(super) struct MemoryState {
     pub header: MemoryImageHeader,
 }
 
+impl MemoryState {
+    /// Construct an unpublished session through the ordinary runtime owner and check native authority. Complete dependency validation still precedes public activation.
+    pub(super) fn into_private_engine(
+        self,
+        retention: MemoryBudget,
+        control: &StorageReadControl,
+    ) -> BackupResult<crate::Engine> {
+        control.check()?;
+        let counter = uqa_execution::catalog::identity::CatalogOidCounter::from_position(
+            self.header.catalog_oid_position,
+        )?;
+        let engine =
+            crate::Engine::from_memory_state(self.storage, self.durable, counter, retention);
+        let production = uqa_core::memory::ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        );
+        let catalog = engine
+            .restored_catalog_read_view_with_control(&production)
+            .map_err(super::metadata::sql_error)?;
+        uqa_execution::catalog::image_validation::validate_authority(
+            catalog.snapshot(),
+            control.memory(),
+            control.cancellation(),
+        )
+        .map_err(super::metadata::sql_error)?;
+        control.check()?;
+        Ok(engine)
+    }
+}
+
 pub(super) struct Input<'a> {
     image: Option<MemoryImageImportReader<'a>>,
     candidate: Option<Budgeted<Box<Candidate>>>,

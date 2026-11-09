@@ -18,6 +18,7 @@ pub mod enum_type;
 pub mod foreign;
 pub mod hierarchy;
 pub mod identity;
+pub mod image_validation;
 pub mod range_type;
 pub mod security;
 pub mod sequence;

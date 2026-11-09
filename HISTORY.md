@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native memory reconstruction validates role incarnations, owner-rooted ACL grant paths, column authority and retained memberships before returning its unpublished runtime. Complete public Engine restoration remains under implementation.
+
 - Native memory-image input assembles ordered catalogs, original sequence authority, graphs, models, path indexes, analyzers and writable tables through their owning codecs. Fresh memory concurrency state preserves the captured catalog OID position while starting independent sessions and transaction history; logical validation and public restore activation remain under implementation.
 
 - Restored HNSW and DiskANN owners retain original decoded payload reservations while subsequent reads and writes use an independent destination allowance. Exhausting the completed input allowance no longer prevents ordinary vector mutations.
