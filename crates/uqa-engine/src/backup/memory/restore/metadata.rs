@@ -119,14 +119,14 @@ impl MetadataInput {
                     image::read_foreign_keys_image(reader, memory, cancellation)
                         .map_err(sql_error)?,
                     control,
-                )?)
+                )?);
             }
             5 => {
                 self.keys = Some(metadata(
                     image::read_table_keys_image(reader, memory, cancellation)
                         .map_err(sql_error)?,
                     control,
-                )?)
+                )?);
             }
             6 => {
                 let value =
@@ -141,20 +141,20 @@ impl MetadataInput {
                     image::read_dropped_attributes_image(reader, memory, cancellation)
                         .map_err(sql_error)?,
                     control,
-                )?)
+                )?);
             }
             8 => {
                 self.statistics = Some(
                     uqa_planner::ColumnStatistics::read_image(reader, memory, cancellation)
                         .map_err(sql_error)?,
-                )
+                );
             }
             9 => {
                 self.maintenance = Some(
                     StatisticsMaintenance::read_image(reader, memory, cancellation).map_err(
                         |error| StorageBackendError::backend("memory table maintenance", error),
                     )?,
-                )
+                );
             }
             _ => return Err(invalid()),
         }

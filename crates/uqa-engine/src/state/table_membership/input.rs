@@ -6,7 +6,11 @@
 
 //! Private native membership admits original names, lookup nodes and capture publication together.
 
-use super::*;
+use super::{
+    Arc, Budgeted, BudgetedSharedMap, Membership, MemoryBudget, MemoryCaptureRegistry, MemoryError,
+    MemoryTables, Publication, RelationIdentity, RetainedValue, State, StorageBackendError,
+    StorageBackendResult, StorageReadControl, TableRegistry, TableSources, TableState, Tables,
+};
 use uqa_core::{memory::ProductionControl, RelationName, RelationReference};
 
 pub(crate) struct TableRegistryInput {
@@ -68,7 +72,7 @@ impl TableRegistryInput {
         let relation = copy_name(&name, &production)?;
         let mut source = TableSources::new(&table, &relation)?;
         let (relation, memory) = relation.into_parts();
-        source.name_memory = Some(memory);
+        source._name_memory = Some(memory);
         let membership = self.membership.with_source(relation, source)?;
         self.publication.insert_with_control(
             &name,

@@ -40,7 +40,7 @@ pub(super) struct TableDestination<'a> {
 
 enum Stage {
     Metadata(MetadataInput),
-    Data(Metadata, MemoryTableDataInput),
+    Data(Metadata, Budgeted<Box<MemoryTableDataInput>>),
 }
 
 pub(super) struct TableInput {
@@ -128,6 +128,9 @@ impl TableInput {
                         destination.resources.clone(),
                         control,
                     )?;
+                    let memory = control
+                        .memory()
+                        .reserve(size_of::<MemoryTableDataInput>())?;
                     let data = MemoryTableDataInput::new(
                         default,
                         fields,
@@ -140,12 +143,18 @@ impl TableInput {
                         destination.maximum_value_bytes,
                         destination.temporary,
                     )?;
-                    Stage::Data(metadata, data)
+                    Stage::Data(metadata, Budgeted::new(Box::new(data), memory))
                 } else {
                     Stage::Metadata(metadata)
                 }
             }
-            Stage::Data(metadata, data) => Stage::Data(metadata, data.read(unit, reader)?),
+            Stage::Data(metadata, data) => {
+                let (data, memory) = data.into_parts();
+                Stage::Data(
+                    metadata,
+                    Budgeted::new(Box::new(data.read(unit, reader)?), memory),
+                )
+            }
         };
         control.check()?;
         Ok(Self {
@@ -162,6 +171,7 @@ impl TableInput {
         let Stage::Data(metadata, data) = self.stage else {
             return Err(invalid());
         };
+        let (data, _memory) = data.into_parts();
         let table = assemble(state, metadata, data.finish()?, control)?;
         Ok((self.name, table))
     }
