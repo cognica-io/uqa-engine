@@ -51070,7 +51070,7 @@
       "cases": 1,
       "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
       "capability": "Complete private memory image assembly",
-      "workload": "Read an actual repository backup after source retirement, compare every native component and ACL, enforce restored role privileges, execute later writes and inject cancellation or exhausted input admission.",
+      "workload": "Read an actual repository backup after source retirement, compare every native component and ACL, preserve enum/domain/composite declarations, enforce restored privileges, execute later writes and inject cancellation or exhausted input admission.",
       "invariant": "Original catalogs, authority, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
       "case_names": [
         ""
@@ -51540,6 +51540,149 @@
       "capability": "Private image authority rejection",
       "workload": "Read actual verified archives with a deleted or replaced table owner after source retirement.",
       "invariant": "Malformed authority cannot escape the unpublished runtime and all decoded allocations retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_references_follow_identity_and_reject_wrong_kind_or_array_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native declared type identity",
+      "workload": "Resolve encoded and concrete type references with changed display names and malformed, missing, wrong-kind or wrong-array identities.",
+      "invariant": "Only original type kinds and physical OIDs satisfy references; names cannot repair missing identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_claims_reject_cross_family_array_and_relation_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native type address uniqueness",
+      "workload": "Claim scalar, array, relation row, builtin, pseudo-type and system-domain addresses across native registries.",
+      "invariant": "One type address has one owner and reserved addresses cannot be replaced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_references_validate_nested_bases_and_preserve_builtin_domains",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native domain base references",
+      "workload": "Validate nested user domain declarations and fixed system domains, then alter the retained base.",
+      "invariant": "Original base OIDs, modifiers, collation selection and array identities survive without type rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_row_type_references_preserve_relation_and_array_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native relation row types",
+      "workload": "Validate a selected row type and then change its describing relation identity.",
+      "invariant": "A row type cannot attach its retained descriptor to a different relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_claim_admission_and_cancellation_release_original_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native type index allocation lifetime",
+      "workload": "Sweep original workspace limits through successful and denied type claims, then cancel reference lookup.",
+      "invariant": "Every partial index releases its admitted workspace and observes original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_concrete_type_membership_rejects_direct_and_indirect_cycles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Acyclic concrete type membership",
+      "workload": "Check repeated valid member edges, direct self-membership and a cycle through an array of another row type.",
+      "invariant": "Recursive live layouts reject without descriptor expansion and all graph workspace retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_reject_missing_and_replaced_column_type_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog type references",
+      "workload": "Validate one table with a user enum, remove its definition and recreate the same name with new OIDs.",
+      "invariant": "A retained column type resolves only to its original physical identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_reject_cross_owner_row_type_collisions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog cross-owner type addresses",
+      "workload": "Assign a relation row type the generated-array address of another native type.",
+      "invariant": "Whole-catalog validation rejects address aliasing before private activation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_retire_workspace_on_quota_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog type validation lifetime",
+      "workload": "Deny the original type-validation allowance and cancel a second immutable catalog traversal.",
+      "invariant": "Failure leaves no retained index workspace or modified catalog state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_user_type_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Private image type rejection",
+      "workload": "Read a real verified archive whose table retains a removed enum after its source Engine is retired.",
+      "invariant": "A missing native type rejects the unpublished runtime and releases every original decoded allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_references_preserve_companion_identity_and_endpoint_alignment",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native range physical identity",
+      "workload": "Validate native range and multirange references, alter their array OIDs and endpoint alignment, and exchange the two type kinds.",
+      "invariant": "Each range family member retains its own kind, physical layout and generated-array identity without SQL declaration replay.",
       "case_names": [
         ""
       ]

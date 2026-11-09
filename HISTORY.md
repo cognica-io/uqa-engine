@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native memory reconstruction checks declared user types and relation row types against the complete selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships before returning its unpublished runtime.
+
 - Native memory reconstruction validates role incarnations, owner-rooted ACL grant paths, column authority and retained memberships before returning its unpublished runtime. Complete public Engine restoration remains under implementation.
 
 - Native memory-image input assembles ordered catalogs, original sequence authority, graphs, models, path indexes, analyzers and writable tables through their owning codecs. Fresh memory concurrency state preserves the captured catalog OID position while starting independent sessions and transaction history; logical validation and public restore activation remain under implementation.

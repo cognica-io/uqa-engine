@@ -14,7 +14,8 @@ use uqa_storage::backup::{
 fn source() -> Engine {
     let engine = Engine::new();
     engine.sql("CREATE TYPE mood AS ENUM('low','high'); COMMENT ON TYPE mood IS 'saved'; CREATE SEQUENCE ticket START 41; CREATE TABLE items(id integer PRIMARY KEY, body text, embedding vector(2), ticket bigint DEFAULT nextval('ticket')); CREATE INDEX text_index ON items USING gin(body); CREATE INDEX vector_index ON items USING hnsw(embedding); CREATE INDEX value_index ON items(lower(body)); INSERT INTO items(id,body,embedding) VALUES(1,'Cats DOGS',ARRAY[1.0,0.0]),(2,'birds',ARRAY[0.0,1.0]); CREATE TABLE empty(id integer); CREATE UNLOGGED TABLE unlogged(value integer); INSERT INTO unlogged VALUES(17); CREATE TEMP TABLE transient(value integer); INSERT INTO transient VALUES(99); CREATE VIEW visible AS SELECT id,body FROM items; CREATE FUNCTION increment(n integer) RETURNS integer LANGUAGE SQL AS 'SELECT n+1'", &[]).unwrap();
-    engine.sql("CREATE ROLE archive_reader; GRANT USAGE ON SCHEMA public TO archive_reader; GRANT USAGE ON TYPE mood TO archive_reader; GRANT SELECT(id,body) ON items TO archive_reader; GRANT SELECT ON visible TO archive_reader; GRANT USAGE ON SEQUENCE ticket TO archive_reader; GRANT EXECUTE ON FUNCTION increment(integer) TO archive_reader; GRANT SELECT(relname) ON pg_class TO archive_reader", &[]).unwrap();
+    engine.sql("CREATE TABLE typed(value mood); INSERT INTO typed VALUES('low'); CREATE ROLE archive_reader; GRANT USAGE ON SCHEMA public TO archive_reader; GRANT USAGE ON TYPE mood TO archive_reader; GRANT SELECT(id,body) ON items TO archive_reader; GRANT SELECT ON visible TO archive_reader; GRANT USAGE ON SEQUENCE ticket TO archive_reader; GRANT EXECUTE ON FUNCTION increment(integer) TO archive_reader; GRANT SELECT(relname) ON pg_class TO archive_reader", &[]).unwrap();
+    engine.sql("CREATE DOMAIN positive AS integer CHECK(VALUE > 0); CREATE TYPE pair AS (mood mood, score positive); CREATE TABLE shaped(value pair); INSERT INTO shaped VALUES(ROW('low',1)::pair); CREATE DOMAIN bundle AS pair[]; CREATE TABLE bundled(value bundle)", &[]).unwrap();
     for id in [1, 2] {
         engine
             .add_graph_vertex(Vertex::new(id, "node"), "saved")
@@ -164,6 +165,13 @@ fn complete_repository_input_preserves_native_state_after_source_retirement_and_
     restored.sql("RESET ROLE", &[]).unwrap();
     assert_eq!(
         restored
+            .sql("SELECT (value).score = 1 AS valid FROM shaped", &[])
+            .unwrap()
+            .rows[0]["valid"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        restored
             .sql("SELECT nextval('ticket') AS value", &[])
             .unwrap()
             .rows[0]["value"],
@@ -250,6 +258,33 @@ fn complete_repository_input_rejects_missing_and_replaced_authority_before_priva
         );
         assert_eq!(control.memory().used(), 0);
     }
+}
+
+#[test]
+fn complete_repository_input_rejects_missing_user_type_before_private_activation() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = repository(&directory.path().join("repository"));
+    let source = Engine::new();
+    source.sql("CREATE TYPE mood AS ENUM('low','high'); CREATE TABLE typed(value mood); INSERT INTO typed VALUES('low')", &[]).unwrap();
+    source.durable.enums.write().remove("public.mood").unwrap();
+    let root = publish(&source, &repository);
+    drop(source);
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut input = input(&repository, root, &control);
+    let state = loop {
+        if let Some(state) = input.advance(1024).unwrap() {
+            break state;
+        }
+    };
+    drop(input);
+    let Err(error) = state.into_private_engine(MemoryBudget::new(32 << 20), &control) else {
+        panic!("missing type reached private activation");
+    };
+    assert!(
+        error.to_string().contains("invalid native type reference"),
+        "{error}"
+    );
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[test]

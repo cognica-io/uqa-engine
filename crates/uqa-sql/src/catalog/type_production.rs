@@ -14,6 +14,7 @@ mod system;
 use crate::ast::{
     ColumnType, CompositeTypeReference, EnumTypeReference, RangeAlignment, RangeTypeReference,
 };
+pub(crate) use system::is_system_catalog_type_oid;
 pub use system::system_catalog_domain_with_control;
 use uqa_core::{
     memory::{Produced, ProductionControl},

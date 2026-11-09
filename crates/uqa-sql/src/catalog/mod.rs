@@ -27,6 +27,8 @@ pub mod table_metadata;
 pub mod type_definitions;
 pub mod type_metadata;
 mod type_production;
+pub mod type_references;
+pub(crate) use type_production::is_system_catalog_type_oid;
 pub use type_production::system_catalog_domain_with_control;
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.

@@ -10,6 +10,9 @@ use super::{CatalogDefinitionSnapshot, CatalogReadSnapshot};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{catalog::security::authority::AuthorityCatalog, SQLError};
 
+mod type_dependencies;
+pub use type_dependencies::validate as validate_types;
+
 #[cfg(test)]
 mod tests;
 
