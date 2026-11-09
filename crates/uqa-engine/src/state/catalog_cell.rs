@@ -102,21 +102,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         registry: Option<&MemoryCaptureRegistry>,
         capture: fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>,
     ) -> StorageBackendResult<Self> {
-        Self::with_source(value.into(), registry, Capture::Definition(capture), None)
-    }
-
-    pub(crate) fn capture_source_with_control(
-        value: impl Into<CatalogGeneration<T>>,
-        registry: &MemoryCaptureRegistry,
-        capture: fn(&T, &ProductionControl<'_>) -> Result<Produced<F>, uqa_sql::SQLError>,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        Self::with_source(
-            value.into(),
-            Some(registry),
-            Capture::Definition(capture),
-            Some(control),
-        )
+        Self::with_source(value.into(), registry, Capture::Definition(capture))
     }
 
     pub(crate) fn capture_resource(
@@ -124,44 +110,20 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         registry: &MemoryCaptureRegistry,
         capture: fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>,
     ) -> StorageBackendResult<Self> {
-        Self::with_source(
-            value.into(),
-            Some(registry),
-            Capture::Resource(capture),
-            None,
-        )
-    }
-
-    pub(crate) fn capture_resource_with_control(
-        value: impl Into<CatalogGeneration<T>>,
-        registry: &MemoryCaptureRegistry,
-        capture: fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        Self::with_source(
-            value.into(),
-            Some(registry),
-            Capture::Resource(capture),
-            Some(control),
-        )
+        Self::with_source(value.into(), Some(registry), Capture::Resource(capture))
     }
 
     fn with_source(
         value: CatalogGeneration<T>,
         registry: Option<&MemoryCaptureRegistry>,
         capture: Capture<T, F>,
-        control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<Self> {
         let mut cell = MemoryCaptureCell::new(CatalogRoot {
             value,
             capture: Some(capture),
         });
         if let Some(registry) = registry {
-            if let Some(control) = control {
-                cell.register_with_control(registry, control)?;
-            } else {
-                cell.register(registry)?;
-            }
+            cell.register(registry)?;
         }
         Ok(Self(cell))
     }

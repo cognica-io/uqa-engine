@@ -50,19 +50,6 @@ impl<T: TableDefinitionValue> TableDefinitionCell<T> {
         MappedRwLockReadGuard::map(self.0.read(), |value| &**value)
     }
 
-    pub(crate) fn capture_source_with_control(
-        self,
-        registry: &MemoryCaptureRegistry,
-        control: &uqa_storage::read_control::StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        Ok(Self(CatalogCell::capture_source_with_control(
-            self.0.snapshot(),
-            registry,
-            TableDefinition::capture_with_control,
-            control,
-        )?))
-    }
-
     #[cfg(test)]
     pub(crate) fn is_locked(&self) -> bool {
         self.0.is_locked()

@@ -55,31 +55,7 @@ impl Engine {
     }
 
     pub(crate) fn in_memory_with_retention(memory: uqa_core::memory::MemoryBudget) -> Self {
-        let storage = super::StorageContext::memory();
-        let durable = super::DurableCatalogState::memory(
-            storage
-                .memory_capture
-                .as_ref()
-                .expect("memory source domain"),
-        )
-        .expect("a fresh memory source domain has available registry identities");
-        Self::from_memory_state(
-            storage,
-            durable,
-            uqa_execution::catalog::identity::CatalogOidCounter::default(),
-            memory,
-        )
-    }
-
-    pub(crate) fn from_memory_state(
-        storage: super::StorageContext,
-        durable: super::DurableCatalogState,
-        catalog_oids: uqa_execution::catalog::identity::CatalogOidCounter,
-        memory: uqa_core::memory::MemoryBudget,
-    ) -> Self {
-        let row_locks = Arc::new(crate::row_locks::RowLockManager::with_catalog_oids(
-            catalog_oids,
-        ));
+        let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::with_retention(
@@ -93,6 +69,14 @@ impl Engine {
             session.state.io_timing(),
         );
         session.state.attach_cancellation(&runtime.cancellation);
+        let storage = super::StorageContext::memory();
+        let durable = super::DurableCatalogState::memory(
+            storage
+                .memory_capture
+                .as_ref()
+                .expect("memory source domain"),
+        )
+        .expect("a fresh memory source domain has available registry identities");
         Self {
             storage,
             durable: Arc::new(durable),

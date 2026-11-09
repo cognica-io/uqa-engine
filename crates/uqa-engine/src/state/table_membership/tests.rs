@@ -132,8 +132,8 @@ fn table_membership_rollback_restores_the_original_root_without_another_live_map
         .capture(&control)
         .unwrap();
     let saved = engine.storage.tables.captured(&cut).unwrap();
-    let original_live = engine.storage.tables.0.read().live.identity();
     sql(&engine, "BEGIN");
+    assert_eq!(Arc::strong_count(&engine.storage.tables.0.read().live), 1);
     sql(&engine, "CREATE TABLE uncommitted(id integer); SAVEPOINT point; DROP TABLE kept; CREATE TABLE kept(other text); ROLLBACK TO point; ROLLBACK");
     assert_eq!(
         engine
@@ -145,8 +145,6 @@ fn table_membership_rollback_restores_the_original_root_without_another_live_map
             .collect::<Vec<_>>(),
         [relation("kept")]
     );
-    assert!(!original_live.is_alive());
-    let restored_live;
     {
         let state = engine.storage.tables.0.read();
         let live = state
@@ -167,7 +165,7 @@ fn table_membership_rollback_restores_the_original_root_without_another_live_map
                 .get(&relation("kept"))
                 .unwrap()
         ));
-        restored_live = state.live.identity();
+        assert_eq!(Arc::strong_count(&state.live), 1);
     }
     assert_eq!(names(&saved), ["kept"]);
     assert_eq!(
@@ -179,9 +177,7 @@ fn table_membership_rollback_restores_the_original_root_without_another_live_map
             .unwrap(),
         1
     );
-    drop(engine);
-    assert!(!restored_live.is_alive());
-    drop((saved, cut));
+    drop((saved, cut, engine));
     assert_eq!(control.memory().used(), 0);
 }
 

@@ -6,6 +6,7 @@
 
 //! Narrow capabilities over the engine's state ownership domains.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleReference;
@@ -279,7 +280,7 @@ impl Engine {
     pub(crate) fn catalog_read_view_from(
         &self,
         durable: &DurableCatalogSnapshot,
-        table_sources: &crate::state::TableRegistryMap,
+        table_sources: &BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
     ) -> CatalogReadView {
         self.catalog_read_view_from_with_control(
             durable,
@@ -593,7 +594,7 @@ impl Engine {
     fn catalog_read_view_from_with_control(
         &self,
         durable: &DurableCatalogSnapshot,
-        table_sources: &crate::state::TableRegistryMap,
+        table_sources: &BTreeMap<uqa_core::RelationIdentity, Arc<crate::TableState>>,
         graph_overlay: Option<uqa_execution::catalog::GraphCatalogOverlay>,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<CatalogReadView, SQLError> {

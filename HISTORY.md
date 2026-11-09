@@ -8,19 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Validate concrete stored-view and bound SQL routine relation references during private memory-image reconstruction, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Missing relations reject the unpublished runtime; complete logical validation and public Engine restore remain under implementation.
+- Add SQL/Execution validation of concrete stored-view and bound SQL routine relation references, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Complete logical validation and public Engine restore remain under implementation.
 
-- Native memory reconstruction checks declared user types and relation row types against the complete selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships before returning its unpublished runtime.
+- Add SQL/Execution checks for declared user types and relation row types against the selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships.
 
-- Native memory reconstruction validates role incarnations, owner-rooted ACL grant paths, column authority and retained memberships before returning its unpublished runtime. Complete public Engine restoration remains under implementation.
+- Add SQL/Execution validation of role incarnations, owner-rooted ACL grant paths, column authority and retained memberships without changing native definitions.
 
-- Native memory-image input assembles ordered catalogs, original sequence authority, graphs, models, path indexes, analyzers and writable tables through their owning codecs. Fresh memory concurrency state preserves the captured catalog OID position while starting independent sessions and transaction history; logical validation and public restore activation remain under implementation.
+- Add ordered native sequence metadata/authority input, verified repository-unit decoding and graph/model/path/analyzer membership adoption. Complete Engine reconstruction and public restore activation remain under implementation.
 
 - Restored HNSW and DiskANN owners retain original decoded payload reservations while subsequent reads and writes use an independent destination allowance. Exhausting the completed input allowance no longer prevents ordinary vector mutations.
 
 - Native field-analyzer input retains decoded names and independent historical index/search revisions; restored lazy defaults share their admitted configurations without resolving resources during input. Memory source publication can transfer future mutations to a destination allowance while retaining original nodes and child update identities.
 
-- Native table data assembly joins writable document, evaluated text, vector and named value-index owners without reanalysis or rebuilding. Engine table reconstruction preserves definitions, analyzer bindings and admitted registry membership through subsequent writes, rollback and capture; complete database validation and public Engine restore remain under implementation.
+- Native table data assembly joins writable document, evaluated text, vector and named value-index owners without reanalysis or rebuilding, retaining original decoded allocation ownership through later mutations. Complete Engine reconstruction and public restore remain under implementation.
 
 - Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
 

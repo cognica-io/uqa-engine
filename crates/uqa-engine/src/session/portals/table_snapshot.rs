@@ -158,7 +158,6 @@ impl Engine {
         doc_count_dirty: bool,
     ) -> std::sync::Arc<TableState> {
         std::sync::Arc::new(TableState {
-            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
             security: crate::state::TableMetadataCell::new(metadata.security()),

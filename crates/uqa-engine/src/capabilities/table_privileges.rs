@@ -8,7 +8,7 @@
 
 use crate::{Engine, TableState};
 use parking_lot::MappedRwLockReadGuard;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::table_inquiry::{
     PrivilegeForeignSecurityRead, PrivilegeForeignTablesRead, PrivilegeViewsRead,
@@ -17,7 +17,9 @@ use uqa_execution::catalog::security::table_inquiry::{
 use uqa_sql::catalog::security::BoundTableSecurity;
 use uqa_storage::StorageBackendResult;
 
-struct TablePrivilegeGuard<'a>(MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>);
+struct TablePrivilegeGuard<'a>(
+    MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+);
 impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
     fn security_entries(
         &self,

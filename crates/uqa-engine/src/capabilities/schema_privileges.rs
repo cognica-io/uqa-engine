@@ -8,7 +8,7 @@
 
 use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 use uqa_sql::catalog::graph_oids::GraphOidRegistry;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
@@ -110,7 +110,7 @@ use uqa_sql::catalog::resolution::creation::{CreationRelationGuards, CreationRel
 use uqa_storage::StorageBackendResult;
 
 struct CreationNamesGuard<G>(G);
-impl<G: std::ops::Deref<Target = crate::state::TableRegistryMap>> CreationRelationNames
+impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRelationNames
     for CreationNamesGuard<G>
 {
     fn contains(&self, relation: &RelationIdentity) -> bool {

@@ -12,63 +12,31 @@ use std::sync::Arc;
 use uqa_storage::StorageBackendResult;
 
 impl StorageContext {
-    pub(crate) fn table_state(&self, table: TableState) -> StorageBackendResult<Arc<TableState>> {
-        self.register_table_state(table, None)
-    }
-
-    pub(crate) fn table_state_with_control(
-        &self,
-        table: TableState,
-        control: &uqa_storage::read_control::StorageReadControl,
-    ) -> StorageBackendResult<Arc<TableState>> {
-        self.register_table_state(table, Some(control))
-    }
-
-    fn register_table_state(
+    pub(crate) fn table_state(
         &self,
         mut table: TableState,
-        control: Option<&uqa_storage::read_control::StorageReadControl>,
     ) -> StorageBackendResult<Arc<TableState>> {
         let Some(registry) = self.table_capture_registry(table.persistence) else {
             return Ok(Arc::new(table));
         };
         macro_rules! capture {
             ($field:ident, $copy:expr) => {
-                table.$field = match control {
-                    Some(control) => CatalogCell::capture_source_with_control(
-                        table.$field.snapshot(),
-                        registry,
-                        $copy,
-                        control,
-                    )?,
-                    None => {
-                        CatalogCell::capture_source(table.$field.snapshot(), Some(registry), $copy)?
-                    }
-                };
+                table.$field =
+                    CatalogCell::capture_source(table.$field.snapshot(), Some(registry), $copy)?;
             };
         }
-        macro_rules! native {
-            ($($field:ident),* $(,)?) => {$(
-                table.$field = match control {
-                    Some(control) => table.$field.capture_source_with_control(registry, control)?,
-                    None => table.$field.capture_source(registry)?,
-                };
-            )*};
-        }
-        native!(
-            columns,
-            table_checks,
-            hierarchy,
-            foreign_keys,
-            key_constraints,
-            fts_fields,
-            row_type_array_name,
-            dropped_attributes,
-            security
-        );
+        table.columns = table.columns.capture_source(registry)?;
+        table.table_checks = table.table_checks.capture_source(registry)?;
+        table.hierarchy = table.hierarchy.capture_source(registry)?;
+        table.foreign_keys = table.foreign_keys.capture_source(registry)?;
+        table.key_constraints = table.key_constraints.capture_source(registry)?;
+        table.fts_fields = table.fts_fields.capture_source(registry)?;
+        table.row_type_array_name = table.row_type_array_name.capture_source(registry)?;
+        table.dropped_attributes = table.dropped_attributes.capture_source(registry)?;
         capture!(columns_declared, |value, control| Ok(
             control.finish(*value, control.empty_reservation())?
         ));
+        table.security = table.security.capture_source(registry)?;
         capture!(
             column_stats,
             uqa_planner::ColumnStatistics::capture_with_control

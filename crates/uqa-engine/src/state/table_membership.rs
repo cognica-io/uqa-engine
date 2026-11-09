@@ -6,14 +6,11 @@
 
 //! Table membership retains source identities, not mutable table owners.
 
-use std::{ops::Deref, sync::Arc};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 
 use parking_lot::MappedRwLockReadGuard;
 use uqa_core::{
-    memory::{
-        Budgeted, BudgetedSharedMap, BudgetedSharedMapSnapshot, MemoryBudget, MemoryError,
-        OwnedMap, RetainedValue,
-    },
+    memory::{Budgeted, BudgetedSharedMap, BudgetedSharedMapSnapshot, MemoryBudget, MemoryError},
     RelationIdentity,
 };
 use uqa_storage::{
@@ -32,8 +29,6 @@ use publication::Publication;
 mod sources;
 pub(crate) use sources::CapturedTable;
 use sources::TableSources;
-mod input;
-pub(crate) use input::TableRegistryInput;
 mod snapshot;
 pub(crate) use snapshot::SnapshotTableCut;
 pub(crate) use snapshot::SnapshotTableSources;
@@ -41,22 +36,18 @@ pub(crate) use snapshot::SnapshotTableSources;
 #[cfg(test)]
 mod tests;
 
-pub(crate) type TableRegistryMap = OwnedMap<RelationIdentity, Arc<TableState>>;
-type Tables = TableRegistryMap;
+type Tables = BTreeMap<RelationIdentity, Arc<TableState>>;
 
 #[derive(Clone)]
 struct Membership {
-    sources: BudgetedSharedMapSnapshot<RelationIdentity, TableSources>,
-    memory: MemoryBudget,
+    sources: BudgetedSharedMap<RelationIdentity, TableSources>,
     payload_bytes: usize,
 }
 
 impl Membership {
     fn new() -> Self {
-        let memory = MemoryBudget::new(usize::MAX);
         Self {
-            sources: BudgetedSharedMap::new(&memory).snapshot(),
-            memory,
+            sources: BudgetedSharedMap::new(&MemoryBudget::new(usize::MAX)),
             payload_bytes: 0,
         }
     }
@@ -89,8 +80,7 @@ impl Membership {
             .and_then(|bytes| bytes.checked_add(source.payload_bytes()))
             .ok_or(MemoryError::SizeOverflow)?;
         Ok(Self {
-            sources: self.sources.with_insert(relation, source, &self.memory)?,
-            memory: self.memory.clone(),
+            sources: self.sources.with_insert(relation, source)?,
             payload_bytes,
         })
     }
@@ -101,8 +91,7 @@ impl Membership {
             .get(relation)
             .map_or(0, TableSources::payload_bytes);
         Ok(Self {
-            sources: self.sources.with_remove(relation, &self.memory)?,
-            memory: self.memory.clone(),
+            sources: self.sources.with_remove(relation)?,
             payload_bytes: self.payload_bytes - previous,
         })
     }
@@ -116,7 +105,6 @@ impl Membership {
             // Temporary entries have no durable source identities to rename.
             return Ok(Self {
                 sources: self.sources.clone(),
-                memory: self.memory.clone(),
                 payload_bytes: self.payload_bytes,
             });
         };
@@ -128,25 +116,20 @@ impl Membership {
             .and_then(|bytes| bytes.checked_add(source.payload_bytes()))
             .ok_or(MemoryError::SizeOverflow)?;
         Ok(Self {
-            sources: self.sources.with_remove(from, &self.memory)?.with_insert(
-                to,
-                source,
-                &self.memory,
-            )?,
-            memory: self.memory.clone(),
+            sources: self.sources.with_remove(from)?.with_insert(to, source)?,
             payload_bytes,
         })
     }
 
     fn snapshot(&self) -> MembershipSnapshot {
         MembershipSnapshot {
-            sources: self.sources.clone(),
+            sources: self.sources.snapshot(),
             payload_bytes: self.payload_bytes,
         }
     }
 
     fn restore(&mut self, snapshot: &MembershipSnapshot) {
-        self.sources.clone_from(&snapshot.sources);
+        self.sources.restore(&snapshot.sources);
         self.payload_bytes = snapshot.payload_bytes;
     }
 }
@@ -158,7 +141,7 @@ pub(crate) struct MembershipSnapshot {
 
 pub(crate) struct PersistentTableRegistrySnapshot<'a> {
     registry: &'a TableRegistry,
-    live: RetainedValue<Tables>,
+    live: Arc<Tables>,
 }
 
 impl PersistentTableRegistrySnapshot<'_> {
@@ -177,7 +160,7 @@ struct MemoryTables {
 }
 
 struct State {
-    live: RetainedValue<Tables>,
+    live: Arc<Tables>,
     memory: Option<MemoryTables>,
 }
 
@@ -239,7 +222,7 @@ pub(crate) struct TableRegistry(MemoryCaptureCell<State>);
 impl TableRegistry {
     pub(crate) fn memory(registry: &MemoryCaptureRegistry) -> StorageBackendResult<Self> {
         Ok(Self(registry.cell(State {
-            live: RetainedValue::new(Tables::new()),
+            live: Arc::new(Tables::new()),
             memory: Some(MemoryTables {
                 membership: Membership::new(),
                 publication: Publication::new(registry, &MemoryBudget::new(usize::MAX))?,
@@ -249,7 +232,7 @@ impl TableRegistry {
 
     pub(crate) fn persistent() -> Self {
         Self(MemoryCaptureCell::new(State {
-            live: RetainedValue::new(Tables::new()),
+            live: Arc::new(Tables::new()),
             memory: None,
         }))
     }
@@ -286,7 +269,7 @@ impl TableRegistry {
         tables: impl Iterator<Item = (RelationIdentity, Arc<TableState>)>,
     ) -> StorageBackendResult<()> {
         // The transaction owner restores physical sources before publishing the matching live lookup and exact source groups. Undo retains its original immutable name/metadata root.
-        let live = RetainedValue::new(tables.collect());
+        let live = Arc::new(tables.collect());
         let mut state = self.0.write();
         let memory = state.memory.as_ref().expect("memory registry undo owner");
         let mut membership = memory.membership.clone();
@@ -333,7 +316,7 @@ impl TableRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) fn live_snapshot(&self) -> RetainedValue<Tables> {
+    pub(crate) fn live_snapshot(&self) -> Arc<Tables> {
         self.0.read().live.clone()
     }
 
@@ -376,7 +359,7 @@ impl TableRegistryWrite<'_> {
                 .insert(&relation, &table, membership.sources.get(&relation))?;
             memory.membership = membership;
         }
-        Ok(RetainedValue::make_mut(&mut self.0.live).insert(relation, table))
+        Ok(Arc::make_mut(&mut self.0.live).insert(relation, table))
     }
 
     pub(crate) fn remove(
@@ -388,7 +371,7 @@ impl TableRegistryWrite<'_> {
             memory.publication.remove(relation)?;
             memory.membership = membership;
         }
-        Ok(RetainedValue::make_mut(&mut self.0.live).remove(relation))
+        Ok(Arc::make_mut(&mut self.0.live).remove(relation))
     }
 
     pub(crate) fn rename(
@@ -407,7 +390,7 @@ impl TableRegistryWrite<'_> {
             memory.publication.rename(from, &to);
             memory.membership = membership;
         }
-        let live = RetainedValue::make_mut(&mut self.0.live);
+        let live = Arc::make_mut(&mut self.0.live);
         live.remove(from);
         live.insert(to, table.clone());
         Ok(Some(table))
@@ -416,8 +399,7 @@ impl TableRegistryWrite<'_> {
     pub(crate) fn replace(&mut self, live: Tables) -> StorageBackendResult<()> {
         if let Some(memory) = &mut self.0.memory {
             let mut membership = Membership {
-                sources: BudgetedSharedMap::new(&memory.membership.memory).snapshot(),
-                memory: memory.membership.memory.clone(),
+                sources: BudgetedSharedMap::new(memory.membership.sources.budget()),
                 payload_bytes: 0,
             };
             for (relation, table) in &live {
@@ -429,7 +411,7 @@ impl TableRegistryWrite<'_> {
                 publication,
             };
         }
-        self.0.live = RetainedValue::new(live);
+        self.0.live = Arc::new(live);
         Ok(())
     }
 
@@ -438,8 +420,7 @@ impl TableRegistryWrite<'_> {
         mut keep: impl FnMut(&RelationIdentity, &Arc<TableState>) -> bool,
     ) -> StorageBackendResult<()> {
         if self.0.memory.is_none() {
-            RetainedValue::make_mut(&mut self.0.live)
-                .retain(|relation, table| keep(relation, table));
+            Arc::make_mut(&mut self.0.live).retain(|relation, table| keep(relation, table));
             return Ok(());
         }
         let retained = self
