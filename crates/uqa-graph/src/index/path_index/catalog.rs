@@ -13,6 +13,7 @@ use uqa_core::memory::{MemoryBudget, MemoryError, Produced, ProductionControl, R
 use uqa_storage::{CatalogFacade, PersistentStorageBackend, StorageBackendResult};
 
 mod capture;
+mod input;
 pub use capture::CapturedPathIndexes;
 
 #[derive(Clone)]

@@ -6,6 +6,28 @@
 
 use super::*;
 
+#[test]
+fn decoded_scoring_payloads_keep_input_ownership_after_destination_replacement() {
+    let input = StorageReadControl::with_limit(65536);
+    let runtime = uqa_core::memory::MemoryBudget::new(65536);
+    let source = wire(&[("score", "opaque\0value")]);
+    let mut catalog = ScoringParameters::read_image(&mut source.as_slice(), &input)
+        .unwrap()
+        .into_mutation_budget(&runtime);
+    let retained = catalog.clone();
+    let pointer = retained.get("score").unwrap().as_ptr();
+    let full = input.memory().reserve(input.memory().available()).unwrap();
+    input.cancellation().cancel();
+    catalog.insert("score".into(), "new".into()).unwrap();
+    assert_eq!(retained.get("score").unwrap().as_ptr(), pointer);
+    assert_eq!(retained.get("score").unwrap(), "opaque\0value");
+    drop((catalog, full));
+    assert_eq!(runtime.used(), 0);
+    assert!(input.memory().used() > 0);
+    drop(retained);
+    assert_eq!(input.memory().used(), 0);
+}
+
 fn wire(rows: &[(&str, &str)]) -> Vec<u8> {
     let mut bytes = b"UQASCP01".to_vec();
     bytes.extend_from_slice(&(rows.len() as u64).to_le_bytes());

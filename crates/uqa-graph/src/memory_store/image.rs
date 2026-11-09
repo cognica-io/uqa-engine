@@ -32,6 +32,32 @@ fn invalid() -> StorageBackendError {
 }
 
 impl MemoryGraphStore {
+    /// Transfer only future native mutations. Selected child partitions, label registries and membership sets inherit this allowance when their owning mutation boundary prepares a successor; existing payloads and roots retain their input reservations.
+    pub fn into_mutation_budget(self, memory: &uqa_core::memory::MemoryBudget) -> Self {
+        Self {
+            vertices: self.vertices.into_mutation_budget(memory),
+            edges: self.edges.into_mutation_budget(memory),
+            graphs: self.graphs.into_mutation_budget(memory),
+            vertex_membership: self.vertex_membership.into_mutation_budget(memory),
+            edge_membership: self.edge_membership.into_mutation_budget(memory),
+            label_registries: self.label_registries.into_mutation_budget(memory),
+            ..self
+        }
+    }
+
+    pub(crate) fn into_image_handle(
+        mut self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<std::sync::Arc<crate::GraphStoreHandle>> {
+        control.check()?;
+        self.image_memory = Some(
+            control
+                .memory()
+                .reserve(size_of::<crate::GraphStoreHandle>())?,
+        );
+        Ok(std::sync::Arc::new(crate::GraphStoreHandle::Memory(self)))
+    }
+
     /// Open an admitted borrowed image reader without visiting graph entities. `prepare` validates bounded positions before output; synchronous `read` completes any remaining preparation. The selected immutable source must outlive the reader.
     pub fn image_reader<'a>(
         &'a self,

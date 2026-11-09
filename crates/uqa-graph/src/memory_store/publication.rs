@@ -29,6 +29,7 @@ impl MemoryGraphStore {
             label_registries: NativeMap::new(memory),
             next_vertex_id: 0,
             next_edge_id: 0,
+            image_memory: None,
         }
     }
 
@@ -46,8 +47,14 @@ impl MemoryGraphStore {
     ) -> GraphStoreResult<T> {
         let mut candidate = self.clone();
         let result = operation(&mut candidate)?;
-        drop(std::mem::replace(self, candidate));
+        self.publish_generation(candidate);
         Ok(result)
+    }
+
+    pub(super) fn publish_generation(&mut self, mut candidate: Self) {
+        // The outer allocation stays in place across publication and rollback; only a separately cloned owner receives a native header.
+        candidate.image_memory = self.image_memory.take();
+        drop(std::mem::replace(self, candidate));
     }
 
     pub(super) fn put_partition(
@@ -84,7 +91,8 @@ pub(super) fn membership(
     }
     let mut names = existing
         .cloned()
-        .unwrap_or_else(|| NativeSet::new(map.budget()));
+        .unwrap_or_else(|| NativeSet::new(map.budget()))
+        .into_mutation_budget(map.budget());
     if add {
         names.insert_name(graph)?;
     } else {

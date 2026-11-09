@@ -90,13 +90,13 @@ fn model_catalog_publication_shares_retained_weights_without_payload_copies() {
     };
     let publication = allocation_counter::measure(|| engine.save_model("small", &small).unwrap());
     assert!(publication.bytes_total < 64 * 1024, "{publication:?}");
-    assert!(Arc::ptr_eq(
+    assert!(uqa_ml::model_catalog::ModelHandle::ptr_eq(
         &captured.models["large"],
         &engine.durable.models.read()["large"]
     ));
     assert!(!captured.models.contains_key("small"));
     engine.save_model("large", &small).unwrap();
-    assert!(!Arc::ptr_eq(
+    assert!(!uqa_ml::model_catalog::ModelHandle::ptr_eq(
         &captured.models["large"],
         &engine.durable.models.read()["large"]
     ));
@@ -127,7 +127,7 @@ fn model_catalog_generations_preserve_rollback_and_owned_public_results() {
     engine.save_model("private", &replacement).unwrap();
     assert_eq!(captured.models["original"].alpha, 0.5);
     engine.sql("ROLLBACK", &[]).unwrap();
-    assert!(Arc::ptr_eq(
+    assert!(uqa_ml::model_catalog::ModelHandle::ptr_eq(
         &captured.models["original"],
         &engine.durable.models.read()["original"]
     ));

@@ -74,9 +74,20 @@ impl AnalyzerCatalog {
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         let production = ProductionControl::new(self.images.budget(), cancellation, cancellation);
-        let image = compiled.image_source_with_control(&production)?;
         let revision_name = production.copy_text(name)?;
         let image_name = production.copy_text(name)?;
+        self.insert_names(revision_name, image_name, compiled, cancellation)
+    }
+
+    fn insert_names(
+        &mut self,
+        revision_name: Produced<String>,
+        image_name: Produced<String>,
+        compiled: Arc<CompiledAnalyzer>,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        let production = ProductionControl::new(self.images.budget(), cancellation, cancellation);
+        let image = compiled.image_source_with_control(&production)?;
         let payload_bytes = image_name
             .capacity()
             .checked_add(image.retained_bytes())
@@ -89,6 +100,41 @@ impl AnalyzerCatalog {
         cancellation.check()?;
         *self = Self { revisions, images };
         Ok(())
+    }
+
+    /// Adopt the decoded permanent name while preserving the compiled revision and its resource owners. Both native roots publish together; a failed input consumes this unpublished candidate.
+    pub fn insert_image(
+        mut self,
+        name: Budgeted<String>,
+        compiled: Arc<CompiledAnalyzer>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if !name.budget().shares_allowance(control.memory())
+            || !self.images.budget().shares_allowance(control.memory())
+            || !self.revisions.budget().shares_allowance(control.memory())
+            || name.reserved_bytes() < name.capacity()
+            || self.contains_key(name.as_str())
+        {
+            return Err(crate::StorageBackendError::Other(
+                "invalid analyzer image admission or identity".into(),
+            ));
+        }
+        let image_name = ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(&name)?;
+        self.insert_names(name.into(), image_name, compiled, control.cancellation())?;
+        Ok(self)
+    }
+
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            revisions: self.revisions.into_mutation_budget(memory),
+            images: self.images.into_mutation_budget(memory),
+        }
     }
 
     pub fn remove(&mut self, name: &str) -> StorageBackendResult<bool> {

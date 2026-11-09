@@ -66,11 +66,11 @@ impl GraphStore for MemoryGraphStore {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self))) {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error)) => {
-                *self = backup;
+                self.publish_generation(backup);
                 Err(error)
             }
             Err(panic) => {
-                *self = backup;
+                self.publish_generation(backup);
                 std::panic::resume_unwind(panic)
             }
         }

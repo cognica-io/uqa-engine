@@ -219,8 +219,8 @@ fn committed_model_capture_and_native_publication_share_unrelated_weights() {
             .save_model(&format!("small-{index:02}"), &small)
             .unwrap();
     }
-    let large = std::sync::Arc::downgrade(&engine.durable.models.read()["large"]);
-    let unread = std::sync::Arc::downgrade(&engine.durable.models.read()["small-00"]);
+    let large = engine.durable.models.read()["large"].identity();
+    let unread = engine.durable.models.read()["small-00"].identity();
     let control = StorageReadControl::with_limit(8 << 20);
     let mut cut = None;
     let usage = allocation_counter::measure(|| {
@@ -252,8 +252,8 @@ fn committed_model_capture_and_native_publication_share_unrelated_weights() {
     assert!(captured.get().unwrap().image("later").unwrap().is_none());
     assert_eq!(model_image(&saved), expected);
     drop((captured, cut));
-    assert!(unread.upgrade().is_none());
-    assert!(large.upgrade().is_some());
+    assert!(!unread.is_live());
+    assert!(large.is_live());
     assert!(control.memory().used() > 1 << 20);
     assert!(control.memory().used() < (1 << 20) + 4096);
     control.cancellation().cancel();
@@ -261,6 +261,6 @@ fn committed_model_capture_and_native_publication_share_unrelated_weights() {
         .write_image(&mut Vec::new(), &StorageReadControl::with_limit(0))
         .is_err());
     drop(saved);
-    assert!(large.upgrade().is_none());
+    assert!(!large.is_live());
     assert_eq!(control.memory().used(), 0);
 }

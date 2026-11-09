@@ -25,6 +25,13 @@ impl Default for ScoringParameters {
 }
 
 impl ScoringParameters {
+    /// Keep existing image payloads and reservations in place while selecting the allowance for future native replacements.
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            values: self.values.into_mutation_budget(memory),
+        }
+    }
+
     pub fn new(memory: &MemoryBudget) -> Self {
         Self {
             values: RetainedMap::new(memory),

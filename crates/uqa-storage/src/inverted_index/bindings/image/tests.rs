@@ -35,7 +35,7 @@ fn image_default_keeps_original_configuration_and_lazy_runtime_after_input_retir
     drop(bindings);
     assert_eq!(input.memory().used(), bytes);
     let revision = retained.index_revision("body").unwrap();
-    assert_eq!(revision.analyze("Cats DOGS").unwrap(), ["Cats", "DOGS"]);
+    assert_eq!(revision.analyze("Cats DOGS").unwrap(), ["cats", "dogs"]);
     assert!(Arc::ptr_eq(
         &revision,
         &retained.search_revision("other").unwrap()

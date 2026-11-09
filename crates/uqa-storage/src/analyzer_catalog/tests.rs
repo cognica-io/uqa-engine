@@ -8,6 +8,48 @@ use super::*;
 use crate::StorageBackendError;
 use uqa_analysis::{Analyzer, AnalyzerLimits, AnalyzerResources};
 
+#[test]
+fn decoded_analyzer_catalog_names_and_historical_revisions_survive_new_destination_writes() {
+    let resources = AnalyzerResources::new(AnalyzerLimits::default());
+    let original = resources
+        .compile(&uqa_analysis::whitespace_analyzer())
+        .unwrap();
+    let input = StorageReadControl::with_limit(65536);
+    let name = ProductionControl::new(input.memory(), input.cancellation(), input.cancellation())
+        .copy_text("custom")
+        .unwrap()
+        .into_budgeted()
+        .unwrap();
+    let pointer = name.as_ptr();
+    let catalog = AnalyzerCatalog::new(input.memory())
+        .insert_image(name, original.clone(), &input)
+        .unwrap();
+    assert_eq!(catalog.keys().next().unwrap().as_ptr(), pointer);
+    let runtime = MemoryBudget::new(65536);
+    let mut catalog = catalog.into_mutation_budget(&runtime);
+    let control = StorageReadControl::with_limit(65536);
+    let captured = catalog.capture(&control).unwrap();
+    let old = captured.image("custom").unwrap().unwrap();
+    let expected = image_bytes(&old);
+    let full = input.memory().reserve(input.memory().available()).unwrap();
+    input.cancellation().cancel();
+    catalog
+        .insert(
+            "custom",
+            resources
+                .compile(&uqa_analysis::keyword_analyzer())
+                .unwrap(),
+        )
+        .unwrap();
+    assert!(!Arc::ptr_eq(catalog.get("custom").unwrap(), &original));
+    drop((catalog, captured, full));
+    assert_eq!(runtime.used(), 0);
+    assert_eq!(image_bytes(&old), expected);
+    drop(old);
+    assert_eq!(input.memory().used(), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn image_bytes(image: &AnalyzerImageSnapshot) -> Vec<u8> {
     let mut bytes = Vec::new();
     image

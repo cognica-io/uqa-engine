@@ -32,6 +32,13 @@ pub(super) struct SequenceRecords {
 }
 
 impl SequenceRecords {
+    pub(super) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            durable: self.durable.into_mutation_budget(memory),
+            temporary: self.temporary.into_mutation_budget(memory),
+        }
+    }
+
     pub(super) fn last_durable_key(&self) -> Option<&RelationIdentity> {
         self.durable
             .last_before::<RelationIdentity>(std::ops::Bound::Unbounded)
