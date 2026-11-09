@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Native field-analyzer input retains decoded names and independent historical index/search revisions; restored lazy defaults share their admitted configurations without resolving resources during input. Memory source publication can transfer future mutations to a destination allowance while retaining original nodes and child update identities.
+
+- Native table data assembly joins writable document, evaluated text, vector and named value-index owners without reanalysis or rebuilding. Engine table reconstruction preserves definitions, analyzer bindings and admitted registry membership through subsequent writes, rollback and capture; complete database validation and public Engine restore remain under implementation.
+
 - Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
 
 - Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; vector and evaluated-index reconstruction use this ownership boundary, including exclusive vector adapters and IVF payload lifetime.
