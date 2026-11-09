@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -51018,8 +51018,8 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
       "capability": "backup native source ownership",
-      "workload": "Capture each decoded native vector kind, cancel construction, perform ordinary writes and query-triggered training, then retire the mutable source.",
-      "invariant": "Completed mutation remains independent of input cancellation, the retained image preserves the exact original bytes, and every input, capture and output allowance retires.",
+      "workload": "Import every vector kind, promote a captured source, exhaust and cancel the input allowance, then mutate, query and retire the live owner before reading the retained original image.",
+      "invariant": "Later work uses the native destination allowance; captured images keep original evaluated bytes and admission through source retirement, including IVF training and HNSW/DiskANN mutations.",
       "case_names": [
         ""
       ]
@@ -51033,6 +51033,370 @@
       "capability": "backup native source ownership",
       "workload": "Build a named IVF registration, promote its native source reader and retire the complete collection while retaining an independent captured image.",
       "invariant": "The builder admits the source header, decoded payload and header reservations survive the public collection until the promoted reader retires, and the independent image retains the original exact bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "ordered_catalog_input_preserves_all_native_images_without_sql_replay",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/catalogs/tests.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_input_rejects_missing_and_out_of_order_components_before_completion",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/catalogs/tests.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_native_state_after_source_retirement_and_runtime_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Complete private memory image assembly",
+      "workload": "Read an actual repository backup after source retirement, compare every native component, execute later writes and inject cancellation or exhausted input admission.",
+      "invariant": "Original catalogs, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_input_failure_retires_all_prior_native_owners_and_repository_lease",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Complete private memory image assembly",
+      "workload": "Read an actual repository backup after source retirement, compare every native component, execute later writes and inject cancellation or exhausted input admission.",
+      "invariant": "Original catalogs, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "reconstructed_table_keeps_native_rows_definitions_and_new_writes_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "rejected_table_input_retires_partial_native_components_and_never_publishes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_registration_failure_retires_complete_input_and_keeps_the_destination_private",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "reconstructed_table_uses_original_field_revisions_and_live_publication_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_sequence_input_retires_readers_and_keeps_original_records_through_runtime_mutation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/ordered.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_sequence_input_failure_consumes_metadata_before_any_catalog_is_exposed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/ordered.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "assembled_table_data_preserves_all_vector_kinds_text_and_evaluated_values_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_data_component_failures_retire_every_preceding_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fresh_memory_manager_preserves_catalog_position_with_independent_session_and_transaction_history",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/tests.rs",
+      "capability": "Fresh restored concurrency state",
+      "workload": "Construct independent managers from wrapped and exhausted catalog OID positions and allocate new sessions and transaction identifiers.",
+      "invariant": "Catalog allocation history is preserved while sessions, locks and transaction history begin independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "decoded_path_catalog_retains_original_names_and_materializations_through_runtime_replacement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_keeps_native_headers_and_all_selected_mutations_after_original_allowance_exhaustion",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retires_failed_native_payloads_and_preceding_membership",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_registration_keeps_exact_weights_through_new_writes_capture_and_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/input.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "failed_model_image_registration_retires_names_weights_and_prior_candidate_entries",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/input.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_field_catalog_preserves_names_revisions_and_independent_mutation_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "rejected_field_input_consumes_candidate_and_keeps_no_partial_image_or_runtime_root",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_analyzer_catalog_names_and_historical_revisions_survive_new_destination_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_codec_input_borrows_the_admitted_address_and_requires_verified_eof",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests/decode.rs",
+      "capability": "Verified native codec input",
+      "workload": "Borrow a verified component, require EOF and inject codec errors, ignored read errors, cancellation and unwinding.",
+      "invariant": "Only a fully consumed successful native component advances; all terminal failures retire the address, payload and repository lease with the original typed read cause.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_codec_failure_cancellation_and_unwind_retire_the_repository_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests/decode.rs",
+      "capability": "Verified native codec input",
+      "workload": "Borrow a verified component, require EOF and inject codec errors, ignored read errors, cancellation and unwinding.",
+      "invariant": "Only a fully consumed successful native component advances; all terminal failures retire the address, payload and repository lease with the original typed read cause.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_scoring_payloads_keep_input_ownership_after_destination_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_default_keeps_original_configuration_and_lazy_runtime_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_default_does_not_open_missing_resources_before_ordinary_first_use",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "publication_mutation_budget_keeps_existing_addresses_and_original_node_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/selection/publication/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "destination_mutations_preserve_resident_and_spilled_input_owners_after_input_exhaustion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Independent native mutation allowance",
+      "workload": "Exhaust and cancel the input owner, mutate resident and spilled destinations, and retain the original ordered roots.",
+      "invariant": "Future workspace and path allocations use the destination allowance; original immutable records and page reservations survive until the last reader retires.",
       "case_names": [
         ""
       ]
