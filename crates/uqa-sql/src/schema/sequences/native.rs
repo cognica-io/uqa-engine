@@ -9,9 +9,22 @@
 use crate::{ast::ColumnDef, catalog::resolution::bound_relation_identity_with_control, SQLError};
 use uqa_core::{
     catalog_sequence::{SequenceOwner, SequenceOwnerDependency},
-    memory::{BudgetedMap, MemoryBudget, ProductionControl},
+    memory::{BudgetedMap, MemoryBudget, Produced, ProductionControl},
     CancellationToken, RelationIdentity,
 };
+
+/// A captured named regclass argument uses the canonical relation namespace. Numeric inputs keep their deferred execution semantics even when no current relation has that OID; do not infer a catalog edge from a numeric value.
+pub fn function_relation(
+    reference: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<RelationIdentity>>, SQLError> {
+    control.check()?;
+    if reference.parse::<u32>().is_ok() {
+        Ok(None)
+    } else {
+        bound_relation_identity_with_control(reference, control).map(Some)
+    }
+}
 
 /// Check stable owned-column edges and canonical implicit sequence references without inferring legacy owners, changing positions or allocating sequence values. Inherited SERIAL and identity columns may name another table's sequence; an internal owner must still point back to its original identity column. Legacy table counters remain valid without a sequence reference.
 pub fn validate<'a>(

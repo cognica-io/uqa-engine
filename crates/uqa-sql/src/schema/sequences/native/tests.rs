@@ -7,6 +7,39 @@
 use super::*;
 use crate::{ast::AutoIncrement, ColumnType};
 
+#[test]
+fn native_sequence_function_relations_preserve_numeric_and_quoted_names() {
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    assert!(function_relation("2147483647", &control).unwrap().is_none());
+    let named = function_relation("\"saved schema\".\"123\"", &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(*named, RelationIdentity::new("saved schema", "123"));
+    drop(named);
+    assert!(function_relation("unqualified", &control).is_err());
+    assert_eq!(memory.used(), 0);
+    let empty = MemoryBudget::new(0);
+    assert_eq!(
+        function_relation(
+            "public.sequence",
+            &ProductionControl::new(&empty, &token, &token)
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(empty.used(), 0);
+    token.cancel();
+    assert_eq!(
+        function_relation("2147483647", &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+}
+
 fn column() -> ColumnDef {
     let mut column = ColumnDef::nullable("id", ColumnType::Integer);
     column.object_id = Some([2; 16]);

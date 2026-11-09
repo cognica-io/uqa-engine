@@ -7,13 +7,57 @@
 //! Join concrete routine references from one native catalog without compiling deferred bodies.
 
 use crate::catalog::CatalogReadSnapshot;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionControl},
+    CancellationToken,
+};
 use uqa_sql::{
-    ast::{ColumnDef, FunctionBody},
+    ast::{ColumnDef, Expr, FunctionBinding, FunctionBody, Statement},
     plan::PlanRef,
     routines::{native::NativeRoutineReferences, CompiledFunctionBody, RoutineBody},
-    SQLError,
+    SQLError, ScalarExpr,
 };
+
+/// One stored-expression inventory shared by native reference predicates. Deferred source text is never compiled by this traversal.
+pub(super) trait References {
+    fn expression(&self, expression: &Expr) -> Result<(), SQLError>;
+    fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError>;
+    fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError>;
+    fn statement(&self, statement: &Statement) -> Result<(), SQLError>;
+    fn binding(&self, binding: &FunctionBinding) -> Result<(), SQLError>;
+    fn identity(
+        &self,
+        identity: [u8; 16],
+        arguments: &[String],
+        procedure: bool,
+    ) -> Result<(), SQLError>;
+}
+
+impl References for NativeRoutineReferences<'_> {
+    fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
+        self.expression(expression)
+    }
+    fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
+        self.scalar(expression)
+    }
+    fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError> {
+        self.plan(plan)
+    }
+    fn statement(&self, statement: &Statement) -> Result<(), SQLError> {
+        self.statement(statement)
+    }
+    fn binding(&self, binding: &FunctionBinding) -> Result<(), SQLError> {
+        self.binding(binding)
+    }
+    fn identity(
+        &self,
+        identity: [u8; 16],
+        arguments: &[String],
+        procedure: bool,
+    ) -> Result<(), SQLError> {
+        self.identity(identity, arguments, procedure)
+    }
+}
 
 pub fn validate(
     snapshot: &CatalogReadSnapshot,
@@ -29,9 +73,22 @@ pub fn validate(
         memory,
         cancellation,
     )?;
+    visit(
+        snapshot,
+        &references,
+        &ProductionControl::new(memory, cancellation, cancellation),
+    )
+}
+
+pub(super) fn visit(
+    snapshot: &CatalogReadSnapshot,
+    references: &impl References,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let d = &snapshot.definitions;
     for table in snapshot.tables.values() {
-        cancellation.check()?;
-        columns(&references, &table.columns, cancellation)?;
+        control.check()?;
+        columns(references, &table.columns, control)?;
         for check in table.checks.iter() {
             references.expression(&check.expr)?;
         }
@@ -42,14 +99,14 @@ pub fn validate(
         }
     }
     for table in d.foreign_tables.values() {
-        cancellation.check()?;
-        columns(&references, &table.columns, cancellation)?;
+        control.check()?;
+        columns(references, &table.columns, control)?;
         for check in &table.checks {
             references.expression(&check.expr)?;
         }
     }
     for domain in d.domains.values() {
-        cancellation.check()?;
+        control.check()?;
         if let Some(default) = &domain.definition.default {
             references.expression(default)?;
         }
@@ -61,9 +118,9 @@ pub fn validate(
         references.plan(PlanRef::Query(&view.query))?;
     }
     for function in d.sql_user_functions.values().flatten() {
-        cancellation.check()?;
+        control.check()?;
         for parameter in &function.def.params {
-            cancellation.check()?;
+            control.check()?;
             if let Some(default) = &parameter.default {
                 references.expression(default)?;
             }
@@ -85,9 +142,9 @@ pub fn validate(
         }
     }
     for triggers in d.triggers.values() {
-        cancellation.check()?;
+        control.check()?;
         for trigger in triggers.values() {
-            cancellation.check()?;
+            control.check()?;
             if let Some(identity) = trigger.function_object_id {
                 references.identity(identity, &[], false)?;
             }
@@ -96,26 +153,26 @@ pub fn validate(
             }
         }
     }
-    validate_rules(&d.rules, &references, cancellation)?;
-    cancellation.check()?;
+    validate_rules(&d.rules, references, control)?;
+    control.check()?;
     Ok(())
 }
 
 fn validate_rules(
     catalog: &uqa_sql::catalog::events::RuleCatalog,
-    references: &NativeRoutineReferences<'_>,
-    cancellation: &CancellationToken,
+    references: &impl References,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     for rules in catalog.values() {
-        cancellation.check()?;
+        control.check()?;
         for rule in rules.values() {
-            cancellation.check()?;
+            control.check()?;
             for action in &rule.definition.actions {
                 references.statement(action)?;
             }
             if let Some(dependencies) = &rule.dependencies {
                 for routine in &dependencies.routines {
-                    cancellation.check()?;
+                    control.check()?;
                     if let Some(identity) = routine.object_id {
                         references.identity(identity, &routine.argument_types, false)?;
                     }
@@ -133,12 +190,12 @@ fn validate_rules(
 }
 
 fn columns(
-    references: &NativeRoutineReferences<'_>,
+    references: &impl References,
     columns: &[ColumnDef],
-    cancellation: &CancellationToken,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     for column in columns {
-        cancellation.check()?;
+        control.check()?;
         for expression in column.default.iter().chain(&column.check) {
             references.expression(expression)?;
         }

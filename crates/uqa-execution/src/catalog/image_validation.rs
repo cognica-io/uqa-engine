@@ -16,6 +16,8 @@ mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
 mod routine_dependencies;
 pub use routine_dependencies::validate as validate_routines;
+mod sequence_functions;
+pub use sequence_functions::validate as validate_sequence_functions;
 mod namespaces;
 pub use namespaces::validate as validate_namespaces;
 mod name_claims;
