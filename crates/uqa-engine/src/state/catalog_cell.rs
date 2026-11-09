@@ -132,6 +132,20 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         )
     }
 
+    pub(crate) fn capture_resource_with_control(
+        value: impl Into<CatalogGeneration<T>>,
+        registry: &MemoryCaptureRegistry,
+        capture: fn(&T, &StorageReadControl) -> StorageBackendResult<Budgeted<F>>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::with_source(
+            value.into(),
+            Some(registry),
+            Capture::Resource(capture),
+            Some(control),
+        )
+    }
+
     fn with_source(
         value: CatalogGeneration<T>,
         registry: Option<&MemoryCaptureRegistry>,

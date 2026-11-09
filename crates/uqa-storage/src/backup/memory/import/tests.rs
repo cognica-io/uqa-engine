@@ -12,6 +12,8 @@ use crate::{
 use std::io::Cursor;
 use uqa_core::RelationIdentity;
 
+mod decode;
+
 #[derive(Clone)]
 struct Unit {
     family: u16,

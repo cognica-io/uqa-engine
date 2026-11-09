@@ -6,8 +6,11 @@
 
 //! Decoded native table owners enter the ordinary Engine state boundary before publication.
 
+mod catalogs;
+mod database;
 mod input;
 mod metadata;
+mod resources;
 
 use crate::{
     state::{CatalogCell, CatalogGeneration, StorageContext},
