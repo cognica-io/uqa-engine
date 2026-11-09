@@ -35,8 +35,9 @@ impl Canonical {
         dimensions: u32,
         generation: DiskANNGeneration,
         physical: &DiskANNMemorySource,
+        owner: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let mut source = Self::empty(dimensions, input.control);
+        let mut source = Self::empty(dimensions, owner);
         source.covered_generation = Some(generation);
         source.revision = match input.array::<1>()?[0] {
             0 => None,

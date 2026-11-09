@@ -103,13 +103,21 @@ pub(crate) fn read(
     )?;
     let physical =
         DiskANNMemorySource::read_image(input, &manifest, options.generation.max_record_bytes)?;
-    let canonical = Canonical::read_image(input, dimensions, generation, &physical)?;
-    let index = RetainedDiskANNIndex::open(
+    // Input cancellation ends with private reconstruction. Native payloads and
+    // subsequent work keep the original memory allowance, but completed readers
+    // and mutations belong to the fresh writer's independent runtime lifetime.
+    let owner = StorageReadControl::new(
+        input.control.memory(),
+        &crate::read_control::CancellationToken::new(),
+    );
+    let canonical = Canonical::read_image(input, dimensions, generation, &physical, &owner)?;
+    let index = RetainedDiskANNIndex::open_with_owner(
         canonical,
         Arc::new(physical.clone()),
         options.parameters,
         options.read,
         input.control,
+        &owner,
     )?;
     // Existing origins and physical data identities are retained. New mutations and
     // generations belong to a fresh lineage, so the source and restored writer cannot
@@ -121,7 +129,7 @@ pub(crate) fn read(
         clock,
         options,
         temporary: temporary.clone(),
-        control: input.control.clone(),
+        control: owner,
         _memory: memory,
     };
     input.control.check()?;
