@@ -21,6 +21,27 @@ pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 
+/// Join original ordinary-table and index membership for SQL's native ownership predicate.
+pub fn validate_indexes(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::catalog::index::native::validate(
+        snapshot.tables.iter().map(|(name, table)| {
+            uqa_sql::catalog::index::native::NativeIndexTable {
+                name,
+                object_id: table.object_id,
+                keys: &table.keys,
+                hierarchy: &table.hierarchy,
+            }
+        }),
+        snapshot.definitions.catalog_indexes.values(),
+        memory,
+        cancellation,
+    )
+}
+
 /// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.
 pub fn validate_sequences(
     snapshot: &CatalogReadSnapshot,
