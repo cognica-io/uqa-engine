@@ -171,6 +171,27 @@ pub fn columns_match(
     Ok(matches && position == expected.len())
 }
 
+/// Visit ordinary column keys with admitted decoding. Expression keys return false without evaluating or materializing their trees.
+pub fn visit_column_keys(
+    text: &str,
+    control: &ProductionControl<'_>,
+    mut visit: impl FnMut(&str) -> Result<(), SQLError>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    let mut ordinary = true;
+    json::array(text, control, |value| {
+        if value.starts_with('"') {
+            let name = uqa_core::json::decode_json_string_with_control(value, control)
+                .map_err(read_error)?;
+            visit(&name)?;
+        } else {
+            ordinary = false;
+        }
+        Ok(())
+    })?;
+    Ok(ordinary)
+}
+
 fn invalid() -> SQLError {
     SQLError::Internal("invalid native index ownership metadata".into())
 }

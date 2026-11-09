@@ -21,6 +21,47 @@ pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 
+/// Join complete immutable ordinary/foreign row layouts and original index rows for SQL's constraint-reference predicate.
+pub fn validate_constraints(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    use uqa_sql::schema::constraints::native::NativeConstraintTable;
+    uqa_sql::schema::constraints::native::validate(
+        snapshot
+            .tables
+            .iter()
+            .map(|(name, table)| NativeConstraintTable {
+                name,
+                object_id: table.object_id,
+                columns: &table.columns,
+                checks: &table.checks,
+                keys: &table.keys,
+                foreign_keys: &table.foreign_keys,
+                hierarchy: Some(&table.hierarchy),
+            })
+            .chain(
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .iter()
+                    .map(|(name, table)| NativeConstraintTable {
+                        name,
+                        object_id: table.object_id,
+                        columns: &table.columns,
+                        checks: &table.checks,
+                        keys: &[],
+                        foreign_keys: &[],
+                        hierarchy: None,
+                    }),
+            ),
+        snapshot.definitions.catalog_indexes.values(),
+        memory,
+        cancellation,
+    )
+}
+
 /// Join original ordinary-table and index membership for SQL's native ownership predicate.
 pub fn validate_indexes(
     snapshot: &CatalogReadSnapshot,
