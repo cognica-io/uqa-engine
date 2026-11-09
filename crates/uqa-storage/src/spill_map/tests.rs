@@ -5,6 +5,44 @@
 //
 
 use super::*;
+
+#[test]
+fn destination_mutations_preserve_resident_and_spilled_input_owners_after_input_exhaustion() {
+    for resident_bytes in [128, 64 << 10] {
+        let input = StorageReadControl::with_limit(1 << 20);
+        let mut original = Map::new(input.memory(), resident_bytes);
+        for key in 0..100 {
+            original.insert(key, key as u64, Some(&input)).unwrap();
+        }
+        assert_eq!(original.is_spilled(), resident_bytes == 128);
+        let expected = entries(&original);
+        let runtime = MemoryBudget::new(1 << 20);
+        let full = input.memory().reserve(input.memory().available()).unwrap();
+        input.cancellation().cancel();
+        let mut destination = original
+            .clone()
+            .into_mutation_budget(&runtime, resident_bytes);
+        destination.insert(200, 901, None).unwrap();
+        destination.insert(10, 902, None).unwrap();
+        destination.remove(20, None).unwrap();
+        assert_eq!(destination.get(10).unwrap().map(|value| *value), Some(902));
+        assert_eq!(destination.get(200).unwrap().map(|value| *value), Some(901));
+        assert!(destination.get(20).unwrap().is_none());
+        let before = original
+            .iter_with_memory(&runtime)
+            .map(|value| {
+                let (key, value) = value.unwrap();
+                (key, *value)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(before, expected);
+        drop((destination, full));
+        assert!(input.memory().used() > 0);
+        drop(original);
+        assert_eq!(input.memory().used(), 0);
+        assert_eq!(runtime.used(), 0);
+    }
+}
 use std::collections::BTreeMap;
 
 mod records;

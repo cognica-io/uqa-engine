@@ -99,6 +99,24 @@ impl<V> std::fmt::Debug for Map<V> {
 }
 
 impl<V: Record> Map<V> {
+    /// Keep immutable records and page leases while selecting future allocation ownership in constant work. Unused conversion workspace belongs to the previous writer and is not reused by the destination.
+    pub(crate) fn into_mutation_budget(
+        mut self,
+        memory: &MemoryBudget,
+        resident_bytes: usize,
+    ) -> Self {
+        self.root = match self.root {
+            Root::Memory(map) => {
+                Root::Memory(map.into_mutation_budget(&memory.child(resident_bytes)))
+            }
+            Root::Disk(map) => Root::Disk(map),
+        };
+        self.memory = memory.clone();
+        self.resident_bytes = resident_bytes;
+        self.workspace = None;
+        self
+    }
+
     pub(crate) fn new(memory: &MemoryBudget, resident_bytes: usize) -> Self {
         Self {
             root: Root::Memory(BudgetedSharedMap::new(&memory.child(resident_bytes))),

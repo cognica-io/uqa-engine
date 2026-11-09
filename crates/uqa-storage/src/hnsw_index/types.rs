@@ -121,6 +121,24 @@ impl HNSWIndex {
         self.params
     }
 
+    pub(super) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.nodes = self.nodes.into_mutation_budget(memory, memory.limit() / 16);
+        self.raw_vectors = self
+            .raw_vectors
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.normalized_vectors = self
+            .normalized_vectors
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.active = self
+            .active
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.dirty_nodes = self
+            .dirty_nodes
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.memory = memory.clone();
+        self
+    }
+
     pub(super) fn max_connections(&self, layer: usize) -> usize {
         if layer == 0 {
             self.params.m.saturating_mul(2)

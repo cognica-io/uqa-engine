@@ -103,12 +103,10 @@ pub(crate) fn read(
     )?;
     let physical =
         DiskANNMemorySource::read_image(input, &manifest, options.generation.max_record_bytes)?;
-    // Input cancellation ends with private reconstruction. Native payloads and
-    // subsequent work keep the original memory allowance, but completed readers
-    // and mutations belong to the fresh writer's independent runtime lifetime.
-    let owner = StorageReadControl::new(
-        input.control.memory(),
-        &crate::read_control::CancellationToken::new(),
+    // Decoded payloads keep their original admission. Future query and mutation
+    // allocations belong to the independent destination, like an ordinary index.
+    let owner = StorageReadControl::with_limit(
+        crate::mvcc::VersionedSessionOptions::default().retained_bytes,
     );
     let canonical = Canonical::read_image(input, dimensions, generation, &physical, &owner)?;
     let index = RetainedDiskANNIndex::open_with_owner(

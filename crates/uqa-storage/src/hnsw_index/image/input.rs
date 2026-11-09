@@ -52,7 +52,11 @@ pub(crate) fn read(input: &mut ImageInput<'_>, dimensions: u32) -> StorageBacken
     validation::validate(&index, input.control)?;
     memory.grow(size_of::<uqa_core::memory::MemoryReservation>())?;
     index.image_memory = Some(std::sync::Arc::new(memory));
-    Ok(index)
+    Ok(
+        index.into_mutation_budget(&uqa_core::memory::MemoryBudget::new(
+            crate::mvcc::VersionedSessionOptions::default().retained_bytes,
+        )),
+    )
 }
 
 fn read_nodes(input: &mut ImageInput<'_>, index: &mut HNSWIndex) -> StorageBackendResult<()> {

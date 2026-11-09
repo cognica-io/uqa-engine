@@ -37,7 +37,7 @@ impl Canonical {
         physical: &DiskANNMemorySource,
         owner: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let mut source = Self::empty(dimensions, owner);
+        let mut source = Self::empty(dimensions, input.control);
         source.covered_generation = Some(generation);
         source.revision = match input.array::<1>()?[0] {
             0 => None,
@@ -99,6 +99,9 @@ impl Canonical {
             previous = Some(change.document());
         }
         source.validate_image(physical, generation, input.control)?;
+        source.documents = source.documents.into_mutation_budget(owner.memory());
+        source.changes = source.changes.into_mutation_budget(owner.memory());
+        source.control = owner.clone();
         Ok(source)
     }
 
