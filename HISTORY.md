@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate concrete stored-view and bound SQL routine relation references during private memory-image reconstruction, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Missing relations reject the unpublished runtime; complete logical validation and public Engine restore remain under implementation.
+
 - Native memory reconstruction checks declared user types and relation row types against the complete selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships before returning its unpublished runtime.
 
 - Native memory reconstruction validates role incarnations, owner-rooted ACL grant paths, column authority and retained memberships before returning its unpublished runtime. Complete public Engine restoration remains under implementation.

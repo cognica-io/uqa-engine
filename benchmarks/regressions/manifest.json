@@ -51686,6 +51686,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_preserve_nonrecursive_cte_visibility",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit self, preceding and forward CTE names.",
+      "invariant": "Only preceding declarations shadow concrete sources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_preserve_recursive_siblings_and_qualified_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit recursive siblings and quoted qualified sources.",
+      "invariant": "Recursive aliases shadow unqualified names only.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_restore_outer_scope_after_nested_shadowing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Traverse nested WITH bodies and sibling sources.",
+      "invariant": "Leaving a nested scope restores exactly the outer visibility.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_visit_mutation_targets_and_scalar_query_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit DML CTEs, ONLY targets and scalar-query children.",
+      "invariant": "Targets remain concrete relations and preserve inheritance flags.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_visit_operator_inputs_despite_cte_name_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit operator-join inputs colliding with CTE aliases.",
+      "invariant": "Operator operands always name concrete relations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_retire_workspace_on_callback_quota_and_cancellation_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Reject a callback, deny scratch and cancel original/invoking controls.",
+      "invariant": "Failure releases all admitted workspace without continuing callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_borrow_large_payloads_and_reject_unsupported_commands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Traverse a one-MiB literal under four-KiB scratch and reject unsupported commands.",
+      "invariant": "Stored payloads are borrowed and unsupported dependency scopes never silently pass.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_bound_identity_retains_admission_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Decode escaped identifiers, deny output admission and cancel its original owner.",
+      "invariant": "Original names and allocation ownership survive decoding without a search path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_accept_ctes_and_reject_missing_or_unqualified_sources",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Validate CTEs and system sources, then missing or unqualified concrete sources.",
+      "invariant": "The captured namespace alone determines concrete relation existence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_validate_bound_routines_but_keep_source_bodies_lazy",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Compare valid and missing bound routine relations with deferred source bodies.",
+      "invariant": "Bound references validate without compiling source bodies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_preserve_catalog_and_release_denied_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Deny scratch and cancel catalog validation, then validate the unchanged snapshot.",
+      "invariant": "Read-only validation releases original scratch on every outcome.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_stored_plan_relations_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Publish actual view/routine archives whose referenced table was removed, retire the source and reconstruct privately.",
+      "invariant": "Both missing relation images reject before exposure and release all original allocations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

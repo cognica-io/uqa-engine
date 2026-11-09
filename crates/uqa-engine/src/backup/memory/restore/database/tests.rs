@@ -24,6 +24,7 @@ fn source() -> Engine {
     engine
         .add_graph_edge(Edge::new(1, 1, 2, "edge"), "saved")
         .unwrap();
+    engine.sql("CREATE VIEW nested_visible AS WITH items AS (SELECT id FROM public.items) SELECT * FROM items; SELECT create_graph('query_graph'); SELECT create_vlabel('query_graph','node'); CREATE VIEW saved_nodes AS SELECT * FROM query_graph.node; CREATE FUNCTION first_item() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT min(id) FROM public.items; END", &[]).unwrap();
     engine
         .build_path_index("saved_path", "saved", &[vec!["edge".into()]])
         .unwrap();
@@ -192,6 +193,16 @@ fn complete_repository_input_preserves_native_state_after_source_retirement_and_
         Value::Int(2)
     );
     assert!(restored.sql("SELECT * FROM transient", &[]).is_err());
+    for (sql, expected) in [
+        ("SELECT count(*) AS value FROM nested_visible", 2),
+        ("SELECT count(*) AS value FROM saved_nodes", 0),
+        ("SELECT first_item() AS value", 1),
+    ] {
+        assert_eq!(
+            restored.sql(sql, &[]).unwrap().rows[0]["value"],
+            Value::Int(expected)
+        );
+    }
     restored.sql("BEGIN; UPDATE items SET body='rollback' WHERE id=1; ROLLBACK; INSERT INTO items(id,body,embedding) VALUES(3,'new',ARRAY[0.5,0.5])", &[]).unwrap();
     assert_eq!(
         restored
@@ -285,6 +296,50 @@ fn complete_repository_input_rejects_missing_user_type_before_private_activation
         "{error}"
     );
     assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn complete_repository_input_rejects_missing_stored_plan_relations_before_private_activation() {
+    for definition in [
+        "CREATE VIEW visible AS SELECT id FROM public.items",
+        "CREATE FUNCTION first_item() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT min(id) FROM public.items; END",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = repository(&directory.path().join("repository"));
+        let source = Engine::new();
+        source
+            .sql(
+                "CREATE TABLE items(id integer); INSERT INTO items VALUES(1)",
+                &[],
+            )
+            .unwrap();
+        source.sql(definition, &[]).unwrap();
+        source
+            .storage
+            .tables
+            .write()
+            .remove(&uqa_core::RelationIdentity::new("public", "items"))
+            .unwrap()
+            .unwrap();
+        let root = publish(&source, &repository);
+        drop(source);
+        let control = StorageReadControl::with_limit(32 << 20);
+        let mut input = input(&repository, root, &control);
+        let state = loop {
+            if let Some(state) = input.advance(1024).unwrap() {
+                break state;
+            }
+        };
+        drop(input);
+        let Err(error) = state.into_private_engine(MemoryBudget::new(32 << 20), &control) else {
+            panic!("missing relation reached private activation");
+        };
+        assert!(
+            error.to_string().contains("missing native plan relation"),
+            "{error}"
+        );
+        assert_eq!(control.memory().used(), 0);
+    }
 }
 
 #[test]

@@ -33,7 +33,7 @@ pub(super) struct MemoryState {
 }
 
 impl MemoryState {
-    /// Construct an unpublished session through the ordinary runtime owner and check native authority and declared types. Complete dependency validation still precedes public activation.
+    /// Construct an unpublished session through the ordinary runtime owner and check native authority, declared types and stored-plan relations. Complete dependency validation still precedes public activation.
     pub(super) fn into_private_engine(
         self,
         retention: MemoryBudget,
@@ -65,6 +65,8 @@ impl MemoryState {
             control.cancellation(),
         )
         .map_err(super::metadata::sql_error)?;
+        uqa_execution::catalog::image_validation::validate_plan_relations(&catalog, &production)
+            .map_err(super::metadata::sql_error)?;
         control.check()?;
         Ok(engine)
     }
