@@ -14,6 +14,8 @@ mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
+mod routine_dependencies;
+pub use routine_dependencies::validate as validate_routines;
 
 /// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.
 pub fn validate_sequences(

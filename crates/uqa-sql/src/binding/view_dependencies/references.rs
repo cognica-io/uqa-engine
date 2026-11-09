@@ -32,6 +32,41 @@ pub fn visit_stored_plan_relation_references(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
+    visit_references(plan, control, visit, &mut |_| Ok(()))
+}
+
+/// Observe the function targets owned by FROM items, including ROWS FROM groups. Scalar arguments remain owned by the ordinary expression visitor; this traversal shares the stored relation visitor's admitted, iterative plan walk.
+pub fn visit_stored_plan_function_bindings(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&crate::ast::FunctionBinding) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_references(plan, control, &mut |_, _| Ok(()), &mut |source| {
+        match source {
+            SourcePlan::Function {
+                binding: Some(binding),
+                ..
+            } => visit(binding)?,
+            SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    control.check()?;
+                    if let Some(binding) = &function.binding {
+                        visit(binding)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    })
+}
+
+fn visit_references(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+    source_visit: &mut impl FnMut(&SourcePlan) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     let mut work = Work {
         pending: ProductionSmallVec::new(*control),
         visible: ProductionMap::new(*control),
@@ -71,7 +106,10 @@ pub fn visit_stored_plan_relation_references(
                 }
             }
             Task::Root(root) => work.root(root)?,
-            Task::Source(source) => work.source(source, visit)?,
+            Task::Source(source) => {
+                source_visit(source)?;
+                work.source(source, visit)?;
+            }
             Task::Command(command) => {
                 if let Some(target) = command.mutation_target() {
                     let descendants = match command {

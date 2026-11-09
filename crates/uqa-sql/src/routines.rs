@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub mod inlining;
 pub mod lifecycle;
 pub mod merge_columns;
+pub mod native;
 mod ownership;
 pub mod privilege_inquiry;
 pub mod regclass;
