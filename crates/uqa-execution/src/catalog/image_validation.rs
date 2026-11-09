@@ -15,6 +15,50 @@ pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
 
+/// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.
+pub fn validate_sequences(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::schema::sequences::native::validate(
+        snapshot
+            .tables
+            .values()
+            .map(|table| (table.object_id, table.columns.as_slice()))
+            .chain(
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .values()
+                    .map(|table| (table.object_id, table.columns.as_slice())),
+            ),
+        snapshot
+            .definitions
+            .sequences
+            .iter()
+            .map(|(name, record)| (name, record.state.owner)),
+        memory,
+        cancellation,
+    )
+}
+
+/// Validate original table parent references against the complete selected table registry. SQL owns inheritance/partition semantics and the admitted acyclicity traversal.
+pub fn validate_hierarchies(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::schema::inheritance::native::validate(
+        snapshot
+            .tables
+            .iter()
+            .map(|(name, table)| (name, &*table.hierarchy, table.persistence)),
+        memory,
+        cancellation,
+    )
+}
+
 #[cfg(test)]
 mod tests;
 
