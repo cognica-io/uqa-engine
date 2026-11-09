@@ -18,6 +18,7 @@ pub mod foreign_relations;
 pub mod image;
 pub mod languages;
 pub mod named_definitions;
+pub mod namespace_names;
 pub mod node_tree;
 pub mod oids;
 pub mod resolution;

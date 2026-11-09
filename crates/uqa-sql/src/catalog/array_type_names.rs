@@ -18,13 +18,10 @@ pub fn valid_type_name(name: &str) -> bool {
 pub fn array_type_name(type_name: &str, pass: u32) -> String {
     let suffix = (pass > 0).then(|| pass.to_string());
     let overhead = 1 + suffix.as_ref().map_or(0, |suffix| suffix.len() + 1);
-    let mut length = type_name.len().min(MAX_TYPE_NAME_BYTES - overhead);
-    while !type_name.is_char_boundary(length) {
-        length -= 1;
-    }
-    let mut name = String::with_capacity(length + overhead);
+    let prefix = clipped_name(type_name, overhead);
+    let mut name = String::with_capacity(prefix.len() + overhead);
     name.push('_');
-    name.push_str(&type_name[..length]);
+    name.push_str(prefix);
     if let Some(suffix) = suffix {
         name.push('_');
         name.push_str(&suffix);
@@ -34,11 +31,24 @@ pub fn array_type_name(type_name: &str, pass: u32) -> String {
 
 /// Compare the legacy first generated name without constructing a temporary catalog identifier.
 pub fn default_array_type_name_matches(type_name: &str, candidate: &str) -> bool {
-    let mut length = type_name.len().min(MAX_TYPE_NAME_BYTES - 1);
+    candidate.strip_prefix('_') == Some(clipped_name(type_name, 1))
+}
+
+/// Decode the legacy first generated name under the caller's original allowance.
+pub fn default_array_type_name_with_control(
+    type_name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<String>, uqa_core::ValueRetentionError> {
+    control.check()?;
+    control.format(format_args!("_{}", clipped_name(type_name, 1)))
+}
+
+fn clipped_name(type_name: &str, overhead: usize) -> &str {
+    let mut length = type_name.len().min(MAX_TYPE_NAME_BYTES - overhead);
     while !type_name.is_char_boundary(length) {
         length -= 1;
     }
-    candidate.strip_prefix('_') == Some(&type_name[..length])
+    &type_name[..length]
 }
 
 /// Select the first generated array name that no existing type in the namespace uses.

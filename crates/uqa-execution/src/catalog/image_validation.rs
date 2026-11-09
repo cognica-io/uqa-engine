@@ -18,6 +18,8 @@ mod routine_dependencies;
 pub use routine_dependencies::validate as validate_routines;
 mod namespaces;
 pub use namespaces::validate as validate_namespaces;
+mod name_claims;
+pub use name_claims::validate as validate_name_uniqueness;
 
 /// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.
 pub fn validate_sequences(
