@@ -18,6 +18,15 @@ use crate::{
 mod shells;
 pub use shells::RoutineShellTypes;
 
+/// `PostgreSQL` identifies a trigger handler by its result type, including a declaration that retains the `SETOF` flag.
+pub fn routine_returns_trigger(definition: &CreateFunction) -> bool {
+    matches!(
+        &definition.returns,
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
+            if canonical_routine_type_name(type_name) == "trigger"
+    )
+}
+
 pub trait RoutineTypeCatalog {
     /// Resolve an undefined type without inventing a value layout.
     fn shell_type_oid(&self, _name: &str) -> Result<Option<u32>, SQLError> {
@@ -642,7 +651,7 @@ fn validate_routine_output_types(
                 && !(type_name == "trigger"
                     && def.language == "plpgsql"
                     && !def.is_procedure
-                    && matches!(def.returns, FunctionReturns::Scalar { .. })) =>
+                    && routine_returns_trigger(def)) =>
             {
                 let message = format!("cannot return type {type_name}");
                 return Err(pseudo_type_error(def, message.clone(), message));

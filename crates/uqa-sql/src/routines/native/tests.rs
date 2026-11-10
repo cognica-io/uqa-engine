@@ -239,3 +239,39 @@ fn native_routine_references_check_stored_actions_under_the_original_allowance()
     }
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn native_trigger_references_keep_the_selected_contract_and_deferred_body() {
+    for (parameters, returns, language, procedure, valid) in [
+        ("", "trigger", "plpgsql", false, true),
+        ("", "pg_catalog.trigger", "plpgsql", false, true),
+        ("", "integer", "plpgsql", false, false),
+        ("", "SETOF trigger", "plpgsql", false, true),
+        ("", "trigger", "sql", false, false),
+        ("integer", "trigger", "plpgsql", false, false),
+        ("", "trigger", "plpgsql", true, false),
+    ] {
+        let Statement::CreateFunction(mut definition) = crate::compile(&format!(
+            "CREATE FUNCTION public.renamed({parameters}) RETURNS {returns} LANGUAGE {language} AS 'uncompiled source body'",
+        )).unwrap().remove(0) else { panic!("function"); };
+        definition.object_id = Some([1; 16]);
+        definition.is_procedure = procedure;
+        let memory = MemoryBudget::new(64 << 10);
+        let token = CancellationToken::new();
+        {
+            let references =
+                NativeRoutineReferences::new(std::iter::once(&*definition), &memory, &token)
+                    .unwrap();
+            let result = references.trigger([1; 16]);
+            assert_eq!(
+                result.is_ok(),
+                valid,
+                "{parameters}/{returns}/{language}/{procedure}: {result:?}"
+            );
+            assert!(references.trigger([2; 16]).is_err());
+            token.cancel();
+            assert!(references.trigger([1; 16]).is_err());
+        }
+        assert_eq!(memory.used(), 0);
+    }
+}

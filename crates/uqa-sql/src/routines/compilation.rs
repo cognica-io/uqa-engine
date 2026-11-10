@@ -18,7 +18,7 @@ use super::{
     CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -32,7 +32,6 @@ use crate::{
     },
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
-    type_resolution::canonical_routine_type_name,
     SQLError, ScalarExpr,
 };
 
@@ -148,11 +147,7 @@ pub(super) fn validate_routine_signature(
 
 /// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.
 fn reject_trigger_function_arguments(def: &CreateFunction) -> Result<(), SQLError> {
-    let returns_trigger = matches!(
-        &def.returns,
-        FunctionReturns::Scalar { type_name } if canonical_routine_type_name(type_name) == "trigger"
-    );
-    if returns_trigger && def.identity_arity() != 0 {
+    if super::declaration::routine_returns_trigger(def) && def.identity_arity() != 0 {
         return Err(SQLError::Diagnostic {
             sqlstate: "42P13".into(),
             message: "trigger functions cannot have declared arguments".into(),

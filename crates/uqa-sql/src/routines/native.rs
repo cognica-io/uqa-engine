@@ -64,6 +64,25 @@ impl<'a> NativeRoutineReferences<'a> {
         argument_types: &[String],
         procedure: bool,
     ) -> Result<(), SQLError> {
+        self.definition(identity, argument_types, procedure)
+            .map(|_| ())
+    }
+
+    /// A stored trigger selects a zero-argument function with the ordinary trigger return and language contract. Its deferred body remains untouched.
+    pub fn trigger(&self, identity: [u8; 16]) -> Result<(), SQLError> {
+        crate::catalog::events::validation::validate_trigger_function(self.definition(
+            identity,
+            &[],
+            false,
+        )?)
+    }
+
+    fn definition(
+        &self,
+        identity: [u8; 16],
+        argument_types: &[String],
+        procedure: bool,
+    ) -> Result<&CreateFunction, SQLError> {
         self.control.check()?;
         let definition = self
             .definitions
@@ -78,7 +97,7 @@ impl<'a> NativeRoutineReferences<'a> {
         {
             return Err(invalid("bound signature or kind"));
         }
-        Ok(())
+        Ok(definition)
     }
 
     pub fn expression(&self, expression: &Expr) -> Result<(), SQLError> {

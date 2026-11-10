@@ -52934,6 +52934,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_references_keep_the_selected_contract_and_deferred_body",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Original trigger function identities retain both scalar and SETOF trigger declarations; wrong signatures, kinds, result types and languages reject without compiling source bodies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_declarations_preserve_setof_return_flags_and_argument_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/compilation/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Both trigger declaration forms retain PostgreSQL argument rejection and allow a zero-argument trigger handler.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_trigger_references_require_the_selected_trigger_function_contract",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Captured trigger targets use the SQL-owned trigger contract before private activation, while original input reservations retire on either result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "setof_trigger_declarations_keep_native_handler_behavior",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/review_regressions.rs",
+      "capability": "PostgreSQL trigger result declarations",
+      "workload": "Create scalar and SETOF trigger functions, rename handlers, retain result flags and execute their original triggers.",
+      "invariant": "Both result declarations retain handler behavior and original identities; ordinary calls and invalid declarations retain PostgreSQL SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

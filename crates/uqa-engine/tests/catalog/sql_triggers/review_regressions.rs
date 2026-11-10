@@ -534,3 +534,35 @@ fn referential_update_triggers_cover_update_merge_and_on_conflict() {
         vec!["BEFORE:STATEMENT", "AFTER:STATEMENT"]
     );
 }
+
+#[test]
+fn setof_trigger_declarations_keep_native_handler_behavior() {
+    for returns in ["trigger", "SETOF trigger"] {
+        let engine = Engine::new();
+        exec(&engine, &format!("CREATE TABLE items(id integer); CREATE FUNCTION saved() RETURNS {returns} LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$; CREATE TRIGGER retained BEFORE INSERT ON items FOR EACH ROW EXECUTE FUNCTION saved('argument'); ALTER FUNCTION saved() RENAME TO renamed; CREATE FUNCTION saved() RETURNS integer LANGUAGE plpgsql AS $$BEGIN RETURN 1; END$$; INSERT INTO items VALUES(7)"));
+        assert_eq!(
+            exec(&engine, "SELECT id FROM items").rows[0]["id"],
+            Value::Int(7)
+        );
+        assert_eq!(
+            exec(
+                &engine,
+                "SELECT proretset AS value FROM pg_proc WHERE proname='renamed'"
+            )
+            .rows[0]["value"],
+            Value::Bool(returns.starts_with("SETOF"))
+        );
+        assert!(strings(
+            &engine,
+            "SELECT pg_get_triggerdef(oid) AS value FROM pg_trigger WHERE tgname='retained'",
+            "value"
+        )[0]
+        .contains("renamed"));
+        assert_eq!(
+            engine.sql("SELECT renamed()", &[]).unwrap_err().sqlstate(),
+            Some("0A000")
+        );
+        assert_eq!(engine.sql("CREATE TRIGGER wrong_return BEFORE INSERT ON items FOR EACH ROW EXECUTE FUNCTION saved()", &[]).unwrap_err().sqlstate(), Some("42P17"));
+        assert_eq!(engine.sql(&format!("CREATE FUNCTION with_argument(integer) RETURNS {returns} LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$"), &[]).unwrap_err().sqlstate(), Some("42P13"));
+    }
+}
