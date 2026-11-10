@@ -52726,6 +52726,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_partition_foreign_key_family_definitions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Corrupt each shared endpoint, key or enforcement option in table- and column-declared partition families.",
+      "invariant": "Inherited definitions preserve the same reference and attachment options as their immediate parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_every_referencing_partition_family_member",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Remove every foreign key from a captured referencing partition.",
+      "invariant": "Every parent family occurs once in each immediate referencing partition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_one_declaring_owner_per_foreign_key_family",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Reuse a captured enforcement-family identity on an independent table.",
+      "invariant": "One family identity has only one original declaring owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_preserve_attached_foreign_key_catalog_choices",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Retain distinct row identities, names, eligible selected indexes and SET subsets on an attached foreign key.",
+      "invariant": "Attachment-equivalent definitions preserve their original independent catalog choices.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

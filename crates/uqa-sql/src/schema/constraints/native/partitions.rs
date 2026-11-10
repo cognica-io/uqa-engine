@@ -7,7 +7,7 @@
 //! Compare derived foreign-key rows with the complete captured partition membership.
 
 use super::{bound_relation_identity_with_control, invalid, Catalog, SQLError};
-use crate::schema::inheritance::foreign_keys::foreign_key_families;
+use crate::schema::inheritance::foreign_keys::attachment::{declarations, Attachment};
 use uqa_core::memory::{BudgetedMap, ProductionControl, ProductionMap};
 
 #[derive(Clone, Copy)]
@@ -19,7 +19,7 @@ struct Link {
 pub(super) struct Partitions<'a> {
     links: ProductionMap<'a, [u8; 16], Link>,
     first_child: ProductionMap<'a, [u8; 16], [u8; 16]>,
-    families: ProductionMap<'a, ([u8; 16], [u8; 16]), ()>,
+    families: ProductionMap<'a, ([u8; 16], [u8; 16]), Attachment<'a>>,
     control: ProductionControl<'a>,
 }
 
@@ -33,8 +33,14 @@ impl<'a> Partitions<'a> {
         };
         for (_, table) in &catalog.tables {
             result.control.check()?;
-            for family in foreign_key_families(table.columns, table.foreign_keys) {
-                result.families.insert_copy((table.object_id, family), ())?;
+            for (family, definition) in declarations(table.columns, table.foreign_keys) {
+                if result
+                    .families
+                    .insert_copy((table.object_id, family), definition)?
+                    .is_some()
+                {
+                    return Err(invalid("duplicate foreign-key family on one relation"));
+                }
             }
             let Some(hierarchy) = table.hierarchy.filter(|hierarchy| hierarchy.is_partition())
             else {
@@ -67,7 +73,39 @@ impl<'a> Partitions<'a> {
                 },
             )?;
         }
+        result.validate_families()?;
         Ok(result)
+    }
+
+    fn validate_families(&self) -> Result<(), SQLError> {
+        let mut roots = ProductionMap::new(self.control);
+        for ((table, family), definition) in &self.families {
+            self.control.check()?;
+            if !self.inherits_family(table, Some(*family))
+                && roots.insert_copy(*family, *table)?.is_some()
+            {
+                return Err(invalid(
+                    "foreign-key family has independent declaring owners",
+                ));
+            }
+            let mut next = self.first_child.get(table).copied();
+            while let Some(child) = next {
+                self.control.check()?;
+                let inherited = self
+                    .families
+                    .get(&(child, *family))
+                    .ok_or_else(|| invalid("missing inherited foreign-key family"))?;
+                if inherited != definition {
+                    return Err(invalid("inherited foreign-key definition"));
+                }
+                next = self
+                    .links
+                    .get(&child)
+                    .expect("indexed partition child")
+                    .next_sibling;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn parent(&self, table: &[u8; 16]) -> Option<[u8; 16]> {

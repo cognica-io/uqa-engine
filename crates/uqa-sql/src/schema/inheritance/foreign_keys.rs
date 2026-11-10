@@ -11,6 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::ast::{ColumnDef, ForeignKey, TableConstraintSet};
 use crate::SQLError;
 
+pub(crate) mod attachment;
+
 #[cfg(test)]
 mod tests;
 
@@ -26,14 +28,12 @@ pub fn attachable_foreign_key<'a>(
     parent_key: &ForeignKey,
     candidates: &'a [ForeignKey],
 ) -> Result<Option<&'a ForeignKey>, SQLError> {
+    let parent = attachment::Attachment::table(parent_key);
     let mut ordered = candidates.iter().collect::<Vec<_>>();
     ordered.sort_by(|left, right| left.name.cmp(&right.name));
     for candidate in ordered {
-        if candidate.ref_table != parent_key.ref_table
-            || candidate.local_columns != parent_key.local_columns
-            || candidate.ref_columns != parent_key.ref_columns
-            || candidate.period != parent_key.period
-        {
+        let definition = attachment::Attachment::table(candidate);
+        if !definition.same_reference(parent) {
             continue;
         }
         if candidate.enforced != parent_key.enforced {
@@ -49,12 +49,7 @@ pub fn attachable_foreign_key<'a>(
                 hint: None,
             });
         }
-        if candidate.deferrable == parent_key.deferrable
-            && candidate.initially_deferred == parent_key.initially_deferred
-            && candidate.on_update == parent_key.on_update
-            && candidate.on_delete == parent_key.on_delete
-            && candidate.match_type == parent_key.match_type
-        {
+        if definition == parent {
             return Ok(Some(candidate));
         }
     }
@@ -93,14 +88,7 @@ pub fn foreign_key_families<'a>(
     columns: &'a [ColumnDef],
     foreign_keys: &'a [ForeignKey],
 ) -> impl Iterator<Item = [u8; 16]> + 'a {
-    columns
-        .iter()
-        .filter_map(|column| column.references.as_ref()?.object_id)
-        .chain(
-            foreign_keys
-                .iter()
-                .filter_map(|foreign_key| foreign_key.object_id),
-        )
+    attachment::declarations(columns, foreign_keys).map(|(family, _)| family)
 }
 
 /// A foreign key of a declaration, by the catalog row it publishes.

@@ -5,3 +5,4 @@ constraint_identity_rows|t|t|t
 partition_constraint_rows|t|t
 declaring_foreign_key_rows|3|3
 inherited_foreign_key_rows|1|t
+attached_family_definition|t|t|t|t

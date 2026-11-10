@@ -11,6 +11,7 @@ use crate::{
 };
 use uqa_core::catalog_identity::CatalogObjectIdentity;
 
+mod families;
 mod identities;
 mod partitions;
 

@@ -30,4 +30,8 @@ CREATE TEMP TABLE backup_refs(id integer REFERENCES backup_targets(id)) PARTITIO
 CREATE TEMP TABLE backup_ref_partition PARTITION OF backup_refs FOR VALUES FROM (0) TO (100);
 SELECT 'declaring_foreign_key_rows', count(*), count(DISTINCT confrelid) FROM pg_constraint WHERE conrelid = 'backup_refs'::regclass AND contype = 'f';
 SELECT 'inherited_foreign_key_rows', count(*), bool_and(confrelid = 'backup_targets'::regclass AND conparentid <> 0) FROM pg_constraint WHERE conrelid = 'backup_ref_partition'::regclass AND contype = 'f';
+CREATE TEMP TABLE backup_action_parent(x integer, y integer, CONSTRAINT root_action FOREIGN KEY(x,y) REFERENCES backup_parent(a,b) ON DELETE SET NULL(x)) PARTITION BY RANGE(x);
+CREATE TEMP TABLE backup_action_child(x integer, y integer, CONSTRAINT attached_action FOREIGN KEY(x,y) REFERENCES backup_parent(a,b) ON DELETE SET NULL(y));
+ALTER TABLE backup_action_parent ATTACH PARTITION backup_action_child FOR VALUES FROM(0) TO(100);
+SELECT 'attached_family_definition', child.conparentid = parent.oid, child.conname <> parent.conname, child.confdelsetcols <> parent.confdelsetcols, child.confrelid = parent.confrelid AND child.conkey = parent.conkey AND child.confkey = parent.confkey AND child.condeferrable = parent.condeferrable AND child.condeferred = parent.condeferred AND child.confupdtype = parent.confupdtype AND child.confdeltype = parent.confdeltype AND child.confmatchtype = parent.confmatchtype AND child.conenforced = parent.conenforced FROM pg_constraint parent JOIN pg_constraint child ON child.conparentid = parent.oid WHERE parent.conrelid = 'backup_action_parent'::regclass AND child.conrelid = 'backup_action_child'::regclass AND parent.contype = 'f';
 ROLLBACK;
