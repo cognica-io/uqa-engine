@@ -28,7 +28,7 @@ fn constraint_catalog(ordinary: u8, foreign: u8, domain: u8) -> CatalogReadSnaps
         column
     };
     snapshot.tables.insert(
-        RelationIdentity::new("public", "local"),
+        RelationIdentity::new("public", "ordinary"),
         table_snapshot(
             [1; 16],
             vec![column(ordinary)],
@@ -172,7 +172,7 @@ fn native_catalog_constraint_triggers_share_the_constraint_identity_namespace() 
         let trigger = uqa_sql::catalog::events::StoredTrigger {
             definition: uqa_sql::ast::CreateTrigger {
                 name: "guard".into(),
-                table: "public.local".into(),
+                table: "public.ordinary".into(),
                 function: "public.check_row".into(),
                 arguments: vec![],
                 constraint: true,
@@ -196,7 +196,7 @@ fn native_catalog_constraint_triggers_share_the_constraint_identity_namespace() 
         };
         RetainedValue::make_mut(&mut catalog.definitions.triggers)
             .insert_event(
-                RelationIdentity::new("public", "local"),
+                RelationIdentity::new("public", "ordinary"),
                 "guard".into(),
                 trigger,
             )
