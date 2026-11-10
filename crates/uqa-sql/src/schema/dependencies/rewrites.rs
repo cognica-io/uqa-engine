@@ -7,7 +7,10 @@
 //! Rewrite stored relation, column, and literal sequence references in SQL schema expressions.
 use super::walk_schema_expr_mut;
 mod production;
-pub use production::visit_sequence_function_references_with_control;
+pub use production::{
+    visit_scalar_sequence_function_references_with_control,
+    visit_sequence_function_references_with_control,
+};
 use uqa_core::{RelationIdentity, Value};
 
 pub fn stored_relation_reference_matches(reference: &str, target: &RelationIdentity) -> bool {

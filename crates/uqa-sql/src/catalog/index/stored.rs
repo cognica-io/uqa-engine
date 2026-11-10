@@ -11,6 +11,8 @@ use crate::{
     schema::dependencies::schema_expr_references_column,
 };
 
+pub mod input;
+
 /// Restore the complete SQL declaration for validation or a physical rebuild without changing its durable catalog identity.
 pub fn declaration(
     row: &uqa_core::catalog_index::CatalogIndexRow,

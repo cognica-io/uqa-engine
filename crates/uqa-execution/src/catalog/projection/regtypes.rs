@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
+use uqa_sql::catalog::regobject::{numeric_regobject_oid, NumericRegobjectOid};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
@@ -62,34 +63,6 @@ fn cross_database_reference(name: &str) -> SQLError {
 
 fn qualified_name_list(names: &[String]) -> String {
     names.join(".")
-}
-
-enum NumericRegobjectOid {
-    NotNumeric,
-    Valid(i64),
-    InvalidSyntax,
-    OutOfRange,
-}
-
-fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
-    if input == "-" {
-        return NumericRegobjectOid::Valid(0);
-    }
-    if input.is_empty() || !input.bytes().all(|byte| byte.is_ascii_digit()) {
-        return NumericRegobjectOid::NotNumeric;
-    }
-    let radix = if input.len() > 1 && input.starts_with('0') {
-        8
-    } else {
-        10
-    };
-    match u32::from_str_radix(input, radix) {
-        Ok(oid) => NumericRegobjectOid::Valid(i64::from(oid)),
-        Err(error) if matches!(error.kind(), std::num::IntErrorKind::InvalidDigit) => {
-            NumericRegobjectOid::InvalidSyntax
-        }
-        Err(_) => NumericRegobjectOid::OutOfRange,
-    }
 }
 
 /// `parseDashOrOid`: `-` is the invalid OID and a string of digits is an OID `oidin` reads, which reports `22P02` for digits `strtoul` cannot read as one number and `22003` for a value past `uint32`; any other string is a name.

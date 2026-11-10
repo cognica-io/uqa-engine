@@ -14,6 +14,121 @@ mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
+mod routine_dependencies;
+pub use routine_dependencies::validate as validate_routines;
+mod sequence_functions;
+pub use sequence_functions::validate as validate_sequence_functions;
+mod namespaces;
+pub use namespaces::validate as validate_namespaces;
+mod name_claims;
+pub use name_claims::validate as validate_name_uniqueness;
+
+/// Join complete immutable ordinary/foreign row layouts and original index rows for SQL's constraint-reference predicate.
+pub fn validate_constraints(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    use uqa_sql::schema::constraints::native::NativeConstraintTable;
+    uqa_sql::schema::constraints::native::validate(
+        snapshot
+            .tables
+            .iter()
+            .map(|(name, table)| NativeConstraintTable {
+                name,
+                object_id: table.object_id,
+                columns: &table.columns,
+                checks: &table.checks,
+                keys: &table.keys,
+                foreign_keys: &table.foreign_keys,
+                hierarchy: Some(&table.hierarchy),
+            })
+            .chain(
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .iter()
+                    .map(|(name, table)| NativeConstraintTable {
+                        name,
+                        object_id: table.object_id,
+                        columns: &table.columns,
+                        checks: &table.checks,
+                        keys: &[],
+                        foreign_keys: &[],
+                        hierarchy: None,
+                    }),
+            ),
+        snapshot.definitions.catalog_indexes.values(),
+        memory,
+        cancellation,
+    )
+}
+
+/// Join original ordinary-table and index membership for SQL's native ownership predicate.
+pub fn validate_indexes(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::catalog::index::native::validate(
+        snapshot.tables.iter().map(|(name, table)| {
+            uqa_sql::catalog::index::native::NativeIndexTable {
+                name,
+                object_id: table.object_id,
+                columns: table.columns_declared.then_some(&table.columns),
+                keys: &table.keys,
+                hierarchy: &table.hierarchy,
+            }
+        }),
+        snapshot.definitions.catalog_indexes.values(),
+        memory,
+        cancellation,
+    )
+}
+
+/// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.
+pub fn validate_sequences(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::schema::sequences::native::validate(
+        snapshot
+            .tables
+            .values()
+            .map(|table| (table.object_id, table.columns.as_slice()))
+            .chain(
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .values()
+                    .map(|table| (table.object_id, table.columns.as_slice())),
+            ),
+        snapshot
+            .definitions
+            .sequences
+            .iter()
+            .map(|(name, record)| (name, record.state.owner)),
+        memory,
+        cancellation,
+    )
+}
+
+/// Validate original table parent references against the complete selected table registry. SQL owns inheritance/partition semantics and the admitted acyclicity traversal.
+pub fn validate_hierarchies(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    uqa_sql::schema::inheritance::native::validate(
+        snapshot
+            .tables
+            .iter()
+            .map(|(name, table)| (name, &*table.hierarchy, table.persistence)),
+        memory,
+        cancellation,
+    )
+}
 
 #[cfg(test)]
 mod tests;

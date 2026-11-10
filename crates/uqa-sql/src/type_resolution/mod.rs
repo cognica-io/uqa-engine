@@ -122,6 +122,7 @@ pub use common::{
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
+    foreign_key_operand_type_with_control,
 };
 pub(crate) use fixed_builtin::resolve_syntax_binding_with_control as resolve_fixed_syntax_binding_with_control;
 #[doc(hidden)]

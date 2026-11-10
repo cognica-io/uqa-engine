@@ -67,6 +67,17 @@ pub(crate) fn is_system_catalog_type_oid(oid: u32) -> bool {
     })
 }
 
+pub(crate) fn is_system_catalog_type_name(schema: &str, name: &str) -> bool {
+    domains().any(|domain| {
+        domain.schema == schema
+            && (domain.name == name
+                || super::super::array_type_names::default_array_type_name_matches(
+                    domain.name,
+                    name,
+                ))
+    })
+}
+
 pub fn system_catalog_domain_with_control(
     oid: u32,
     control: &ProductionControl<'_>,

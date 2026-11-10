@@ -6,6 +6,8 @@
 
 //! CREATE TABLE inheritance and partition row-type preparation.
 
+pub mod native;
+
 use crate::schema::table_creation::not_nulls::InheritedNotNull;
 use crate::semantics::partition::{
     transform_partition_bound, validate_new_partition_bound, PartitionContext,

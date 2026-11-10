@@ -51816,6 +51816,799 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_preserves_diamond_and_quoted_parent_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_rejects_missing_repeated_unbound_and_cyclic_parents",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_retains_sparse_sequence_numbers_and_rejects_invalid_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_requires_matching_partition_parent_kind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_rejects_partition_strategy_mismatch_and_invalid_temporary_edges",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_deep_ancestry_is_iterative_and_budget_failure_retires_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native inheritance dependency closure",
+      "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
+      "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_owners_use_original_column_incarnations_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence dependency closure",
+      "workload": "Validate stable owned-column edges, internal identity backreferences, inherited implicit sequence names and legacy counters.",
+      "invariant": "No replacement owner or missing sequence satisfies a retained reference; validation never allocates a sequence value or changes declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_columns_preserve_inherited_provenance_and_legacy_counters",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence dependency closure",
+      "workload": "Validate stable owned-column edges, internal identity backreferences, inherited implicit sequence names and legacy counters.",
+      "invariant": "No replacement owner or missing sequence satisfies a retained reference; validation never allocates a sequence value or changes declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_internal_owners_require_the_original_identity_column_and_sequence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence dependency closure",
+      "workload": "Validate stable owned-column edges, internal identity backreferences, inherited implicit sequence names and legacy counters.",
+      "invariant": "No replacement owner or missing sequence satisfies a retained reference; validation never allocates a sequence value or changes declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_references_reject_unbound_names_and_unconsumed_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence dependency closure",
+      "workload": "Validate stable owned-column edges, internal identity backreferences, inherited implicit sequence names and legacy counters.",
+      "invariant": "No replacement owner or missing sequence satisfies a retained reference; validation never allocates a sequence value or changes declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_validation_rejects_duplicate_owners_and_releases_denied_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence dependency closure",
+      "workload": "Validate stable owned-column edges, internal identity backreferences, inherited implicit sequence names and legacy counters.",
+      "invariant": "No replacement owner or missing sequence satisfies a retained reference; validation never allocates a sequence value or changes declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_references_preserve_identity_through_rename_and_reject_replacements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Concrete routine identity",
+      "workload": "Check historical names, replacement identities, changed signatures and procedure kinds.",
+      "invariant": "Original identity and canonical declaration signature select the same function after a rename; replacements and incompatible kinds reject.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_reference_index_rejects_missing_zero_and_duplicate_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Native routine membership",
+      "workload": "Build native routine indexes with missing, zero and repeated object identities.",
+      "invariant": "Invalid identity membership rejects and releases all previously admitted map nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_references_keep_late_calls_structural_dispatch_and_deferred_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Lazy routine dispatch preservation",
+      "workload": "Inspect unbound, builtin, structural-dispatch and retained-error bindings with no routine registry.",
+      "invariant": "Nonconcrete dispatch remains unchanged and validation does not resolve or execute a call.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_references_walk_nested_schema_and_query_expressions_without_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Stored routine expression traversal",
+      "workload": "Validate concrete calls in schema expressions and an unevaluated CASE branch of a stored plan.",
+      "invariant": "Traversal checks retained bindings without evaluating either branch or compiling deferred routine bodies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_reference_admission_and_cancellation_release_original_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Routine validation ownership",
+      "workload": "Deny identity-index admission and cancel original controls before and after construction.",
+      "invariant": "Every failure releases the original validation workspace without modifying definitions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_references_check_stored_actions_under_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Admitted SQL action validation",
+      "workload": "Validate stored VALUES actions with valid and missing routine identities, then exhaust the original allowance.",
+      "invariant": "Temporary borrowed lowering retains concrete bindings, never executes the action and retires its entire allowance on success or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_checks_stored_column_bindings_without_resolving_lazy_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Immutable catalog routine references",
+      "workload": "Join stored column defaults with original and missing routine identities whose source bodies reference unavailable functions.",
+      "invariant": "Concrete column calls resolve only by immutable identity; source bodies remain lazy and temporary workspace retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_checks_parameter_defaults_and_retained_sql_actions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Stored routine dependency closure",
+      "workload": "Join parameter defaults and original/bound SQL actions with present and missing routine identities.",
+      "invariant": "Each retained concrete call uses the same selected catalog without overload rebinding or source execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_releases_workspace_on_admission_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Catalog routine validation retirement",
+      "workload": "Validate a native catalog under a zero allowance and a cancelled original token.",
+      "invariant": "No rejected immutable-snapshot validation retains temporary identity-index memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_references_include_from_functions_and_grouped_function_targets",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Stored table-function identity",
+      "workload": "Validate present and missing concrete targets in ordinary FROM functions and grouped ROWS FROM functions.",
+      "invariant": "Relational function targets are validated independently of scalar arguments using the original admitted stored-plan traversal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_namespaces_check_exact_membership_without_creating_public_or_temporary_schemas",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/namespaces/tests.rs",
+      "capability": "Native catalog namespace membership",
+      "workload": "Validate ordinary and quoted schema names with missing, present and similarly spelled declarations.",
+      "invariant": "Only exact declared schemas satisfy an original namespace; public and temporary schemas are not synthesized.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_namespaces_preserve_virtual_system_schemas_and_native_graph_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/namespaces/tests.rs",
+      "capability": "Native graph and system namespaces",
+      "workload": "Validate the virtual system schemas and an independently owned graph namespace without explicit schema declarations.",
+      "invariant": "Ordinary implicit namespaces remain valid, and removal of the sole native graph owner rejects its missing namespace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_namespaces_check_indexes_and_independently_relocated_multiranges",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/namespaces/tests.rs",
+      "capability": "Native index and multirange namespaces",
+      "workload": "Check index membership and a multirange whose schema differs from its range owner.",
+      "invariant": "Both index declarations and independently relocated multiranges require their exact original namespace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_namespaces_admit_routine_name_decoding_and_preserve_lazy_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/namespaces/tests.rs",
+      "capability": "Admitted native routine namespace decoding",
+      "workload": "Validate a stored routine with a deferred unresolved body under ordinary, zero and cancelled allowances.",
+      "invariant": "Bound names retain their declared schema without compiling bodies; allocation denial and cancellation release all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_name_claims_separate_plain_relations_from_row_and_scalar_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "Separate native relation/type namespaces",
+      "workload": "Validate repeated relation names, row-type collisions, legal scalar/plain-relation name reuse and decoded dotted identifiers.",
+      "invariant": "Only claims in the same catalog name space collide; structured schema/local keys remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_name_claims_preserve_displaced_arrays_and_legacy_utf8_clipping",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "Original native array type names",
+      "workload": "Validate displaced stored array names and legacy arrays derived from multibyte names under an admitted output allowance.",
+      "invariant": "Recorded array names are not regenerated, legacy clipping matches the existing owner and all allocated output retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_name_claims_reject_fixed_relation_scalar_array_and_pseudo_type_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "Fixed catalog namespace claims",
+      "workload": "Attempt native declarations at system relation, builtin scalar/array/pseudo-type and catalog-domain addresses.",
+      "invariant": "Fixed names reject through the existing SQL metadata while an equivalent local name in another schema remains legal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_name_claims_release_all_name_and_map_owners_on_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "Native name claim allocation ownership",
+      "workload": "Validate declarations with a zero allowance and cancellation after the first admitted relation/row/array claims.",
+      "invariant": "Every copied key and ordered-map node retires on failure without changing original declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_names_join_declared_arrays_with_row_type_names",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/name_claims/tests.rs",
+      "capability": "Cross-catalog native name uniqueness",
+      "workload": "Join a table and enum whose array name is independent or collides with the original row or generated array type.",
+      "invariant": "One immutable catalog supplies both claim families and rejects conflicts before activation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_names_keep_recorded_row_array_names_and_release_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/name_claims/tests.rs",
+      "capability": "Native row-array name preservation",
+      "workload": "Validate a displaced recorded row-array name, then deny or cancel the same catalog validation.",
+      "invariant": "Recorded row-array names remain authoritative and validation scratch always retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_metadata_preserves_original_addresses_and_column_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Project exact index and table identities, escaped physical keys, relationships and repeated included columns.",
+      "invariant": "Stored metadata remains unchanged and column comparisons preserve declaration order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_metadata_borrows_large_expression_payloads_and_admits_copied_text",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Project a four-MiB expression within a 4-KiB allowance and reject a four-MiB physical-key copy.",
+      "invariant": "Expression payloads stay borrowed; copied text is admitted before allocation and retired with its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_metadata_rejects_missing_duplicate_and_malformed_ownership_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Read missing, duplicated, mistyped, truncated and oversized identity fields through the native JSON projection.",
+      "invariant": "Malformed ownership metadata rejects and releases all admitted scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_metadata_retains_legacy_defaults_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Read absent legacy definitions, deny copied text and cancel either production owner.",
+      "invariant": "Legacy defaults allocate no payload; denial and both cancellation sources release workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_preserve_renames_legacy_addresses_and_included_duplicates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate renamed tables and indexes, original physical keys, repeated INCLUDE columns and legacy addressless declarations.",
+      "invariant": "Original identities and valid legacy semantics survive without rebinding or name inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_reject_missing_replaced_and_duplicate_targets",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate missing/replaced tables, invalid addresses, repeated index identities/OIDs and shared physical keys.",
+      "invariant": "Every recorded index belongs to its original table and owns a distinct native address and physical key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_require_bidirectional_constraint_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate omitted/mismatched key and index identities, unequal key/include columns and duplicate owners.",
+      "invariant": "Recorded constraint/index edges agree in both directions and a constraint owns at most one index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_follow_original_partition_parent_edges",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate actual parent/child table and index edges, missing parents, wrong tables and ordinary-table ancestry.",
+      "invariant": "Only original partition edges resolve a parent index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_reject_cycles_without_recursive_traversal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate a cyclic pair of table/index parent references using admitted node-local visitation.",
+      "invariant": "Cyclic index ancestry rejects without recursive traversal or catalog mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_references_release_workspace_on_quota_failure_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Validate native key/index ownership under seven allowances and pre-cancelled input.",
+      "invariant": "Every temporary node and copied physical key retires on success, denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_indexes_join_original_table_incarnations_and_release_rejected_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/indexes.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Join the same immutable native index with absent, original and replaced table incarnations.",
+      "invariant": "Execution supplies original catalog owners to SQL and rejected validation leaves them unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_existing_foreign_key_tables_and_live_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Omit or corrupt local/target columns, relation membership, arity and operand types.",
+      "invariant": "Foreign-key endpoints use existing ordinary tables and live compatible attributes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_preserve_selected_index_identity_and_reordered_column_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Exercise renamed original indexes, reordered keys and missing/replaced/nonunique/partial/expression indexes.",
+      "invariant": "Only the original eligible unique index can satisfy a captured foreign key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_validate_column_references_without_rebinding_missing_indexes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Validate column REFERENCES declarations and omit their selected index incarnation.",
+      "invariant": "Column and table foreign keys obey the same original-identity contract.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_preserve_repeated_local_and_action_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Repeat referencing and SET NULL columns while keeping target columns distinct.",
+      "invariant": "PostgreSQL 18.4 permitted repetitions survive native reconstruction without weakening target uniqueness.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_check_key_membership_and_borrowed_check_columns_without_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Validate live key/INCLUDE/CHECK columns, repeated includes, tableoid and unevaluated false checks.",
+      "invariant": "Checks retain flags and expressions; missing column dependencies reject without evaluation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_original_referenced_partition_edges",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Validate original derived partition rows and corrupt their parent or membership.",
+      "invariant": "Every recorded derived row follows its original captured partition edge.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_release_all_workspace_on_quota_failure_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Deny validation allocation and cancel its original token.",
+      "invariant": "Validation returns the original admission/cancellation error and releases all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_foreign_key_type_checks_preserve_directional_coercion_and_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Resolve ordinary and controlled foreign-key comparison types with sufficient and zero allowance.",
+      "invariant": "Controlled validation preserves ordinary coercion while admitting copied type/name payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_constraint_validation_joins_original_foreign_key_targets_without_mutation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Join immutable ordinary tables and indexes, then remove or replace a target incarnation.",
+      "invariant": "Execution exposes original SQL inputs without repairing declarations or retaining failed scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_original_period_key_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Preserve an original PERIOD key and remove both sides of its recorded constraint ownership.",
+      "invariant": "Temporal coverage refers to the original WITHOUT OVERLAPS constraint rather than an unowned unique index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_sequence_observation_preserves_selected_builtins_and_runtime_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Observe selected builtins, historical display names, explicit casts, numeric arguments and user-function bindings.",
+      "invariant": "Only selected builtin arguments produce captured name references; runtime inputs retain their original semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_sequence_observation_borrows_payloads_and_preserves_control_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Observe a 4 MiB unrelated scalar at zero allowance and exercise callback errors and both cancellation owners.",
+      "invariant": "Traversal borrows payloads without allocation and preserves the first failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_function_relations_preserve_numeric_and_quoted_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Decode quoted canonical names, dash and octal OIDs, malformed numeric inputs and invalid unqualified names under quota and cancellation.",
+      "invariant": "Numeric values do not imply live catalog edges; canonical names retain their exact identity and allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_function_names_require_relations_without_evaluating_runtime_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/sequence_functions/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Join named builtin arguments to immutable ordinary and virtual relation membership.",
+      "invariant": "Missing captured names reject while numeric OIDs, nonsequence relations and explicit text remain deferred.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_function_references_cover_bound_plans_and_preserve_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/sequence_functions/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Inspect a bound SQL routine and a deferred source routine with the same absent relation spelling.",
+      "invariant": "Only the bound expression inventory is inspected; source text is not compiled.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_sequence_function_validation_releases_denied_and_cancelled_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/sequence_functions/tests.rs",
+      "capability": "Native sequence function references",
+      "workload": "Deny canonical-name decoding and cancel through both original control owners.",
+      "invariant": "Every failure releases temporary workspace without changing catalog state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_columns_close_over_declared_layouts_before_optional_addresses",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index column references",
+      "workload": "Validate missing key and included columns with and without recorded index addresses, then complete, empty and undeclared row layouts.",
+      "invariant": "Every plain key and included column of a declared table belongs to its captured live layout; document tables retain open fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_column_admission_preserves_quoted_names_and_repeated_include_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index column references",
+      "workload": "Validate escaped Unicode column names, repeated INCLUDE fields, denied text admission and duplicate live declarations.",
+      "invariant": "Names and ordering remain exact, validation owns temporary allocations and every failed admission retires them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_regobject_numeric_inputs_preserve_postgresql_radix_and_name_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/regobject.rs",
+      "capability": "Native sequence function references",
+      "workload": "Classify dash, octal and uint32 OIDs, malformed numeric inputs and quoted or signed names against captured PostgreSQL 18.4 outcomes.",
+      "invariant": "Execution and stored-reference validation share the native classifier without allocating or inferring catalog edges from numeric OIDs.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

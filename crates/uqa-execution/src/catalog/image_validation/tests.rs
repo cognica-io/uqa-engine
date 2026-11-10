@@ -5,6 +5,9 @@
 //
 
 use super::*;
+
+mod constraints;
+mod indexes;
 use crate::catalog::test_support::{empty_catalog, table_snapshot};
 use uqa_core::{memory::RetainedValue, RelationIdentity};
 use uqa_sql::{

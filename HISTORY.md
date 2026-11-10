@@ -8,7 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for captured named arguments of builtin sequence functions against the original relation namespace. Typed numeric OIDs, dash OID zero, native numeric spellings, explicit text casts, deferred routine bodies and same-named user functions retain their original behavior. Complete logical closure and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for live key/CHECK columns, original foreign-key indexes and captured referenced-partition edges before activation. Reordered target keys, repeated referencing/action columns, renamed indexes and NOT VALID declarations preserve their existing behavior without evaluating checks or callbacks. SQL owns the admitted dependency predicate; complete expression/resource closure and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for stored index table incarnations, constraint ownership and partition-parent identities. Missing or inconsistent references, duplicate addresses/physical keys and cyclic ancestry reject before private activation; original names, legacy addressless definitions and repeated included columns are preserved. Index metadata projection borrows expression payloads and admits copied physical keys under the restore allowance. Complete stored-expression validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution native rejection of missing declaration schemas and duplicate relation/type names, while preserving virtual system schemas, native graph namespaces, quoted identifiers, independently relocated multiranges and displaced array names. Indexes and sequences retain their separate namespace from scalar types. Public Engine restore remains under implementation.
+
+- Add SQL/Execution native checks for concrete routine identities and original signatures in column/domain expressions, views, bound SQL bodies, trigger targets and rule actions without compiling deferred source bodies. Complete logical closure and public Engine restore remain under implementation.
+
 - Preserve imported graph handle reservations through transaction errors, panics, nesting and complete handle replacement. Native and mapped transaction boundaries retain the original allocation and restore the selected generation on failure.
+
+- Add SQL/Execution native predicates for inherited/partition parent references and stable sequence ownership. Missing parents, ancestry cycles, replaced owner columns and missing implicit sequences reject without repairing metadata or allocating sequence values; public Engine restore remains under implementation.
 
 - Add SQL/Execution validation of concrete stored-view and bound SQL routine relation references, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Complete logical validation and public Engine restore remain under implementation.
 

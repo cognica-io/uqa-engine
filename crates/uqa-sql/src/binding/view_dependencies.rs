@@ -14,7 +14,7 @@ use crate::{
 use uqa_core::{RelationIdentity, Value};
 
 mod references;
-pub use references::visit_stored_plan_relation_references;
+pub use references::{visit_stored_plan_function_bindings, visit_stored_plan_relation_references};
 
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     crate::catalog::resolve_virtual_relation(&[], reference)
