@@ -12,7 +12,35 @@ The latest locally verified input source, `7dfab90942bd45ed975a9972078ac07fad601
 
 **Next implementation:** named value-index admission and native source registration in Execution and Storage.
 
-### Remaining requirements and completed components
+### Progress by scope
+
+| Scope | Complete | Remaining |
+| --- | --- | --- |
+| Original requirements, delivered | 13 of 18 | Five delivery requirements below |
+| Native catalog input, locally verified | 24 of 24 | Integration and delivery remain in the parent requirement |
+| Table metadata input, locally verified | 10 of 10 | Integration and delivery remain in the parent requirement |
+| PR #1373 implementation and review | 8 of 8 | No implementation items remain in that PR |
+| PR #1373 final qualification and delivery | 0 of 2 | Automatic final-source CI and merge |
+
+### Delivered requirements
+
+These thirteen requirements are delivered in merged PRs.
+
+- [x] **Common Storage image/repository contracts:** versioned identities, cuts, bounded ordered inventory and framing, explicit capabilities, strict parsing and lifecycle errors. Delivered through #1323/#1343.
+- [x] **Joint committed metadata capture:** record state, autonomous sequences and identifier reservations, namespaces, definitions and artifact roots at one cut without an unbounded writer-gate copy. Persistent capture is delivered through #1326/#1327; bounded native membership and complete public memory capture are delivered through #1361/#1371. #1346 and #1351 are complete.
+- [x] **Native SQLite provider export/import** in plain, encrypted, compressed and compressed-encrypted modes, including all sixteen source/destination protection combinations. #1335 is qualified and delivered in #1343; the shared logical-validation and public Engine-activation requirements are listed above.
+- [x] **SQLite KV provider export/import** in the same four file modes, including capture, fresh private-directory import and recovery. #1331/#1334 are qualified and delivered in #1343; Engine integration is tracked above.
+- [x] **redb provider export/import** through the shared live owner and public dependency interfaces, including fresh-file import and history transitions. #1331/#1332 are qualified and delivered in #1343; Engine integration is tracked above.
+- [x] **Native memory image codecs and writable destination owners** for catalog, documents, text, vectors, evaluated values, graph, models and resources. Catalog/security/type/routine/view/trigger/table metadata and resource codecs are delivered through #1371, including #1365; original reservations survive destination mutation, rollback and retained readers in #1372. Complete table assembly and Engine activation remain in the shared restoration tasks above.
+- [x] **Public Engine/uqa-api full and incremental export/verification:** authority, committed-cut admission, independently retained handles and bounded jobs on persistent providers and the actual memory Engine. Delivered through #1358/#1361/#1371. Source Engines may be retired while retained jobs complete.
+- [x] **Durable local full-backup publication:** protection, operation identity, cancellation and uncertain-outcome recovery. #1324 is qualified and delivered in #1343.
+- [x] **Storage-owned fresh-target restore lifecycle:** verified archive readers, external durable intent, target exclusivity, private-directory publication, history transition and retry that preserves later writes. #1333 is delivered in #1343; owned scheduling, handle retirement before preparation and pinned filename continuations are delivered through #1361. Complete logical validation and fresh Engine activation remain above.
+- [x] **Incremental complete-inventory comparison:** changed, new, deleted and tombstone units, compatible lineage, branching and standalone children. #1348 is delivered through #1350, including standalone restoration on redb and all eight SQLite mapping/file-mode combinations. Fingerprint acceleration remains a separate item above.
+- [x] **Retention/GC and standalone copy:** active-job safety, ancestor removal and key rotation. #1356 delivers #1357 with both-platform qualification.
+- [x] **Delivered export/verify examples and records:** the public Rust persistent export/verify example and corresponding manual/HISTORY/discovery records, followed by public memory full/incremental export documentation. Delivered through #1358/#1371; complete public restore examples and remaining capability documentation are tracked above.
+- [x] **Qualification and delivery of the completed units through #1372.** The final #1372 source passes 24,411 Linux and 24,426 macOS workspace cases, 53 macOS documentation examples, 6,104 regression cases and eight process fixtures on each platform, 22 C/sanitizer configurations, all six FDW configurations and 88 Nori allocation/output measurements. Merge `3405596e76f8dd01fcffcec8158e4722f27a677f` preserves the exact qualified tree; its local/remote branch and worktree are removed. Remaining units retain their own final-source acceptance requirement above.
+
+### Open requirements and locally completed components
 
 - [ ] **Writable table assembly.** Assemble decoded document, text, vector, evaluated-value, graph and resource owners into complete writable memory tables, with their table definitions, registrations and original allocation ownership. Component codecs and destination mutation owners are delivered in #1372. PR #1373 contains the independent native input owners. The current unpublished production-restore unit contains private Engine assembly plus hierarchy, sequence, routine, namespace, relation/type name, index-ownership, constraint-reference and named sequence-function validation. Production integration and final-source delivery remain required.
   - [x] Implement writable document/text/vector/value data assembly and historical field-analyzer input through Execution and Storage, with Graph/ML native resource adoption. The independent owning interfaces in #1373 cover retained readers, mutation ownership, malformed input, quota failure and cancellation. The graph transaction correction preserves the original header through errors, panics, nesting and complete handle replacement; 274 Graph and 28 Engine graph cases and strict seven-crate library/test Clippy pass. Final-source CI and delivery remain in the parent requirement.
@@ -98,24 +126,6 @@ The latest locally verified input source, `7dfab90942bd45ed975a9972078ac07fad601
 - [ ] **Snapshot-qualified fingerprints.** Implement exact fingerprints for each built-in provider's captured immutable units. Preserve the existing bounded content-comparison fallback for missing, stale or incompatible fingerprints, and verify truthful metadata visits, source payload reads, hashed bytes, reused bytes and newly stored bytes.
 
 - [ ] **End-to-end restore acceptance and public documentation.** Qualify complete full/incremental Engine restoration on memory, native SQLite, SQLite KV and redb, including all eight SQLite mapping/file-mode combinations, source/ancestor removal, protection changes, failures/cancellation and subsequent reads/writes. Finish the public Rust backup/verify/restore example, remaining API/manual/HISTORY/discovery updates, final-source Linux/macOS work/memory/output and applicable C/FDW qualification, delivery records and branch cleanup for these remaining units.
-
-### Completed work
-
-These thirteen requirements are delivered in merged PRs.
-
-- [x] **Common Storage image/repository contracts:** versioned identities, cuts, bounded ordered inventory and framing, explicit capabilities, strict parsing and lifecycle errors. Delivered through #1323/#1343.
-- [x] **Joint committed metadata capture:** record state, autonomous sequences and identifier reservations, namespaces, definitions and artifact roots at one cut without an unbounded writer-gate copy. Persistent capture is delivered through #1326/#1327; bounded native membership and complete public memory capture are delivered through #1361/#1371. #1346 and #1351 are complete.
-- [x] **Native SQLite provider export/import** in plain, encrypted, compressed and compressed-encrypted modes, including all sixteen source/destination protection combinations. #1335 is qualified and delivered in #1343; the shared logical-validation and public Engine-activation requirements are listed above.
-- [x] **SQLite KV provider export/import** in the same four file modes, including capture, fresh private-directory import and recovery. #1331/#1334 are qualified and delivered in #1343; Engine integration is tracked above.
-- [x] **redb provider export/import** through the shared live owner and public dependency interfaces, including fresh-file import and history transitions. #1331/#1332 are qualified and delivered in #1343; Engine integration is tracked above.
-- [x] **Native memory image codecs and writable destination owners** for catalog, documents, text, vectors, evaluated values, graph, models and resources. Catalog/security/type/routine/view/trigger/table metadata and resource codecs are delivered through #1371, including #1365; original reservations survive destination mutation, rollback and retained readers in #1372. Complete table assembly and Engine activation remain in the shared restoration tasks above.
-- [x] **Public Engine/uqa-api full and incremental export/verification:** authority, committed-cut admission, independently retained handles and bounded jobs on persistent providers and the actual memory Engine. Delivered through #1358/#1361/#1371. Source Engines may be retired while retained jobs complete.
-- [x] **Durable local full-backup publication:** protection, operation identity, cancellation and uncertain-outcome recovery. #1324 is qualified and delivered in #1343.
-- [x] **Storage-owned fresh-target restore lifecycle:** verified archive readers, external durable intent, target exclusivity, private-directory publication, history transition and retry that preserves later writes. #1333 is delivered in #1343; owned scheduling, handle retirement before preparation and pinned filename continuations are delivered through #1361. Complete logical validation and fresh Engine activation remain above.
-- [x] **Incremental complete-inventory comparison:** changed, new, deleted and tombstone units, compatible lineage, branching and standalone children. #1348 is delivered through #1350, including standalone restoration on redb and all eight SQLite mapping/file-mode combinations. Fingerprint acceleration remains a separate item above.
-- [x] **Retention/GC and standalone copy:** active-job safety, ancestor removal and key rotation. #1356 delivers #1357 with both-platform qualification.
-- [x] **Delivered export/verify examples and records:** the public Rust persistent export/verify example and corresponding manual/HISTORY/discovery records, followed by public memory full/incremental export documentation. Delivered through #1358/#1371; complete public restore examples and remaining capability documentation are tracked above.
-- [x] **Qualification and delivery of the completed units through #1372.** The final #1372 source passes 24,411 Linux and 24,426 macOS workspace cases, 53 macOS documentation examples, 6,104 regression cases and eight process fixtures on each platform, 22 C/sanitizer configurations, all six FDW configurations and 88 Nori allocation/output measurements. Merge `3405596e76f8dd01fcffcec8158e4722f27a677f` preserves the exact qualified tree; its local/remote branch and worktree are removed. Remaining units retain their own final-source acceptance requirement above.
 
 ### Completed design preparation
 
