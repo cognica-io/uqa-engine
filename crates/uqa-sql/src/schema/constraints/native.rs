@@ -7,8 +7,11 @@
 //! Validate captured constraint references against one immutable native catalog.
 
 use crate::{
-    ast::{ColumnDef, Expr, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint},
+    ast::{
+        ColumnDef, CreateDomain, Expr, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint,
+    },
     catalog::{
+        events::StoredTrigger,
         index::stored::input::{metadata, IndexMetadata},
         resolution::bound_relation_identity_with_control,
     },
@@ -21,6 +24,8 @@ use uqa_core::{
 };
 
 mod foreign_keys;
+mod identities;
+mod partitions;
 
 #[derive(Clone, Copy)]
 pub struct NativeConstraintTable<'a> {
@@ -41,17 +46,19 @@ struct Index<'a> {
 
 struct Catalog<'a> {
     tables: BudgetedMap<&'a RelationIdentity, NativeConstraintTable<'a>>,
-    identities: BudgetedMap<[u8; 16], NativeConstraintTable<'a>>,
+    identities: BudgetedMap<[u8; 16], ()>,
     columns: BudgetedMap<([u8; 16], &'a str), &'a ColumnDef>,
     indexes: BudgetedMap<[u8; 16], Index<'a>>,
     memory: &'a MemoryBudget,
     control: ProductionControl<'a>,
 }
 
-/// Validate live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
+/// Validate supplied constraint identities across ordinary/foreign tables, domains and constraint triggers, live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
 pub fn validate<'a>(
     tables: impl Iterator<Item = NativeConstraintTable<'a>>,
     indexes: impl Iterator<Item = &'a CatalogIndexRow>,
+    domains: impl Iterator<Item = &'a CreateDomain>,
+    triggers: impl Iterator<Item = &'a StoredTrigger>,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
 ) -> Result<(), SQLError> {
@@ -64,11 +71,12 @@ pub fn validate<'a>(
         control: ProductionControl::new(memory, cancellation, cancellation),
     };
     catalog.control.check()?;
+    let mut constraint_identities = identities::Identities::new(catalog.control);
     for table in tables {
         catalog.control.check()?;
         if table.object_id == [0; 16]
             || catalog.tables.insert(table.name, table)?.is_some()
-            || catalog.identities.insert(table.object_id, table)?.is_some()
+            || catalog.identities.insert(table.object_id, ())?.is_some()
         {
             return Err(invalid("duplicate or invalid relation"));
         }
@@ -82,7 +90,15 @@ pub fn validate<'a>(
                 return Err(invalid("duplicate live column"));
             }
         }
+        constraint_identities.table(table)?;
     }
+    for domain in domains {
+        constraint_identities.domain(domain)?;
+    }
+    for trigger in triggers {
+        constraint_identities.trigger(trigger)?;
+    }
+    drop(constraint_identities);
     for row in indexes {
         catalog.control.check()?;
         let metadata = metadata(row.definition_json.as_deref(), &catalog.control)?;
@@ -96,8 +112,9 @@ pub fn validate<'a>(
             }
         }
     }
+    let partitions = partitions::Partitions::new(&catalog)?;
     for (_, table) in &catalog.tables {
-        catalog.table(*table)?;
+        catalog.table(*table, &partitions)?;
     }
     catalog.control.check()?;
     Ok(())
@@ -116,7 +133,11 @@ impl<'a> Catalog<'a> {
             .ok_or_else(|| invalid("missing live column"))
     }
 
-    fn table(&self, table: NativeConstraintTable<'a>) -> Result<(), SQLError> {
+    fn table(
+        &self,
+        table: NativeConstraintTable<'a>,
+        partitions: &partitions::Partitions<'_>,
+    ) -> Result<(), SQLError> {
         for key in table.keys {
             if key.columns.is_empty() {
                 return Err(invalid("empty key"));
@@ -137,11 +158,15 @@ impl<'a> Catalog<'a> {
                 self.expression(table, check)?;
             }
             if let Some(reference) = &column.references {
-                self.foreign_key(table, foreign_keys::Reference::column(column, reference))?;
+                self.foreign_key(
+                    table,
+                    foreign_keys::Reference::column(column, reference),
+                    partitions,
+                )?;
             }
         }
         for key in table.foreign_keys {
-            self.foreign_key(table, foreign_keys::Reference::table(key))?;
+            self.foreign_key(table, foreign_keys::Reference::table(key), partitions)?;
         }
         if let Some(hierarchy) = table.hierarchy {
             if let Some(partition) = &hierarchy.partition_spec {

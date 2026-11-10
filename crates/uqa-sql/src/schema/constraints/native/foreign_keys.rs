@@ -6,6 +6,7 @@
 
 //! Original foreign-key endpoints and partition-derived rows use borrowed declaration fields.
 
+use super::partitions::Partitions;
 use super::{
     bound_relation_identity_with_control, invalid, BudgetedMap, Catalog, ColumnDef, ForeignKey,
     Index, NativeConstraintTable, SQLError,
@@ -17,6 +18,7 @@ pub(super) struct Reference<'a> {
     target: &'a str,
     columns: &'a [String],
     index: Option<[u8; 16]>,
+    family: Option<[u8; 16]>,
     period: bool,
     on_update: ForeignKeyAction,
     on_delete: ForeignKeyAction,
@@ -31,6 +33,7 @@ impl<'a> Reference<'a> {
             target: &reference.table,
             columns: reference.column.as_slice(),
             index: reference.referenced_index,
+            family: reference.object_id,
             period: reference.period,
             on_update: reference.on_update,
             on_delete: reference.on_delete,
@@ -45,6 +48,7 @@ impl<'a> Reference<'a> {
             target: &key.ref_table,
             columns: &key.ref_columns,
             index: key.referenced_index,
+            family: key.object_id,
             period: key.period,
             on_update: key.on_update,
             on_delete: key.on_delete,
@@ -59,6 +63,7 @@ impl<'a> Catalog<'a> {
         &self,
         local: NativeConstraintTable<'a>,
         key: Reference<'_>,
+        partitions: &Partitions<'_>,
     ) -> Result<(), SQLError> {
         self.control.check()?;
         if local.hierarchy.is_none() || key.local.is_empty() || key.local.len() != key.columns.len()
@@ -122,7 +127,7 @@ impl<'a> Catalog<'a> {
                 }
             }
         }
-        self.referenced_partitions(target, key.partitions)
+        self.referenced_partitions(local, target, &key, partitions)
     }
 
     fn index_columns(&self, index: &Index<'_>, columns: &[String]) -> Result<(), SQLError> {
@@ -197,11 +202,22 @@ impl<'a> Catalog<'a> {
 
     fn referenced_partitions(
         &self,
+        local: NativeConstraintTable<'a>,
         target: NativeConstraintTable<'a>,
-        partitions: &[ReferencedPartitionConstraint],
+        key: &Reference<'_>,
+        partitions: &Partitions<'_>,
     ) -> Result<(), SQLError> {
+        if partitions.inherits_family(&local.object_id, key.family) {
+            return if key.partitions.is_empty() {
+                Ok(())
+            } else {
+                Err(invalid(
+                    "inherited foreign key retains derived partition rows",
+                ))
+            };
+        }
         let mut seen = BudgetedMap::new(self.memory);
-        for derived in partitions {
+        for derived in key.partitions {
             self.control.check()?;
             if !derived.catalog_identity.is_valid()
                 || derived.partition == target.object_id
@@ -214,29 +230,10 @@ impl<'a> Catalog<'a> {
                 Some(_) => return Err(invalid("referenced partition parent order")),
                 None => target.object_id,
             };
-            let child = self
-                .identities
-                .get(&derived.partition)
-                .ok_or_else(|| invalid("missing referenced partition"))?;
-            let hierarchy = child
-                .hierarchy
-                .ok_or_else(|| invalid("referenced partition relation kind"))?;
-            if !hierarchy.is_partition() || hierarchy.parents.len() != 1 {
-                return Err(invalid("referenced partition edge"));
-            }
-            let name = bound_relation_identity_with_control(&hierarchy.parents[0], &self.control)?;
-            let parent = self
-                .tables
-                .get(&*name)
-                .ok_or_else(|| invalid("missing referenced partition parent"))?;
-            if parent.object_id != expected
-                || parent
-                    .hierarchy
-                    .is_none_or(|hierarchy| hierarchy.partition_spec.is_none())
-            {
+            if partitions.parent(&derived.partition) != Some(expected) {
                 return Err(invalid("referenced partition parent incarnation"));
             }
         }
-        Ok(())
+        partitions.complete(target.object_id, &seen)
     }
 }

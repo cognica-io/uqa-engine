@@ -1,0 +1,10 @@
+sequence_columns|{last_value,log_cnt,is_called}
+rule_owner|t
+rule_effect|7
+renamed_dependency|t
+missing_target 42P01
+pseudo_source 42P01
+concrete_cte 00000
+missing_owner 42P01
+missing_trigger_column 42703
+trigger_relations|t|t

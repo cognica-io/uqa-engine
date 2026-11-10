@@ -24,7 +24,6 @@ use crate::catalog::context::CatalogContext;
 use crate::catalog::tuples::constraint::ConstraintTuple;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
-use uqa_sql::canonical_routine_type_name;
 use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
 use uqa_sql::routines::routine_signature_types;
 
@@ -507,23 +506,7 @@ fn resolve_trigger_function(
             });
         }
     };
-    let returns_trigger = matches!(
-        &function.def.returns,
-        uqa_sql::ast::FunctionReturns::Scalar { type_name }
-            if canonical_routine_type_name(type_name) == "trigger"
-    );
-    if !returns_trigger {
-        return Err(SQLError::Routine {
-            sqlstate: "42P17".into(),
-            message: format!("function {} must return type trigger", function.def.name),
-        });
-    }
-    if function.def.language != "plpgsql" {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "only LANGUAGE plpgsql trigger functions are executable".into(),
-        });
-    }
+    uqa_sql::catalog::events::validation::validate_trigger_function(&function.def)?;
     Ok(function)
 }
 

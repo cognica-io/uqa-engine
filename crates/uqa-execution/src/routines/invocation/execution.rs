@@ -7,8 +7,8 @@
 //! Execute concrete routine bodies under the caller's transaction and state guards.
 use super::{context::RoutineInvocationContext, depth::DepthGuard};
 use crate::routines::{
-    transaction::RoutineTransactionGuard, CreateFunction, FunctionReturns, Interpreter,
-    RoutineOutcome, TriggerRoutineContext,
+    transaction::RoutineTransactionGuard, CreateFunction, Interpreter, RoutineOutcome,
+    TriggerRoutineContext,
 };
 use uqa_core::Value;
 use uqa_sql::{
@@ -17,7 +17,6 @@ use uqa_sql::{
         invocation::specialized_definition, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
     semantics::sets::placement_scope::SetPlacementScope,
-    type_resolution::canonical_routine_type_name,
     SQLError,
 };
 
@@ -102,11 +101,7 @@ fn execute_entry(
         } => (allow_nonatomic, record_target, descriptions, true),
         RoutineEntry::CatalogCallback => (false, None, None, false),
     };
-    if matches!(
-        &function.def.returns,
-        FunctionReturns::Scalar { type_name }
-            if canonical_routine_type_name(type_name) == "trigger"
-    ) {
+    if uqa_sql::routines::declaration::routine_returns_trigger(&function.def) {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
             message: "trigger functions can only be called as triggers".into(),

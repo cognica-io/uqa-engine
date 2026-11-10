@@ -19,6 +19,23 @@ use crate::{
 };
 use uqa_core::Value;
 
+/// A selected trigger handler shares this result and language contract across definition, catalog projection and native restoration.
+pub fn validate_trigger_function(function: &crate::ast::CreateFunction) -> Result<(), SQLError> {
+    if !crate::routines::declaration::routine_returns_trigger(function) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: format!("function {} must return type trigger", function.name),
+        });
+    }
+    if function.language != "plpgsql" {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "only LANGUAGE plpgsql trigger functions are executable".into(),
+        });
+    }
+    Ok(())
+}
+
 pub struct TriggerConditionTypeResolver<'a> {
     pub columns: &'a [crate::ast::ColumnDef],
 }

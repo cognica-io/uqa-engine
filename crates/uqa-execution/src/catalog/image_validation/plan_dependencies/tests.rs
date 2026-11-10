@@ -23,6 +23,8 @@ use uqa_sql::{
     ColumnType,
 };
 
+mod events;
+
 fn catalog(sql: &str) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.tables.insert(
@@ -68,6 +70,37 @@ fn check(catalog: &CatalogReadView) -> Result<(), SQLError> {
     let result = validate(catalog, &ProductionControl::new(&memory, &token, &token));
     assert_eq!(memory.used(), 0);
     result
+}
+
+#[test]
+fn native_stored_relations_reject_missing_rule_action_targets() {
+    let mut snapshot = catalog("SELECT id FROM public.items").snapshot().clone();
+    let Statement::CreateRule(definition) = uqa_sql::compile(
+        "CREATE RULE saved AS ON INSERT TO public.items DO ALSO INSERT INTO public.missing VALUES (new.id)",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("rule");
+    };
+    RetainedValue::make_mut(&mut snapshot.definitions.rules)
+        .insert_event(
+            RelationIdentity::new("public", "items"),
+            "saved".into(),
+            uqa_sql::catalog::events::StoredRule {
+                definition,
+                enabled: uqa_sql::ast::EventEnableMode::default(),
+                condition_plan: None,
+                condition_binding: None,
+                dependencies: Some(uqa_sql::catalog::events::RuleDependencies::default()),
+                catalog_oid: Some(31_000),
+            },
+        )
+        .unwrap();
+    let result = check(&CatalogReadView::new(snapshot));
+    assert!(
+        result.is_err(),
+        "missing stored rule target accepted: {result:?}"
+    );
 }
 
 #[test]
