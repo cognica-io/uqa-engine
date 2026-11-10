@@ -11,6 +11,7 @@ use crate::{
         ColumnDef, CreateDomain, Expr, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint,
     },
     catalog::{
+        events::StoredTrigger,
         index::stored::input::{metadata, IndexMetadata},
         resolution::bound_relation_identity_with_control,
     },
@@ -52,11 +53,12 @@ struct Catalog<'a> {
     control: ProductionControl<'a>,
 }
 
-/// Validate supplied constraint identities across ordinary/foreign tables and domains, live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
+/// Validate supplied constraint identities across ordinary/foreign tables, domains and constraint triggers, live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
 pub fn validate<'a>(
     tables: impl Iterator<Item = NativeConstraintTable<'a>>,
     indexes: impl Iterator<Item = &'a CatalogIndexRow>,
     domains: impl Iterator<Item = &'a CreateDomain>,
+    triggers: impl Iterator<Item = &'a StoredTrigger>,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
 ) -> Result<(), SQLError> {
@@ -92,6 +94,9 @@ pub fn validate<'a>(
     }
     for domain in domains {
         constraint_identities.domain(domain)?;
+    }
+    for trigger in triggers {
+        constraint_identities.trigger(trigger)?;
     }
     drop(constraint_identities);
     for row in indexes {

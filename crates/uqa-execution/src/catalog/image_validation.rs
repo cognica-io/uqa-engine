@@ -23,7 +23,7 @@ pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 
-/// Join complete immutable ordinary/foreign row layouts, domain declarations and original index rows for SQL's constraint-reference predicate.
+/// Join complete immutable ordinary/foreign row layouts, domains, constraint triggers and original index rows for SQL's constraint-reference predicate.
 pub fn validate_constraints(
     snapshot: &CatalogReadSnapshot,
     memory: &MemoryBudget,
@@ -64,6 +64,11 @@ pub fn validate_constraints(
             .domains
             .values()
             .map(|domain| &domain.definition),
+        snapshot
+            .definitions
+            .triggers
+            .values()
+            .flat_map(uqa_sql::catalog::events::EventDefinitions::values),
         memory,
         cancellation,
     )

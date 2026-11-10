@@ -34,4 +34,8 @@ CREATE TEMP TABLE backup_action_parent(x integer, y integer, CONSTRAINT root_act
 CREATE TEMP TABLE backup_action_child(x integer, y integer, CONSTRAINT attached_action FOREIGN KEY(x,y) REFERENCES backup_parent(a,b) ON DELETE SET NULL(y));
 ALTER TABLE backup_action_parent ATTACH PARTITION backup_action_child FOR VALUES FROM(0) TO(100);
 SELECT 'attached_family_definition', child.conparentid = parent.oid, child.conname <> parent.conname, child.confdelsetcols <> parent.confdelsetcols, child.confrelid = parent.confrelid AND child.conkey = parent.conkey AND child.confkey = parent.confkey AND child.condeferrable = parent.condeferrable AND child.condeferred = parent.condeferred AND child.confupdtype = parent.confupdtype AND child.confdeltype = parent.confdeltype AND child.confmatchtype = parent.confmatchtype AND child.conenforced = parent.conenforced FROM pg_constraint parent JOIN pg_constraint child ON child.conparentid = parent.oid WHERE parent.conrelid = 'backup_action_parent'::regclass AND child.conrelid = 'backup_action_child'::regclass AND parent.contype = 'f';
+CREATE FUNCTION pg_temp.backup_guard() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$;
+CREATE CONSTRAINT TRIGGER backup_guard AFTER INSERT ON backup_parent FOR EACH ROW EXECUTE FUNCTION pg_temp.backup_guard();
+SELECT 'constraint_trigger_rows', c.contype = 't', c.conrelid = t.tgrelid, t.oid <> c.oid FROM pg_trigger t JOIN pg_constraint c ON c.oid = t.tgconstraint WHERE t.tgrelid = 'backup_parent'::regclass AND t.tgname = 'backup_guard';
+SELECT 'all_constraint_rows', count(*) = count(DISTINCT oid), bool_or(contype = 't') FROM pg_constraint WHERE connamespace = pg_my_temp_schema();
 ROLLBACK;

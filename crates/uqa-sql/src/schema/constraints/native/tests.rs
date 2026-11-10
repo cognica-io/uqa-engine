@@ -14,6 +14,7 @@ use uqa_core::catalog_identity::CatalogObjectIdentity;
 mod families;
 mod identities;
 mod partitions;
+mod triggers;
 
 struct Table {
     name: RelationIdentity,
@@ -97,6 +98,7 @@ fn check(
             hierarchy: table.hierarchy.as_ref(),
         }),
         indexes.iter(),
+        std::iter::empty(),
         std::iter::empty(),
         memory,
         token,

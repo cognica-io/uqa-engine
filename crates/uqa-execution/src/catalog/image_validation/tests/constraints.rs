@@ -164,3 +164,50 @@ fn native_catalog_constraint_validation_joins_original_foreign_key_targets_witho
         Some([3; 16])
     );
 }
+
+#[test]
+fn native_catalog_constraint_triggers_share_the_constraint_identity_namespace() {
+    for collision in ["none", "oid", "incarnation"] {
+        let mut catalog = constraint_catalog(10, 11, 12);
+        let trigger = uqa_sql::catalog::events::StoredTrigger {
+            definition: uqa_sql::ast::CreateTrigger {
+                name: "guard".into(),
+                table: "public.local".into(),
+                function: "public.check_row".into(),
+                arguments: vec![],
+                constraint: true,
+                referenced_table: None,
+                deferrability: uqa_sql::ast::TriggerDeferrability::NotDeferrable,
+                row: true,
+                timing: uqa_sql::ast::TriggerTiming::After,
+                events: vec![uqa_sql::ast::TriggerEvent::Insert],
+                update_columns: vec![],
+                transition_relations: vec![],
+                when: None,
+                or_replace: false,
+            },
+            function_object_id: None,
+            enabled: uqa_sql::ast::EventEnableMode::Origin,
+            object_id: Some(identity(if collision == "incarnation" { 10 } else { 13 }).object_id),
+            constraint_name: Some("guard".into()),
+            // The trigger row occupies pg_trigger, so its OID may equal a pg_constraint OID.
+            catalog_oid: Some(identity(10).oid),
+            constraint_catalog_oid: Some(identity(if collision == "oid" { 10 } else { 13 }).oid),
+        };
+        RetainedValue::make_mut(&mut catalog.definitions.triggers)
+            .insert_event(
+                RelationIdentity::new("public", "local"),
+                "guard".into(),
+                trigger,
+            )
+            .unwrap();
+        let memory = MemoryBudget::new(64 << 10);
+        let result = validate_constraints(&catalog, &memory, &CancellationToken::new());
+        assert_eq!(
+            result.is_ok(),
+            collision == "none",
+            "{collision}: {result:?}"
+        );
+        assert_eq!(memory.used(), 0);
+    }
+}

@@ -52778,6 +52778,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_reject_shared_constraint_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Repeat a supplied constraint-trigger OID or incarnation.",
+      "invariant": "Constraint-trigger rows have unique original constraint identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_preserve_legacy_absence_and_separate_catalog_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Retain absent legacy identity fields and equal OIDs in separate trigger/constraint catalogs.",
+      "invariant": "No replacement identity is inferred and separate catalog namespaces remain separate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_trigger_identity_admission_retires_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Deny the original validation allowance and cancel before visiting trigger rows.",
+      "invariant": "Failure and cancellation leave no retained validation reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_constraint_triggers_share_the_constraint_identity_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Join captured constraint-trigger rows with table and domain constraint identities.",
+      "invariant": "Cross-owner OID/incarnation collisions reject under the original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

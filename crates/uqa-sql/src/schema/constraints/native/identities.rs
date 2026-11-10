@@ -4,11 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Catalog row identities share one namespace across ordinary tables, foreign tables and domains.
+//! Table, domain and constraint-trigger rows share the constraint catalog namespace.
 
 use super::{invalid, NativeConstraintTable};
 use crate::{
     ast::{ConstraintCatalogIdentity, CreateDomain},
+    catalog::events::StoredTrigger,
     schema::{constraint_metadata::identity::claims::row_identities, domains::constraints},
     SQLError,
 };
@@ -56,6 +57,16 @@ impl<'a> Identities<'a> {
         self.control.check()?;
         for identity in constraints::identities(domain) {
             self.insert(identity)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn trigger(&mut self, trigger: &StoredTrigger) -> Result<(), SQLError> {
+        self.control.check()?;
+        if trigger.definition.constraint {
+            if let Some((object_id, oid)) = trigger.object_id.zip(trigger.constraint_catalog_oid) {
+                self.insert(ConstraintCatalogIdentity { object_id, oid })?;
+            }
         }
         Ok(())
     }
