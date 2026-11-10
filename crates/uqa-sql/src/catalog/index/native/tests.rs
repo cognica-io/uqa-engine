@@ -14,6 +14,7 @@ use uqa_core::catalog_identity::CatalogObjectIdentity;
 struct Table {
     name: RelationIdentity,
     id: [u8; 16],
+    columns: Option<Vec<ColumnDef>>,
     keys: Vec<TableKeyConstraint>,
     hierarchy: TableHierarchy,
 }
@@ -29,6 +30,12 @@ fn table(name: &str, id: u8) -> Table {
     Table {
         name: RelationIdentity::new("public", name),
         id: [id; 16],
+        columns: Some(
+            ["value", "extra"]
+                .into_iter()
+                .map(|name| ColumnDef::nullable(name, crate::ColumnType::Integer))
+                .collect(),
+        ),
         keys: vec![],
         hierarchy: TableHierarchy::default(),
     }
@@ -72,6 +79,7 @@ fn check(
         tables.iter().map(|table| NativeIndexTable {
             name: &table.name,
             object_id: table.id,
+            columns: table.columns.as_deref(),
             keys: &table.keys,
             hierarchy: &table.hierarchy,
         }),
@@ -111,6 +119,92 @@ fn owned_key() -> (Table, CatalogIndexRow) {
             .clone_from(&table.keys[0].included_columns);
     });
     (table, row)
+}
+
+#[test]
+fn native_index_columns_close_over_declared_layouts_before_optional_addresses() {
+    for addressed in [false, true] {
+        for included in [false, true] {
+            let mut table = table("items", 1);
+            let mut row = row(&table, 2);
+            alter(&mut row, |definition| {
+                if !addressed {
+                    definition.catalog = None;
+                }
+                if included {
+                    definition.included_columns = vec!["missing".into()];
+                }
+            });
+            if !included {
+                row.columns_json = r#"["missing"]"#.into();
+            }
+            accepts(
+                std::slice::from_ref(&table),
+                std::slice::from_ref(&row),
+                false,
+            );
+            table
+                .columns
+                .as_mut()
+                .unwrap()
+                .push(ColumnDef::nullable("missing", crate::ColumnType::Text));
+            accepts(
+                std::slice::from_ref(&table),
+                std::slice::from_ref(&row),
+                true,
+            );
+            table.columns = Some(vec![]);
+            accepts(
+                std::slice::from_ref(&table),
+                std::slice::from_ref(&row),
+                false,
+            );
+            table.columns = None;
+            accepts(&[table], &[row], true);
+        }
+    }
+}
+
+#[test]
+fn native_index_column_admission_preserves_quoted_names_and_repeated_include_fields() {
+    let mut table = table("items", 1);
+    let mut row = row(&table, 2);
+    let names = vec!["quoted name".to_owned(), "한글\\\"".repeat(2000)];
+    table.columns = Some(
+        names
+            .iter()
+            .map(|name| ColumnDef::nullable(name, crate::ColumnType::Integer))
+            .collect(),
+    );
+    row.columns_json = serde_json::to_string(&names).unwrap();
+    alter(&mut row, |definition| {
+        definition.included_columns = vec![names[1].clone(), names[0].clone(), names[1].clone()];
+    });
+    accepts(
+        std::slice::from_ref(&table),
+        std::slice::from_ref(&row),
+        true,
+    );
+    let memory = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    assert_eq!(
+        check(
+            std::slice::from_ref(&table),
+            std::slice::from_ref(&row),
+            &memory,
+            &token
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(memory.used(), 0);
+    table
+        .columns
+        .as_mut()
+        .unwrap()
+        .push(ColumnDef::nullable(&names[0], crate::ColumnType::Integer));
+    accepts(&[table], &[row], false);
 }
 
 #[test]

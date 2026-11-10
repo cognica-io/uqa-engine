@@ -6,9 +6,9 @@
 
 //! Native index ownership closes over the original table, key and partition identities.
 
-use super::stored::input::{columns_match, metadata, IndexMetadata};
+use super::stored::input::{columns_match, metadata, visit_column_keys, IndexMetadata};
 use crate::{
-    ast::{TableHierarchy, TableKeyConstraint},
+    ast::{ColumnDef, TableHierarchy, TableKeyConstraint},
     catalog::resolution::bound_relation_identity_with_control,
     SQLError,
 };
@@ -23,6 +23,8 @@ use uqa_core::{
 pub struct NativeIndexTable<'a> {
     pub name: &'a RelationIdentity,
     pub object_id: [u8; 16],
+    /// None denotes a document table without a declared row layout; an empty declared layout is Some(&[]).
+    pub columns: Option<&'a [ColumnDef]>,
     pub keys: &'a [TableKeyConstraint],
     pub hierarchy: &'a TableHierarchy,
 }
@@ -34,7 +36,7 @@ struct Index<'a> {
     visited: Cell<u8>,
 }
 
-/// Validate stored ownership without inferring identities, rebinding expressions or rebuilding indexes. Legacy definitions without recorded addresses remain addressless. Native addresses, declared key ownership and partition-parent edges must agree in both directions. All scratch and decoded text retain the supplied allowance until validation finishes or fails.
+/// Validate stored ownership and plain key/INCLUDE columns without inferring identities, rebinding expressions or rebuilding indexes. Legacy definitions without recorded addresses remain addressless and still validate their declared columns. Native addresses, declared key ownership and partition-parent edges must agree in both directions. All scratch and decoded text retain the supplied allowance until validation finishes or fails.
 pub fn validate<'a>(
     tables: impl Iterator<Item = NativeIndexTable<'a>>,
     rows: impl Iterator<Item = &'a CatalogIndexRow>,
@@ -46,6 +48,7 @@ pub fn validate<'a>(
     let mut relations = BudgetedMap::new(memory);
     let mut table_ids = BudgetedMap::new(memory);
     let mut constraints = BudgetedMap::new(memory);
+    let mut columns = BudgetedMap::new(memory);
     for table in tables {
         control.check()?;
         if table.object_id == [0; 16]
@@ -53,6 +56,15 @@ pub fn validate<'a>(
             || relations.insert(table.name, table)?.is_some()
         {
             return Err(invalid("duplicate or invalid table identity"));
+        }
+        for column in table.columns.into_iter().flatten() {
+            control.check()?;
+            if columns
+                .insert((table.object_id, column.name.as_str()), ())?
+                .is_some()
+            {
+                return Err(invalid("duplicate live column"));
+            }
         }
         for key in table.keys {
             control.check()?;
@@ -81,6 +93,7 @@ pub fn validate<'a>(
             return Err(invalid("index and table namespaces differ"));
         }
         let metadata = metadata(row.definition_json.as_deref(), &control)?;
+        column_references(table, row, &metadata, &columns, &control)?;
         let Some(catalog) = metadata.catalog.as_ref() else {
             if !metadata.relationships.is_empty() {
                 return Err(invalid("relationship has no index identity"));
@@ -116,6 +129,30 @@ pub fn validate<'a>(
     ownership_edges(&indexes, &constraints, memory, &control)?;
     acyclic(&indexes, &control)?;
     control.check()?;
+    Ok(())
+}
+
+fn column_references(
+    table: NativeIndexTable<'_>,
+    row: &CatalogIndexRow,
+    metadata: &IndexMetadata<'_>,
+    columns: &BudgetedMap<([u8; 16], &str), ()>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let column = |name: &str| {
+        control.check()?;
+        if table.columns.is_some() && !columns.contains_key(&(table.object_id, name)) {
+            return Err(invalid("missing live column"));
+        }
+        Ok(())
+    };
+    visit_column_keys(&row.columns_json, control, column)?;
+    let included_are_columns = metadata.included_columns.map_or(Ok(true), |included| {
+        visit_column_keys(included, control, column)
+    })?;
+    if !included_are_columns {
+        return Err(invalid("included attribute is not a column"));
+    }
     Ok(())
 }
 

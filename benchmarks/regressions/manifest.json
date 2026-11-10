@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -52567,6 +52567,32 @@
       "capability": "Native sequence function references",
       "workload": "Deny canonical-name decoding and cancel through both original control owners.",
       "invariant": "Every failure releases temporary workspace without changing catalog state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_columns_close_over_declared_layouts_before_optional_addresses",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index column references",
+      "workload": "Validate missing key and included columns with and without recorded index addresses, then complete, empty and undeclared row layouts.",
+      "invariant": "Every plain key and included column of a declared table belongs to its captured live layout; document tables retain open fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_column_admission_preserves_quoted_names_and_repeated_include_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index column references",
+      "workload": "Validate escaped Unicode column names, repeated INCLUDE fields, denied text admission and duplicate live declarations.",
+      "invariant": "Names and ordering remain exact, validation owns temporary allocations and every failed admission retires them.",
       "case_names": [
         ""
       ]

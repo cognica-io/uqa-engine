@@ -45,8 +45,21 @@ fn native_catalog_indexes_join_original_table_incarnations_and_release_rejected_
     assert_eq!(memory.used(), 0);
     snapshot.tables.insert(
         table.clone(),
-        table_snapshot([1; 16], vec![], TableConstraintSet::default()),
+        table_snapshot(
+            [1; 16],
+            vec![uqa_sql::ast::ColumnDef::nullable(
+                "value",
+                uqa_sql::ColumnType::Integer,
+            )],
+            TableConstraintSet::default(),
+        ),
     );
+    validate_indexes(&snapshot, &memory, &cancellation).unwrap();
+    assert_eq!(memory.used(), 0);
+    snapshot.tables.get_mut(&table).unwrap().columns = Vec::new().into();
+    assert!(validate_indexes(&snapshot, &memory, &cancellation).is_err());
+    assert_eq!(memory.used(), 0);
+    snapshot.tables.get_mut(&table).unwrap().columns_declared = false;
     validate_indexes(&snapshot, &memory, &cancellation).unwrap();
     assert_eq!(memory.used(), 0);
     snapshot.tables.get_mut(&table).unwrap().object_id = [3; 16];

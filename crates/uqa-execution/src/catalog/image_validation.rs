@@ -75,6 +75,7 @@ pub fn validate_indexes(
             uqa_sql::catalog::index::native::NativeIndexTable {
                 name,
                 object_id: table.object_id,
+                columns: table.columns_declared.then_some(&table.columns),
                 keys: &table.keys,
                 hierarchy: &table.hierarchy,
             }
