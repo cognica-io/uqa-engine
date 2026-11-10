@@ -8,6 +8,8 @@ use super::*;
 use crate::{DeepLayerSpec, GatingSpec};
 use uqa_storage::StorageBackendError;
 
+mod input;
+
 fn model(capacity: usize) -> Arc<DeepModel> {
     let mut weights = Vec::with_capacity(capacity);
     weights.push(-0.0);
@@ -57,7 +59,7 @@ fn model_catalog_capture_and_publication_do_not_traverse_unrelated_layers() {
         let replacement = model(1);
         let usage = allocation_counter::measure(|| source.insert(name, replacement).unwrap());
         assert!(usage.bytes_total < 32768, "{entries}: {usage:?}");
-        assert!(Arc::ptr_eq(
+        assert!(ModelHandle::ptr_eq(
             source.get("large").unwrap(),
             original.get("large").unwrap()
         ));

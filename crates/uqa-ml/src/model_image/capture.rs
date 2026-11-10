@@ -7,12 +7,12 @@
 //! Immutable stored models retain their actual buffer capacities without duplicating weights.
 
 use super::{write_parts, DeepModel, ImageReader, StorageBackendResult, StorageReadControl};
-use crate::DeepLayerSpec;
+use crate::{model_catalog::ModelHandle, DeepLayerSpec};
 use std::sync::Arc;
 use uqa_core::memory::{MemoryError, MemoryReservation};
 
 struct RetainedModel {
-    source: Arc<DeepModel>,
+    source: ModelHandle,
     control: StorageReadControl,
     _memory: MemoryReservation,
 }
@@ -26,16 +26,7 @@ impl DeepModel {
         self: &Arc<Self>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<ModelImageSnapshot> {
-        control.check()?;
-        let bytes = retained_model_bytes(self, || control.check())?;
-        let mut memory = control.memory().reserve(bytes)?;
-        memory.grow(ModelImageSnapshot::wrapper_bytes())?;
-        control.check()?;
-        Ok(ModelImageSnapshot::from_admitted(
-            self.clone(),
-            control,
-            memory,
-        ))
+        ModelHandle::from(self.clone()).capture_image_with_control(control)
     }
 }
 
@@ -65,7 +56,7 @@ impl ModelImageSnapshot {
     }
 
     pub(crate) fn from_admitted(
-        source: Arc<DeepModel>,
+        source: ModelHandle,
         control: &StorageReadControl,
         memory: MemoryReservation,
     ) -> Self {

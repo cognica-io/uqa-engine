@@ -9,6 +9,7 @@ pub mod foreign_tables;
 use std::collections::BTreeMap;
 pub mod acl_command;
 pub mod acl_warning;
+pub mod authority;
 pub mod capture;
 pub mod columns;
 pub mod dependencies;

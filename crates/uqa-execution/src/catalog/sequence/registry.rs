@@ -19,6 +19,7 @@ use uqa_sql::{
 };
 
 mod image;
+pub use image::SequenceCatalogInput;
 pub mod publication;
 mod records;
 use records::SequenceRecords;

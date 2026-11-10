@@ -39,7 +39,7 @@ use labels::NativeLabels;
 use native::{NativeMap, NativeSet};
 use partition::Partition;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MemoryGraphStore {
     vertices: NativeMap<VertexId, Vertex>,
     edges: NativeMap<EdgeId, Edge>,
@@ -49,6 +49,23 @@ pub struct MemoryGraphStore {
     label_registries: NativeMap<String, NativeLabels>,
     next_vertex_id: VertexId,
     next_edge_id: EdgeId,
+    pub(crate) image_memory: Option<uqa_core::memory::MemoryReservation>,
+}
+
+impl Clone for MemoryGraphStore {
+    fn clone(&self) -> Self {
+        Self {
+            vertices: self.vertices.clone(),
+            edges: self.edges.clone(),
+            graphs: self.graphs.clone(),
+            vertex_membership: self.vertex_membership.clone(),
+            edge_membership: self.edge_membership.clone(),
+            label_registries: self.label_registries.clone(),
+            next_vertex_id: self.next_vertex_id,
+            next_edge_id: self.next_edge_id,
+            image_memory: None,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -30,6 +30,23 @@ impl SequenceCatalog {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
+        SequenceCatalogInput::read_metadata(metadata, memory, cancellation)?
+            .read_authority(authorities, memory)
+    }
+}
+
+/// Private ordered image input. Metadata can finish and release its reader before authority input starts; neither part exposes a usable sequence catalog alone. The native records retain their original input reservations throughout construction.
+pub struct SequenceCatalogInput {
+    catalog: SequenceCatalog,
+    cancellation: CancellationToken,
+}
+
+impl SequenceCatalogInput {
+    pub fn read_metadata(
+        metadata: &mut dyn Read,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
         let mut input = ImageInput {
             reader: metadata,
             memory,
@@ -39,20 +56,12 @@ impl SequenceCatalog {
             return Err(invalid("version header"));
         }
         let count = input.count()?;
-        let security = SequenceSecurities::read_image(authorities, memory, cancellation)?;
-        if security.len() != count {
-            return Err(invalid("authority membership count"));
-        }
-        let mut result = Self::with_budget(memory);
-        result.security = security;
+        let mut result = SequenceCatalog::with_budget(memory);
         let mut oids = BudgetedMap::new(memory);
         for _ in 0..count {
             cancellation.check()?;
             let relation = relation(&mut input, result.records.last_durable_key())?;
             let record = decode(input.array::<RECORD_BYTES>()?)?;
-            if result.security.persistence(&relation) != Some(record.persistence) {
-                return Err(invalid("authority membership or persistence"));
-            }
             if result.durable_objects.get(&record.object_id).is_some() {
                 return Err(invalid("duplicate object identity"));
             }
@@ -73,7 +82,45 @@ impl SequenceCatalog {
             result.records.insert_image_entry(relation, record)?;
         }
         input.end()?;
-        Ok(result)
+        Ok(Self {
+            catalog: result,
+            cancellation: cancellation.clone(),
+        })
+    }
+
+    /// Complete the exact record/authority pairing, then select only future mutation allocations. Errors consume the unpublished records and authority; successful completion does not retain the input cancellation token.
+    pub fn read_authority(
+        self,
+        authorities: &mut dyn Read,
+        mutations: &MemoryBudget,
+    ) -> Result<SequenceCatalog, SQLError> {
+        self.cancellation.check()?;
+        let security = SequenceSecurities::read_image_with_mutation_budget(
+            authorities,
+            self.catalog.budget(),
+            mutations,
+            &self.cancellation,
+        )?;
+        if security.len() != self.catalog.len() {
+            return Err(invalid("authority membership count"));
+        }
+        for (relation, record) in self.catalog.iter() {
+            self.cancellation.check()?;
+            if security.persistence(relation) != Some(record.persistence) {
+                return Err(invalid("authority membership or persistence"));
+            }
+        }
+        self.cancellation.check()?;
+        Ok(SequenceCatalog {
+            records: self.catalog.records.into_mutation_budget(mutations),
+            security,
+            catalog_oids: self.catalog.catalog_oids.into_mutation_budget(mutations),
+            durable_objects: self.catalog.durable_objects.into_mutation_budget(mutations),
+            temporary_objects: self
+                .catalog
+                .temporary_objects
+                .into_mutation_budget(mutations),
+        })
     }
 }
 

@@ -31,7 +31,10 @@ impl MemoryGraphStore {
     }
 
     pub(super) fn partition_candidate(&self, name: &str) -> GraphStoreResult<Partition> {
-        self.require_partition(name).cloned()
+        Ok(self
+            .require_partition(name)?
+            .clone()
+            .into_mutation_budget(self.graphs.budget()))
     }
 
     pub(super) fn require_partition(&self, name: &str) -> GraphStoreResult<&Partition> {
@@ -172,7 +175,8 @@ impl MemoryGraphStore {
                 .graphs
                 .get(target)
                 .cloned()
-                .unwrap_or_else(|| Partition::new(state.graphs.budget()));
+                .unwrap_or_else(|| Partition::new(state.graphs.budget()))
+                .into_mutation_budget(state.graphs.budget());
             for id in vertex_ids {
                 partition.add_vertex(state.vertices.get(id).expect("validated vertex"))?;
                 super::publication::membership(&mut state.vertex_membership, *id, target, true)?;
@@ -294,6 +298,7 @@ impl MemoryGraphStore {
             .get(graph)
             .cloned()
             .unwrap_or_else(|| super::NativeLabels::new(self.label_registries.budget()))
+            .into_mutation_budget(self.label_registries.budget())
     }
 
     /// Install (merge) a persisted label registry for `graph`. Existing

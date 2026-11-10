@@ -6,6 +6,34 @@
 
 use super::*;
 
+#[test]
+fn fresh_memory_manager_preserves_catalog_position_with_independent_session_and_transaction_history(
+) {
+    use crate::catalog::identity::CatalogOidCounter;
+    let counter = CatalogOidCounter::from_position(Some(u64::from(u32::MAX))).unwrap();
+    let manager = RowLockManager::with_catalog_oids(counter);
+    assert_eq!(manager.allocate_session(), 1);
+    assert_eq!(manager.allocate_transaction_xid().unwrap(), 3);
+    assert_eq!(
+        manager
+            .catalog_oids()
+            .next_oid(None, || panic!("admitted counter is initialized"))
+            .unwrap(),
+        crate::catalog::identity::FIRST_NORMAL_OBJECT_ID
+    );
+    assert!(manager.state.lock().rows.is_empty());
+    assert!(manager.state.lock().changes.is_empty());
+    let other = RowLockManager::with_catalog_oids(
+        CatalogOidCounter::from_position(Some(u64::MAX)).unwrap(),
+    );
+    assert!(other
+        .catalog_oids()
+        .next_oid(None, || panic!("exhausted counter is initialized"))
+        .is_err());
+    assert_eq!(other.allocate_session(), 1);
+    assert_eq!(other.allocate_transaction_xid().unwrap(), 3);
+}
+
 fn assert_granted(result: Result<LockAcquire, SQLError>) {
     assert!(matches!(result.unwrap(), LockAcquire::Granted { .. }));
 }

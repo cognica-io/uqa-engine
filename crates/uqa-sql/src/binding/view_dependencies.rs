@@ -13,6 +13,9 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+mod references;
+pub use references::visit_stored_plan_relation_references;
+
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     crate::catalog::resolve_virtual_relation(&[], reference)
         .map(crate::catalog::VirtualRelation::qualified_name)

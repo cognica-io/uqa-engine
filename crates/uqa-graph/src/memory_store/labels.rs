@@ -27,6 +27,16 @@ pub(super) struct NativeLabels {
 }
 
 impl NativeLabels {
+    pub(super) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            labels: self.labels.into_mutation_budget(memory),
+            kinds: self.kinds.into_mutation_budget(memory),
+            sequences: self.sequences.into_mutation_budget(memory),
+            dropped_label_ids: self.dropped_label_ids.into_mutation_budget(memory),
+            ..self
+        }
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self {
             allocation_id: [0; 16],

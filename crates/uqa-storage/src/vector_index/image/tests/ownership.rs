@@ -225,6 +225,7 @@ fn controlled_vector_sources_preserve_original_cuts_after_input_cancellation() {
         let key = restored.memory_capture().unwrap().key().unwrap();
         let output = StorageReadControl::with_limit(32 << 20);
         let cut = registry.capture(&output).unwrap();
+        let full = input.memory().reserve(input.memory().available()).unwrap();
         input.cancellation().cancel();
         restored.delete(9).unwrap();
         restored.add(41, vec![0.25, 0.75]).unwrap();
@@ -240,7 +241,7 @@ fn controlled_vector_sources_preserve_original_cuts_after_input_cancellation() {
         let mut actual = Vec::new();
         image.write_image(&mut actual, &working).unwrap();
         assert_eq!(actual, expected);
-        drop(image);
+        drop((image, full));
         assert_eq!(input.memory().used(), 0);
         assert_eq!(output.memory().used(), 0);
         assert_eq!(working.memory().used(), 0);

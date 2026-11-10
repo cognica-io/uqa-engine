@@ -51018,8 +51018,8 @@
       "cases": 1,
       "source": "crates/uqa-storage/src/vector_index/image/tests/ownership.rs",
       "capability": "backup native source ownership",
-      "workload": "Capture each decoded native vector kind, cancel construction, perform ordinary writes and query-triggered training, then retire the mutable source.",
-      "invariant": "Completed mutation remains independent of input cancellation, the retained image preserves the exact original bytes, and every input, capture and output allowance retires.",
+      "workload": "Import every vector kind, promote a captured source, exhaust and cancel the input allowance, then mutate, query and retire the live owner before reading the retained original image.",
+      "invariant": "Later work uses the native destination allowance; captured images keep original evaluated bytes and admission through source retirement, including IVF training and HNSW/DiskANN mutations.",
       "case_names": [
         ""
       ]
@@ -51033,6 +51033,786 @@
       "capability": "backup native source ownership",
       "workload": "Build a named IVF registration, promote its native source reader and retire the complete collection while retaining an independent captured image.",
       "invariant": "The builder admits the source header, decoded payload and header reservations survive the public collection until the promoted reader retires, and the independent image retains the original exact bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_sequence_input_retires_readers_and_keeps_original_records_through_runtime_mutation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/ordered.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordered_sequence_input_failure_consumes_metadata_before_any_catalog_is_exposed",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/ordered.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "assembled_table_data_preserves_all_vector_kinds_text_and_evaluated_values_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_data_component_failures_retire_every_preceding_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "fresh_memory_manager_preserves_catalog_position_with_independent_session_and_transaction_history",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/row_locks/tests.rs",
+      "capability": "Fresh restored concurrency state",
+      "workload": "Construct independent managers from wrapped and exhausted catalog OID positions and allocate new sessions and transaction identifiers.",
+      "invariant": "Catalog allocation history is preserved while sessions, locks and transaction history begin independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "decoded_path_catalog_retains_original_names_and_materializations_through_runtime_replacement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_keeps_native_headers_and_all_selected_mutations_after_original_allowance_exhaustion",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retires_failed_native_payloads_and_preceding_membership",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_image_registration_keeps_exact_weights_through_new_writes_capture_and_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/input.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "failed_model_image_registration_retires_names_weights_and_prior_candidate_entries",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/input.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_field_catalog_preserves_names_revisions_and_independent_mutation_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "rejected_field_input_consumes_candidate_and_keeps_no_partial_image_or_runtime_root",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_analyzer_catalog_names_and_historical_revisions_survive_new_destination_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_codec_input_borrows_the_admitted_address_and_requires_verified_eof",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests/decode.rs",
+      "capability": "Verified native codec input",
+      "workload": "Borrow a verified component, require EOF and inject codec errors, ignored read errors, cancellation and unwinding.",
+      "invariant": "Only a fully consumed successful native component advances; all terminal failures retire the address, payload and repository lease with the original typed read cause.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_codec_failure_cancellation_and_unwind_retire_the_repository_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests/decode.rs",
+      "capability": "Verified native codec input",
+      "workload": "Borrow a verified component, require EOF and inject codec errors, ignored read errors, cancellation and unwinding.",
+      "invariant": "Only a fully consumed successful native component advances; all terminal failures retire the address, payload and repository lease with the original typed read cause.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_scoring_payloads_keep_input_ownership_after_destination_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_default_keeps_original_configuration_and_lazy_runtime_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "image_default_does_not_open_missing_resources_before_ordinary_first_use",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/image/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "publication_mutation_budget_keeps_existing_addresses_and_original_node_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/selection/publication/tests.rs",
+      "capability": "Native resource and publication ownership",
+      "workload": "Adopt native resource or publication owners, retain their original identities through destination mutations and exercise cancellation, failed admission and final retirement.",
+      "invariant": "Native values and original reservations remain paired across capture and replacement; unsuccessful input publishes no partial resource.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "destination_mutations_preserve_resident_and_spilled_input_owners_after_input_exhaustion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests.rs",
+      "capability": "Independent native mutation allowance",
+      "workload": "Exhaust and cancel the input owner, mutate resident and spilled destinations, and retain the original ordered roots.",
+      "invariant": "Future workspace and path allocations use the destination allowance; original immutable records and page reservations survive until the last reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_rejects_missing_and_replaced_incarnations_without_resolving_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native authority incarnation closure",
+      "workload": "Validate owner, grantor and grantee identities before and after role replacement.",
+      "invariant": "Only the original live OID/incarnation pair resolves; display names do not rebind authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_grant_graph_matches_existing_acl_validation_for_all_three_role_graphs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native ACL grant graph",
+      "workload": "Compare all 64 three-role grant-option graphs with the existing independent object ACL validator.",
+      "invariant": "The admitted owner-rooted reachability predicate accepts exactly the existing ACL authority relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_combines_relation_options_with_column_grants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Native column authority",
+      "workload": "Validate column grants using relation-level grant options and reject missing columns or unsupported privilege paths.",
+      "invariant": "Column grants use the matching relation privilege option while retaining independent ACL path scope.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_rejects_unrooted_duplicate_and_public_grant_options",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Malformed native authority rejection",
+      "workload": "Validate disconnected grant cycles, duplicate paths and PUBLIC grant options.",
+      "invariant": "Malformed authority fails without changing the selected catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_membership_validation_preserves_parallel_grantors_and_rejects_cycles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Retained role membership graph",
+      "workload": "Validate parallel membership grantors and inject a cyclic role-membership path.",
+      "invariant": "Independent grantors remain valid and cyclic memberships are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_membership_validation_preserves_deleted_endpoints_without_name_or_oid_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Retained membership incarnation isolation",
+      "workload": "Delete a role endpoint, recreate its name and OID with another incarnation, and remove a membership grantor.",
+      "invariant": "Deleted target/member identities remain retained without rebinding, but every grantor must still exist.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_schema_grants_cannot_borrow_a_different_privilege_option",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Independent ACL privilege paths",
+      "workload": "Attempt to support schema CREATE authority using an owner-rooted USAGE grant-option path.",
+      "invariant": "Reachability is independent for each privilege bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_authority_validation_retires_admitted_workspace_on_quota_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/authority/tests.rs",
+      "capability": "Authority validation allocation lifetime",
+      "workload": "Sweep original allocation limits through success and denial, then cancel native authority validation.",
+      "invariant": "Failed and successful validation retire all temporary graph allocations and preserve original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_authority_rejects_missing_and_recreated_table_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog authority integration",
+      "workload": "Validate one immutable catalog with a real table owner, remove the role, then reuse its name and OID.",
+      "invariant": "The selected table cannot acquire authority from a replacement role incarnation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_authority_validation_is_read_only_and_cancellation_releases_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Immutable native authority traversal",
+      "workload": "Validate a complete bootstrap catalog and cancel a subsequent traversal.",
+      "invariant": "Catalog state remains unchanged and validation workspace returns to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_references_follow_identity_and_reject_wrong_kind_or_array_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native declared type identity",
+      "workload": "Resolve encoded and concrete type references with changed display names and malformed, missing, wrong-kind or wrong-array identities.",
+      "invariant": "Only original type kinds and physical OIDs satisfy references; names cannot repair missing identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_claims_reject_cross_family_array_and_relation_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native type address uniqueness",
+      "workload": "Claim scalar, array, relation row, builtin, pseudo-type and system-domain addresses across native registries.",
+      "invariant": "One type address has one owner and reserved addresses cannot be replaced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_domain_references_validate_nested_bases_and_preserve_builtin_domains",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native domain base references",
+      "workload": "Validate nested user domain declarations and fixed system domains, then alter the retained base.",
+      "invariant": "Original base OIDs, modifiers, collation selection and array identities survive without type rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_row_type_references_preserve_relation_and_array_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native relation row types",
+      "workload": "Validate a selected row type and then change its describing relation identity.",
+      "invariant": "A row type cannot attach its retained descriptor to a different relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_type_claim_admission_and_cancellation_release_original_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native type index allocation lifetime",
+      "workload": "Sweep original workspace limits through successful and denied type claims, then cancel reference lookup.",
+      "invariant": "Every partial index releases its admitted workspace and observes original cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_concrete_type_membership_rejects_direct_and_indirect_cycles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Acyclic concrete type membership",
+      "workload": "Check repeated valid member edges, direct self-membership and a cycle through an array of another row type.",
+      "invariant": "Recursive live layouts reject without descriptor expansion and all graph workspace retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_reject_missing_and_replaced_column_type_identities",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog type references",
+      "workload": "Validate one table with a user enum, remove its definition and recreate the same name with new OIDs.",
+      "invariant": "A retained column type resolves only to its original physical identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_reject_cross_owner_row_type_collisions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog cross-owner type addresses",
+      "workload": "Assign a relation row type the generated-array address of another native type.",
+      "invariant": "Whole-catalog validation rejects address aliasing before private activation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_types_retire_workspace_on_quota_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Native catalog type validation lifetime",
+      "workload": "Deny the original type-validation allowance and cancel a second immutable catalog traversal.",
+      "invariant": "Failure leaves no retained index workspace or modified catalog state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_range_references_preserve_companion_identity_and_endpoint_alignment",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests.rs",
+      "capability": "Native range physical identity",
+      "workload": "Validate native range and multirange references, alter their array OIDs and endpoint alignment, and exchange the two type kinds.",
+      "invariant": "Each range family member retains its own kind, physical layout and generated-array identity without SQL declaration replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_preserve_nonrecursive_cte_visibility",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit self, preceding and forward CTE names.",
+      "invariant": "Only preceding declarations shadow concrete sources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_preserve_recursive_siblings_and_qualified_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit recursive siblings and quoted qualified sources.",
+      "invariant": "Recursive aliases shadow unqualified names only.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_restore_outer_scope_after_nested_shadowing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Traverse nested WITH bodies and sibling sources.",
+      "invariant": "Leaving a nested scope restores exactly the outer visibility.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_visit_mutation_targets_and_scalar_query_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit DML CTEs, ONLY targets and scalar-query children.",
+      "invariant": "Targets remain concrete relations and preserve inheritance flags.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_visit_operator_inputs_despite_cte_name_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Visit operator-join inputs colliding with CTE aliases.",
+      "invariant": "Operator operands always name concrete relations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_retire_workspace_on_callback_quota_and_cancellation_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Reject a callback, deny scratch and cancel original/invoking controls.",
+      "invariant": "Failure releases all admitted workspace without continuing callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_relations_borrow_large_payloads_and_reject_unsupported_commands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Traverse a one-MiB literal under four-KiB scratch and reject unsupported commands.",
+      "invariant": "Stored payloads are borrowed and unsupported dependency scopes never silently pass.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_bound_identity_retains_admission_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Decode escaped identifiers, deny output admission and cancel its original owner.",
+      "invariant": "Original names and allocation ownership survive decoding without a search path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_accept_ctes_and_reject_missing_or_unqualified_sources",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Validate CTEs and system sources, then missing or unqualified concrete sources.",
+      "invariant": "The captured namespace alone determines concrete relation existence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_validate_bound_routines_but_keep_source_bodies_lazy",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Compare valid and missing bound routine relations with deferred source bodies.",
+      "invariant": "Bound references validate without compiling source bodies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_preserve_catalog_and_release_denied_workspace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Deny scratch and cancel catalog validation, then validate the unchanged snapshot.",
+      "invariant": "Read-only validation releases original scratch on every outcome.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_error_preserves_image_header_and_original_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_panic_preserves_image_header_and_original_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_error_restores_replaced_handle_and_original_header",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "mapped_graph_panic_restores_replaced_handle_and_original_header",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_trait_transactions_preserve_image_headers_through_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_graph_transactions_preserve_image_headers_through_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_transaction_success_keeps_original_header_across_resource_replacement",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "nested_mapped_graph_transactions_restore_the_enclosing_image_generation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "replaced_persistent_graph_keeps_original_header_through_native_transactions",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/registration.rs",
+      "capability": "Graph transaction allocation ownership",
+      "workload": "Exercise native and mapped graph transactions through errors, unwinding, nested operations and complete handle replacement with the original input allowance exhausted.",
+      "invariant": "The original handle allocation remains admitted through operation, publication and rollback; rollback restores the original native generation and final retirement releases its reservation.",
       "case_names": [
         ""
       ]

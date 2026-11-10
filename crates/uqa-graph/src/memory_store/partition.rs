@@ -20,6 +20,17 @@ pub(super) struct Partition {
 }
 
 impl Partition {
+    pub(super) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            vertex_ids: self.vertex_ids.into_mutation_budget(memory),
+            edge_ids: self.edge_ids.into_mutation_budget(memory),
+            adj_out: self.adj_out.into_mutation_budget(memory),
+            adj_in: self.adj_in.into_mutation_budget(memory),
+            label_index: self.label_index.into_mutation_budget(memory),
+            vertex_label_index: self.vertex_label_index.into_mutation_budget(memory),
+        }
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self {
             vertex_ids: NativeSet::new(memory),
@@ -93,7 +104,8 @@ fn update_index(
     }
     let mut ids = existing
         .cloned()
-        .unwrap_or_else(|| NativeSet::new(map.budget()));
+        .unwrap_or_else(|| NativeSet::new(map.budget()))
+        .into_mutation_budget(map.budget());
     if add {
         ids.insert(id, 0)?;
     } else {
@@ -115,7 +127,8 @@ fn update_label_index(
     }
     let mut ids = existing
         .cloned()
-        .unwrap_or_else(|| NativeSet::new(map.budget()));
+        .unwrap_or_else(|| NativeSet::new(map.budget()))
+        .into_mutation_budget(map.budget());
     if add {
         ids.insert(id, 0)?;
     } else {

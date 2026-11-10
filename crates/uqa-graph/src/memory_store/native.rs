@@ -25,6 +25,10 @@ impl<K, V> Clone for NativeMap<K, V> {
 }
 
 impl<K, V> NativeMap<K, V> {
+    pub(super) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self(self.0.into_mutation_budget(memory))
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self(RetainedMap::new(memory))
     }
@@ -179,6 +183,10 @@ impl<K> Clone for NativeSet<K> {
 }
 
 impl<K> NativeSet<K> {
+    pub(super) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self(self.0.into_mutation_budget(memory))
+    }
+
     pub(super) fn new(memory: &MemoryBudget) -> Self {
         Self(NativeMap::new(memory))
     }

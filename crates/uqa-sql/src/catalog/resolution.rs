@@ -168,18 +168,67 @@ pub fn described_relation_name(
 
 /// Decode a relation identity already selected by binding. A stored identity must name its schema and must never resolve through the current search path or temporary-schema alias.
 pub fn bound_relation_identity(name: &str) -> Result<uqa_core::RelationIdentity, SQLError> {
-    let (schema, relation) = uqa_core::RelationIdentity::parse_reference(name)
-        .map_err(|error| SQLError::Internal(format!("decode bound relation `{name}`: {error}")))?;
-    let schema = schema.ok_or_else(|| {
-        SQLError::Internal(format!(
+    Ok(bound_relation_identity_with_control(
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary bound identity"))
+}
+
+/// Decode an already bound relation without consulting a search path. Exact original names and diagnostic buffers use the supplied allowance.
+pub fn bound_relation_identity_with_control(
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<uqa_core::RelationIdentity>, SQLError> {
+    control.check()?;
+    let diagnostic = |message: std::fmt::Arguments<'_>| match control.format(message) {
+        Ok(message) => SQLError::Internal(message.into_parts().0),
+        Err(error) => error.into(),
+    };
+    let reference = uqa_core::RelationIdentity::try_borrowed_reference(name)
+        .map_err(|error| diagnostic(format_args!("decode bound relation `{name}`: {error}")))?;
+    let schema = reference.schema.ok_or_else(|| {
+        diagnostic(format_args!(
             "bound query contains non-canonical relation reference `{name}`"
         ))
     })?;
-    Ok(uqa_core::RelationIdentity::new(schema, relation))
+    Ok(reference.identity_with_control(schema, control)?)
 }
 
 #[cfg(test)]
 mod bound_identity_tests {
+    #[test]
+    fn controlled_bound_identity_retains_admission_and_original_cancellation() {
+        use uqa_core::{
+            memory::{MemoryBudget, ProductionControl},
+            CancellationToken,
+        };
+        let memory = MemoryBudget::new(4096);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let relation = super::bound_relation_identity_with_control(
+            "\"quoted\"\"schema\".\"quoted\"\"table\"",
+            &control,
+        )
+        .unwrap();
+        assert_eq!(relation.schema, "quoted\"schema");
+        assert_eq!(relation.name, "quoted\"table");
+        assert!(memory.used() > 0);
+        drop(relation);
+        assert_eq!(memory.used(), 0);
+        let empty = MemoryBudget::new(0);
+        assert!(super::bound_relation_identity_with_control(
+            "public.items",
+            &ProductionControl::new(&empty, &original, &invoking)
+        )
+        .is_err());
+        original.cancel();
+        assert!(super::bound_relation_identity_with_control("public.items", &control).is_err());
+        assert_eq!(memory.used(), 0);
+    }
+
     #[test]
     fn bound_identity_requires_a_schema_and_keeps_quoted_names_and_schema_aliases() {
         for (input, schema, name) in [

@@ -18,9 +18,13 @@ use uqa_core::memory::{
 };
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
+mod handle;
+pub use handle::{ModelHandle, ModelIdentity};
+
 struct ModelSource {
-    model: Arc<DeepModel>,
+    model: ModelHandle,
     payload_bytes: usize,
+    _name_memory: Option<MemoryReservation>,
 }
 
 /// Native immutable model catalog. Clones share a root; updates copy only the affected path and never traverse unrelated models or clone their weights.
@@ -42,7 +46,7 @@ impl ModelCatalog {
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<&Arc<DeepModel>> {
+    pub fn get(&self, name: &str) -> Option<&ModelHandle> {
         self.values.get(name).map(|source| &source.model)
     }
 
@@ -59,8 +63,9 @@ impl ModelCatalog {
         self.values.insert(
             name,
             ModelSource {
-                model,
+                model: model.into(),
                 payload_bytes,
+                _name_memory: None,
             },
             total,
         )
@@ -72,6 +77,59 @@ impl ModelCatalog {
 
     pub fn clear(&mut self) {
         self.values.clear();
+    }
+
+    /// Transfer the exact decoded name, model and reservations to an unpublished native entry. Failed admission consumes this candidate; ordinary publication and capture keep using the same immutable catalog.
+    pub fn insert_image(
+        mut self,
+        name: Budgeted<String>,
+        model: Budgeted<DeepModel>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if !name.budget().shares_allowance(control.memory())
+            || !model.budget().shares_allowance(control.memory())
+            || !self.values.budget().shares_allowance(control.memory())
+            || name.reserved_bytes() < name.capacity()
+            || self.contains_key(name.as_str())
+        {
+            return Err(uqa_storage::StorageBackendError::Other(
+                "invalid model image admission or identity".into(),
+            ));
+        }
+        let payload_bytes = retained_model_bytes(&model, || control.check())?;
+        if model.reserved_bytes() < payload_bytes {
+            return Err(uqa_storage::StorageBackendError::Other(
+                "incomplete model image admission".into(),
+            ));
+        }
+        let model = ModelHandle::from_image(model)?;
+        let payload_bytes = payload_bytes
+            .checked_add(model.admitted_wrapper_bytes())
+            .ok_or(MemoryError::SizeOverflow)?;
+        let total = name
+            .capacity()
+            .checked_add(payload_bytes)
+            .ok_or(MemoryError::SizeOverflow)?;
+        let (name, memory) = name.into_parts();
+        self.values.insert(
+            name,
+            ModelSource {
+                model,
+                payload_bytes,
+                _name_memory: Some(memory),
+            },
+            total,
+        )?;
+        control.check()?;
+        Ok(self)
+    }
+
+    /// Select future catalog edits without moving or re-admitting retained names and model weights.
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            values: self.values.into_mutation_budget(memory),
+        }
     }
 
     /// Independently admit the selected root in constant work without visiting names, layers or weights.
@@ -97,7 +155,7 @@ impl ModelCatalog {
 }
 
 impl std::ops::Index<&str> for ModelCatalog {
-    type Output = Arc<DeepModel>;
+    type Output = ModelHandle;
 
     fn index(&self, name: &str) -> &Self::Output {
         self.get(name).expect("model name exists in this catalog")

@@ -90,25 +90,30 @@ impl GraphStoreHandle {
     where
         E: std::fmt::Display,
     {
-        match self {
-            Self::Memory(store) => {
-                let backup = store.clone();
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self))) {
-                    Ok(Ok(value)) => Ok(value),
-                    Ok(Err(error)) => {
-                        *self = Self::Memory(backup);
-                        Err(error)
-                    }
-                    Err(panic) => {
-                        *self = Self::Memory(backup);
-                        std::panic::resume_unwind(panic)
-                    }
-                }
-            }
+        let backup = self.clone();
+        // The allocation stays live even if the callback replaces the complete handle.
+        let image_memory = self.image_memory().take();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &backup {
+            Self::Memory(_) => operation(self),
             Self::Persistent(store) => {
                 let mut checkpoint = store.clone();
                 checkpoint.transaction_mapped(|_| operation(self), map_error)
             }
+        }));
+        if !matches!(&outcome, Ok(Ok(_))) {
+            *self = backup;
+        }
+        *self.image_memory() = image_memory;
+        match outcome {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    fn image_memory(&mut self) -> &mut Option<uqa_core::memory::MemoryReservation> {
+        match self {
+            Self::Memory(store) => &mut store.image_memory,
+            Self::Persistent(store) => &mut store.image_memory,
         }
     }
 
@@ -235,27 +240,7 @@ impl GraphStore for GraphStoreHandle {
         &mut self,
         operation: impl FnOnce(&mut Self) -> GraphStoreResult<T>,
     ) -> GraphStoreResult<T> {
-        match self {
-            Self::Memory(store) => {
-                let backup = store.clone();
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self))) {
-                    Ok(Ok(value)) => Ok(value),
-                    Ok(Err(error)) => {
-                        *self = Self::Memory(backup);
-                        Err(error)
-                    }
-                    Err(panic) => {
-                        *self = Self::Memory(backup);
-                        std::panic::resume_unwind(panic)
-                    }
-                }
-            }
-            Self::Persistent(store) => {
-                // This clone is a storage handle, never a graph snapshot.
-                let mut checkpoint = store.clone();
-                checkpoint.transaction(|_| operation(self))
-            }
-        }
+        self.transaction_mapped(operation, std::convert::identity)
     }
     fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
         match self {

@@ -8,6 +8,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve imported graph handle reservations through transaction errors, panics, nesting and complete handle replacement. Native and mapped transaction boundaries retain the original allocation and restore the selected generation on failure.
+
+- Add SQL/Execution validation of concrete stored-view and bound SQL routine relation references, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Complete logical validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution checks for declared user types and relation row types against the selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships.
+
+- Add SQL/Execution validation of role incarnations, owner-rooted ACL grant paths, column authority and retained memberships without changing native definitions.
+
+- Add ordered native sequence metadata/authority input, verified repository-unit decoding and graph/model/path/analyzer membership adoption. Complete Engine reconstruction and public restore activation remain under implementation.
+
+- Restored HNSW and DiskANN owners retain original decoded payload reservations while subsequent reads and writes use an independent destination allowance. Exhausting the completed input allowance no longer prevents ordinary vector mutations.
+
+- Native field-analyzer input retains decoded names and independent historical index/search revisions; restored lazy defaults share their admitted configurations without resolving resources during input. Memory source publication can transfer future mutations to a destination allowance while retaining original nodes and child update identities.
+
+- Native table data assembly joins writable document, evaluated text, vector and named value-index owners without reanalysis or rebuilding, retaining original decoded allocation ownership through later mutations. Complete Engine reconstruction and public restore remain under implementation.
+
 - Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
 
 - Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; vector and evaluated-index reconstruction use this ownership boundary, including exclusive vector adapters and IVF payload lifetime.

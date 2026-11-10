@@ -142,7 +142,7 @@ impl RelationNameCatalog<'_> {
         Ok(output.finish()?)
     }
 
-    fn kind_at(&self, relation: &RelationIdentity) -> Option<&'static str> {
+    pub(in crate::catalog) fn kind_at(&self, relation: &RelationIdentity) -> Option<&'static str> {
         if let Some(relation) =
             uqa_sql::catalog::SystemRelation::at(&relation.schema, &relation.name)
         {

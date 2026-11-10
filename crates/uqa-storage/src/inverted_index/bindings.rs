@@ -13,6 +13,7 @@ use uqa_analysis::{AnalysisResult, Analyzer, AnalyzerResources, CompiledAnalyzer
 
 use super::AnalyzerPhase;
 
+mod image;
 mod read_only;
 mod retained;
 pub use read_only::RetainedAnalyzerBindings;
@@ -21,9 +22,24 @@ mod tests;
 use retained::FieldBindings;
 
 struct DefaultRevision {
-    configuration: Analyzer,
+    configuration: Configuration,
     resources: AnalyzerResources,
     resolved: OnceLock<Arc<CompiledAnalyzer>>,
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
+}
+
+enum Configuration {
+    Native(Analyzer),
+    Image(uqa_analysis::AnalyzerDefinition),
+}
+
+impl Configuration {
+    fn get(&self) -> &Analyzer {
+        match self {
+            Self::Native(value) => value,
+            Self::Image(value) => value.configuration(),
+        }
+    }
 }
 
 impl DefaultRevision {
@@ -32,15 +48,16 @@ impl DefaultRevision {
             return Ok(revision);
         }
         // Resource callbacks run without a binding lock. Concurrent resolution publishes one immutable winner.
-        let revision = self.resources.compile(&self.configuration)?;
+        let revision = self.resources.compile(self.configuration.get())?;
         let _ = self.resolved.set(revision);
         Ok(self.resolved.get().expect("resolved default was published"))
     }
 
     fn configuration(&self) -> &Analyzer {
-        self.resolved
-            .get()
-            .map_or(&self.configuration, |revision| revision.configuration())
+        self.resolved.get().map_or_else(
+            || self.configuration.get(),
+            |revision| revision.configuration(),
+        )
     }
 }
 
@@ -81,9 +98,10 @@ impl AnalyzerBindings {
     pub fn with_resources(default: Analyzer, resources: AnalyzerResources) -> Self {
         Self {
             default: Arc::new(DefaultRevision {
-                configuration: default,
+                configuration: Configuration::Native(default),
                 resources,
                 resolved: OnceLock::new(),
+                _image_memory: None,
             }),
             fields: FieldBindings::Live(BTreeMap::new()),
         }

@@ -8,6 +8,48 @@ use super::*;
 use crate::{GraphStoreHandle, MemoryGraphStore};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
+#[test]
+fn decoded_path_catalog_retains_original_names_and_materializations_through_runtime_replacement() {
+    let source = materialized("edge");
+    let mut bytes = Vec::new();
+    source
+        .write_image(&mut bytes, &StorageReadControl::with_limit(0))
+        .unwrap();
+    drop(source);
+    let input = StorageReadControl::with_limit(65536);
+    let runtime = MemoryBudget::new(65536);
+    let name = ProductionControl::new(input.memory(), input.cancellation(), input.cancellation())
+        .copy_text("g::path")
+        .unwrap()
+        .into_budgeted()
+        .unwrap();
+    let name_pointer = name.as_ptr();
+    let catalog = PathIndexCatalog::new(input.memory())
+        .read_image(name, &mut bytes.as_slice(), &input)
+        .unwrap();
+    assert_eq!(catalog.keys().next().unwrap().as_ptr(), name_pointer);
+    let mut catalog = catalog.into_mutation_budget(&runtime);
+    let retained = catalog.get("g::path").unwrap().clone();
+    let control = StorageReadControl::with_limit(65536);
+    let captured = catalog.capture(&control).unwrap();
+    let image = captured.image("g::path").unwrap().unwrap();
+    let full = input.memory().reserve(input.memory().available()).unwrap();
+    input.cancellation().cancel();
+    catalog.insert("g::path", materialized("changed")).unwrap();
+    catalog.insert("g::new", materialized("new")).unwrap();
+    drop((catalog, captured, full));
+    assert_eq!(runtime.used(), 0);
+    assert!(input.memory().used() > 0);
+    assert!(retained.has_path(&["edge".into()]));
+    assert!(!retained.has_path(&["changed".into()]));
+    drop(retained);
+    assert!(input.memory().used() > 0);
+    assert_eq!(image.get().unwrap().paths[0].sequence, ["edge"]);
+    drop(image);
+    assert_eq!(input.memory().used(), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn materialized(label: &str) -> PathIndex {
     let mut graph = MemoryGraphStore::new();
     graph.create_graph("g").unwrap();

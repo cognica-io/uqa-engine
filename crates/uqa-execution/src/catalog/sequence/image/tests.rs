@@ -27,6 +27,7 @@ use uqa_sql::{
 };
 use uqa_storage::{memory_capture::MemoryCaptureSource, read_control::StorageReadControl};
 
+mod ordered;
 mod validation;
 
 #[test]

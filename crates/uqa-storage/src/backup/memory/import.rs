@@ -15,6 +15,7 @@ use crate::{
     read_control::StorageReadControl,
 };
 
+mod decode;
 mod membership;
 
 /// A structurally admitted component. Its codec must consume the complete payload and validate its native representation; complete database closure remains a separate obligation.
