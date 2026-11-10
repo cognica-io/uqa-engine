@@ -167,7 +167,13 @@ fn native_catalog_constraint_validation_joins_original_foreign_key_targets_witho
 
 #[test]
 fn native_catalog_constraint_triggers_share_the_constraint_identity_namespace() {
-    for collision in ["none", "oid", "incarnation"] {
+    for collision in [
+        "none",
+        "oid",
+        "incarnation",
+        "legacy_oid",
+        "legacy_incarnation",
+    ] {
         let mut catalog = constraint_catalog(10, 11, 12);
         let trigger = uqa_sql::catalog::events::StoredTrigger {
             definition: uqa_sql::ast::CreateTrigger {
@@ -188,11 +194,27 @@ fn native_catalog_constraint_triggers_share_the_constraint_identity_namespace() 
             },
             function_object_id: None,
             enabled: uqa_sql::ast::EventEnableMode::Origin,
-            object_id: Some(identity(if collision == "incarnation" { 10 } else { 13 }).object_id),
+            object_id: (collision != "legacy_oid").then(|| {
+                identity(
+                    if matches!(collision, "incarnation" | "legacy_incarnation") {
+                        10
+                    } else {
+                        13
+                    },
+                )
+                .object_id
+            }),
             constraint_name: Some("guard".into()),
             // The trigger row occupies pg_trigger, so its OID may equal a pg_constraint OID.
             catalog_oid: Some(identity(10).oid),
-            constraint_catalog_oid: Some(identity(if collision == "oid" { 10 } else { 13 }).oid),
+            constraint_catalog_oid: (collision != "legacy_incarnation").then(|| {
+                identity(if matches!(collision, "oid" | "legacy_oid") {
+                    10
+                } else {
+                    13
+                })
+                .oid
+            }),
         };
         RetainedValue::make_mut(&mut catalog.definitions.triggers)
             .insert_event(

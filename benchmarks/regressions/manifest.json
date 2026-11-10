@@ -52786,7 +52786,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
       "capability": "Constraint-trigger catalog identity closure",
-      "workload": "Repeat a supplied constraint-trigger OID or incarnation.",
+      "workload": "Repeat a supplied constraint-trigger OID or incarnation with complete and partial legacy identities.",
       "invariant": "Constraint-trigger rows have unique original constraint identities.",
       "case_names": [
         ""
@@ -52801,6 +52801,19 @@
       "capability": "Constraint-trigger catalog identity closure",
       "workload": "Retain absent legacy identity fields and equal OIDs in separate trigger/constraint catalogs.",
       "invariant": "No replacement identity is inferred and separate catalog namespaces remain separate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_reject_invalid_partial_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Supply an invalid constraint OID or incarnation without its companion identity field.",
+      "invariant": "Each original identity field is validated independently without synthesizing missing metadata.",
       "case_names": [
         ""
       ]

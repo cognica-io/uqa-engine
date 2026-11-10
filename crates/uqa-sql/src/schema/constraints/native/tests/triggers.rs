@@ -41,17 +41,26 @@ fn check(
 
 #[test]
 fn native_constraint_triggers_reject_shared_constraint_catalog_identities() {
-    for object in [false, true] {
+    for (object, legacy) in [(false, false), (false, true), (true, false), (true, true)] {
         let mut triggers = [trigger(1), trigger(2)];
         let memory = MemoryBudget::new(64 << 10);
         let token = CancellationToken::new();
         check(&triggers, &memory, &token).unwrap();
         if object {
             triggers[1].object_id = triggers[0].object_id;
+            if legacy {
+                triggers[1].constraint_catalog_oid = None;
+            }
         } else {
             triggers[1].constraint_catalog_oid = triggers[0].constraint_catalog_oid;
+            if legacy {
+                triggers[1].object_id = None;
+            }
         }
-        assert!(check(&triggers, &memory, &token).is_err());
+        assert!(
+            check(&triggers, &memory, &token).is_err(),
+            "object={object}, legacy={legacy}"
+        );
         assert_eq!(memory.used(), 0);
     }
 }
@@ -68,10 +77,15 @@ fn native_constraint_triggers_preserve_legacy_absence_and_separate_catalog_rows(
     triggers[1].definition.constraint = false;
     check(&triggers, &memory, &token).unwrap();
     triggers[1].definition.constraint = true;
+    triggers[1].object_id = Some(identity(2).object_id);
     triggers[1].constraint_catalog_oid = None;
     check(&triggers, &memory, &token).unwrap();
-    triggers[1].constraint_catalog_oid = triggers[0].constraint_catalog_oid;
+    assert_eq!(triggers[1].constraint_catalog_oid, None);
+    triggers[1].constraint_catalog_oid = Some(identity(12).oid);
     triggers[1].object_id = None;
+    check(&triggers, &memory, &token).unwrap();
+    assert_eq!(triggers[1].object_id, None);
+    triggers[1].constraint_catalog_oid = None;
     check(&triggers, &memory, &token).unwrap();
     assert_eq!(memory.used(), 0);
 }
@@ -94,5 +108,23 @@ fn native_constraint_trigger_identity_admission_retires_on_failure() {
         check(&triggers, &memory, &token).unwrap_err().sqlstate(),
         Some("57014")
     );
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn native_constraint_triggers_reject_invalid_partial_catalog_identities() {
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    for oid in [0, -1, i64::from(u32::MAX) + 1] {
+        let mut value = trigger(1);
+        value.object_id = None;
+        value.constraint_catalog_oid = Some(oid);
+        assert!(check(&[value], &memory, &token).is_err(), "OID {oid}");
+        assert_eq!(memory.used(), 0);
+    }
+    let mut value = trigger(1);
+    value.object_id = Some([0; 16]);
+    value.constraint_catalog_oid = None;
+    assert!(check(&[value], &memory, &token).is_err());
     assert_eq!(memory.used(), 0);
 }

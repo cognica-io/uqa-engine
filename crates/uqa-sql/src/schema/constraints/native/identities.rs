@@ -8,7 +8,7 @@
 
 use super::{invalid, NativeConstraintTable};
 use crate::{
-    ast::{ConstraintCatalogIdentity, CreateDomain},
+    ast::CreateDomain,
     catalog::events::StoredTrigger,
     schema::{constraint_metadata::identity::claims::row_identities, domains::constraints},
     SQLError,
@@ -30,16 +30,22 @@ impl<'a> Identities<'a> {
         }
     }
 
-    fn insert(&mut self, identity: ConstraintCatalogIdentity) -> Result<(), SQLError> {
+    fn insert(&mut self, object_id: Option<[u8; 16]>, oid: Option<i64>) -> Result<(), SQLError> {
         self.control.check()?;
-        if !identity.is_valid() {
+        if object_id.is_some_and(|id| id == [0; 16])
+            || oid.is_some_and(|oid| !u32::try_from(oid).is_ok_and(|oid| oid != 0))
+        {
             return Err(invalid("invalid constraint catalog identity"));
         }
-        if self.objects.insert_copy(identity.object_id, ())?.is_some() {
-            return Err(invalid("duplicate constraint catalog incarnation"));
+        if let Some(object_id) = object_id {
+            if self.objects.insert_copy(object_id, ())?.is_some() {
+                return Err(invalid("duplicate constraint catalog incarnation"));
+            }
         }
-        if self.oids.insert_copy(identity.oid, ())?.is_some() {
-            return Err(invalid("duplicate constraint catalog OID"));
+        if let Some(oid) = oid {
+            if self.oids.insert_copy(oid, ())?.is_some() {
+                return Err(invalid("duplicate constraint catalog OID"));
+            }
         }
         Ok(())
     }
@@ -48,7 +54,7 @@ impl<'a> Identities<'a> {
         self.control.check()?;
         for identity in row_identities(table.columns, table.checks, table.keys, table.foreign_keys)
         {
-            self.insert(identity)?;
+            self.insert(Some(identity.object_id), Some(identity.oid))?;
         }
         Ok(())
     }
@@ -56,7 +62,7 @@ impl<'a> Identities<'a> {
     pub(super) fn domain(&mut self, domain: &CreateDomain) -> Result<(), SQLError> {
         self.control.check()?;
         for identity in constraints::identities(domain) {
-            self.insert(identity)?;
+            self.insert(Some(identity.object_id), Some(identity.oid))?;
         }
         Ok(())
     }
@@ -64,9 +70,7 @@ impl<'a> Identities<'a> {
     pub(super) fn trigger(&mut self, trigger: &StoredTrigger) -> Result<(), SQLError> {
         self.control.check()?;
         if trigger.definition.constraint {
-            if let Some((object_id, oid)) = trigger.object_id.zip(trigger.constraint_catalog_oid) {
-                self.insert(ConstraintCatalogIdentity { object_id, oid })?;
-            }
+            self.insert(trigger.object_id, trigger.constraint_catalog_oid)?;
         }
         Ok(())
     }
