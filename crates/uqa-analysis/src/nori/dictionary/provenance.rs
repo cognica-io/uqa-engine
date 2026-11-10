@@ -6,8 +6,7 @@
 
 //! Canonical model provenance and pinned vocabulary validation.
 
-use std::collections::BTreeSet;
-
+use crate::morphology::{manifest, work::Work};
 use serde_json::Value;
 
 use super::tables::CLASSES;
@@ -32,16 +31,43 @@ pub(in crate::nori) struct Provenance {
 }
 
 impl Provenance {
-    pub fn decode(bytes: &[u8], maximum_bytes: usize) -> DictionaryResult<Self> {
-        check_limit("manifest bytes", bytes.len(), maximum_bytes)?;
-        let json: Value = serde_json::from_slice(bytes)?;
-        if canonical(&json)? != bytes {
-            return Err(invalid("provenance", "manifest is not canonical JSON"));
-        }
-        Self::from_value(json)
+    pub async fn from_section(
+        section: crate::morphology::frame::Section,
+        maximum_bytes: usize,
+        work: &mut impl Work,
+    ) -> DictionaryResult<Self> {
+        let mut reader = section.reader();
+        let bytes = reader.take(reader.remaining())?;
+        let value = Self::decode_with(bytes, maximum_bytes, work).await?;
+        section.finish(reader, 1)?;
+        Ok(value)
     }
 
+    #[cfg(test)]
+    pub fn decode(bytes: &[u8], maximum_bytes: usize) -> DictionaryResult<Self> {
+        crate::morphology::work::inline(Self::decode_with(bytes, maximum_bytes, &mut ()))
+    }
+
+    pub async fn decode_with(
+        bytes: &[u8],
+        maximum_bytes: usize,
+        work: &mut impl Work,
+    ) -> DictionaryResult<Self> {
+        check_limit("manifest bytes", bytes.len(), maximum_bytes)?;
+        let json = manifest::parse(bytes, work).await?;
+        let canonical = manifest::canonical_with(&json, work).await?;
+        if !manifest::bytes_equal(&canonical, bytes, work).await? {
+            return Err(invalid("provenance", "manifest is not canonical JSON"));
+        }
+        Self::from_value_with(json, work).await
+    }
+
+    #[cfg(any(test, feature = "nori-tools"))]
     pub fn from_value(json: Value) -> DictionaryResult<Self> {
+        crate::morphology::work::inline(Self::from_value_with(json, &mut ()))
+    }
+
+    pub async fn from_value_with(json: Value, work: &mut impl Work) -> DictionaryResult<Self> {
         if json["format"] != "uqa-nori-neutral"
             || json["format_version"] != 1
             || json["byte_order"] != "big"
@@ -49,7 +75,7 @@ impl Provenance {
             return Err(invalid("provenance", "unsupported neutral model format"));
         }
         let model = &json["model"];
-        let types = strings(&model["pos_types"])?;
+        let types = manifest::strings_with(&model["pos_types"], work).await?;
         let expected = [
             POSType::Morpheme,
             POSType::Compound,
@@ -70,6 +96,7 @@ impl Provenance {
             return Err(invalid("provenance", "POS tag count differs"));
         }
         for (index, actual) in tags.iter().enumerate() {
+            work.records(index).await?;
             let tag = POSTag::from_ordinal(index as u8)?;
             if actual["name"] != tag.name()
                 || actual["code"].as_i64() != Some(i64::from(tag.code()))
@@ -77,27 +104,16 @@ impl Provenance {
                 return Err(invalid("provenance", "POS names or codes differ"));
             }
         }
-        if strings(&model["character_classes"])?
+        if manifest::strings_with(&model["character_classes"], work)
+            .await?
             .iter()
             .map(String::as_str)
             .ne(CLASSES.iter().copied())
         {
             return Err(invalid("provenance", "character class vocabulary differs"));
         }
-        let scripts = strings(&model["unicode_scripts"])?;
-        let unique: BTreeSet<_> = scripts.iter().map(String::as_str).collect();
-        if scripts.len() > 0x1_0000
-            || unique.len() != scripts.len()
-            || !unique.contains("COMMON")
-            || !unique.contains("INHERITED")
-            || !unique.contains("UNKNOWN")
-            || scripts.iter().any(|name| {
-                name.is_empty() || !name.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
-            })
-        {
-            return Err(invalid("provenance", "invalid Unicode script vocabulary"));
-        }
-        reference::validate(&json)?;
+        let scripts = manifest::scripts_with(&model["unicode_scripts"], work).await?;
+        reference::validate_with(&json, work).await?;
         Ok(Self { json, scripts })
     }
 
@@ -130,10 +146,7 @@ impl Provenance {
     }
 }
 
-fn strings(value: &Value) -> DictionaryResult<Vec<String>> {
-    crate::morphology::manifest::strings(value).map_err(Into::into)
-}
-
+#[cfg(any(test, feature = "nori-tools"))]
 pub(in crate::nori) fn canonical(value: &Value) -> DictionaryResult<Vec<u8>> {
     crate::morphology::manifest::canonical(value).map_err(Into::into)
 }

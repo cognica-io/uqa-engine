@@ -36,7 +36,7 @@ pub(in crate::nori) fn sections() -> Vec<Section> {
     let lexicon = section(1, 5, |output| {
         let mut builder = Builder::new();
         for text in ["", "가", "가나", "😀", "\u{e000}"] {
-            builder.insert(text.encode_utf16().collect())?;
+            builder = builder.insert(text.encode_utf16().collect())?;
         }
         builder.finish(16)?.encode(output)?;
         output.u32(5)?;

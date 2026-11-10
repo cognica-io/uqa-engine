@@ -16,6 +16,8 @@ mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod json;
 #[cfg(feature = "kuromoji")]
 pub mod kuromoji;
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
@@ -35,6 +37,8 @@ pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
 mod unicode;
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod work;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,

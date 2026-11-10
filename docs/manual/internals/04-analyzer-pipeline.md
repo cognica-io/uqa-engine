@@ -268,3 +268,8 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 - [Search and ranking internals](05-search-and-ranking.md)
 
 Historical table-field bindings use Storage’s immutable `FieldAnalyzerCatalog`. Native publication records each resolved relation’s actual persistence and prepares both exact index/search image sides before analyzer effects. Temporary runtime membership remains separate from the durable encoded root; matching index/field capture retains those already selected roots without copying table membership. Selected children keep their original image admission and cancellation after parent and Engine retirement.
+
+
+## Native dictionary input
+
+Analysis owns retained dictionary frame, table, string, lexical/completion and provenance construction. Nori and Kuromoji share the same native loops between ordinary loading and callers with an `AsyncImageInput` work channel. Frame decoding retains the public inflater and incremental checksum state; fixed records, UTF-8/UTF-16 scans, lexical ordering and complete provenance values retain their original positions across checkpoints. Decoded models retain Analysis representation limits independently of archive-reader admission. Immutable resource identities, dictionary bytes, diagnostics and token observations remain unchanged. The [native dictionary input argument](../../design/backup-image-format.md#native-dictionary-input-continuations) defines these guarantees and explicit atomic allocation, container and scalar-dependency boundaries. Descriptor preparation and enclosing analyzer/field-image restoration remain separate open work.

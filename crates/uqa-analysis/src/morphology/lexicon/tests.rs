@@ -9,10 +9,12 @@
 use super::{Builder, Lexicon};
 use crate::morphology::io::{Reader, Writer};
 
+pub(super) mod input;
+
 fn build(words: &[&str]) -> Lexicon {
     let mut builder = Builder::new();
     for word in words {
-        builder.insert(word.encode_utf16().collect()).unwrap();
+        builder = builder.insert(word.encode_utf16().collect()).unwrap();
     }
     builder.finish(32).unwrap()
 }
@@ -63,7 +65,7 @@ fn empty_models_empty_surfaces_and_supplementary_utf16_order_are_distinct() {
 fn duplicate_unsorted_unpaired_surrogate_and_overlong_inputs_fail() {
     for words in [[vec![1], vec![1]], [vec![2], vec![1]]] {
         let mut builder = Builder::new();
-        builder.insert(words[0].clone()).unwrap();
+        builder = builder.insert(words[0].clone()).unwrap();
         assert!(builder.insert(words[1].clone()).is_err());
     }
     for units in [
@@ -73,10 +75,10 @@ fn duplicate_unsorted_unpaired_surrogate_and_overlong_inputs_fail() {
         vec![65, 0xdc00],
     ] {
         let mut builder = Builder::new();
-        builder.insert(units).unwrap();
+        builder = builder.insert(units).unwrap();
         assert!(builder.finish(32).is_err());
     }
     let mut builder = Builder::new();
-    builder.insert(vec![65; 33]).unwrap();
+    builder = builder.insert(vec![65; 33]).unwrap();
     assert!(builder.finish(32).is_err());
 }

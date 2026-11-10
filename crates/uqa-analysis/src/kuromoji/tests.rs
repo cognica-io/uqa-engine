@@ -8,6 +8,8 @@ use super::{DictionaryError, DictionaryLimits, KuromojiDictionary};
 
 pub(super) mod analysis;
 pub(super) mod fixtures;
+mod input;
+mod provenance_input;
 
 #[test]
 fn dictionary_preserves_japanese_attributes_and_surface_identity() {

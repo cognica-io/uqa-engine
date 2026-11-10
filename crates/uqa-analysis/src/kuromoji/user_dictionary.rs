@@ -163,7 +163,7 @@ impl UserDictionary {
             word_entries.try_reserve(entry.lengths.len())?;
             word_entries.extend(std::iter::repeat_n(phrase, entry.lengths.len()));
             // Lucene rejects duplicate FST inputs, unlike Korean first-definition semantics.
-            builder.insert(surface)?;
+            builder = builder.insert(surface)?;
             entries.push(entry);
         }
         Ok(Some(Arc::new(Self {

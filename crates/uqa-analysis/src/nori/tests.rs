@@ -12,6 +12,8 @@ use super::{DictionaryError, DictionaryId, DictionaryLimits, NoriDictionary, POS
 
 mod corruption;
 pub(super) mod fixtures;
+mod input;
+mod provenance_input;
 
 #[test]
 fn dictionary_preserves_ordered_words_and_optional_morphology() {

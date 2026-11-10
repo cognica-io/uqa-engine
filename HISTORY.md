@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; enclosing analyzer restoration remains under implementation.
+
 - Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.
 
 - Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
