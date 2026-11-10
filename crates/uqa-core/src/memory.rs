@@ -250,7 +250,7 @@ impl Drop for MemoryReservation {
     }
 }
 
-/// An immutable result and its owned allocations. Cloning the value is a separate allocation.
+/// An admitted value and its owned allocations. Cloning the value is a separate allocation.
 #[derive(Debug)]
 pub struct Budgeted<T> {
     // Field order ensures that the value is destroyed before its allowance is returned.
@@ -284,6 +284,29 @@ impl<T> Budgeted<T> {
     pub fn into_parts(self) -> (T, MemoryReservation) {
         (self.value, self.memory)
     }
+
+    /// Transfer an admitted value through an owning transformation while retaining its original reservation through errors and unwinding. The transformation must retire its input on failure and account for any additional allocations through their owning budgets.
+    pub fn try_map<U, E>(
+        self,
+        transform: impl FnOnce(T) -> Result<U, E>,
+    ) -> Result<Budgeted<U>, E> {
+        let memory = self.memory;
+        let value = transform(self.value)?;
+        Ok(Budgeted::new(value, memory))
+    }
+
+    /// Retain the original lease while an owning transformation is suspended. The transformation future, including its moved input and partial output, retires before that lease on failure or drop.
+    pub async fn try_map_async<U, E, F>(
+        self,
+        transform: impl FnOnce(T) -> F,
+    ) -> Result<Budgeted<U>, E>
+    where
+        F: std::future::Future<Output = Result<U, E>>,
+    {
+        let memory = self.memory;
+        let value = transform(self.value).await?;
+        Ok(Budgeted::new(value, memory))
+    }
 }
 
 impl<T> std::ops::Deref for Budgeted<T> {
@@ -291,6 +314,25 @@ impl<T> std::ops::Deref for Budgeted<T> {
 
     fn deref(&self) -> &T {
         &self.value
+    }
+}
+
+/// Mutate a boxed continuation without separating its fixed allocation from its reservation. Nested payload changes remain the responsibility of their allocation owners.
+impl<T: ?Sized> AsMut<T> for Budgeted<Box<T>> {
+    fn as_mut(&mut self) -> &mut T {
+        self.value.as_mut()
+    }
+}
+
+/// Poll an admitted pinned allocation without exposing its original reservation or allowing the allocation to move. The future owns and admits any variable payloads it retains.
+impl<F: std::future::Future + ?Sized> std::future::Future for Budgeted<std::pin::Pin<Box<F>>> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.get_mut().value.as_mut().poll(context)
     }
 }
 

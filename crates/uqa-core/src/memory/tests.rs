@@ -6,7 +6,100 @@
 
 use super::*;
 
+mod asynchronous;
 mod children;
+
+#[test]
+fn admitted_owned_mapping_retires_input_before_allowance_on_error_and_unwind() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct Input {
+        memory: MemoryBudget,
+        observed: Arc<AtomicUsize>,
+    }
+    impl Drop for Input {
+        fn drop(&mut self) {
+            self.observed.store(self.memory.used(), Ordering::SeqCst);
+        }
+    }
+    for outcome in ["complete", "error", "unwind"] {
+        let size = size_of::<Input>();
+        let memory = MemoryBudget::new(size);
+        let observed = Arc::new(AtomicUsize::new(0));
+        let reservation = memory.reserve(size).unwrap();
+        let owner = Budgeted::new(
+            Box::new(Input {
+                memory: memory.clone(),
+                observed: Arc::clone(&observed),
+            }),
+            reservation,
+        );
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            owner.try_map(|input| match outcome {
+                "error" => Err(()),
+                "unwind" => panic!("owned mapping unwound"),
+                _ => Ok(input),
+            })
+        }));
+        assert_eq!(result.is_err(), outcome == "unwind");
+        if let Ok(result) = &result {
+            assert_eq!(result.is_err(), outcome == "error");
+        }
+        drop(result);
+        assert_eq!(observed.load(Ordering::SeqCst), size, "{outcome}");
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn mutable_box_keeps_original_allowance_through_failure_unwinding_and_drop() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct Continuation {
+        memory: MemoryBudget,
+        observed: Arc<AtomicUsize>,
+        value: usize,
+    }
+    impl Drop for Continuation {
+        fn drop(&mut self) {
+            self.observed.store(self.memory.used(), Ordering::SeqCst);
+        }
+    }
+    for outcome in ["complete", "error", "unwind"] {
+        let size = size_of::<Continuation>();
+        let memory = MemoryBudget::new(size);
+        let observed = Arc::new(AtomicUsize::new(0));
+        let reservation = memory.reserve(size).unwrap();
+        let owner = Budgeted::new(
+            Box::new(Continuation {
+                memory: memory.clone(),
+                observed: Arc::clone(&observed),
+                value: 0,
+            }),
+            reservation,
+        );
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut owner = owner;
+            owner.as_mut().value = 17;
+            assert_eq!(owner.as_mut().value, 17);
+            match outcome {
+                "error" => Err(()),
+                "unwind" => panic!("continuation unwound"),
+                _ => Ok(()),
+            }
+        }));
+        assert_eq!(observed.load(Ordering::SeqCst), size, "{outcome}");
+        assert_eq!(memory.used(), 0);
+        assert_eq!(result.is_err(), outcome == "unwind");
+        if let Ok(result) = result {
+            assert_eq!(result.is_err(), outcome == "error");
+        }
+    }
+}
 
 #[test]
 fn allowance_owners_keep_one_compact_allocation_through_the_final_lease() {

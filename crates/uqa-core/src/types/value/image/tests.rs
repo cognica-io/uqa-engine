@@ -12,6 +12,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+mod input;
 mod stream;
 
 fn encode(value: &Value) -> Vec<u8> {

@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod resumable;
+
 fn valid(input: &str, depth: Option<usize>) -> bool {
     let memory = MemoryBudget::new(1024 * 1024);
     let cancellation = CancellationToken::new();

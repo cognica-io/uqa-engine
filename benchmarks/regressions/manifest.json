@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -52606,6 +52606,357 @@
       "capability": "Native sequence function references",
       "workload": "Classify dash, octal and uint32 OIDs, malformed numeric inputs and quoted or signed names against captured PostgreSQL 18.4 outcomes.",
       "invariant": "Execution and stored-reference validation share the native classifier without allocating or inferring catalog edges from numeric OIDs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "mutable_box_keeps_original_allowance_through_failure_unwinding_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Mutate an admitted boxed continuation and complete, return an error or unwind through its destructor.",
+      "invariant": "The original fixed-header allowance remains held during value destruction and returns only after the value retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_owned_mapping_retires_input_before_allowance_on_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Transfer an admitted input through successful, failing and unwinding owning transformations.",
+      "invariant": "The original reservation outlives input destruction on every path and remains attached to successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_decode_windows_preserve_split_utf8_and_original_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Decode split UTF-8 across 1-, 3-, 17-, 4096- and 16384-byte windows with independent poll limits.",
+      "invariant": "Actual source bytes stay within each window; exact completed text retains only its original payload reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_decode_checkpoints_bound_non_io_steps_without_reader_calls",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Resume 103 explicit metadata checkpoints through seven-poll windows and a source that rejects every read.",
+      "invariant": "Each call performs at most seven checkpoint operations, performs no I/O and retires all continuation memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "interrupted_native_reads_consume_work_and_resume_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Return only interrupted reads for three five-step windows before supplying the original image.",
+      "invariant": "Each interrupted attempt consumes one step, later input is not replayed and completion releases original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "partial_native_decoders_retire_on_quota_cancel_invalid_input_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Fail a partial decoder with zero limits, cancellation, quota exhaustion, short/invalid/trailing input and a reader panic.",
+      "invariant": "Every terminal path immediately releases original continuation and payload reservations and rejects reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_continuation_keeps_original_header_until_future_destruction",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/ownership.rs",
+      "capability": "Native value input",
+      "workload": "Observe the exact admitted future/channel bytes from a destructor on completion, failure, invalid pending work, cancellation, zero windows, drop and unwind.",
+      "invariant": "The original header reservation remains unchanged until the future is destroyed exactly once; no reservation survives termination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_continuation_admits_before_constructor_and_retires_constructor_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/ownership.rs",
+      "capability": "Native value input",
+      "workload": "Deny shared input admission after the fixed future reservation, then unwind inside an admitted constructor.",
+      "invariant": "Denied admission never invokes the constructor; both failure paths return every original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_preserves_every_carrier_with_independent_byte_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Decode every native carrier, large UTF-8/binary fields and 128 nested containers with one-byte and independent poll windows.",
+      "invariant": "Each call respects source-byte/read-attempt limits, preserves exact native images, leaves enclosing bytes unread and transfers only original payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_retires_partial_nested_payloads_between_calls",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Cancel, deny memory, drop or truncate a partially decoded record with large native children.",
+      "invariant": "Typed failures retire all original nested payloads immediately while the decoder object remains alive and cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_utf8_input_rejects_invalid_prefixes_at_every_read_width",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Read overlong, surrogate, out-of-range, incomplete and malformed UTF-8 through five byte-window widths.",
+      "invariant": "The standard UTF-8 oracle rejects every input; each continuation preserves the invalid-input diagnostic and releases its original memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_keeps_synchronous_and_retained_frames_bounded",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Decode every native carrier through both entry points on the existing 128 KiB stack budget and measure fixed scalar allocations.",
+      "invariant": "Both entry points preserve exact values without stack growth; scalar input performs no heap allocation or memory-budget reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_text_copy_yields_per_fragment_without_io_and_preserves_original_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/copying.rs",
+      "capability": "Checkpointed native text copying",
+      "workload": "Copy empty and large mixed-width UTF-8 fields with one, three and seven continuation polls per call and through the synchronous codec.",
+      "invariant": "Exact text, independently predicted completion calls, zero source reads and original input/destination allocation retirement are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_text_copy_retires_source_and_partial_destination_on_cancel_quota_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/copying.rs",
+      "capability": "Native text copy retirement",
+      "workload": "Cancel, exhaust destination admission and drop a suspended large UTF-8 copy.",
+      "invariant": "The owning transition retires both the original source and partial destination; terminal input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_input_preserves_parent_windows_and_original_child_payload",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Decode nested UTF-8 fields through 1-, 17- and 4096-byte parent windows and then read an independent parent tail.",
+      "invariant": "Child reads preserve each caller byte limit, exact parent position and the original completed payload allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_work_checkpoints_yield_without_reading_the_parent",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Drive 103 nested child checkpoints with a parent that rejects every read and a three-poll work window.",
+      "invariant": "Child work cannot bypass the enclosing poll bound or perform unintended source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_input_retires_child_state_on_cancellation_and_denied_payload",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Cancel or exhaust memory after a nested native decoder has retained partial input.",
+      "invariant": "The original child continuation and partial payload retire before their reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_preserve_independent_capacity_counts_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_resume_deep_parent_retirement_without_recursive_or_unbounded_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_retire_original_scratch_on_denial_cancellation_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "suspended_owned_mapping_keeps_input_admission_until_transformation_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests/asynchronous.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Suspend owned transformations before completion, error, construction/poll unwind and abandonment.",
+      "invariant": "The native input retires before its original allocation reservation, including unpolled and suspended futures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_json_continuation_bounds_long_tokens_and_preserves_original_ranges",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Advance long JSON numbers, UTF-8 strings, escapes and whitespace with one-poll windows and no source reads.",
+      "invariant": "Original ranges, grammar, independently constructed string capacities and prior reservations survive; terminal failure retires every incomplete owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_string_continuation_preserves_unicode_capacity_and_failure_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Advance long JSON numbers, UTF-8 strings, escapes and whitespace with one-poll windows and no source reads.",
+      "invariant": "Original ranges, grammar, independently constructed string capacities and prior reservations survive; terminal failure retires every incomplete owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copies_preserve_native_variants_capacities_and_shared_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Native retained value copying",
+      "workload": "Copy native variants with one-poll windows and compare original values, capacities and shared descriptors; interrupt a partially copied nested value.",
+      "invariant": "Synchronous scalar copying allocates nothing; suspended copies preserve exact destination admission and retire partial owners on cancellation, denial, invalid windows and drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_failure_retires_each_partially_constructed_native_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Native retained value copying",
+      "workload": "Copy native variants with one-poll windows and compare original values, capacities and shared descriptors; interrupt a partially copied nested value.",
+      "invariant": "Synchronous scalar copying allocates nothing; suspended copies preserve exact destination admission and retire partial owners on cancellation, denial, invalid windows and drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_rendering_resumes_quoted_components_with_exact_native_capacity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Retained canonical relation spelling",
+      "workload": "Render long quoted Unicode components and escaped quotes through one-poll windows.",
+      "invariant": "Ordinary and retained rendering have identical canonical bytes, capacities and admission without source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_rendering_retires_partial_names_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Canonical name retirement",
+      "workload": "Cancel, deny memory, supply an invalid window or drop a partially rendered long name.",
+      "invariant": "Every terminal path releases the original output and continuation reservations and prevents reentry.",
       "case_names": [
         ""
       ]
