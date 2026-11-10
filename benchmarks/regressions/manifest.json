@@ -52830,6 +52830,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_events_validate_original_registry_owners_and_column_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rules_validate_recorded_relation_and_column_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_actions_keep_pseudo_rows_ctes_and_concrete_targets_distinct",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_preserve_legacy_and_bound_reference_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_reference_work_retires_original_admission_on_failure_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_dependencies_use_captured_table_view_foreign_system_and_graph_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_dependencies_keep_document_fields_open_and_require_live_event_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_reject_missing_rule_action_targets",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

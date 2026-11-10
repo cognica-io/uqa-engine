@@ -14,6 +14,7 @@ mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
+mod event_dependencies;
 mod routine_dependencies;
 pub use routine_dependencies::validate as validate_routines;
 mod sequence_functions;

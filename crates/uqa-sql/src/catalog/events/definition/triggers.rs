@@ -301,7 +301,7 @@ impl EventAnalysisContext<'_> {
         }
     }
 
-    fn validate_trigger_relation_kind(
+    pub(crate) fn validate_trigger_relation_kind(
         definition: &CreateTrigger,
         relation: &RelationIdentity,
         relation_kind: &str,

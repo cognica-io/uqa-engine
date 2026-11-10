@@ -317,11 +317,12 @@ pub fn query_source_column_names(
         resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     }
     if catalog.sequence_resolved(&resolution, name)?.is_some() {
-        return Ok(Some(vec![
-            "last_value".into(),
-            "log_cnt".into(),
-            "is_called".into(),
-        ]));
+        return Ok(Some(
+            uqa_sql::schema::sequences::ROW_COLUMN_NAMES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ));
     }
     if let Some(view) = catalog.view_resolved(&resolution, name)? {
         let schema =

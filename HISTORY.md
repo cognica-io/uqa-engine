@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate captured event registry ownership, trigger relation kinds and update columns, rule dependency relations/columns, and concrete action/condition references before private restoration. Native OLD/NEW scalar references, CTE visibility, quoted names and absent legacy dependency summaries retain their existing meaning; definitions are not rebound or executed.
+
 - Include supplied constraint-trigger catalog identities in the same restore validation namespace as table and domain constraints. Trigger-row OIDs retain their separate catalog namespace, and missing legacy identity fields remain unchanged.
 
 - Validate complete referencing-partition foreign-key families with the same borrowed definition comparison used for ordinary attachment. Missing members, conflicting targets/options and independent declaring owners reject before activation; attached names, catalog identities, eligible indexes and SET column subsets are preserved.
