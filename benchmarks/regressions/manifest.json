@@ -52435,7 +52435,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
       "capability": "Native constraint reference validation",
-      "workload": "Validate original derived partition rows and corrupt their parent or membership.",
+      "workload": "Validate original derived partition rows and corrupt their parent, membership or globally distinct catalog identity.",
       "invariant": "Every recorded derived row follows its original captured partition edge.",
       "case_names": [
         ""
@@ -52606,6 +52606,448 @@
       "capability": "Native sequence function references",
       "workload": "Classify dash, octal and uint32 OIDs, malformed numeric inputs and quoted or signed names against captured PostgreSQL 18.4 outcomes.",
       "invariant": "Execution and stored-reference validation share the native classifier without allocating or inferring catalog edges from numeric OIDs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_rejects_cross_table_oid_and_incarnation_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Reject an OID or incarnation shared by distinct table constraint rows.",
+      "invariant": "Both original catalog identity projections are injective across tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_rejects_invalid_supplied_row_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Supply zero incarnations and zero, negative or overflowing OIDs.",
+      "invariant": "Native reconstruction rejects malformed supplied constraint addresses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_includes_each_constraint_kind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Collide NOT NULL, column/table CHECK, key and column/table foreign-key identities.",
+      "invariant": "Every supplied constraint row participates in the same catalog identity namespace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_preserves_shared_families_and_separate_catalog_classes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Share a partition foreign-key enforcement family and repeat provenance while retaining distinct row identities and cross-catalog OIDs.",
+      "invariant": "Shared enforcement metadata is not a duplicate row; pg_class and pg_constraint remain separate OID namespaces.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_borrows_large_expressions_and_preserves_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Validate one-MiB borrowed CHECK input with absent legacy identities and original NOT VALID/NOT ENFORCED flags.",
+      "invariant": "Validation copies no expression payload, releases its scratch and never materializes missing metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_constraints_share_one_namespace_across_tables_foreign_tables_and_domains",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Join ordinary, foreign and domain constraints and collide each pair of owners.",
+      "invariant": "The immutable catalog adapter validates all three constraint owner families together.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_complete_referenced_partition_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Omit the leaf or every derived row from a captured two-level referenced partition tree.",
+      "invariant": "Every proper referenced descendant has exactly one original derived constraint row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_derive_partition_rows_only_for_the_declaring_foreign_key",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Use column/table declarations with an inherited partition copy and then add extra derived rows to that copy.",
+      "invariant": "Only the declaring family row derives referenced-partition rows; inherited copies retain their independent catalog identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_select_only_the_original_referenced_partition_tree",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Retain an unrelated partition tree and substitute one of its children into the derived rows.",
+      "invariant": "Completeness covers only the original referenced subtree and rejects foreign descendants.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_partition_foreign_key_family_definitions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Corrupt each shared endpoint, key or enforcement option in table- and column-declared partition families.",
+      "invariant": "Inherited definitions preserve the same reference and attachment options as their immediate parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_every_referencing_partition_family_member",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Remove every foreign key from a captured referencing partition.",
+      "invariant": "Every parent family occurs once in each immediate referencing partition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_one_declaring_owner_per_foreign_key_family",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Reuse a captured enforcement-family identity on an independent table.",
+      "invariant": "One family identity has only one original declaring owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_preserve_attached_foreign_key_catalog_choices",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/families.rs",
+      "capability": "Captured foreign-key family closure",
+      "workload": "Retain distinct row identities, names, eligible selected indexes and SET subsets on an attached foreign key.",
+      "invariant": "Attachment-equivalent definitions preserve their original independent catalog choices.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_reject_shared_constraint_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Repeat a supplied constraint-trigger OID or incarnation with complete and partial legacy identities.",
+      "invariant": "Constraint-trigger rows have unique original constraint identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_preserve_legacy_absence_and_separate_catalog_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Retain absent legacy identity fields and equal OIDs in separate trigger/constraint catalogs.",
+      "invariant": "No replacement identity is inferred and separate catalog namespaces remain separate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_triggers_reject_invalid_partial_catalog_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Supply an invalid constraint OID or incarnation without its companion identity field.",
+      "invariant": "Each original identity field is validated independently without synthesizing missing metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_trigger_identity_admission_retires_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/triggers.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Deny the original validation allowance and cancel before visiting trigger rows.",
+      "invariant": "Failure and cancellation leave no retained validation reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_constraint_triggers_share_the_constraint_identity_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints.rs",
+      "capability": "Constraint-trigger catalog identity closure",
+      "workload": "Join captured constraint-trigger rows with table and domain constraint identities.",
+      "invariant": "Cross-owner OID/incarnation collisions reject under the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_events_validate_original_registry_owners_and_column_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rules_validate_recorded_relation_and_column_dependencies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_actions_keep_pseudo_rows_ctes_and_concrete_targets_distinct",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_preserve_legacy_and_bound_reference_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_event_reference_work_retires_original_admission_on_failure_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_dependencies_use_captured_table_view_foreign_system_and_graph_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_dependencies_keep_document_fields_open_and_require_live_event_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_stored_relations_reject_missing_rule_action_targets",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate captured event ownership, columns and concrete rule references without executing definitions.",
+      "invariant": "Missing catalog edges reject; original definitions, lexical scope and admission survive success or retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_trigger_references_keep_the_selected_contract_and_deferred_body",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Original trigger function identities retain both scalar and SETOF trigger declarations; wrong signatures, kinds, result types and languages reject without compiling source bodies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_declarations_preserve_setof_return_flags_and_argument_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/compilation/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Both trigger declaration forms retain PostgreSQL argument rejection and allow a zero-argument trigger handler.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_trigger_references_require_the_selected_trigger_function_contract",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Native trigger function contract",
+      "workload": "Inspect the selected trigger declaration without evaluating the body or resolving another function.",
+      "invariant": "Captured trigger targets use the SQL-owned trigger contract before private activation, while original input reservations retire on either result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "setof_trigger_declarations_keep_native_handler_behavior",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/catalog/sql_triggers/review_regressions.rs",
+      "capability": "PostgreSQL trigger result declarations",
+      "workload": "Create scalar and SETOF trigger functions, rename handlers, retain result flags and execute their original triggers.",
+      "invariant": "Both result declarations retain handler behavior and original identities; ordinary calls and invalid declarations retain PostgreSQL SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_names_preserve_quoted_identity_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_names_reject_ambiguous_zero_argument_functions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_name_index_retires_partial_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_trigger_references_reject_missing_legacy_name_targets",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
       "case_names": [
         ""
       ]

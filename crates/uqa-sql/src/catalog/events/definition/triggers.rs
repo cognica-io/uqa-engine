@@ -6,20 +6,18 @@
 
 use super::EventAnalysisContext;
 use crate::{
-    ast::{
-        ColumnDef, ColumnType, CreateTrigger, Expr, FunctionReturns, TriggerEvent, TriggerTiming,
-    },
+    ast::{ColumnDef, ColumnType, CreateTrigger, Expr, TriggerEvent, TriggerTiming},
     catalog::{
         events::validation::{
             is_boolean_type, validate_trigger_condition_names, validate_trigger_condition_rows,
-            validate_trigger_transition_relation, TriggerConditionTypeResolver,
+            validate_trigger_function, validate_trigger_transition_relation,
+            TriggerConditionTypeResolver,
         },
         resolution::{RelationLookupMode, RelationResolution},
         security::table::TableAclPrivilege,
     },
     plpgsql::bind_expr,
-    routines::{routine_signature_types, SQLUserFunction},
-    type_resolution::canonical_routine_type_name,
+    routines::routine_signature_types,
     SQLError,
 };
 use uqa_core::{RelationIdentity, Value};
@@ -186,34 +184,13 @@ impl EventAnalysisContext<'_> {
         Ok(function)
     }
 
-    fn validate_trigger_function(function: &SQLUserFunction) -> Result<(), SQLError> {
-        let returns_trigger = matches!(
-            &function.def.returns,
-            FunctionReturns::Scalar { type_name }
-                if canonical_routine_type_name(type_name) == "trigger"
-        );
-        if !returns_trigger {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: format!("function {} must return type trigger", function.def.name),
-            });
-        }
-        if function.def.language != "plpgsql" {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "only LANGUAGE plpgsql trigger functions are executable".into(),
-            });
-        }
-        Ok(())
-    }
-
     pub fn resolve_trigger_function(
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
     ) -> Result<crate::routines::SQLRoutine, SQLError> {
         let function = self.resolve_trigger_function_candidate(name, lookup_mode)?;
-        Self::validate_trigger_function(&function)?;
+        validate_trigger_function(&function.def)?;
         Ok(function)
     }
 
@@ -259,7 +236,7 @@ impl EventAnalysisContext<'_> {
                 )))
             }
         };
-        Self::validate_trigger_function(&function)?;
+        validate_trigger_function(&function.def)?;
         Ok(function)
     }
 
@@ -301,7 +278,7 @@ impl EventAnalysisContext<'_> {
         }
     }
 
-    fn validate_trigger_relation_kind(
+    pub(crate) fn validate_trigger_relation_kind(
         definition: &CreateTrigger,
         relation: &RelationIdentity,
         relation_kind: &str,
@@ -428,7 +405,7 @@ impl EventAnalysisContext<'_> {
                 &requested_function,
             )?;
         }
-        Self::validate_trigger_function(&function)?;
+        validate_trigger_function(&function.def)?;
         definition.function.clone_from(&function.def.name);
         let columns = self.trigger_relation_columns(&relation, relation_kind)?;
         if relation_kind == "table" {

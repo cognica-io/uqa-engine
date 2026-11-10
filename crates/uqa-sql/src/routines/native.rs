@@ -13,12 +13,13 @@ use crate::{
 };
 use uqa_core::{
     memory::{BudgetedMap, MemoryBudget, ProductionControl},
-    CancellationToken,
+    CancellationToken, RelationIdentity, RelationName,
 };
 
 /// An admitted borrowed identity index for one immutable routine registry. Late-bound calls and deferred source bodies retain their existing execution contract; runtime resource availability is checked separately.
 pub struct NativeRoutineReferences<'a> {
     definitions: BudgetedMap<[u8; 16], &'a CreateFunction>,
+    trigger_names: BudgetedMap<(RelationName<'a>, RelationName<'a>), &'a CreateFunction>,
     control: ProductionControl<'a>,
 }
 
@@ -31,6 +32,7 @@ impl<'a> NativeRoutineReferences<'a> {
         let control = ProductionControl::new(memory, cancellation, cancellation);
         control.check()?;
         let mut registry = BudgetedMap::new(memory);
+        let mut trigger_names = BudgetedMap::new(memory);
         for definition in definitions {
             control.check()?;
             let identity = definition
@@ -39,9 +41,18 @@ impl<'a> NativeRoutineReferences<'a> {
             if identity == [0; 16] || registry.insert(identity, definition)?.is_some() {
                 return Err(invalid("duplicate or zero identity"));
             }
+            if !definition.is_procedure
+                && definition.identity_params().next().is_none()
+                && trigger_names
+                    .insert(trigger_name(&definition.name)?, definition)?
+                    .is_some()
+            {
+                return Err(invalid("duplicate zero-argument function name"));
+            }
         }
         Ok(Self {
             definitions: registry,
+            trigger_names,
             control,
         })
     }
@@ -64,6 +75,29 @@ impl<'a> NativeRoutineReferences<'a> {
         argument_types: &[String],
         procedure: bool,
     ) -> Result<(), SQLError> {
+        self.definition(identity, argument_types, procedure)
+            .map(|_| ())
+    }
+
+    /// A stored trigger selects its original identity or, for legacy entries, its exact qualified name. Both paths require the ordinary trigger contract without compiling the body or changing stored metadata.
+    pub fn trigger(&self, name: &str, identity: Option<[u8; 16]>) -> Result<(), SQLError> {
+        let definition = if let Some(identity) = identity {
+            self.definition(identity, &[], false)?
+        } else {
+            self.control.check()?;
+            self.trigger_names
+                .get(&trigger_name(name)?)
+                .ok_or_else(|| invalid("missing legacy trigger function"))?
+        };
+        crate::catalog::events::validation::validate_trigger_function(definition)
+    }
+
+    fn definition(
+        &self,
+        identity: [u8; 16],
+        argument_types: &[String],
+        procedure: bool,
+    ) -> Result<&CreateFunction, SQLError> {
         self.control.check()?;
         let definition = self
             .definitions
@@ -78,7 +112,7 @@ impl<'a> NativeRoutineReferences<'a> {
         {
             return Err(invalid("bound signature or kind"));
         }
-        Ok(())
+        Ok(definition)
     }
 
     pub fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
@@ -132,6 +166,15 @@ impl<'a> NativeRoutineReferences<'a> {
         )?;
         self.plan(plan.as_plan_ref())
     }
+}
+
+fn trigger_name(name: &str) -> Result<(RelationName<'_>, RelationName<'_>), SQLError> {
+    let reference = RelationIdentity::try_borrowed_reference(name)
+        .map_err(|_| invalid("invalid trigger function name"))?;
+    let schema = reference
+        .schema
+        .ok_or_else(|| invalid("unqualified trigger function name"))?;
+    Ok((schema, reference.name))
 }
 
 fn invalid(detail: &str) -> SQLError {

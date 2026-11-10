@@ -14,6 +14,7 @@ mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
 pub use plan_dependencies::validate as validate_plan_relations;
+mod event_dependencies;
 mod routine_dependencies;
 pub use routine_dependencies::validate as validate_routines;
 mod sequence_functions;
@@ -23,7 +24,7 @@ pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 
-/// Join complete immutable ordinary/foreign row layouts and original index rows for SQL's constraint-reference predicate.
+/// Join complete immutable ordinary/foreign row layouts, domains, constraint triggers and original index rows for SQL's constraint-reference predicate.
 pub fn validate_constraints(
     snapshot: &CatalogReadSnapshot,
     memory: &MemoryBudget,
@@ -59,6 +60,16 @@ pub fn validate_constraints(
                     }),
             ),
         snapshot.definitions.catalog_indexes.values(),
+        snapshot
+            .definitions
+            .domains
+            .values()
+            .map(|domain| &domain.definition),
+        snapshot
+            .definitions
+            .triggers
+            .values()
+            .flat_map(uqa_sql::catalog::events::EventDefinitions::values),
         memory,
         cancellation,
     )

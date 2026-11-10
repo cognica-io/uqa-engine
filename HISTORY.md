@@ -11,6 +11,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; enclosing analyzer restoration remains under implementation.
 
 - Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.
+- Validate legacy trigger targets through their exact stored schema/function name when an immutable function identity is absent. Original absent identity fields remain unchanged, and ambiguous or missing handlers reject before activation. Trigger activation consumes one event row even when the stored handler declaration includes `SETOF`.
+
+- Validate selected trigger function signatures, result types and languages during native restoration without compiling deferred bodies. Ordinary creation, catalog projection and restoration share the trigger contract, including PostgreSQL-compatible `RETURNS SETOF trigger` declarations.
+
+- Validate captured event registry ownership, trigger relation kinds and update columns, rule dependency relations/columns, and concrete action/condition references before private restoration. Native OLD/NEW scalar references, CTE visibility, quoted names and absent legacy dependency summaries retain their existing meaning; definitions are not rebound or executed.
+
+- Include each supplied constraint-trigger OID and incarnation in the same restore validation namespace as table and domain constraints, even when the companion legacy field is absent. Trigger-row OIDs retain their separate catalog namespace, and missing legacy identity fields remain unchanged.
+
+- Validate complete referencing-partition foreign-key families with the same borrowed definition comparison used for ordinary attachment. Missing members, conflicting targets/options and independent declaring owners reject before activation; attached names, catalog identities, eligible indexes and SET column subsets are preserved.
+
+- Reject restored foreign keys with omitted derived constraints for their captured referenced partitions, or with extra derived rows on an inherited foreign-key copy. Validation compares the complete original partition tree without executing declarations or creating replacement rows.
+
+- Reject duplicate supplied constraint catalog OIDs and incarnations across ordinary tables, foreign tables and domains before restore activation. Shared foreign-key enforcement families, distinct partition rows, separate catalog OID namespaces and original legacy metadata absence are preserved. Complete logical closure and public Engine restore remain under implementation.
 
 - Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
 

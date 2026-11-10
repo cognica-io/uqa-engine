@@ -88,7 +88,9 @@ impl<'a> Interpreter<'a> {
             out_datums,
             found: parsed.found_datum,
             last_row_count: 0,
-            is_set: def.returns_set(),
+            // Trigger activation returns one event row even when its catalog declaration retains SETOF.
+            is_set: def.returns_set()
+                && !uqa_sql::routines::declaration::routine_returns_trigger(def),
             variable_conflict: parsed.variable_conflict,
         });
         interpreter.bind_arguments(bound)?;

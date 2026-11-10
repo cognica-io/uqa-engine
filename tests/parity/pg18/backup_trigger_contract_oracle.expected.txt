@@ -1,0 +1,10 @@
+renamed_trigger_identity|t
+renamed_trigger_effect|7
+wrong_return 42P17
+declared_argument 42P13
+sql_trigger 42P13
+set_return 00000
+set_trigger 00000
+set_trigger_execution 00000
+set_trigger_effect|{7,8}
+direct_set_call 0A000

@@ -16,7 +16,7 @@ use uqa_sql::{
     SQLError,
 };
 
-/// Validate the concrete relation references of stored views and bound SQL routine plans. Deferred source bodies keep their existing lazy compilation contract. Graph-label lookup follows the same immutable catalog's graph owner. No source SQL, callback or query is executed.
+/// Validate concrete relation references of stored views, bound SQL routine plans and event definitions. Deferred source bodies keep their existing lazy compilation contract. Graph-label lookup follows the same immutable catalog's graph owner. No source SQL, callback or query is executed.
 pub fn validate(
     catalog: &CatalogReadView,
     control: &ProductionControl<'_>,
@@ -56,8 +56,7 @@ pub fn validate(
             }
         }
     }
-    control.check()?;
-    Ok(())
+    super::event_dependencies::validate(catalog, control)
 }
 
 #[cfg(test)]
