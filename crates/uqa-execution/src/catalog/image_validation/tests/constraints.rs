@@ -12,6 +12,89 @@ use uqa_sql::{
     ColumnType,
 };
 
+fn identity(id: u8) -> CatalogObjectIdentity {
+    CatalogObjectIdentity {
+        object_id: [id; 16],
+        oid: 20_000 + i64::from(id),
+    }
+}
+
+fn constraint_catalog(ordinary: u8, foreign: u8, domain: u8) -> CatalogReadSnapshot {
+    let mut snapshot = snapshot();
+    let column = |id| {
+        let mut column = ColumnDef::nullable("id", ColumnType::Integer);
+        column.not_null = true;
+        column.not_null_identity = Some(identity(id));
+        column
+    };
+    snapshot.tables.insert(
+        RelationIdentity::new("public", "local"),
+        table_snapshot(
+            [1; 16],
+            vec![column(ordinary)],
+            TableConstraintSet::default(),
+        ),
+    );
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
+        RelationIdentity::new("public", "remote"),
+        crate::catalog::foreign::StoredForeignTable {
+            name: "public.remote".into(),
+            persistence: RelationPersistence::Permanent,
+            object_id: [2; 16],
+            catalog_oids: None,
+            row_type_array_name: None,
+            server_name: "remote_server".into(),
+            server_reference: None,
+            columns: vec![column(foreign)],
+            dropped_attributes: vec![],
+            checks: vec![],
+            options: uqa_core::memory::OwnedMap::default(),
+            option_order: vec![],
+        },
+    )]);
+    RetainedValue::make_mut(&mut snapshot.definitions.domains)
+        .insert(
+            "public.positive".into(),
+            uqa_sql::catalog::domain::StoredDomain {
+                object_id: [3; 16],
+                oid: 30_000,
+                array_oid: Some(30_001),
+                identity: RelationIdentity::new("public", "positive"),
+                owner: uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+                definition: uqa_sql::ast::CreateDomain {
+                    name: "public.positive".into(),
+                    base: ColumnType::Integer,
+                    collation: None,
+                    collation_oid: None,
+                    default: None,
+                    not_null: Some(uqa_sql::ast::DomainNotNull {
+                        name: Some("required".into()),
+                        catalog_identity: Some(identity(domain)),
+                    }),
+                    checks: vec![],
+                },
+                array_name: Some("_positive".into()),
+                usage_acl: None,
+            },
+        )
+        .unwrap();
+    snapshot
+}
+
+#[test]
+fn native_catalog_constraints_share_one_namespace_across_tables_foreign_tables_and_domains() {
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let valid = constraint_catalog(10, 11, 12);
+    validate_constraints(&valid, &memory, &token).unwrap();
+    assert_eq!(memory.used(), 0);
+    for (ordinary, foreign, domain) in [(10, 10, 12), (10, 11, 10), (10, 11, 11)] {
+        let invalid = constraint_catalog(ordinary, foreign, domain);
+        assert!(validate_constraints(&invalid, &memory, &token).is_err());
+        assert_eq!(memory.used(), 0);
+    }
+}
+
 #[test]
 fn native_catalog_constraint_validation_joins_original_foreign_key_targets_without_mutation() {
     let mut snapshot = snapshot();

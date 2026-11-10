@@ -11,6 +11,8 @@ use crate::{
 };
 use uqa_core::catalog_identity::CatalogObjectIdentity;
 
+mod identities;
+
 struct Table {
     name: RelationIdentity,
     id: [u8; 16],
@@ -93,6 +95,7 @@ fn check(
             hierarchy: table.hierarchy.as_ref(),
         }),
         indexes.iter(),
+        std::iter::empty(),
         memory,
         token,
     )
@@ -307,6 +310,11 @@ fn native_constraints_require_original_referenced_partition_edges() {
         },
     );
     accepts(&tables, &indexes, true);
+    tables[2].columns[0].not_null = true;
+    tables[2].columns[0].not_null_identity = Some(identity(7));
+    accepts(&tables, &indexes, false);
+    tables[2].columns[0].not_null = false;
+    tables[2].columns[0].not_null_identity = None;
     tables[1].foreign_keys[0].referenced_partitions[0].parent = Some([6; 16]);
     accepts(&tables, &indexes, false);
     tables[1].foreign_keys[0].referenced_partitions[0].parent = None;

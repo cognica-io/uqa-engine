@@ -23,7 +23,7 @@ pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 
-/// Join complete immutable ordinary/foreign row layouts and original index rows for SQL's constraint-reference predicate.
+/// Join complete immutable ordinary/foreign row layouts, domain declarations and original index rows for SQL's constraint-reference predicate.
 pub fn validate_constraints(
     snapshot: &CatalogReadSnapshot,
     memory: &MemoryBudget,
@@ -59,6 +59,11 @@ pub fn validate_constraints(
                     }),
             ),
         snapshot.definitions.catalog_indexes.values(),
+        snapshot
+            .definitions
+            .domains
+            .values()
+            .map(|domain| &domain.definition),
         memory,
         cancellation,
     )

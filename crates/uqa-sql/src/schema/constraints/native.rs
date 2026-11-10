@@ -7,7 +7,9 @@
 //! Validate captured constraint references against one immutable native catalog.
 
 use crate::{
-    ast::{ColumnDef, Expr, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint},
+    ast::{
+        ColumnDef, CreateDomain, Expr, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint,
+    },
     catalog::{
         index::stored::input::{metadata, IndexMetadata},
         resolution::bound_relation_identity_with_control,
@@ -21,6 +23,7 @@ use uqa_core::{
 };
 
 mod foreign_keys;
+mod identities;
 
 #[derive(Clone, Copy)]
 pub struct NativeConstraintTable<'a> {
@@ -48,10 +51,11 @@ struct Catalog<'a> {
     control: ProductionControl<'a>,
 }
 
-/// Validate live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
+/// Validate supplied constraint identities across ordinary/foreign tables and domains, live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
 pub fn validate<'a>(
     tables: impl Iterator<Item = NativeConstraintTable<'a>>,
     indexes: impl Iterator<Item = &'a CatalogIndexRow>,
+    domains: impl Iterator<Item = &'a CreateDomain>,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
 ) -> Result<(), SQLError> {
@@ -64,6 +68,7 @@ pub fn validate<'a>(
         control: ProductionControl::new(memory, cancellation, cancellation),
     };
     catalog.control.check()?;
+    let mut constraint_identities = identities::Identities::new(catalog.control);
     for table in tables {
         catalog.control.check()?;
         if table.object_id == [0; 16]
@@ -82,7 +87,12 @@ pub fn validate<'a>(
                 return Err(invalid("duplicate live column"));
             }
         }
+        constraint_identities.table(table)?;
     }
+    for domain in domains {
+        constraint_identities.domain(domain)?;
+    }
+    drop(constraint_identities);
     for row in indexes {
         catalog.control.check()?;
         let metadata = metadata(row.definition_json.as_deref(), &catalog.control)?;

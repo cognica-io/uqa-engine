@@ -52435,7 +52435,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/constraints/native/tests.rs",
       "capability": "Native constraint reference validation",
-      "workload": "Validate original derived partition rows and corrupt their parent or membership.",
+      "workload": "Validate original derived partition rows and corrupt their parent, membership or globally distinct catalog identity.",
       "invariant": "Every recorded derived row follows its original captured partition edge.",
       "case_names": [
         ""
@@ -52606,6 +52606,84 @@
       "capability": "Native sequence function references",
       "workload": "Classify dash, octal and uint32 OIDs, malformed numeric inputs and quoted or signed names against captured PostgreSQL 18.4 outcomes.",
       "invariant": "Execution and stored-reference validation share the native classifier without allocating or inferring catalog edges from numeric OIDs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_rejects_cross_table_oid_and_incarnation_collisions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Reject an OID or incarnation shared by distinct table constraint rows.",
+      "invariant": "Both original catalog identity projections are injective across tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_rejects_invalid_supplied_row_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Supply zero incarnations and zero, negative or overflowing OIDs.",
+      "invariant": "Native reconstruction rejects malformed supplied constraint addresses.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_includes_each_constraint_kind",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Collide NOT NULL, column/table CHECK, key and column/table foreign-key identities.",
+      "invariant": "Every supplied constraint row participates in the same catalog identity namespace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_preserves_shared_families_and_separate_catalog_classes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Share a partition foreign-key enforcement family and repeat provenance while retaining distinct row identities and cross-catalog OIDs.",
+      "invariant": "Shared enforcement metadata is not a duplicate row; pg_class and pg_constraint remain separate OID namespaces.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_catalog_borrows_large_expressions_and_preserves_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/identities.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Validate one-MiB borrowed CHECK input with absent legacy identities and original NOT VALID/NOT ENFORCED flags.",
+      "invariant": "Validation copies no expression payload, releases its scratch and never materializes missing metadata.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_catalog_constraints_share_one_namespace_across_tables_foreign_tables_and_domains",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints.rs",
+      "capability": "Native constraint catalog identity closure",
+      "workload": "Join ordinary, foreign and domain constraints and collide each pair of owners.",
+      "invariant": "The immutable catalog adapter validates all three constraint owner families together.",
       "case_names": [
         ""
       ]

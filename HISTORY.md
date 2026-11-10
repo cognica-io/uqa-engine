@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reject duplicate supplied constraint catalog OIDs and incarnations across ordinary tables, foreign tables and domains before restore activation. Shared foreign-key enforcement families, distinct partition rows, separate catalog OID namespaces and original legacy metadata absence are preserved. Complete logical closure and public Engine restore remain under implementation.
+
 - Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
 
 - Add SQL/Execution native predicates for captured named arguments of builtin sequence functions against the original relation namespace. Typed numeric OIDs, dash OID zero, native numeric spellings, explicit text casts, deferred routine bodies and same-named user functions retain their original behavior. Complete logical closure and public Engine restore remain under implementation.
