@@ -21,6 +21,7 @@ pub mod named_definitions;
 pub mod namespace_names;
 pub mod node_tree;
 pub mod oids;
+pub mod regobject;
 pub mod resolution;
 pub mod result_type;
 pub mod table_definition;

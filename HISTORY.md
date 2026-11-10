@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
 
-- Add SQL/Execution native predicates for captured named arguments of builtin sequence functions against the original relation namespace. Typed numeric OIDs, explicit text casts, deferred routine bodies and same-named user functions retain their original behavior. Complete logical closure and public Engine restore remain under implementation.
+- Add SQL/Execution native predicates for captured named arguments of builtin sequence functions against the original relation namespace. Typed numeric OIDs, dash OID zero, native numeric spellings, explicit text casts, deferred routine bodies and same-named user functions retain their original behavior. Complete logical closure and public Engine restore remain under implementation.
 
 - Add SQL/Execution native predicates for live key/CHECK columns, original foreign-key indexes and captured referenced-partition edges before activation. Reordered target keys, repeated referencing/action columns, renamed indexes and NOT VALID declarations preserve their existing behavior without evaluating checks or callbacks. SQL owns the admitted dependency predicate; complete expression/resource closure and public Engine restore remain under implementation.
 

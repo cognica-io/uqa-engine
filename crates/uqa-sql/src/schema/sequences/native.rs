@@ -6,7 +6,14 @@
 
 //! Native sequence dependencies retain original table/column identities and bound names.
 
-use crate::{ast::ColumnDef, catalog::resolution::bound_relation_identity_with_control, SQLError};
+use crate::{
+    ast::ColumnDef,
+    catalog::{
+        regobject::{numeric_regobject_oid, NumericRegobjectOid},
+        resolution::bound_relation_identity_with_control,
+    },
+    SQLError,
+};
 use uqa_core::{
     catalog_sequence::{SequenceOwner, SequenceOwnerDependency},
     memory::{BudgetedMap, MemoryBudget, Produced, ProductionControl},
@@ -19,7 +26,10 @@ pub fn function_relation(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<RelationIdentity>>, SQLError> {
     control.check()?;
-    if reference.parse::<u32>().is_ok() {
+    if matches!(
+        numeric_regobject_oid(reference),
+        NumericRegobjectOid::Valid(_)
+    ) {
         Ok(None)
     } else {
         bound_relation_identity_with_control(reference, control).map(Some)

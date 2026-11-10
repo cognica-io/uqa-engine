@@ -47,6 +47,10 @@ fn native_sequence_function_names_require_relations_without_evaluating_runtime_i
         "2147483647::regclass",
         "'public.absent'::text",
         "'2147483647'",
+        "'-'",
+        "'-'::regclass",
+        "'010'",
+        "'4294967295'",
     ] {
         check(&catalog(argument)).unwrap();
     }
@@ -54,6 +58,9 @@ fn native_sequence_function_names_require_relations_without_evaluating_runtime_i
         "'public.absent'",
         "'public.absent'::regclass",
         "'unqualified'",
+        "'+5'",
+        "'08'",
+        "'4294967296'",
     ] {
         assert!(check(&catalog(argument)).is_err(), "{argument}");
     }

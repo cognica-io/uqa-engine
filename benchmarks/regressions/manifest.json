@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -52526,7 +52526,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
       "capability": "Native sequence function references",
-      "workload": "Decode quoted canonical names, numeric OIDs and invalid unqualified names under quota and cancellation.",
+      "workload": "Decode quoted canonical names, dash and octal OIDs, malformed numeric inputs and invalid unqualified names under quota and cancellation.",
       "invariant": "Numeric values do not imply live catalog edges; canonical names retain their exact identity and allowance.",
       "case_names": [
         ""
@@ -52593,6 +52593,19 @@
       "capability": "Native index column references",
       "workload": "Validate escaped Unicode column names, repeated INCLUDE fields, denied text admission and duplicate live declarations.",
       "invariant": "Names and ordering remain exact, validation owns temporary allocations and every failed admission retires them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_regobject_numeric_inputs_preserve_postgresql_radix_and_name_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/regobject.rs",
+      "capability": "Native sequence function references",
+      "workload": "Classify dash, octal and uint32 OIDs, malformed numeric inputs and quoted or signed names against captured PostgreSQL 18.4 outcomes.",
+      "invariant": "Execution and stored-reference validation share the native classifier without allocating or inferring catalog edges from numeric OIDs.",
       "case_names": [
         ""
       ]

@@ -28,3 +28,26 @@ INSERT INTO backup_dynamic DEFAULT VALUES;
 \set ON_ERROR_STOP on
 ROLLBACK TO execution;
 ROLLBACK;
+SELECT '-'::regclass::oid AS dash_oid, '010'::regclass::oid AS octal_oid,
+       '4294967295'::regclass::oid AS maximum_oid \gset
+\echo numeric_regclass_values :dash_oid :octal_oid :maximum_oid
+BEGIN;
+CREATE TEMP TABLE backup_dash(value bigint DEFAULT nextval('-'));
+\echo dash_definition :SQLSTATE
+CREATE TEMP VIEW backup_dash_view AS SELECT currval('-'::regclass);
+\echo dash_view :SQLSTATE
+SAVEPOINT execution;
+\set ON_ERROR_STOP off
+INSERT INTO backup_dash DEFAULT VALUES;
+\echo dash_execution :SQLSTATE
+\set ON_ERROR_STOP on
+ROLLBACK TO execution;
+ROLLBACK;
+\set ON_ERROR_STOP off
+SELECT '08'::regclass;
+\echo invalid_octal_input :SQLSTATE
+SELECT '4294967296'::regclass;
+\echo overflowing_oid_input :SQLSTATE
+SELECT '+5'::regclass;
+\echo signed_name_input :SQLSTATE
+\set ON_ERROR_STOP on

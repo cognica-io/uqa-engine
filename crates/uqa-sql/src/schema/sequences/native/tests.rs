@@ -12,13 +12,20 @@ fn native_sequence_function_relations_preserve_numeric_and_quoted_names() {
     let memory = MemoryBudget::new(4096);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
-    assert!(function_relation("2147483647", &control).unwrap().is_none());
+    for reference in ["-", "0", "010", "2147483647", "4294967295"] {
+        assert!(function_relation(reference, &control).unwrap().is_none());
+    }
     let named = function_relation("\"saved schema\".\"123\"", &control)
         .unwrap()
         .unwrap();
     assert_eq!(*named, RelationIdentity::new("saved schema", "123"));
     drop(named);
-    assert!(function_relation("unqualified", &control).is_err());
+    for reference in ["unqualified", "+5", " 5", "08", "4294967296"] {
+        assert!(
+            function_relation(reference, &control).is_err(),
+            "{reference}"
+        );
+    }
     assert_eq!(memory.used(), 0);
     let empty = MemoryBudget::new(0);
     assert_eq!(
