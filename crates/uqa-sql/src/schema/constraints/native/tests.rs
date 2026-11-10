@@ -12,6 +12,7 @@ use crate::{
 use uqa_core::catalog_identity::CatalogObjectIdentity;
 
 mod identities;
+mod partitions;
 
 struct Table {
     name: RelationIdentity,

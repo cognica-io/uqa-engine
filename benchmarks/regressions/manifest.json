@@ -52687,6 +52687,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_require_complete_referenced_partition_membership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Omit the leaf or every derived row from a captured two-level referenced partition tree.",
+      "invariant": "Every proper referenced descendant has exactly one original derived constraint row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_derive_partition_rows_only_for_the_declaring_foreign_key",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Use column/table declarations with an inherited partition copy and then add extra derived rows to that copy.",
+      "invariant": "Only the declaring family row derives referenced-partition rows; inherited copies retain their independent catalog identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraints_select_only_the_original_referenced_partition_tree",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/partitions.rs",
+      "capability": "Complete referenced-partition constraint membership",
+      "workload": "Retain an unrelated partition tree and substitute one of its children into the derived rows.",
+      "invariant": "Completeness covers only the original referenced subtree and rejects foreign descendants.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

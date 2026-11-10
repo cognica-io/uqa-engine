@@ -24,6 +24,7 @@ use uqa_core::{
 
 mod foreign_keys;
 mod identities;
+mod partitions;
 
 #[derive(Clone, Copy)]
 pub struct NativeConstraintTable<'a> {
@@ -44,7 +45,7 @@ struct Index<'a> {
 
 struct Catalog<'a> {
     tables: BudgetedMap<&'a RelationIdentity, NativeConstraintTable<'a>>,
-    identities: BudgetedMap<[u8; 16], NativeConstraintTable<'a>>,
+    identities: BudgetedMap<[u8; 16], ()>,
     columns: BudgetedMap<([u8; 16], &'a str), &'a ColumnDef>,
     indexes: BudgetedMap<[u8; 16], Index<'a>>,
     memory: &'a MemoryBudget,
@@ -73,7 +74,7 @@ pub fn validate<'a>(
         catalog.control.check()?;
         if table.object_id == [0; 16]
             || catalog.tables.insert(table.name, table)?.is_some()
-            || catalog.identities.insert(table.object_id, table)?.is_some()
+            || catalog.identities.insert(table.object_id, ())?.is_some()
         {
             return Err(invalid("duplicate or invalid relation"));
         }
@@ -106,8 +107,9 @@ pub fn validate<'a>(
             }
         }
     }
+    let partitions = partitions::Partitions::new(&catalog)?;
     for (_, table) in &catalog.tables {
-        catalog.table(*table)?;
+        catalog.table(*table, &partitions)?;
     }
     catalog.control.check()?;
     Ok(())
@@ -126,7 +128,11 @@ impl<'a> Catalog<'a> {
             .ok_or_else(|| invalid("missing live column"))
     }
 
-    fn table(&self, table: NativeConstraintTable<'a>) -> Result<(), SQLError> {
+    fn table(
+        &self,
+        table: NativeConstraintTable<'a>,
+        partitions: &partitions::Partitions<'_>,
+    ) -> Result<(), SQLError> {
         for key in table.keys {
             if key.columns.is_empty() {
                 return Err(invalid("empty key"));
@@ -147,11 +153,15 @@ impl<'a> Catalog<'a> {
                 self.expression(table, check)?;
             }
             if let Some(reference) = &column.references {
-                self.foreign_key(table, foreign_keys::Reference::column(column, reference))?;
+                self.foreign_key(
+                    table,
+                    foreign_keys::Reference::column(column, reference),
+                    partitions,
+                )?;
             }
         }
         for key in table.foreign_keys {
-            self.foreign_key(table, foreign_keys::Reference::table(key))?;
+            self.foreign_key(table, foreign_keys::Reference::table(key), partitions)?;
         }
         if let Some(hierarchy) = table.hierarchy {
             if let Some(partition) = &hierarchy.partition_spec {

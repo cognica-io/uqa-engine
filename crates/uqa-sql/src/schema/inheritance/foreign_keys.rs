@@ -85,16 +85,22 @@ pub fn declared_foreign_key_families(
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
 ) -> BTreeSet<[u8; 16]> {
+    foreign_key_families(columns, &constraints.foreign_keys).collect()
+}
+
+/// Borrow the same enforcement-family identities without allocating a set or copying declarations.
+pub fn foreign_key_families<'a>(
+    columns: &'a [ColumnDef],
+    foreign_keys: &'a [ForeignKey],
+) -> impl Iterator<Item = [u8; 16]> + 'a {
     columns
         .iter()
         .filter_map(|column| column.references.as_ref()?.object_id)
         .chain(
-            constraints
-                .foreign_keys
+            foreign_keys
                 .iter()
                 .filter_map(|foreign_key| foreign_key.object_id),
         )
-        .collect()
 }
 
 /// A foreign key of a declaration, by the catalog row it publishes.

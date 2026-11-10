@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reject restored foreign keys with omitted derived constraints for their captured referenced partitions, or with extra derived rows on an inherited foreign-key copy. Validation compares the complete original partition tree without executing declarations or creating replacement rows.
+
 - Reject duplicate supplied constraint catalog OIDs and incarnations across ordinary tables, foreign tables and domains before restore activation. Shared foreign-key enforcement families, distinct partition rows, separate catalog OID namespaces and original legacy metadata absence are preserved. Complete logical closure and public Engine restore remain under implementation.
 
 - Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
