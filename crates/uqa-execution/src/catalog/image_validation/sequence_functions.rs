@@ -92,7 +92,7 @@ impl References for SequenceReferences<'_, '_> {
         self.control.check()?;
         Ok(())
     }
-    fn trigger(&self, _: [u8; 16]) -> Result<(), SQLError> {
+    fn trigger(&self, _: &str, _: Option<[u8; 16]>) -> Result<(), SQLError> {
         self.control.check()?;
         Ok(())
     }

@@ -52986,6 +52986,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_names_preserve_quoted_identity_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_names_reject_ambiguous_zero_argument_functions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_trigger_name_index_retires_partial_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_trigger_references_reject_missing_legacy_name_targets",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests.rs",
+      "capability": "Legacy trigger target closure",
+      "workload": "Check qualified legacy names, exact quoted components, concrete identities, missing/ambiguous targets and original allocation retirement.",
+      "invariant": "A missing function identity uses only its stored qualified name; lookup never consults a search path or modifies the original event definition.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

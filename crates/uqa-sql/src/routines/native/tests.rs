@@ -262,16 +262,102 @@ fn native_trigger_references_keep_the_selected_contract_and_deferred_body() {
             let references =
                 NativeRoutineReferences::new(std::iter::once(&*definition), &memory, &token)
                     .unwrap();
-            let result = references.trigger([1; 16]);
+            let result = references.trigger("public.historical_name", Some([1; 16]));
             assert_eq!(
                 result.is_ok(),
                 valid,
                 "{parameters}/{returns}/{language}/{procedure}: {result:?}"
             );
-            assert!(references.trigger([2; 16]).is_err());
+            assert!(references.trigger("public.renamed", Some([2; 16])).is_err());
             token.cancel();
-            assert!(references.trigger([1; 16]).is_err());
+            assert!(references
+                .trigger("public.historical_name", Some([1; 16]))
+                .is_err());
         }
         assert_eq!(memory.used(), 0);
     }
+}
+
+fn trigger_definition(name: &str, identity: u8) -> CreateFunction {
+    let Statement::CreateFunction(mut definition) = crate::compile(&format!(
+        "CREATE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS 'uncompiled source body'",
+    ))
+    .unwrap()
+    .remove(0) else {
+        panic!("function");
+    };
+    definition.object_id = Some([identity; 16]);
+    *definition
+}
+
+#[test]
+fn native_legacy_trigger_names_preserve_quoted_identity_without_rebinding() {
+    for (stored, requested) in [
+        ("public.fire", r#""public"."fire""#),
+        (r#""s.q"."f""x""#, r#""s.q"."f""x""#),
+    ] {
+        let definition = trigger_definition(stored, 1);
+        let memory = MemoryBudget::new(64 << 10);
+        let token = CancellationToken::new();
+        {
+            let references =
+                NativeRoutineReferences::new(std::iter::once(&definition), &memory, &token)
+                    .unwrap();
+            references.trigger(requested, None).unwrap();
+            references
+                .trigger("historical_name", Some([1; 16]))
+                .unwrap();
+            assert!(references.trigger("public.absent", None).is_err());
+            assert!(references.trigger("fire", None).is_err());
+            assert!(references.trigger(requested, Some([2; 16])).is_err());
+        }
+        assert_eq!(definition.object_id, Some([1; 16]));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn native_legacy_trigger_names_reject_ambiguous_zero_argument_functions() {
+    let original = trigger_definition("public.fire", 1);
+    let duplicate = trigger_definition(r#""public"."fire""#, 2);
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    assert!(
+        NativeRoutineReferences::new([&original, &duplicate].into_iter(), &memory, &token).is_err()
+    );
+    assert_eq!(memory.used(), 0);
+    let mut overload = definition();
+    overload.name = original.name.clone();
+    overload.object_id = Some([2; 16]);
+    {
+        let references =
+            NativeRoutineReferences::new([&original, &overload].into_iter(), &memory, &token)
+                .unwrap();
+        references.trigger("public.fire", None).unwrap();
+    }
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn native_legacy_trigger_name_index_retires_partial_admission_and_cancellation() {
+    let definition = trigger_definition("public.fire", 1);
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let used = {
+        let references =
+            NativeRoutineReferences::new(std::iter::once(&definition), &memory, &token).unwrap();
+        references.trigger("public.fire", None).unwrap();
+        memory.used()
+    };
+    assert_eq!(memory.used(), 0);
+    let denied = MemoryBudget::new(used - 1);
+    assert!(NativeRoutineReferences::new(std::iter::once(&definition), &denied, &token).is_err());
+    assert_eq!(denied.used(), 0);
+    {
+        let references =
+            NativeRoutineReferences::new(std::iter::once(&definition), &memory, &token).unwrap();
+        token.cancel();
+        assert!(references.trigger("public.fire", None).is_err());
+    }
+    assert_eq!(memory.used(), 0);
 }

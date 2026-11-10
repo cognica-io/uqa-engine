@@ -31,7 +31,7 @@ pub(super) trait References {
         arguments: &[String],
         procedure: bool,
     ) -> Result<(), SQLError>;
-    fn trigger(&self, identity: [u8; 16]) -> Result<(), SQLError>;
+    fn trigger(&self, name: &str, identity: Option<[u8; 16]>) -> Result<(), SQLError>;
 }
 
 impl References for NativeRoutineReferences<'_> {
@@ -58,8 +58,8 @@ impl References for NativeRoutineReferences<'_> {
     ) -> Result<(), SQLError> {
         self.identity(identity, arguments, procedure)
     }
-    fn trigger(&self, identity: [u8; 16]) -> Result<(), SQLError> {
-        self.trigger(identity)
+    fn trigger(&self, name: &str, identity: Option<[u8; 16]>) -> Result<(), SQLError> {
+        self.trigger(name, identity)
     }
 }
 
@@ -149,9 +149,7 @@ pub(super) fn visit(
         control.check()?;
         for trigger in triggers.values() {
             control.check()?;
-            if let Some(identity) = trigger.function_object_id {
-                references.trigger(identity)?;
-            }
+            references.trigger(&trigger.definition.function, trigger.function_object_id)?;
             if let Some(condition) = &trigger.definition.when {
                 references.expression(condition)?;
             }

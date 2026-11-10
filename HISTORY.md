@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate legacy trigger targets through their exact stored schema/function name when an immutable function identity is absent. Original absent identity fields remain unchanged, and ambiguous or missing handlers reject before activation. Trigger activation consumes one event row even when the stored handler declaration includes `SETOF`.
+
 - Validate selected trigger function signatures, result types and languages during native restoration without compiling deferred bodies. Ordinary creation, catalog projection and restoration share the trigger contract, including PostgreSQL-compatible `RETURNS SETOF trigger` declarations.
 
 - Validate captured event registry ownership, trigger relation kinds and update columns, rule dependency relations/columns, and concrete action/condition references before private restoration. Native OLD/NEW scalar references, CTE visibility, quoted names and absent legacy dependency summaries retain their existing meaning; definitions are not rebound or executed.

@@ -132,36 +132,62 @@ fn native_trigger_references_require_the_selected_trigger_function_contract() {
         ("integer", "plpgsql", false),
         ("trigger", "sql", false),
     ] {
-        let mut snapshot = empty_catalog().snapshot().clone();
-        let Statement::CreateFunction(mut function) = uqa_sql::compile(&format!(
+        for identity in [Some([1; 16]), None] {
+            let mut snapshot = empty_catalog().snapshot().clone();
+            let Statement::CreateFunction(mut function) = uqa_sql::compile(&format!(
             "CREATE FUNCTION public.fire() RETURNS {returns} LANGUAGE {language} AS 'uncompiled source body'",
         )).unwrap().remove(0) else { panic!("function"); };
-        function.object_id = Some([1; 16]);
-        RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
-            .insert(
-                "public.fire".into(),
-                vec![SQLUserFunction::new(*function, RoutineBody::Source).shared()],
-            )
-            .unwrap();
-        let Statement::CreateTrigger(definition) = uqa_sql::compile(
+            function.object_id = Some([1; 16]);
+            RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+                .insert(
+                    "public.fire".into(),
+                    vec![SQLUserFunction::new(*function, RoutineBody::Source).shared()],
+                )
+                .unwrap();
+            let Statement::CreateTrigger(definition) = uqa_sql::compile(
             "CREATE TRIGGER saved BEFORE INSERT ON public.items FOR EACH ROW EXECUTE FUNCTION public.fire()",
         ).unwrap().remove(0) else { panic!("trigger"); };
-        RetainedValue::make_mut(&mut snapshot.definitions.triggers)
-            .insert_event(
-                RelationIdentity::new("public", "items"),
-                "saved".into(),
-                uqa_sql::catalog::events::StoredTrigger {
-                    definition,
-                    function_object_id: Some([1; 16]),
-                    enabled: uqa_sql::ast::EventEnableMode::default(),
-                    object_id: None,
-                    constraint_name: None,
-                    catalog_oid: None,
-                    constraint_catalog_oid: None,
-                },
-            )
-            .unwrap();
-        let result = check(&snapshot);
-        assert_eq!(result.is_ok(), valid, "{returns}/{language}: {result:?}");
+            RetainedValue::make_mut(&mut snapshot.definitions.triggers)
+                .insert_event(
+                    RelationIdentity::new("public", "items"),
+                    "saved".into(),
+                    uqa_sql::catalog::events::StoredTrigger {
+                        definition,
+                        function_object_id: identity,
+                        enabled: uqa_sql::ast::EventEnableMode::default(),
+                        object_id: None,
+                        constraint_name: None,
+                        catalog_oid: None,
+                        constraint_catalog_oid: None,
+                    },
+                )
+                .unwrap();
+            let result = check(&snapshot);
+            assert_eq!(result.is_ok(), valid, "{returns}/{language}: {result:?}");
+        }
     }
+}
+
+#[test]
+fn native_trigger_references_reject_missing_legacy_name_targets() {
+    let mut snapshot = empty_catalog().snapshot().clone();
+    let Statement::CreateTrigger(definition) = uqa_sql::compile(
+        "CREATE TRIGGER saved BEFORE INSERT ON public.items FOR EACH ROW EXECUTE FUNCTION public.absent()",
+    ).unwrap().remove(0) else { panic!("trigger"); };
+    RetainedValue::make_mut(&mut snapshot.definitions.triggers)
+        .insert_event(
+            RelationIdentity::new("public", "items"),
+            "saved".into(),
+            uqa_sql::catalog::events::StoredTrigger {
+                definition,
+                function_object_id: None,
+                enabled: uqa_sql::ast::EventEnableMode::default(),
+                object_id: None,
+                constraint_name: None,
+                catalog_oid: None,
+                constraint_catalog_oid: None,
+            },
+        )
+        .unwrap();
+    assert!(check(&snapshot).is_err());
 }
