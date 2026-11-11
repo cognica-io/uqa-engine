@@ -33,6 +33,14 @@ pub(crate) enum PreparedCharFilter<'a> {
 
 impl CharFilter {
     pub(crate) fn prepare(&self) -> AnalysisResult<PreparedCharFilter<'_>> {
+        crate::work::inline(self.prepare_with(&mut ()))
+    }
+
+    pub(crate) async fn prepare_with(
+        &self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<PreparedCharFilter<'_>> {
+        work.checkpoint().await?;
         Ok(match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
             Self::CJKWidth => PreparedCharFilter::CJKWidth,
@@ -45,7 +53,7 @@ impl CharFilter {
                 normalize_kana: *normalize_kana,
             },
             Self::Mapping { mapping } => {
-                PreparedCharFilter::Mapping(mapping_longest_first(mapping))
+                PreparedCharFilter::Mapping(mapping_longest_first(mapping, work).await?)
             }
             Self::PatternReplace {
                 pattern,
@@ -57,7 +65,7 @@ impl CharFilter {
                         pattern: pattern.clone(),
                         source,
                     })?;
-                let replacement = Replacement::prepare(replacement, &expression);
+                let replacement = Replacement::prepare_with(replacement, &expression, work).await?;
                 let expression = CooperativeRegex::compile(pattern).map_err(|source| {
                     AnalysisError::InvalidRegex {
                         component: "pattern-replace character filter",
@@ -75,8 +83,11 @@ impl CharFilter {
 }
 
 impl PreparedCharFilter<'_> {
-    pub(crate) fn into_owned(self) -> PreparedCharFilter<'static> {
-        match self {
+    pub(crate) async fn into_owned_with(
+        self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<PreparedCharFilter<'static>> {
+        Ok(match self {
             Self::HTMLStrip => PreparedCharFilter::HTMLStrip,
             Self::CJKWidth => PreparedCharFilter::CJKWidth,
             #[cfg(feature = "kuromoji")]
@@ -93,9 +104,9 @@ impl PreparedCharFilter<'_> {
                 replacement,
             } => PreparedCharFilter::PatternReplace {
                 expression,
-                replacement: replacement.into_owned(),
+                replacement: replacement.into_owned_with(work).await?,
             },
-        }
+        })
     }
 
     pub(crate) fn filter_mapped<'a>(

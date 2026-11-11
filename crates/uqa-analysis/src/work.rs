@@ -11,6 +11,10 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub(crate) mod ordering;
+pub(crate) mod progress;
+
 pub(crate) trait Work<E>: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;
 
@@ -40,6 +44,21 @@ impl<E: From<uqa_core::image_io::ImageIoError>> Work<E>
     }
 }
 
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub(crate) trait ResourceWork:
+    Work<crate::AnalysisError> + crate::morphology::work::Work
+{
+}
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+impl<W> ResourceWork for W where W: Work<crate::AnalysisError> + crate::morphology::work::Work {}
+
+#[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+pub(crate) trait ResourceWork: Work<crate::AnalysisError> {}
+
+#[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+impl<W: Work<crate::AnalysisError>> ResourceWork for W {}
+
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     match future
@@ -49,4 +68,43 @@ pub(crate) fn inline<F: Future>(future: F) -> F::Output {
         Poll::Ready(value) => value,
         Poll::Pending => unreachable!("ordinary analysis construction has no suspended work"),
     }
+}
+
+/// Copy original text while retaining the position between scalar-aligned fragments.
+pub(crate) async fn copy_text<E>(value: &str, work: &mut impl Work<E>) -> Result<String, E> {
+    work.checkpoint().await?;
+    let mut output = String::with_capacity(value.len());
+    let mut position = 0;
+    while position < value.len() {
+        work.checkpoint().await?;
+        let part = crate::json::fragment(value, position);
+        output.push_str(part);
+        position += part.len();
+    }
+    Ok(output)
+}
+
+pub(crate) async fn own_text<E>(
+    value: std::borrow::Cow<'_, str>,
+    work: &mut impl Work<E>,
+) -> Result<String, E> {
+    match value {
+        std::borrow::Cow::Owned(value) => Ok(value),
+        std::borrow::Cow::Borrowed(value) => copy_text(value, work).await,
+    }
+}
+
+pub(crate) async fn find_byte<E>(
+    value: &str,
+    start: usize,
+    byte: u8,
+    work: &mut impl Work<E>,
+) -> Result<Option<usize>, E> {
+    for (index, bytes) in value.as_bytes()[start..].chunks(4096).enumerate() {
+        work.checkpoint().await?;
+        if let Some(offset) = bytes.iter().position(|candidate| *candidate == byte) {
+            return Ok(Some(start + index * 4096 + offset));
+        }
+    }
+    Ok(None)
 }

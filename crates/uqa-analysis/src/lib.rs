@@ -12,11 +12,11 @@ pub mod analyzer;
 mod cache;
 pub mod char_filter;
 mod character_class;
+mod configuration;
 mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
-#[cfg(any(feature = "nori", feature = "kuromoji"))]
 mod json;
 #[cfg(feature = "kuromoji")]
 pub mod kuromoji;
@@ -37,7 +37,6 @@ pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
 mod unicode;
-#[cfg(any(feature = "nori", feature = "kuromoji"))]
 mod work;
 
 pub use analyzer::{

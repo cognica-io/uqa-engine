@@ -42,6 +42,7 @@ impl Builder {
         }
     }
 
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn insert(self, surface: Vec<u16>) -> DictionaryResult<Self> {
         crate::morphology::work::inline(self.insert_with(surface, &mut ()))
     }
@@ -164,6 +165,7 @@ impl Builder {
         Ok(index)
     }
 
+    #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn finish(self, maximum_word_length: usize) -> DictionaryResult<Lexicon> {
         crate::morphology::work::inline(self.finish_with(maximum_word_length, &mut ()))
     }

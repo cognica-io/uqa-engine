@@ -2,6 +2,188 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_analyzer_image_preparation_preserves_exact_descriptor_and_independent_token_output",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Prepare wide mapping/synonym stages through one-poll windows without transport reads.",
+      "invariant": "Exact descriptor identity, independently expected terms and bounded fixture allocations survive retained reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_analyzer_image_preparation_retires_candidates_on_cancel_invalid_windows_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Interrupt multiple complete analyzer preparation positions through cancellation, invalid windows and abandonment.",
+      "invariant": "All candidate owners retire without live cache publication or another admission being released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_and_image_compose_without_transport_replay_or_input_owner_leaks",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Compose native descriptor syntax and complete executable preparation through one input work channel.",
+      "invariant": "Exact descriptor bytes and token output survive source-owner retirement without transport replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_korean_image_preserves_user_rules_dictionary_bytes_and_private_ownership",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Restore original Korean user rules and a mixed language closure when Japanese support is enabled.",
+      "invariant": "Original encoded addresses, first-definition rules, exact output and private cache ownership remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_image_prepares_user_rules_and_large_case_insensitive_stop_sets",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Restore Japanese user CSV and a wide stop set with long prefixes and lowercase duplicates.",
+      "invariant": "UTF-16 ordering, pinned case mapping, stop removal and original resource ownership preserve independent expected output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_image_failure_order_keeps_unused_artifacts_lazy_and_retires_requested_bytes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Present unused invalid artifacts, missing requested resources and interrupted dictionary hashing/decoding.",
+      "invariant": "Closure diagnostics retain their order, host resolvers are never used and supplied encoded admissions retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_ordering_matches_native_order_and_bounds_comparison_progress",
+      "cases": 1,
+      "source": "crates/uqa-core/src/ordering/tests/retained.rs",
+      "capability": "Retained native ordering",
+      "workload": "Order duplicate-bearing inputs across heap boundaries and one/multiple-poll windows.",
+      "invariant": "Native order matches the independent slice result and each call respects its comparison progress window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_ordering_retires_original_elements_on_cancel_invalid_window_and_abandonment",
+      "cases": 1,
+      "source": "crates/uqa-core/src/ordering/tests/retained.rs",
+      "capability": "Retained native ordering",
+      "workload": "Cancel, invalidate and abandon original admitted values during heap construction and extraction.",
+      "invariant": "Partial order retains the original elements until terminal retirement, which releases their original reservations and work owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_korean_user_preparation_preserves_stable_rules_and_retires_partial_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/user_dictionary/tests.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Parse and order wide Korean user rules with long common prefixes and duplicate source definitions through one-poll windows.",
+      "invariant": "UTF-16 ranks, exact source and first-definition segmentation are preserved; interrupted preparation retires every original borrow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_user_preparation_matches_pinned_csv_and_morphology",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/user_dictionary/tests/retained.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Compile every pinned Japanese user-rule fixture through one-poll windows and compare complete prefix and word observations.",
+      "invariant": "CSV quoting, Unicode comments, segmentation, duplicate rejection and deferred morphology failures match the independent reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_user_preparation_retires_wide_rules_during_each_construction_pass",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/user_dictionary/tests/retained.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Interrupt wide Japanese source parsing, UTF-16 ordering and native lexical construction at actual retained positions.",
+      "invariant": "Exact source and lexical ranks survive completion; cancellation, invalid windows and abandonment release all partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_preparation_retains_configuration_and_stage_work_without_whole_pipeline_copies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Prepare a resolved multi-megabyte mapping, synonym and stop pipeline through one-poll input windows.",
+      "invariant": "Every fixture poll allocates less than 64 KiB while preserving the original descriptor, canonical configuration and token output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_preparation_retires_configuration_and_prepared_stages_at_each_boundary",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Abandon, cancel and invalidate compiled preparation at early, middle and late suspension points.",
+      "invariant": "No partial configuration or prepared stage remains owned after terminal failure, and failed input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_replacement_preparation_matches_regex_capture_expansion",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Prepare long Unicode, literal, escaped-dollar, named/numeric capture and malformed replacement inputs through one-poll windows.",
+      "invariant": "Prepared character output matches the independent public regex replacement implementation after the source configuration is retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_column_images_match_independent_physical_attribute_bytes",
@@ -53867,6 +54049,292 @@
       "capability": "Canonical native object traversal",
       "workload": "Encode 4096 ordered native properties and the same properties inserted in reverse order.",
       "invariant": "Ordered input is borrowed without a second key index; both native map configurations retain exactly the canonical bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_conversion_yields_without_source_reads_and_preserves_independent_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Convert large original analyzer configurations through one-poll windows, independent encoded/decoded allowances and terminal failures.",
+      "invariant": "Original encoded pointers, unresolved stages and native configurations remain exact without source rereads or resource compilation; failure releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_conversion_retires_incomplete_native_configuration_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Convert large original analyzer configurations through one-poll windows, independent encoded/decoded allowances and terminal failures.",
+      "invariant": "Original encoded pointers, unresolved stages and native configurations remain exact without source rereads or resource compilation; failure releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_expression_hash_preserves_exact_long_and_wide_native_tree_encoding",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor identity",
+      "workload": "Hash long literal/capture payloads and a 5,000-child native alternation with varied cooperative windows.",
+      "invariant": "Exact independent v1 preorder bytes and SHA-256 identities survive suspension without source reads or sibling-list copies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_identity_preserves_canonical_bytes_profiles_and_configuration",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor identity",
+      "workload": "Restore a descriptor with 200 expression filters, a long tokenizer pattern and Unicode-dependent stages.",
+      "invariant": "Canonical JSON, full runtime profiles, configuration and fingerprint remain exact across all tested poll windows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_preparation_retires_candidates_on_interruption_and_invalid_windows",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor identity",
+      "workload": "Cancel, abandon and invalidate private descriptor preparation at actual early and late suspension points.",
+      "invariant": "Incomplete parsed/configuration/profile candidates retire without retained allocation or reentry after failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_descriptor_wire_preserves_reference_struct_forms_and_values",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests.rs",
+      "capability": "Retained analyzer descriptor input",
+      "workload": "Decode independent serde object and sequence struct forms through native descriptor construction.",
+      "invariant": "Original typed fields, pipeline values and profile expressions remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_descriptor_wire_preserves_schema_and_duplicate_key_error_order",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests.rs",
+      "capability": "Retained analyzer descriptor input",
+      "workload": "Visit invalid native fields in source order and reject decoded duplicate keys before typed validation.",
+      "invariant": "Original schema diagnostics and duplicate-key precedence survive retained parsing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_descriptor_wire_retires_candidates_during_each_syntax_pass",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests.rs",
+      "capability": "Retained analyzer descriptor input",
+      "workload": "Abandon or cancel wide native profile input during uniqueness and typed construction passes.",
+      "invariant": "No partially constructed wire, profile string or syntax owner remains retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_output_avoids_complete_temporary_value_copies_per_poll",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor output",
+      "workload": "Serialize a wide original descriptor through one-poll windows.",
+      "invariant": "Canonical wire bytes and fingerprints are unchanged without whole temporary Value copies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_output_preserves_reference_bytes_and_limits",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor output",
+      "workload": "Encode independent escaped fields, arbitrary-precision values and exact descriptor byte limits.",
+      "invariant": "Native output matches canonical serde bytes and rejects overflow before publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_output_retires_every_partial_native_owner",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/profiles/retained.rs",
+      "capability": "Retained analyzer descriptor output",
+      "workload": "Cancel, abandon and invalidate windows during descriptor data and complete wire output.",
+      "invariant": "Partial output, source field copies and retained candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_configuration_preserves_public_serde_values_defaults_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests.rs",
+      "capability": "Retained native analyzer configuration input",
+      "workload": "Compare native stage construction with the public serde contract across every enabled stage, defaults, malformed fields, numerical representations and error order.",
+      "invariant": "Native construction preserves original values, feature-selected vocabulary and exact schema diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_configuration_preserves_tagged_and_struct_sequence_forms",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests.rs",
+      "capability": "Retained native analyzer configuration input",
+      "workload": "Restore original object and positional analyzer/stage forms, including missing and excess fields.",
+      "invariant": "All accepted configurations and positional error diagnostics match the original serde visitors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_configuration_construction_yields_without_complete_value_copies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/retained.rs",
+      "capability": "Retained native analyzer configuration input",
+      "workload": "Advance a large borrowed synonym configuration with one work step per call and no reader access.",
+      "invariant": "Each fixture poll allocates less than 64 KiB and reconstructs the original native fields without opening paths or compiling stages.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_configuration_construction_retires_partial_fields_and_original_borrows",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/retained.rs",
+      "capability": "Retained native analyzer configuration input",
+      "workload": "Cancel, abandon or invalidate every partial native configuration input position.",
+      "invariant": "Partial payloads and original borrowed owners retire completely; failed and completed continuations remain terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "malformed_original_configuration_rejects_skipped_fields_before_payload_admission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/resumable.rs",
+      "capability": "Retained native analyzer configuration input",
+      "workload": "Read malformed original images with absent required fields before a payload larger than the decoding allowance.",
+      "invariant": "Original field-order errors precede later payload admission and all unpublished owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "resolved_configuration_validation_retains_work_without_complete_pipeline_copies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/config/tests.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Restore a multi-megabyte resolved synonym/mapping configuration through one-poll windows.",
+      "invariant": "Every poll stays below the fixture allocation bound and returns the exact resolved configuration without complete pipeline copies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "resolved_configuration_validation_preserves_canonical_fields_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/config/tests.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Compare native restore with public serde plus the existing snapshot transformation across canonical/default/unknown/error shapes.",
+      "invariant": "Acceptance, original configuration fields, feature checks, size/stage limits and diagnostic precedence remain identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "resolved_configuration_validation_retires_each_suspended_owner",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/config/tests.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Interrupt configuration construction, byte validation and long-prefix canonical comparison at five retained progress positions.",
+      "invariant": "Cancellation, invalid windows and abandonment retire original input and native candidates without publishing an analyzer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_size_matches_public_serde_limit_diagnostics_for_every_stage",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/observations.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Visit every feature-selected stage and each byte limit around its public JSON representation.",
+      "invariant": "Native field traversal preserves original compact-serializer write boundaries and exact required-byte diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "borrowed_configuration_views_preserve_every_public_serialized_field_and_omission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/observations.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Compare borrowed field views to public serde values, including explicit synonym properties, unknown keys and omitted fields.",
+      "invariant": "Exact native variant, value, property presence and array membership determine snapshot equivalence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "configuration_size_retains_long_escape_boundaries_and_structural_comparison",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/observations.rs",
+      "capability": "Retained resolved analyzer configuration validation",
+      "workload": "Validate Unicode and escaped configuration strings across multiple 4 KiB fragments and a late equal-length mismatch.",
+      "invariant": "Retained scanning preserves size-limit errors and complete string equality without fragment-dependent admission.",
       "case_names": [
         ""
       ]

@@ -8,22 +8,7 @@
 
 use super::{DictionaryResult, Value, Work};
 
-pub(crate) async fn bytes_equal(
-    left: &[u8],
-    right: &[u8],
-    work: &mut impl Work,
-) -> DictionaryResult<bool> {
-    if left.len() != right.len() {
-        return Ok(false);
-    }
-    for (left, right) in left.chunks(4096).zip(right.chunks(4096)) {
-        work.checkpoint().await?;
-        if left != right {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
+pub(crate) use crate::json::bytes_equal;
 
 enum Frame<'a> {
     Value(&'a Value, &'a Value),

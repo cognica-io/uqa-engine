@@ -27,11 +27,17 @@ impl AnalyzerFingerprint {
         Self(bytes)
     }
 
-    pub(super) fn digest(bytes: &[u8]) -> Self {
+    pub(super) async fn digest_with(
+        bytes: &[u8],
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Self> {
         let mut hash = Sha256::new();
         hash.update(b"UQA analyzer descriptor\0");
-        hash.update(bytes);
-        Self(hash.finalize().into())
+        for fragment in bytes.chunks(4096) {
+            work.checkpoint().await?;
+            hash.update(fragment);
+        }
+        Ok(Self(hash.finalize().into()))
     }
 }
 

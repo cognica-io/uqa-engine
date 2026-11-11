@@ -101,3 +101,5 @@ fn analyzer_image_rejects_unavailable_resource_features_before_payload_use() {
         }
     }
 }
+
+mod retained;

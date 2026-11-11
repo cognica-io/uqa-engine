@@ -6,11 +6,15 @@
 
 //! Fingerprints describe the Unicode behavior of the components actually present.
 
-use regex_syntax::hir::{Class, Hir, HirKind, Look};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use crate::{AnalysisError, AnalysisResult, Analyzer, CharFilter, TokenFilter, Tokenizer};
+use crate::{
+    work::{inline, Work},
+    AnalysisError, AnalysisResult, Analyzer, CharFilter, TokenFilter, Tokenizer,
+};
+
+mod expression;
+use expression::{expression, property_expression};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -24,15 +28,24 @@ pub(super) struct RuntimeProfiles {
 
 impl RuntimeProfiles {
     pub fn resolve(config: &Analyzer) -> AnalysisResult<Self> {
-        Self::resolve_with_profile(config, crate::unicode::Profile::default())
+        inline(Self::resolve_with_profile(
+            config,
+            crate::unicode::Profile::default(),
+            &mut (),
+        ))
     }
 
     pub fn profile(&self) -> AnalysisResult<crate::unicode::Profile> {
         crate::unicode::Profile::from_version(self.rust_unicode)
     }
 
-    pub fn validate(&self, config: &Analyzer) -> AnalysisResult<()> {
-        if Self::resolve_with_profile(config, self.profile()?)? != *self {
+    pub async fn validate_with(
+        &self,
+        config: &Analyzer,
+        work: &mut impl Work<AnalysisError>,
+    ) -> AnalysisResult<()> {
+        let expected = Self::resolve_with_profile(config, self.profile()?, work).await?;
+        if !self.equals(&expected, work).await? {
             return Err(super::invalid(
                 "runtime Unicode or regular-expression profile differs",
             ));
@@ -40,12 +53,14 @@ impl RuntimeProfiles {
         Ok(())
     }
 
-    fn resolve_with_profile(
+    async fn resolve_with_profile(
         config: &Analyzer,
         profile: crate::unicode::Profile,
+        work: &mut impl Work<AnalysisError>,
     ) -> AnalysisResult<Self> {
         let mut expressions = Vec::new();
-        for filter in &config.char_filters {
+        for (index, filter) in config.char_filters.iter().enumerate() {
+            work.records(index).await?;
             let pattern = match filter {
                 CharFilter::HTMLStrip => "<[^>]+>",
                 CharFilter::PatternReplace { pattern, .. } => pattern,
@@ -53,7 +68,7 @@ impl RuntimeProfiles {
                 #[cfg(feature = "kuromoji")]
                 CharFilter::KuromojiIterationMark { .. } => continue,
             };
-            expressions.push(expression(pattern, "pattern-replace character filter")?);
+            expressions.push(expression(pattern, "pattern-replace character filter", work).await?);
         }
         if matches!(config.tokenizer, Tokenizer::NGram { .. }) {
             config.tokenizer.validate()?;
@@ -70,36 +85,68 @@ impl RuntimeProfiles {
             Tokenizer::Kuromoji(_) => (None, false),
         };
         if let Some(pattern) = pattern {
-            expressions.push(expression(pattern, "pattern tokenizer")?);
+            expressions.push(expression(pattern, "pattern tokenizer", work).await?);
         }
-        let rust_lower = config
-            .token_filters
-            .iter()
-            .any(|filter| matches!(filter, TokenFilter::Lowercase));
+        let mut rust_lower = false;
+        let mut normalization = false;
+        for (index, filter) in config.token_filters.iter().enumerate() {
+            work.records(index).await?;
+            rust_lower |= matches!(filter, TokenFilter::Lowercase);
+            normalization |= matches!(filter, TokenFilter::ASCIIFolding);
+        }
         if rust_lower {
             let context = [
-                property_expression(crate::unicode::CASED),
-                property_expression(crate::unicode::CASE_IGNORABLE),
+                property_expression(crate::unicode::CASED, work).await?,
+                property_expression(crate::unicode::CASE_IGNORABLE, work).await?,
             ];
             extend_lowercase_context(&mut expressions, profile.version(), context);
         }
-        let normalization = config
-            .token_filters
-            .iter()
-            .any(|filter| matches!(filter, TokenFilter::ASCIIFolding))
-            || config
-                .char_filters
-                .iter()
-                .any(|filter| matches!(filter, CharFilter::CJKWidth))
-            || config
-                .normalization
-                .as_ref()
-                .is_some_and(crate::NormalizationConfig::width);
+        if !normalization {
+            for (index, filter) in config.char_filters.iter().enumerate() {
+                work.records(index).await?;
+                if matches!(filter, CharFilter::CJKWidth) {
+                    normalization = true;
+                    break;
+                }
+            }
+        }
+        normalization |= config
+            .normalization
+            .as_ref()
+            .is_some_and(crate::NormalizationConfig::width);
         Ok(Self {
             rust_unicode: (rust_tokenizer || rust_lower).then_some(profile.version()),
             normalization_unicode: normalization.then_some(unicode_normalization::UNICODE_VERSION),
             expressions,
         })
+    }
+}
+
+impl RuntimeProfiles {
+    async fn equals(
+        &self,
+        expected: &Self,
+        work: &mut impl Work<AnalysisError>,
+    ) -> AnalysisResult<bool> {
+        if self.rust_unicode != expected.rust_unicode
+            || self.normalization_unicode != expected.normalization_unicode
+            || self.expressions.len() != expected.expressions.len()
+        {
+            return Ok(false);
+        }
+        for (index, (actual, expected)) in self
+            .expressions
+            .iter()
+            .zip(&expected.expressions)
+            .enumerate()
+        {
+            work.records(index).await?;
+            // Generated expression identities have exactly 64 ASCII bytes. Length is checked first.
+            if actual.len() != expected.len() || actual != expected {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -119,121 +166,11 @@ fn extend_lowercase_context(
     }
 }
 
-fn expression(pattern: &str, component: &'static str) -> AnalysisResult<String> {
-    let hir = regex_syntax::Parser::new()
-        .parse(pattern)
-        .map_err(|source| AnalysisError::InvalidRegex {
-            component,
-            pattern: pattern.into(),
-            source: regex::Error::Syntax(source.to_string()),
-        })?;
-    let mut hash = Sha256::new();
-    hash.update(b"UQA regex expression\0v1\0");
-    let unicode_word = hash_hir(&hir, &mut hash);
-    hash.update([u8::from(unicode_word)]);
-    if unicode_word {
-        let word = regex_syntax::Parser::new()
-            .parse("\\w")
-            .map_err(|_| super::invalid("Unicode word profile is unavailable"))?;
-        hash_hir(&word, &mut hash);
-    }
-    Ok(format!("{:x}", hash.finalize()))
-}
-
-fn property_expression(property: icu_properties::CodePointSetDataBorrowed<'_>) -> String {
-    // Use the same encoding as a parsed Unicode class, hashing the actual runtime data.
-    let mut hash = Sha256::new();
-    hash.update(b"UQA regex expression\0v1\0");
-    hash.update([2]);
-    length(&mut hash, property.iter_ranges().count());
-    for range in property.iter_ranges() {
-        hash.update(range.start().to_le_bytes());
-        hash.update(range.end().to_le_bytes());
-    }
-    hash.update([0]);
-    format!("{:x}", hash.finalize())
-}
-
-fn length(hash: &mut Sha256, length: usize) {
-    hash.update((length as u64).to_le_bytes());
-}
-
-fn hash_hir(root: &Hir, hash: &mut Sha256) -> bool {
-    let mut pending = vec![root];
-    let mut unicode_word = false;
-    while let Some(node) = pending.pop() {
-        match node.kind() {
-            HirKind::Empty => hash.update([0]),
-            HirKind::Literal(literal) => {
-                hash.update([1]);
-                length(hash, literal.0.len());
-                hash.update(&literal.0);
-            }
-            HirKind::Class(Class::Unicode(class)) => {
-                hash.update([2]);
-                length(hash, class.ranges().len());
-                for range in class.ranges() {
-                    hash.update((range.start() as u32).to_le_bytes());
-                    hash.update((range.end() as u32).to_le_bytes());
-                }
-            }
-            HirKind::Class(Class::Bytes(class)) => {
-                hash.update([3]);
-                length(hash, class.ranges().len());
-                for range in class.ranges() {
-                    hash.update([range.start(), range.end()]);
-                }
-            }
-            HirKind::Look(look) => {
-                hash.update([4]);
-                hash.update(look.as_repr().to_le_bytes());
-                unicode_word |= matches!(
-                    look,
-                    Look::WordUnicode
-                        | Look::WordUnicodeNegate
-                        | Look::WordStartUnicode
-                        | Look::WordEndUnicode
-                        | Look::WordStartHalfUnicode
-                        | Look::WordEndHalfUnicode
-                );
-            }
-            HirKind::Repetition(repetition) => {
-                hash.update([5]);
-                hash.update(repetition.min.to_le_bytes());
-                hash.update([
-                    u8::from(repetition.max.is_some()),
-                    u8::from(repetition.greedy),
-                ]);
-                hash.update(repetition.max.unwrap_or(0).to_le_bytes());
-                pending.push(&repetition.sub);
-            }
-            HirKind::Capture(capture) => {
-                hash.update([6]);
-                hash.update(capture.index.to_le_bytes());
-                hash.update([u8::from(capture.name.is_some())]);
-                if let Some(name) = &capture.name {
-                    length(hash, name.len());
-                    hash.update(name.as_bytes());
-                }
-                pending.push(&capture.sub);
-            }
-            HirKind::Concat(children) | HirKind::Alternation(children) => {
-                hash.update([if matches!(node.kind(), HirKind::Concat(_)) {
-                    7
-                } else {
-                    8
-                }]);
-                length(hash, children.len());
-                pending.extend(children.iter().rev());
-            }
-        }
-    }
-    unicode_word
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use expression::hash_hir;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn changed_lowercase_context_tables_cannot_reuse_an_implicit_rust_profile() {
@@ -246,7 +183,7 @@ mod tests {
             (
                 (16, 0, 0),
                 [
-                    expression("[A-Z]", "changed cased").unwrap(),
+                    inline(expression("[A-Z]", "changed cased", &mut ())).unwrap(),
                     known[1].clone(),
                 ],
             ),
@@ -254,7 +191,7 @@ mod tests {
                 (16, 0, 0),
                 [
                     known[0].clone(),
-                    expression("['.]", "changed ignorable").unwrap(),
+                    inline(expression("['.]", "changed ignorable", &mut ())).unwrap(),
                 ],
             ),
         ] {
@@ -267,7 +204,7 @@ mod tests {
 
     #[test]
     fn expression_identity_preserves_structure_and_uses_fixed_width_encoding() {
-        let profile = |pattern| expression(pattern, "test pattern").unwrap();
+        let profile = |pattern| inline(expression(pattern, "test pattern", &mut ())).unwrap();
         assert_eq!(
             profile("hello"),
             "19646533c4da6bb1fe7a2e586f74910409bbf2508139b3c8e4697dd75fc3704a"
@@ -302,11 +239,20 @@ mod tests {
             "\\b{end-half}",
         ] {
             let hir = regex_syntax::Parser::new().parse(pattern).unwrap();
-            assert!(hash_hir(&hir, &mut Sha256::new()), "{pattern}");
+            assert!(
+                inline(hash_hir(&hir, &mut Sha256::new(), &mut ())).unwrap(),
+                "{pattern}"
+            );
             let ascii = regex_syntax::Parser::new()
                 .parse(&format!("(?-u:{pattern})"))
                 .unwrap();
-            assert!(!hash_hir(&ascii, &mut Sha256::new()), "{pattern}");
+            assert!(
+                !inline(hash_hir(&ascii, &mut Sha256::new(), &mut ())).unwrap(),
+                "{pattern}"
+            );
         }
     }
 }
+
+#[cfg(test)]
+mod retained;

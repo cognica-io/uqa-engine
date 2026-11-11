@@ -12,6 +12,7 @@ use super::error::{check_limit, invalid};
 use super::{DictionaryId, DictionaryResult, KuromojiDictionary};
 use crate::morphology::io::vector;
 use crate::morphology::lexicon::{Builder, Lexicon};
+use crate::morphology::work::{source, Work};
 
 mod parse;
 
@@ -132,8 +133,17 @@ impl UserDictionary {
         model: &KuromojiDictionary,
         limits: UserDictionaryLimits,
     ) -> DictionaryResult<Option<Arc<Self>>> {
+        crate::morphology::work::inline(Self::compile_with(source, model, limits, &mut ()))
+    }
+
+    pub(crate) async fn compile_with(
+        source: &str,
+        model: &KuromojiDictionary,
+        limits: UserDictionaryLimits,
+        work: &mut impl Work,
+    ) -> DictionaryResult<Option<Arc<Self>>> {
         check_limit("user dictionary bytes", source.len(), limits.max_bytes)?;
-        let mut lines = parse::entries(source, limits.max_entries)?;
+        let lines = parse::entries(source, limits.max_entries, work).await?;
         if lines.is_empty() {
             return Ok(None);
         }
@@ -144,32 +154,36 @@ impl UserDictionary {
                 "model cannot address fixed user contexts",
             ));
         }
-        lines.sort_by(|left, right| left[0].encode_utf16().cmp(right[0].encode_utf16()));
+        let order = crate::morphology::work::ordering::utf16(&lines, work).await?;
         let mut entries = vector(lines.len())?;
         let mut word_entries = Vec::new();
         let mut builder = Builder::new();
-        for fields in &lines {
-            let length = fields[0].encode_utf16().count();
+        for (rank, index) in order.into_iter().enumerate() {
+            work.records(rank).await?;
+            let fields = &lines[index].0;
+            let length = source::utf16_len(&fields[0], work).await?;
             check_limit(
                 "user surface UTF-16 units",
                 length,
                 limits.max_surface_utf16,
             )?;
-            let mut surface = vector(length)?;
-            surface.extend(fields[0].encode_utf16());
-            let entry = prepare_entry(fields, word_entries.len())?;
+            let surface = source::utf16(&fields[0], length, work).await?;
+            let entry = prepare_entry(fields, word_entries.len(), work).await?;
             let phrase = u32::try_from(entries.len())
                 .map_err(|_| invalid("user dictionary", "phrase ID exceeds u32"))?;
             word_entries.try_reserve(entry.lengths.len())?;
-            word_entries.extend(std::iter::repeat_n(phrase, entry.lengths.len()));
+            for index in 0..entry.lengths.len() {
+                work.records(index).await?;
+                word_entries.push(phrase);
+            }
             // Lucene rejects duplicate FST inputs, unlike Korean first-definition semantics.
-            builder = builder.insert(surface)?;
+            builder = builder.insert_with(surface, work).await?;
             entries.push(entry);
         }
         Ok(Some(Arc::new(Self {
             model_id: model.id(),
-            source: parse::owned(source)?,
-            lexicon: builder.finish(limits.max_surface_utf16)?,
+            source: source::text(source, work).await?,
+            lexicon: builder.finish_with(limits.max_surface_utf16, work).await?,
             entries,
             word_entries,
         })))
@@ -238,16 +252,20 @@ impl UserDictionary {
     }
 }
 
-fn prepare_entry(fields: &[String], words: usize) -> DictionaryResult<UserEntry> {
-    let segments = parse::space_split(&fields[1])?;
-    let readings = parse::space_split(&fields[2])?;
+async fn prepare_entry(
+    fields: &[String],
+    words: usize,
+    work: &mut impl Work,
+) -> DictionaryResult<UserEntry> {
+    let segments = parse::space_split(&fields[1], work).await?;
+    let readings = parse::space_split(&fields[2], work).await?;
     if segments.len() != readings.len() {
         return Err(invalid(
             "user dictionary",
             "segmentation and reading counts differ",
         ));
     }
-    if !parse::without_whitespace(&fields[0]).eq(parse::without_whitespace(&fields[1])) {
+    if !parse::same_segments(&fields[0], &fields[1], work).await? {
         return Err(invalid(
             "user dictionary",
             "concatenated segmentation differs from surface",
@@ -265,14 +283,14 @@ fn prepare_entry(fields: &[String], words: usize) -> DictionaryResult<UserEntry>
     let mut lengths = vector(segments.len())?;
     let mut owned_readings = vector(readings.len())?;
     for (segment, reading) in segments.iter().zip(readings) {
-        lengths.push(segment.encode_utf16().count());
-        owned_readings.push(parse::owned(reading)?);
+        lengths.push(source::utf16_len(segment, work).await?);
+        owned_readings.push(source::text(reading, work).await?);
     }
     Ok(UserEntry {
         word_base,
         lengths,
         readings: owned_readings,
-        pos: parse::owned(&fields[3])?,
+        pos: source::text(&fields[3], work).await?,
     })
 }
 

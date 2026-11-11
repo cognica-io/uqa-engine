@@ -14,6 +14,8 @@ use crate::token_filter::SynonymFileError;
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError {
     #[error(transparent)]
+    Input(#[from] uqa_core::image_io::ImageIoError),
+    #[error(transparent)]
     Memory(#[from] uqa_core::memory::MemoryError),
     #[error("this pipeline has no normalization plan")]
     NormalizationUnavailable,

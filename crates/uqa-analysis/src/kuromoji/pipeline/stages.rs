@@ -23,12 +23,22 @@ impl PreparedKuromojiFilter {
         filter: &JapaneseFilter,
         profile: Option<Arc<ResolvedDictionary>>,
     ) -> AnalysisResult<Self> {
-        let filter = filter.compile(
-            profile.as_ref().map(|profile| profile.model().as_ref()),
-            KuromojiLimits::default(),
-            &MemoryBudget::new(usize::MAX),
-            &mut || Ok(()),
-        )?;
+        crate::work::inline(Self::new_with(filter, profile, &mut ()))
+    }
+
+    pub(super) async fn new_with(
+        filter: &JapaneseFilter,
+        profile: Option<Arc<ResolvedDictionary>>,
+        work: &mut impl crate::work::Work<crate::AnalysisError>,
+    ) -> AnalysisResult<Self> {
+        let filter = filter
+            .compile_with(
+                profile.as_ref().map(|profile| profile.model().as_ref()),
+                KuromojiLimits::default(),
+                &MemoryBudget::new(usize::MAX),
+                &mut crate::work::progress::Retained(work),
+            )
+            .await?;
         let profile = if filter.uses_model() { profile } else { None };
         Ok(Self { filter, profile })
     }

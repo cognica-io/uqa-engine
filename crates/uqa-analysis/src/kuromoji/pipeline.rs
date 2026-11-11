@@ -6,6 +6,7 @@
 
 //! Japanese pipeline resources are frozen before descriptor publication.
 
+pub(crate) use super::resources::preparation::Source;
 use super::{
     DictionaryRequest, JapaneseTokenizer, KuromojiResources, KuromojiTokenizerConfig,
     ResolvedDictionary,
@@ -37,11 +38,26 @@ impl ResolvedKuromojiPipeline {
         resources: &KuromojiResources,
         limits: crate::AnalyzerLimits,
     ) -> AnalysisResult<Self> {
+        crate::work::inline(Self::resolve_with(config, resources, limits, &mut ()))
+    }
+
+    pub(crate) async fn resolve_with(
+        config: &mut Analyzer,
+        resources: &impl Source,
+        limits: crate::AnalyzerLimits,
+        work: &mut impl crate::work::ResourceWork,
+    ) -> AnalysisResult<Self> {
         let mut resolved = Self::default();
         let mut snapshot = Snapshot::default();
         if let Tokenizer::Kuromoji(tokenizer) = &mut config.tokenizer {
-            let dictionary = load(&mut snapshot, request(&tokenizer.dictionary)?, resources)?;
-            let prepared = prepare_tokenizer(tokenizer, &dictionary, resources)?;
+            let dictionary = load(
+                &mut snapshot,
+                request(&tokenizer.dictionary)?,
+                resources,
+                work,
+            )
+            .await?;
+            let prepared = prepare_tokenizer_with(tokenizer, &dictionary, resources, work).await?;
             tokenizer.dictionary = format!("sha256:{}", dictionary.sha256());
             tokenizer.n_best_cost = prepared.n_best_cost();
             tokenizer.n_best_examples = None;
@@ -49,17 +65,20 @@ impl ResolvedKuromojiPipeline {
             resolved.dictionaries.push(dictionary);
         }
         for index in 0..config.token_filters.len() {
+            crate::work::Work::<crate::AnalysisError>::records(work, index).await?;
             let filter = &mut config.token_filters[index];
             if !is_japanese_filter(filter) {
                 resolved.filters.push(None);
                 continue;
             }
-            let profile = configuration::dictionary_name(filter)?
-                .map(|name| load(&mut snapshot, request(name)?, resources))
-                .transpose()?;
-            let stage = configuration::native_filter(filter)?;
-            let prepared = Arc::new(PreparedKuromojiFilter::new(&stage, profile.clone())?);
-            let expanded = configuration::freeze(filter, profile.as_deref())?;
+            let profile = match configuration::dictionary_name(filter)? {
+                Some(name) => Some(load(&mut snapshot, request(name)?, resources, work).await?),
+                None => None,
+            };
+            let stage = configuration::native_filter_with(filter, work).await?;
+            let prepared =
+                Arc::new(PreparedKuromojiFilter::new_with(&stage, profile.clone(), work).await?);
+            let expanded = configuration::freeze_with(filter, profile.as_deref(), work).await?;
             if configuration::dictionary_name(filter)?.is_some() {
                 resolved
                     .dictionaries
@@ -68,7 +87,7 @@ impl ResolvedKuromojiPipeline {
                     ))?);
             }
             if expanded {
-                crate::descriptor::check_configuration(config, limits)?;
+                crate::descriptor::check_configuration_with(config, limits, work).await?;
             }
             resolved.filters.push(Some(prepared));
         }
@@ -77,15 +96,17 @@ impl ResolvedKuromojiPipeline {
             .as_mut()
             .and_then(|value| value.profile_mut())
         {
-            let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+            let profile = load(&mut snapshot, request(dictionary)?, resources, work).await?;
             resolved.dictionaries.push(profile.clone());
             *dictionary = format!("sha256:{}", profile.sha256());
             resolved.normalizer = Some(profile);
         }
-        resolved
-            .dictionaries
-            .sort_unstable_by_key(|item| item.sha256());
-        resolved.dictionaries.dedup_by_key(|item| item.sha256());
+        crate::work::ordering::unique::<_, _, crate::AnalysisError>(
+            &mut resolved.dictionaries,
+            |item| item.sha256(),
+            work,
+        )
+        .await?;
         Ok(resolved)
     }
 
@@ -125,19 +146,28 @@ pub(crate) fn request(name: &str) -> AnalysisResult<DictionaryRequest> {
     })
 }
 
-fn load(
+async fn load(
     snapshot: &mut Snapshot<DictionaryRequest, ResolvedDictionary>,
     request: DictionaryRequest,
-    resources: &KuromojiResources,
+    resources: &impl Source,
+    work: &mut impl crate::morphology::work::Work,
 ) -> AnalysisResult<Arc<ResolvedDictionary>> {
     Ok(snapshot.load(request,
         |request, dictionary| matches!(request, DictionaryRequest::Sha256(hash) if *hash == dictionary.sha256()),
-        |request| resources.load(request),
-    )?)
+        resources, work,
+    ).await?)
 }
 
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
-    for filter in &config.token_filters {
+    crate::work::inline(check_resolved_with(config, &mut ()))
+}
+
+pub(crate) async fn check_resolved_with(
+    config: &Analyzer,
+    work: &mut impl crate::work::Work<AnalysisError>,
+) -> AnalysisResult<()> {
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         configuration::check_resolved(filter)?;
     }
     if let Tokenizer::Kuromoji(tokenizer) = &config.tokenizer {
@@ -159,11 +189,12 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
 }
 
 fn exact(dictionary: &str) -> AnalysisResult<()> {
-    let DictionaryRequest::Sha256(hash) = request(dictionary)? else {
+    let Some(hash) = dictionary.strip_prefix("sha256:") else {
         return Err(AnalysisError::Descriptor(
             "resolved Japanese resources require exact artifact hashes",
         ));
     };
+    let hash = hash.parse::<super::ResourceHash>()?;
     if format!("sha256:{hash}") != dictionary {
         return Err(AnalysisError::Descriptor(
             "noncanonical Japanese resource hash",
@@ -177,16 +208,29 @@ pub(crate) fn prepare_tokenizer(
     dictionary: &ResolvedDictionary,
     resources: &KuromojiResources,
 ) -> AnalysisResult<JapaneseTokenizer> {
-    let user = config
-        .user_dictionary
-        .as_deref()
-        .map(|source| resources.compile_user(source, dictionary.model()))
-        .transpose()?;
-    let tokenizer = JapaneseTokenizer::new(
-        dictionary.model().clone(),
-        user.as_ref().and_then(|user| user.dictionary().cloned()),
-        config.options(),
-    )?;
+    crate::work::inline(prepare_tokenizer_with(
+        config,
+        dictionary,
+        resources,
+        &mut (),
+    ))
+}
+
+async fn prepare_tokenizer_with(
+    config: &KuromojiTokenizerConfig,
+    dictionary: &ResolvedDictionary,
+    resources: &impl Source,
+    work: &mut impl crate::morphology::work::Work,
+) -> AnalysisResult<JapaneseTokenizer> {
+    let user = match config.user_dictionary.as_deref() {
+        Some(source) => {
+            resources
+                .compile_user(source, dictionary.model(), work)
+                .await?
+        }
+        None => None,
+    };
+    let tokenizer = JapaneseTokenizer::new(dictionary.model().clone(), user, config.options())?;
     match config.n_best_examples.as_deref() {
         Some(examples) => tokenizer.with_n_best_examples(examples),
         None => Ok(tokenizer),

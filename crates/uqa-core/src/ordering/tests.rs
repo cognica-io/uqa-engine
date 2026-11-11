@@ -7,6 +7,8 @@
 use super::*;
 use crate::memory::{Budgeted, MemoryBudget};
 
+mod retained;
+
 #[test]
 fn fallible_order_matches_slice_order_across_duplicates_and_heap_boundaries() {
     for seed in 0..512_u64 {

@@ -12,7 +12,7 @@ use uqa_core::memory::{Budgeted, MemoryBudget};
 use super::Analyzer;
 use crate::{
     char_filter::PreparedCharFilter, token_filter::PreparedTokenFilter,
-    tokenizer::PreparedTokenizer, AnalysisResult, AnalyzedText, AnalyzerDescriptor,
+    tokenizer::PreparedTokenizer, AnalysisError, AnalysisResult, AnalyzedText, AnalyzerDescriptor,
     AnalyzerResources, FilteredText,
 };
 
@@ -67,13 +67,55 @@ impl CompiledAnalyzer {
         #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
         #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
     ) -> AnalysisResult<Self> {
-        let config = descriptor.configuration()?;
+        crate::work::inline(Self::prepare_with(
+            descriptor,
+            #[cfg(feature = "nori")]
+            nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
+            &mut (),
+        ))
+    }
+
+    pub(crate) async fn prepare_with(
+        descriptor: Arc<AnalyzerDescriptor>,
+        #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Self> {
+        work.checkpoint().await?;
+        let config = descriptor.configuration_with(work).await?;
+        Self::prepare_configuration_with(
+            descriptor,
+            config,
+            #[cfg(feature = "nori")]
+            nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
+            work,
+        )
+        .await
+    }
+
+    pub(crate) async fn prepare_configuration_with(
+        descriptor: Arc<AnalyzerDescriptor>,
+        config: Analyzer,
+        #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Self> {
         let unicode_profile = descriptor.unicode_profile()?;
-        let char_filters = config
-            .char_filters
-            .iter()
-            .map(|filter| filter.prepare().map(PreparedCharFilter::into_owned))
-            .collect::<AnalysisResult<_>>()?;
+        let mut char_filters = Vec::with_capacity(config.char_filters.len());
+        for (index, filter) in config.char_filters.iter().enumerate() {
+            work.records(index).await?;
+            char_filters.push(
+                filter
+                    .prepare_with(work)
+                    .await?
+                    .into_owned_with(work)
+                    .await?,
+            );
+        }
         let tokenizer = match &config.tokenizer {
             #[cfg(feature = "nori")]
             crate::Tokenizer::Nori(_) => PreparedTokenizer::Nori(nori.tokenizer.clone().ok_or(
@@ -87,26 +129,27 @@ impl CompiledAnalyzer {
             }
             _ => config.tokenizer.prepare()?,
         };
-        let token_filters = config
-            .token_filters
-            .iter()
-            .enumerate()
-            .map(|(index, filter)| {
-                #[cfg(not(feature = "kuromoji"))]
-                let _ = index;
-                #[cfg(feature = "nori")]
-                if let Some(filter) = nori.filter(filter)? {
-                    return Ok(PreparedTokenFilter::Nori(filter));
-                }
-                #[cfg(feature = "kuromoji")]
-                if let Some(filter) = kuromoji.filter(index, filter)? {
-                    return Ok(PreparedTokenFilter::Kuromoji(filter));
-                }
+        let mut token_filters = Vec::with_capacity(config.token_filters.len());
+        for (index, filter) in config.token_filters.iter().enumerate() {
+            work.records(index).await?;
+            #[cfg(feature = "nori")]
+            if let Some(filter) = nori.filter(filter)? {
+                token_filters.push(PreparedTokenFilter::Nori(filter));
+                continue;
+            }
+            #[cfg(feature = "kuromoji")]
+            if let Some(filter) = kuromoji.filter(index, filter)? {
+                token_filters.push(PreparedTokenFilter::Kuromoji(filter));
+                continue;
+            }
+            token_filters.push(
                 filter
-                    .prepare_with_profile(unicode_profile)
-                    .map(PreparedTokenFilter::into_owned)
-            })
-            .collect::<AnalysisResult<_>>()?;
+                    .prepare_with_profile_and_work(unicode_profile, work)
+                    .await?
+                    .into_owned_with(work)
+                    .await?,
+            );
+        }
         let normalization = crate::normalization::PreparedNormalization::new(
             config.normalization.as_ref(),
             #[cfg(feature = "nori")]
@@ -213,3 +256,6 @@ impl CompiledAnalyzer {
             .normalize_budgeted(text, budget, &mut poll)
     }
 }
+
+#[cfg(test)]
+mod tests;

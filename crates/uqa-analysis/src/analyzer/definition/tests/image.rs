@@ -17,18 +17,27 @@ fn admitted(bytes: &[u8], memory: &MemoryBudget) -> Budgeted<Vec<u8>> {
 
 fn restored(config: &Analyzer) {
     let bytes = serde_json::to_vec(config).unwrap();
-    let memory = MemoryBudget::new(8 << 20);
-    let input = admitted(&bytes, &memory);
-    let original = input.as_ptr();
-    let token = CancellationToken::new();
-    let value = AnalyzerDefinition::from_image(input, &token).unwrap();
-    assert_eq!(serde_json::to_vec(value.configuration()).unwrap(), bytes);
-    assert_eq!(value.image.as_ref().unwrap().as_bytes(), bytes);
-    assert_eq!(value.image.as_ref().unwrap().as_ptr(), original);
-    assert!(memory.used() > bytes.len());
-    assert!(memory.peak() <= memory.limit());
-    drop(value);
-    assert_eq!(memory.used(), 0);
+    for native in [false, true] {
+        let memory = MemoryBudget::new(8 << 20);
+        let input = admitted(&bytes, &memory);
+        let original = input.as_ptr();
+        let token = CancellationToken::new();
+        let value = if native {
+            AnalyzerDefinition::image_input(input, &token)
+                .unwrap()
+                .read(&mut resumable::NoRead)
+                .unwrap()
+        } else {
+            AnalyzerDefinition::from_image(input, &token).unwrap()
+        };
+        assert_eq!(serde_json::to_vec(value.configuration()).unwrap(), bytes);
+        assert_eq!(value.image.as_ref().unwrap().as_bytes(), bytes);
+        assert_eq!(value.image.as_ref().unwrap().as_ptr(), original);
+        assert!(memory.used() > bytes.len());
+        assert!(memory.peak() <= memory.limit());
+        drop(value);
+        assert_eq!(memory.used(), 0);
+    }
 }
 
 #[test]
@@ -235,3 +244,4 @@ fn original_analyzer_input_releases_cancelled_and_underfunded_construction() {
 }
 
 mod languages;
+mod resumable;

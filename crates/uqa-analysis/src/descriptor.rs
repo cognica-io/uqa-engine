@@ -14,11 +14,14 @@ use serde_json::{value::RawValue, Value};
 use crate::{AnalysisError, AnalysisResult, Analyzer};
 
 mod config;
-#[cfg(feature = "kuromoji")]
+#[cfg(test)]
 pub(crate) use config::check_config as check_configuration;
+#[cfg(feature = "kuromoji")]
+pub(crate) use config::check_config_with as check_configuration_with;
 mod hash;
 mod json;
 pub(crate) mod limits;
+mod output;
 mod profiles;
 
 pub use hash::AnalyzerFingerprint;
@@ -145,19 +148,31 @@ impl AnalyzerDescriptor {
 
     /// Restore resolved inputs without opening any file or substituting current mutable definitions.
     pub fn from_json(json: &str, limits: AnalyzerLimits) -> AnalysisResult<Arc<Self>> {
+        crate::work::inline(Self::from_json_with(json, limits, &mut ()))
+    }
+
+    /// Validate exact descriptor syntax, fields, fingerprints and runtime profiles through retained input work. The JSON is already admitted by its enclosing owner; this operation never reads the transport.
+    pub async fn from_json_with_input(
+        json: &str,
+        limits: AnalyzerLimits,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> AnalysisResult<Arc<Self>> {
+        Self::from_json_with(json, limits, input).await
+    }
+
+    pub(crate) async fn from_json_with(
+        json: &str,
+        limits: AnalyzerLimits,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Arc<Self>> {
         limits::check_limit(
             "analyzer descriptor bytes",
             json.len(),
             limits.max_descriptor_bytes,
         )?;
-        json::check_unique_keys(json)?;
-        let wire: Wire = serde_json::from_str(json)?;
-        let data_bytes = limits::encode(
-            &canonical(&serde_json::to_value(&wire.descriptor)?),
-            limits.max_descriptor_bytes,
-            true,
-        )?;
-        let fingerprint = AnalyzerFingerprint::digest(&data_bytes);
+        let wire = json::decode(json, work).await?;
+        let data_bytes = output::data(&wire.descriptor, limits, work).await?;
+        let fingerprint = AnalyzerFingerprint::digest_with(data_bytes.as_bytes(), work).await?;
         if wire.fingerprint != fingerprint {
             return Err(AnalysisError::DescriptorFingerprint {
                 expected: wire.fingerprint,
@@ -165,27 +180,41 @@ impl AnalyzerDescriptor {
             });
         }
         Self::check_revision(&wire.descriptor)?;
-        let config = config::restore(&wire.descriptor.pipeline, limits)?;
-        wire.descriptor.runtime_profiles.validate(&config)?;
-        Self::finish(wire.descriptor, limits)
+        let config = config::restore(&wire.descriptor.pipeline, limits, work).await?;
+        wire.descriptor
+            .runtime_profiles
+            .validate_with(&config, work)
+            .await?;
+        Self::finish_encoded(wire.descriptor, data_bytes, fingerprint, limits, work).await
     }
 
     fn finish(data: DescriptorData, limits: AnalyzerLimits) -> AnalysisResult<Arc<Self>> {
-        let bytes = limits::encode(
-            &canonical(&serde_json::to_value(&data)?),
-            limits.max_descriptor_bytes,
-            true,
-        )?;
-        let fingerprint = AnalyzerFingerprint::digest(&bytes);
-        let wire = canonical(&serde_json::to_value(Wire {
-            descriptor: data.clone(),
-            fingerprint,
-        })?);
-        let bytes = limits::encode(&wire, limits.max_descriptor_bytes, true)?;
-        let json = String::from_utf8(bytes).expect("JSON serializer returns UTF-8");
+        crate::work::inline(Self::finish_with(data, limits, &mut ()))
+    }
+
+    async fn finish_with(
+        data: DescriptorData,
+        limits: AnalyzerLimits,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Arc<Self>> {
+        let bytes = output::data(&data, limits, work).await?;
+        let fingerprint = AnalyzerFingerprint::digest_with(bytes.as_bytes(), work).await?;
+        Self::finish_encoded(data, bytes, fingerprint, limits, work).await
+    }
+
+    async fn finish_encoded(
+        data: DescriptorData,
+        bytes: String,
+        fingerprint: AnalyzerFingerprint,
+        limits: AnalyzerLimits,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Arc<Self>> {
+        let json = output::wire(&bytes, fingerprint, limits, work).await?;
         Ok(Arc::new(Self {
             data,
             fingerprint,
+            // Preserve the existing public raw-JSON carrier and all serializer behavior.
+            // Its dependency-owned syntax scan remains an atomic public API call.
             wire: RawValue::from_string(json)?,
         }))
     }
@@ -230,7 +259,29 @@ impl AnalyzerDescriptor {
 
     /// Return the resolved configuration for diagnostics or compatibility APIs. Execute a retained compiled handle when exact resource ownership is required.
     pub fn configuration(&self) -> AnalysisResult<Analyzer> {
-        Ok(serde_json::from_value(self.data.pipeline.clone())?)
+        crate::work::inline(self.configuration_with(&mut ()))
+    }
+
+    pub(crate) async fn configuration_with(
+        &self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Analyzer> {
+        crate::configuration::decode(&self.data.pipeline, work).await
+    }
+
+    pub(crate) async fn validated_configuration_with(
+        &self,
+        limits: AnalyzerLimits,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Analyzer> {
+        limits::check_limit(
+            "analyzer descriptor bytes",
+            self.canonical_json().len(),
+            limits.max_descriptor_bytes,
+        )?;
+        let config = self.configuration_with(work).await?;
+        config::check_config_with(&config, limits, work).await?;
+        Ok(config)
     }
 
     pub(crate) fn validate_limits(&self, limits: AnalyzerLimits) -> AnalysisResult<()> {

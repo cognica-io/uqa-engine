@@ -8,6 +8,10 @@
 
 use super::{CompletionMode, KuromojiDictionary, KuromojiLimits, KuromojiOutput};
 use crate::morphology::filter::{AllocatedStream, FilterStream};
+use crate::{
+    work::progress::{Callback, Progress},
+    AnalysisError,
+};
 use crate::{AnalysisResult, AnalyzedText};
 use serde::{Deserialize, Serialize};
 use uqa_core::memory::{Budgeted, MemoryBudget};
@@ -134,7 +138,17 @@ impl JapaneseFilter {
         budget: &MemoryBudget,
         poll: &mut dyn FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<CompiledFilter>> {
-        poll()?;
+        crate::work::inline(self.compile_with(model, limits, budget, &mut Callback(poll)))
+    }
+
+    pub(super) async fn compile_with(
+        &self,
+        model: Option<&KuromojiDictionary>,
+        limits: KuromojiLimits,
+        budget: &MemoryBudget,
+        progress: &mut impl Progress<AnalysisError>,
+    ) -> AnalysisResult<Budgeted<CompiledFilter>> {
+        progress.checkpoint().await?;
         let mut memory = budget.empty_reservation();
         let value = match self {
             Self::BaseForm => CompiledFilter::BaseForm,
@@ -166,7 +180,9 @@ impl JapaneseFilter {
                     None => dictionary(model)?.default_stop_tags(),
                 };
                 let (words, allocation) =
-                    PreparedWords::new(words, false, model, limits, budget, poll)?.into_parts();
+                    PreparedWords::new_with(words, false, model, limits, budget, progress)
+                        .await?
+                        .into_parts();
                 memory.absorb(allocation);
                 CompiledFilter::PartOfSpeech(words)
             }
@@ -179,13 +195,14 @@ impl JapaneseFilter {
                     None => dictionary(model)?.default_stop_words(),
                 };
                 let (words, allocation) =
-                    PreparedWords::new(words, *ignore_case, model, limits, budget, poll)?
+                    PreparedWords::new_with(words, *ignore_case, model, limits, budget, progress)
+                        .await?
                         .into_parts();
                 memory.absorb(allocation);
                 CompiledFilter::Stop(words, *ignore_case)
             }
         };
-        poll()?;
+        progress.checkpoint().await?;
         Ok(Budgeted::new(value, memory))
     }
 

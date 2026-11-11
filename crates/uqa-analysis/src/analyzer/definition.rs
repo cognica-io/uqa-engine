@@ -10,6 +10,7 @@ use super::Analyzer;
 use crate::AnalysisError;
 use std::sync::Arc;
 use uqa_core::{
+    image_io::{AsyncImageInput, ImageDecoder, ImageIoError},
     json::JsonReadError,
     memory::{Budgeted, MemoryError, Produced, ProductionControl},
     CancellationToken, ValueRetentionError,
@@ -33,6 +34,12 @@ pub enum AnalyzerConfigurationError {
     Admission(#[from] ValueRetentionError),
     #[error(transparent)]
     Decoding(#[from] JsonReadError),
+}
+
+impl From<ImageIoError> for AnalyzerConfigurationError {
+    fn from(error: ImageIoError) -> Self {
+        Self::Decoding(error.into())
+    }
 }
 
 /// Only the unresolved configuration bytes. Retaining this image does not retain the original configuration, compiled pipelines or resolved resources.
@@ -78,11 +85,48 @@ impl AnalyzerDefinition {
         let control = ProductionControl::new(&budget, cancellation, cancellation);
         control.check()?;
         let configuration = image::decode(&bytes, &budget, cancellation)?;
-        let configuration = Produced::from(configuration).into_shared(&control)?;
+        Self::publish_image(configuration, bytes, cancellation)
+    }
+
+    /// Retain reconstruction of an already admitted configuration image. Advancing uses only work checkpoints; no reader is consulted and no resource or pipeline is resolved.
+    pub fn image_input(
+        bytes: Budgeted<Vec<u8>>,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, AnalyzerConfigurationError>, AnalyzerConfigurationError> {
+        let budget = bytes.budget().clone();
+        Ok(ImageDecoder::new(
+            &budget,
+            cancellation,
+            |mut reader| async move { Self::from_image_from(bytes, reader.input()).await },
+        )?)
+    }
+
+    /// Adopt the original encoded owner through the enclosing image work channel. Decoded payloads use that channel's allowance; encoded bytes keep their own original allowance. Only complete native input publishes either shared owner.
+    pub async fn from_image_from(
+        bytes: Budgeted<Vec<u8>>,
+        input: AsyncImageInput<'_>,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let cancellation = input.cancellation;
+        cancellation.check().map_err(ValueRetentionError::from)?;
+        let configuration = image::decode_from(&bytes, input).await?;
+        Self::publish_image(configuration, bytes, cancellation)
+    }
+
+    fn publish_image(
+        configuration: Budgeted<Analyzer>,
+        bytes: Budgeted<Vec<u8>>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let configuration_budget = configuration.budget().clone();
+        let configuration_control =
+            ProductionControl::new(&configuration_budget, cancellation, cancellation);
+        let configuration = Produced::from(configuration).into_shared(&configuration_control)?;
         let retained_bytes = bytes
             .capacity()
             .checked_add(size_of::<Produced<Vec<u8>>>())
             .ok_or(ValueRetentionError::Memory(MemoryError::SizeOverflow))?;
+        let budget = bytes.budget().clone();
+        let control = ProductionControl::new(&budget, cancellation, cancellation);
         let bytes = Produced::from(bytes).into_shared(&control)?;
         Ok(Self {
             configuration,

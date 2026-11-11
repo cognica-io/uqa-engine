@@ -11,6 +11,7 @@ use std::sync::Arc;
 use super::error::{check_limit, invalid};
 use super::{DictionaryId, DictionaryResult, NoriDictionary, POSTag, POSType};
 use crate::morphology::lexicon::{Builder, Lexicon};
+use crate::morphology::work::{ordering::Surface, source, Work};
 
 mod parse;
 
@@ -75,8 +76,17 @@ impl UserDictionary {
         model: &NoriDictionary,
         limits: UserDictionaryLimits,
     ) -> DictionaryResult<Option<Arc<Self>>> {
+        crate::morphology::work::inline(Self::compile_with(source, model, limits, &mut ()))
+    }
+
+    pub(crate) async fn compile_with(
+        source: &str,
+        model: &NoriDictionary,
+        limits: UserDictionaryLimits,
+        work: &mut impl Work,
+    ) -> DictionaryResult<Option<Arc<Self>>> {
         check_limit("user dictionary bytes", source.len(), limits.max_bytes)?;
-        let mut lines = parse::entries(source, limits.max_entries)?;
+        let lines = parse::entries(source, limits.max_entries, work).await?;
         if lines.is_empty() {
             return Ok(None);
         }
@@ -87,71 +97,38 @@ impl UserDictionary {
                 "model cannot address fixed user-noun contexts",
             ));
         }
-        // Stable sorting retains the first source definition among equal UTF-16 surfaces.
-        lines.sort_by(|left, right| {
-            left.surface()
-                .encode_utf16()
-                .cmp(right.surface().encode_utf16())
-        });
+        // Source indices break equal UTF-16 ties, retaining the first source definition.
+        let order = crate::morphology::work::ordering::utf16(&lines, work).await?;
         let mut entries = crate::morphology::io::vector(lines.len())?;
         let mut builder = Builder::new();
         let mut previous = None;
-        for line in &lines {
-            if previous == Some(line.surface()) {
-                continue;
+        for (rank, index) in order.into_iter().enumerate() {
+            work.records(rank).await?;
+            let line = &lines[index];
+            if let Some(previous) = previous {
+                if crate::json::bytes_equal::<crate::morphology::error::DictionaryError>(
+                    previous,
+                    line.surface().as_bytes(),
+                    work,
+                )
+                .await?
+                {
+                    continue;
+                }
             }
-            let surface: Vec<_> = line.surface().encode_utf16().collect();
+            let length = source::utf16_len(line.surface(), work).await?;
             check_limit(
                 "user surface UTF-16 units",
-                surface.len(),
+                length,
                 limits.max_surface_utf16,
             )?;
-            let segments = if line.labels().len() == 0 {
-                None
-            } else {
-                let mut lengths = crate::morphology::io::vector(line.labels().len())?;
-                let mut total = 0_usize;
-                for label in line.labels() {
-                    let length = label.encode_utf16().count();
-                    total = total.checked_add(length).ok_or_else(|| {
-                        invalid("user dictionary", "segmentation length overflow")
-                    })?;
-                    lengths.push(length);
-                }
-                if total > surface.len() {
-                    return Err(invalid(
-                        "user dictionary",
-                        "segmentation is bigger than the surface form",
-                    ));
-                }
-                Some(lengths)
-            };
-            let last = line.original.encode_utf16().last().expect("nonempty rule");
-            let flags = model.character_morphology_flags(last);
-            let right_context = if flags & 2 == 0 {
-                3533
-            } else if flags & 4 == 0 {
-                3534
-            } else {
-                3535
-            };
-            if forward <= usize::from(right_context) {
-                return Err(invalid(
-                    "user dictionary",
-                    "model cannot address the user-noun right context",
-                ));
-            }
-            entries.push(UserEntry {
-                right_context,
-                segment_lengths: segments,
-            });
-            builder = builder.insert(surface)?;
-            previous = Some(line.surface());
+            let surface = source::utf16(line.surface(), length, work).await?;
+            entries.push(prepare_entry(line, surface.len(), model, forward, work).await?);
+            builder = builder.insert_with(surface, work).await?;
+            previous = Some(line.surface().as_bytes());
         }
-        let lexicon = builder.finish(limits.max_surface_utf16)?;
-        let mut owned = String::new();
-        owned.try_reserve_exact(source.len())?;
-        owned.push_str(source);
+        let lexicon = builder.finish_with(limits.max_surface_utf16, work).await?;
+        let owned = source::text(source, work).await?;
         Ok(Some(Arc::new(Self {
             model_id: model.id(),
             source: owned,
@@ -187,3 +164,62 @@ impl UserDictionary {
         self.lexicon.prefixes(text)
     }
 }
+
+async fn prepare_entry(
+    line: &parse::Entry<'_>,
+    surface_length: usize,
+    model: &NoriDictionary,
+    forward: usize,
+    work: &mut impl Work,
+) -> DictionaryResult<UserEntry> {
+    let segments = if line.labels().len() == 0 {
+        None
+    } else {
+        let mut lengths = crate::morphology::io::vector(line.labels().len())?;
+        let mut total = 0_usize;
+        for label in line.labels() {
+            let length = source::utf16_len(label, work).await?;
+            total = total
+                .checked_add(length)
+                .ok_or_else(|| invalid("user dictionary", "segmentation length overflow"))?;
+            lengths.push(length);
+        }
+        if total > surface_length {
+            return Err(invalid(
+                "user dictionary",
+                "segmentation is bigger than the surface form",
+            ));
+        }
+        Some(lengths)
+    };
+    let mut units = [0; 2];
+    let last = *line
+        .original
+        .chars()
+        .next_back()
+        .expect("nonempty rule")
+        .encode_utf16(&mut units)
+        .last()
+        .expect("one or two UTF-16 units");
+    let flags = model.character_morphology_flags(last);
+    let right_context = if flags & 2 == 0 {
+        3533
+    } else if flags & 4 == 0 {
+        3534
+    } else {
+        3535
+    };
+    if forward <= usize::from(right_context) {
+        return Err(invalid(
+            "user dictionary",
+            "model cannot address the user-noun right context",
+        ));
+    }
+    Ok(UserEntry {
+        right_context,
+        segment_lengths: segments,
+    })
+}
+
+#[cfg(test)]
+mod tests;

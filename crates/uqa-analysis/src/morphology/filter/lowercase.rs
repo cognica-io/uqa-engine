@@ -8,7 +8,14 @@
 
 use super::Work;
 use crate::morphology::unicode::UnicodeTable;
+use crate::work::progress::Progress;
 use crate::{AnalysisError, AnalysisResult};
+
+impl Progress<AnalysisError> for Work<'_> {
+    fn checkpoint(&mut self) -> impl std::future::Future<Output = AnalysisResult<()>> {
+        std::future::ready(self.tick())
+    }
+}
 
 pub(crate) fn apply(
     input: &mut [u16],
@@ -16,9 +23,18 @@ pub(crate) fn apply(
     work: &mut Work<'_>,
     invalid_width: impl Fn() -> AnalysisError,
 ) -> AnalysisResult<()> {
+    crate::work::inline(apply_with(input, profile, work, invalid_width))
+}
+
+pub(crate) async fn apply_with(
+    input: &mut [u16],
+    profile: &UnicodeTable,
+    progress: &mut impl Progress<AnalysisError>,
+    invalid_width: impl Fn() -> AnalysisError,
+) -> AnalysisResult<()> {
     let mut index = 0;
     while index < input.len() {
-        work.tick()?;
+        progress.checkpoint().await?;
         let first = input[index];
         let (point, width) = if (0xd800..=0xdbff).contains(&first)
             && input
