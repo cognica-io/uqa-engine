@@ -40,6 +40,13 @@ pub(crate) fn unit<T: DeserializeOwned + Copy>(tag: &str) -> Result<T, InputErro
 }
 
 impl<'a> Input<'a, '_> {
+    pub fn optional_text(
+        &mut self,
+        token: JsonToken<'a>,
+    ) -> Result<Produced<Option<String>>, InputError> {
+        self.maybe(token, |input, token| input.text(token))
+    }
+
     pub fn scalar<T: Copy>(&self, value: T) -> Result<Produced<T>, InputError> {
         Ok(self
             .control

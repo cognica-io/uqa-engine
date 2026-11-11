@@ -8,13 +8,13 @@
 
 use super::Expr;
 use crate::{
-    ast::stored_input::{invalid, Input, InputError, Parts},
+    ast::stored_input::{invalid, Input, InputError, Parts, Values},
     SQLError,
 };
 use uqa_core::{
     json::JsonToken,
     memory::{BudgetedVec, MemoryBudget, Produced, ProductionControl},
-    CancellationToken, JsonValueDecoder, Value,
+    CancellationToken,
 };
 
 mod composites;
@@ -45,31 +45,6 @@ struct Frame<'a> {
     cursor: usize,
 }
 
-struct Values<'c> {
-    memory: &'c MemoryBudget,
-    original: &'c CancellationToken,
-    invoking: &'c CancellationToken,
-}
-
-impl Values<'_> {
-    fn control(&self) -> ProductionControl<'_> {
-        ProductionControl::new(self.memory, self.original, self.invoking)
-    }
-
-    fn value<'a>(
-        &self,
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-    ) -> Result<Produced<Value>, InputError> {
-        let (text, depth) = input.encoded(token)?;
-        Ok(JsonValueDecoder::new(self.memory, self.original)
-            .with_invoking_cancellation(self.invoking)
-            .with_depth_limit(depth - 1)
-            .value(text)?
-            .into())
-    }
-}
-
 impl Expr {
     /// Decode the stored scalar forms admitted in defaults, generated expressions, CHECKs and index expressions. Query/window nodes are rejected; selected names, bindings and native constants are retained without evaluation or semantic rebinding.
     pub fn from_stored_schema_json(
@@ -91,7 +66,7 @@ fn read(text: &str, depth: usize, values: &Values<'_>) -> Result<Produced<Expr>,
     let control = values.control();
     {
         // Expr's mixed tagged/untagged serialization first reads generic content, including unknown fields, before selecting native scalar syntax.
-        let mut input = Input::new(text, control);
+        let mut input = Input::content_at_depth(text, control, depth);
         let token = input.next()?;
         input.content(token)?;
         input.end()?;
@@ -192,6 +167,15 @@ fn slot(expression: &mut Expr, slot: Slot) -> &mut Expr {
 }
 
 impl<'a> Input<'a, '_> {
+    pub(crate) fn schema_expression(
+        &mut self,
+        token: JsonToken<'a>,
+        values: &Values<'_>,
+    ) -> Result<Produced<Expr>, InputError> {
+        let (text, depth) = self.encoded(token)?;
+        read(text, depth, values)
+    }
+
     fn child(
         &mut self,
         token: JsonToken<'a>,

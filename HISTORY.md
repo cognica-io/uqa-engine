@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode complete stored column declarations under their original allowance and cancellation owners. Retain defaults, generated expressions, checks, identity provenance, physical column identities and foreign-key metadata without evaluation or catalog rebinding.
+
 - Decode stored schema expressions under their original memory allowance and both cancellation owners. Preserve scalar syntax, selected call bindings and native constants without execution; explicit admitted parent frames support deep input and failure cleanup.
 
 - Decode stored SQL function bindings under their original allowance and both cancellation owners. Preserve selected routine identities, native dispatch, invocation types, composite/assignment metadata and deferred errors without rebinding names or executing routines.

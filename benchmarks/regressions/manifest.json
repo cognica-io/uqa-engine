@@ -56210,6 +56210,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_preserves_complete_native_declarations_and_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests.rs",
+      "capability": "Stored column native representation",
+      "workload": "Decode complete types, column identities, defaults, generated dependencies, checks, identity provenance and foreign-key metadata in ordered duplicate declarations.",
+      "invariant": "The complete serialized native declaration and original vector order match the existing decoder without rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_preserves_legacy_sequence_and_positional_forms",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests.rs",
+      "capability": "Stored column legacy representation",
+      "workload": "Decode legacy boolean sequence provenance and original positional column, generation and reference forms.",
+      "invariant": "Original default masks, sequence positions and legacy provenance behavior are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_rejects_query_expressions_without_execution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests.rs",
+      "capability": "Stored column expression domain",
+      "workload": "Attempt a native compiled scalar subquery in defaults, generated expressions and CHECKs.",
+      "invariant": "No query expression escapes the stored schema boundary and no SQL is executed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_preserves_field_defaults_duplicates_and_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/compatibility.rs",
+      "capability": "Stored column field compatibility",
+      "workload": "Compare missing, null, reversed, duplicate and unknown column fields and nested metadata omissions.",
+      "invariant": "Original required/default fields and strict-versus-ignored unknown behavior match native deserialization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_preserves_nested_depth_and_numeric_content_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/compatibility.rs",
+      "capability": "Stored column nested input boundaries",
+      "workload": "Compare direct integers, generic identity options, expression integers and deep nested values/expressions.",
+      "invariant": "Nested input retains the original remaining depth and direct-versus-generic numeric classification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_matches_native_truncation_and_mutation_rejection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/compatibility.rs",
+      "capability": "Stored column damaged input",
+      "workload": "Truncate every UTF-8 fixture boundary and mutate every ASCII byte with seven structural replacements.",
+      "invariant": "Accepted native metadata and malformed-input rejection remain equivalent and partial owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_retains_native_allocations_and_retires_partial_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/retention.rs",
+      "capability": "Stored column allocation ownership",
+      "workload": "Measure live/peak native allocations and deny sampled admission boundaries in a complete declaration.",
+      "invariant": "Completed declarations retain their native allocation charge and failed candidates return every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_checks_both_owners_and_denies_payload_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/retention.rs",
+      "capability": "Stored column entry admission",
+      "workload": "Cancel either owner before entry and deny a two-megabyte name under a small allowance.",
+      "invariant": "Cancellation precedes allocation and denied payload size does not produce an unrestricted allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_cancellation_retires_active_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/retention.rs",
+      "capability": "Stored column active cancellation",
+      "workload": "Cancel either owner after a large name begins production behind already decoded metadata.",
+      "invariant": "The active producer rejects cancellation and retires both partial fields and completed declarations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_columns_json_deep_expression_input_and_retirement_use_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/retention.rs",
+      "capability": "Stored column explicit expression ownership",
+      "workload": "Read and retire a column containing 122 nested expression nodes on a 128 KiB stack.",
+      "invariant": "Nested expression input and retirement preserve the bounded stack contract inside column construction.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
