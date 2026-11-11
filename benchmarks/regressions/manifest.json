@@ -56080,6 +56080,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_preserves_all_scalar_nodes_and_child_positions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests.rs",
+      "capability": "Stored schema scalar representation",
+      "workload": "Decode every scalar node and distinct child slot with stored calls, typed constants and composite rows.",
+      "invariant": "Native serialized observations and original child positions are preserved without SQL evaluation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_reuses_native_constant_representation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests.rs",
+      "capability": "Stored schema constant representation",
+      "workload": "Decode native scalar, array, map and typed composite constant forms.",
+      "invariant": "Constants preserve the existing Core value representation and original descriptors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_rejects_query_and_window_forms_without_execution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests.rs",
+      "capability": "Stored schema expression domain",
+      "workload": "Attempt stored subqueries, EXISTS, IN queries and window expressions compiled by the native compiler.",
+      "invariant": "Query and window nodes cannot escape the schema-only decoder or execute a callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_preserves_field_defaults_order_and_unknown_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/compatibility.rs",
+      "capability": "Stored schema JSON field compatibility",
+      "workload": "Compare native decoding with missing, null, reversed, duplicate, unknown and positional fields.",
+      "invariant": "Original required/default fields, unknown-value validation and positional representation are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_preserves_depth_and_integer_content_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/compatibility.rs",
+      "capability": "Stored schema JSON content boundaries",
+      "workload": "Compare deep expression/value containers and integer widths including signed zero.",
+      "invariant": "Generic-content depth, numeric classification and scalar width acceptance match native decoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_matches_native_truncation_and_byte_mutation_rejection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/compatibility.rs",
+      "capability": "Stored schema damaged input",
+      "workload": "Truncate every fixture byte boundary and mutate each byte with seven structural replacements.",
+      "invariant": "The accepted schema representation and rejection behavior match the native decoder without leaking partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_admits_frames_and_retains_ast_and_value_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/retention.rs",
+      "capability": "Stored schema allocation ownership",
+      "workload": "Measure native AST allocations and the existing Core value payload charge, then deny each sampled admission boundary.",
+      "invariant": "Live AST allocations and Core payload charges retain their leases; failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_rejects_cancelled_or_unadmitted_payload_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/retention.rs",
+      "capability": "Stored schema input admission",
+      "workload": "Enter with either owner cancelled and deny a two-megabyte string under a small allowance.",
+      "invariant": "Cancellation precedes allocation and denied payload size does not produce an unadmitted allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_and_retirement_use_a_small_stack_for_deep_expressions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/retention.rs",
+      "capability": "Stored schema explicit parent frames",
+      "workload": "Decode and retire 126 nested expressions on a 128 KiB thread stack.",
+      "invariant": "Parent storage is admitted explicitly and native retirement does not recurse through the expression tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_input_cancellation_retires_active_input_and_parent_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/input/tests/retention.rs",
+      "capability": "Stored schema active cancellation",
+      "workload": "Cancel either owner during a large literal or wide parent vector after admitted production begins.",
+      "invariant": "The active producer observes cancellation and destroys all partial values before returning their allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

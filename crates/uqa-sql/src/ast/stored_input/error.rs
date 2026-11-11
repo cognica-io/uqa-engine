@@ -48,6 +48,17 @@ impl From<QueryCancelled> for InputError {
     }
 }
 
+impl From<uqa_core::json::JsonReadError> for InputError {
+    fn from(error: uqa_core::json::JsonReadError) -> Self {
+        use uqa_core::json::JsonReadError;
+        match error {
+            JsonReadError::Memory(error) => error.into(),
+            JsonReadError::Cancelled(error) => error.into(),
+            JsonReadError::InvalidJson | JsonReadError::Malformed { .. } => Self::Invalid,
+        }
+    }
+}
+
 impl From<InputError> for crate::SQLError {
     fn from(error: InputError) -> Self {
         match error {

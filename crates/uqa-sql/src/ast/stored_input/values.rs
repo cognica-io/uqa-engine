@@ -20,6 +20,14 @@ impl Integer for usize {
     const MAX_LITERAL_BYTES: usize = usize::MAX.ilog10() as usize + 1;
 }
 
+impl Integer for u64 {
+    const MAX_LITERAL_BYTES: usize = 20;
+}
+
+impl Integer for i64 {
+    const MAX_LITERAL_BYTES: usize = 20;
+}
+
 pub(crate) fn boolean(token: JsonToken<'_>) -> Result<bool, InputError> {
     let JsonToken::Bool(value) = token else {
         return Err(invalid());

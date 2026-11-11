@@ -60,6 +60,23 @@ impl<'a, 'c> Input<'a, 'c> {
         input
     }
 
+    pub fn content_at_depth(
+        text: &'a str,
+        control: ProductionControl<'c>,
+        remaining_depth: usize,
+    ) -> Self {
+        let mut input = Self::from_content(text, control);
+        input.remaining_depth = remaining_depth;
+        input
+    }
+
+    /// Child syntax borrows its original range and the parent's remaining typed-container allowance.
+    pub fn encoded(&mut self, first: JsonToken<'a>) -> Result<(&'a str, usize), InputError> {
+        let start = self.range.start;
+        self.skip(first)?;
+        Ok((&self.text[start..self.range.end], self.remaining_depth))
+    }
+
     pub fn next(&mut self) -> Result<JsonToken<'a>, InputError> {
         let event = self
             .reader

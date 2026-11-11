@@ -24,6 +24,27 @@ impl<'a> Input<'a, '_> {
         names: &[&str],
         required: u64,
         sequence_required: u64,
+        field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
+        self.field_set(first, names, [required, sequence_required], false, field)
+    }
+
+    pub fn closed_fields(
+        &mut self,
+        first: JsonToken<'a>,
+        names: &[&str],
+        required: [u64; 2],
+        field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
+        self.field_set(first, names, required, true, field)
+    }
+
+    fn field_set(
+        &mut self,
+        first: JsonToken<'a>,
+        names: &[&str],
+        [required, sequence_required]: [u64; 2],
+        reject_unknown: bool,
         mut field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
         self.enter()?;
@@ -50,6 +71,9 @@ impl<'a> Input<'a, '_> {
                     let token = self.next()?;
                     field(self, index, token)?;
                 } else {
+                    if reject_unknown {
+                        return Err(invalid());
+                    }
                     let token = self.next()?;
                     self.skip(token)?;
                 }
