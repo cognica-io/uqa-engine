@@ -129,7 +129,7 @@ impl<'a, 'c> Input<'a, 'c, '_> {
         names: [&str; N],
         required: [bool; N],
         deny_unknown: bool,
-        mut field: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, usize, JsonToken<'a>) -> Result<()>,
+        mut field: impl for<'s, 'r> FnMut(&mut Input<'s, 'c, 'r>, usize, JsonToken<'s>) -> Result<()>,
     ) -> Result<()> {
         let start = self.range.start;
         self.skip(first)?;

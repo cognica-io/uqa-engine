@@ -14,7 +14,7 @@ impl<'a, 'c> Input<'a, 'c, '_> {
         first: JsonToken<'a>,
         names: [&str; N],
         required: [bool; N],
-        field: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, usize, JsonToken<'a>) -> Result<()>,
+        field: impl for<'s, 'r> FnMut(&mut Input<'s, 'c, 'r>, usize, JsonToken<'s>) -> Result<()>,
     ) -> Result<()> {
         self.fields_with_unknown(first, names, required, false, field)
     }
@@ -25,7 +25,7 @@ impl<'a, 'c> Input<'a, 'c, '_> {
         names: [&str; N],
         required: [bool; N],
         deny_unknown: bool,
-        mut field: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, usize, JsonToken<'a>) -> Result<()>,
+        mut field: impl for<'s, 'r> FnMut(&mut Input<'s, 'c, 'r>, usize, JsonToken<'s>) -> Result<()>,
     ) -> Result<()> {
         let object = match first {
             JsonToken::StartObject => true,
