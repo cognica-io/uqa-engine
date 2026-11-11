@@ -21,7 +21,7 @@ use uqa_core::{
 impl KeyValueCatalog {
     pub(super) fn row_input<T>(
         &self,
-        tag: u8,
+        prefix: &[u8],
         decode: CatalogRowDecoder<T>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
@@ -32,11 +32,10 @@ impl KeyValueCatalog {
                 "retained catalog input requires a versioned read owner".into(),
             ));
         }
-        let prefix = [tag];
         let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
-            read.retain(&[&prefix])
+            read.retain(&[prefix])
         })?;
-        CatalogInput::new(read, &prefix, decode, limits, control)
+        CatalogInput::new(read, prefix, decode, limits, control)
     }
 
     pub(super) fn index_input(
@@ -44,7 +43,7 @@ impl KeyValueCatalog {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogInput<CatalogIndexRow>> {
-        self.row_input(TAG_CATALOG_INDEX, decode_index, limits, control)
+        self.row_input(&[TAG_CATALOG_INDEX], decode_index, limits, control)
     }
 }
 

@@ -58,6 +58,7 @@ mod relation_acl;
 mod relations;
 mod schema_table;
 mod sequences;
+mod statistics_input;
 mod table_data;
 mod table_input;
 mod tables;
@@ -829,6 +830,15 @@ impl CatalogFacade for KeyValueCatalog {
         stats: &[ColumnStatsInput<'_>],
     ) -> StorageBackendResult<()> {
         self.replace_column_stats_impl(table_name, stats)
+    }
+
+    fn begin_column_stats_input(
+        &self,
+        table_name: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::input::CatalogInput<ColumnStatsRow>> {
+        self.column_stats_input(table_name, limits, control)
     }
 
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {

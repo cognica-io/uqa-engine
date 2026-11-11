@@ -81,3 +81,21 @@ fn sqlite_key_value_catalog_text_input_retains_private_rows_and_source_lifetime(
     )
     .unwrap();
 }
+
+#[test]
+fn sqlite_native_catalog_statistics_input_retains_original_values_and_private_membership() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_statistics_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_catalog_statistics_input_retains_original_values_and_private_membership() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_statistics_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}

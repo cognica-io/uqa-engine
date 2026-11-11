@@ -925,6 +925,19 @@ pub trait CatalogFacade: Send + Sync {
         table_name: &str,
         stats: &[ColumnStatsInput<'_>],
     ) -> StorageBackendResult<()>;
+    /// Retain the selected table's committed/private statistics and consume one physical record per advance. Counts and encoded distributions retain their stored representation; Planner owns their semantic decoding.
+    fn begin_column_stats_input(
+        &self,
+        _table_name: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<ColumnStatsRow>> {
+        control.check()?;
+        Err(crate::StorageBackendError::Other(
+            "retained column statistics input is not supported by this catalog".into(),
+        ))
+    }
+
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>>;
     fn delete_column_stats(&self, table_name: &str) -> StorageBackendResult<()>;
 }

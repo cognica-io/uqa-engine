@@ -872,6 +872,15 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::replace_column_stats(self, table_name, stats))
     }
 
+    fn begin_column_stats_input(
+        &self,
+        table_name: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::input::CatalogInput<ColumnStatsRow>> {
+        self.native_column_stats_input(table_name, limits, control)
+    }
+
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {
         into_storage_result(Catalog::load_column_stats(self, table_name))
     }

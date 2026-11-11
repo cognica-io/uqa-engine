@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -57039,6 +57039,97 @@
       "capability": "Admitted stored column statistics",
       "workload": "Measure decimal and nested byte formatting with exact original width decisions, zero-byte denial and each incomplete distribution allowance.",
       "invariant": "Sizing admits temporary formatting, releases its scratch and preserves typed resource failure instead of omitting a value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "column_statistics_input_preserves_native_struct_forms_and_opaque_distributions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/statistics_input/tests.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Decode map/positional rows, extreme signed counts, escaped keys, opaque distributions, ignored nested values and original key suffixes.",
+      "invariant": "Stored fields match the existing decoder exactly and completed rows retain only their original string capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "column_statistics_input_rejects_invalid_shapes_and_preserves_error_precedence",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/statistics_input/tests.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Decode duplicate/missing fields, invalid integer and string tokens, incomplete positional forms and trailing input.",
+      "invariant": "Malformed rows fail without retained allocations and duplicate/missing diagnostics preserve their original precedence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "column_statistics_input_admits_every_field_and_retires_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/statistics_input/tests.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Decode one complete row with every allowance below 512 bytes, then cancel the original owner.",
+      "invariant": "Every failed prefix releases its admitted fields and successful rows retain exactly their native capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "column_statistics_input_preserves_key_errors_and_empty_completion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/statistics_input/tests.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Truncate each original physical key prefix and exercise empty input, zero limits and original cancellation.",
+      "invariant": "Key failures retain no scratch, empty completion allocates nothing and completed input remains idempotent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_statistics_input_retains_original_values_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Retain native SQLite private statistics, roll back the source, replace later rows and retire the source catalog.",
+      "invariant": "One-slot input preserves the selected snapshot, tombstones and original values; size failure and cancellation retire the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_statistics_input_retains_original_values_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Retain SQLite KV private statistics, roll back the source, replace later rows and retire the source catalog.",
+      "invariant": "One-slot input preserves the selected snapshot, tombstones and original values; size failure and cancellation retire the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_statistics_input_retains_original_values_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained physical column statistics",
+      "workload": "Retain redb private statistics, roll back the source, replace later rows and retire the source catalog.",
+      "invariant": "One-slot input preserves the selected snapshot, tombstones and original values; size failure and cancellation retire the view.",
       "case_names": [
         ""
       ]

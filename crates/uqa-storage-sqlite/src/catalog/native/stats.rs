@@ -14,6 +14,8 @@ use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{ColumnStatsInput, ColumnStatsRow, KeyValueBatch};
 
+mod input;
+
 impl NativeSnapshot {
     fn put_column_stats(
         &self,

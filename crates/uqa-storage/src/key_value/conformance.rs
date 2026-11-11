@@ -15,6 +15,8 @@ use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog_index_input;
+mod catalog_statistics_input;
+pub use catalog_statistics_input::verify_catalog_statistics_input;
 mod catalog_revisions;
 mod catalog_table_input;
 mod catalog_text_input;

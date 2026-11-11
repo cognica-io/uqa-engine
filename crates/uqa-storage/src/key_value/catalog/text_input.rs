@@ -33,7 +33,7 @@ impl KeyValueCatalog {
             CatalogTextFamily::PathIndexes => TAG_PATH_INDEX,
         };
         self.row_input(
-            tag,
+            &[tag],
             if matches!(family, CatalogTextFamily::Metadata) {
                 decode_metadata
             } else {

@@ -45,3 +45,14 @@ fn redb_catalog_text_input_retains_private_rows_and_source_lifetime() {
     )
     .unwrap();
 }
+
+#[test]
+fn redb_catalog_statistics_input_retains_original_values_and_private_membership() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider =
+        RedbStorage::open(directory.path().join("catalog-statistics-input.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_statistics_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}

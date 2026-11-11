@@ -14,6 +14,7 @@ use std::sync::Arc;
 use uqa_core::memory::{Budgeted, BudgetedVec};
 
 pub mod index;
+pub mod statistics;
 pub(crate) mod strings;
 pub mod table;
 
@@ -21,6 +22,15 @@ pub mod table;
 pub struct CatalogInputLimits {
     pub maximum_key_bytes: usize,
     pub maximum_value_bytes: usize,
+}
+
+impl CatalogInputLimits {
+    fn validate(self) -> StorageBackendResult<()> {
+        if self.maximum_key_bytes == 0 || self.maximum_value_bytes == 0 {
+            return Err(invalid("zero catalog record limit"));
+        }
+        Ok(())
+    }
 }
 
 /// A tombstone or a provider-owned absent text field consumes one slot without returning a row.
@@ -59,6 +69,18 @@ struct Input<T> {
 }
 
 impl<T> CatalogInput<T> {
+    /// Complete an absent catalog owner without retaining a provider view or allocating a cursor.
+    pub fn empty(
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        limits.validate()?;
+        Ok(Self {
+            state: State::Complete,
+        })
+    }
+
     /// Retain an already selected native view without enumerating records. Versioned providers supply the same committed/private view to key selection and bounded value reads. Physical key order is preserved; consumers that require name order retain and order the complete decoded catalog in their owning layer.
     pub fn new(
         read: Arc<dyn KeyValueRead + Send + Sync>,
@@ -92,9 +114,7 @@ impl<T> CatalogInput<T> {
     ) -> StorageBackendResult<Self> {
         control.check()?;
         read.control().check()?;
-        if limits.maximum_key_bytes == 0 || limits.maximum_value_bytes == 0 {
-            return Err(invalid("zero catalog record limit"));
-        }
+        limits.validate()?;
         control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
         let memory = control.memory().reserve(size_of::<Input<T>>())?;
         let mut owned_prefix = BudgetedVec::new(control.memory());
