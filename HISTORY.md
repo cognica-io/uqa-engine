@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.
+
 - Retain persistent catalog text reads on one committed/private snapshot, including model, scoring, analyzer and path definitions. Each transition consumes one record slot, including deletions, and checks encoded key/value limits before owned payload admission. Typed catalog and Engine restore integration remain under implementation.
 
 - Resume native model input, validation and catalog adoption through the original byte/work windows, preserving exact weight bits, layer order, labels and original allocation ownership without retraining. Engine archive integration and public restore remain separate delivery work.

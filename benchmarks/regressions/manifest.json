@@ -54806,6 +54806,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_preserves_stored_struct_and_legacy_name_forms",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode object and positional catalog encodings, escaped field names, nullable definitions, deeply nested ignored fields and legacy/composite physical keys.",
+      "invariant": "The stored decoder and retained input produce identical relation names and every original encoded string.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_rejects_invalid_field_shapes_without_retained_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode missing or duplicate fields, wrong types, malformed strings, extra positional fields and trailing values.",
+      "invariant": "Invalid shapes fail without retaining output buffers or reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_accounts_original_buffers_and_retires_denied_construction",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode long Unicode/escaped definitions under actual allocation observation, several denied allowances and cancellation.",
+      "invariant": "Successful native field capacities equal their retained reservation; partial construction retires on every denied path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture native SQLite index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture SQLite Key/Value index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture redb index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

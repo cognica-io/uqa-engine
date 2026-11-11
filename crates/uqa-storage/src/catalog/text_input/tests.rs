@@ -6,14 +6,21 @@
 
 use super::*;
 use crate::{
+    key_value::KeyValueRead,
     key_value::{KeyValueReadRevision, RecordKeyReadVisitor},
     read_control::{KeyValueReadVisitor, ValueReadVisitor},
+    StorageBackendError,
 };
 use std::{
     collections::BTreeMap,
     ops::Bound::{Excluded, Included, Unbounded},
     sync::atomic::{AtomicUsize, Ordering},
+    sync::Arc,
 };
+
+fn invalid(message: &'static str) -> StorageBackendError {
+    StorageBackendError::Other(message.into())
+}
 
 #[derive(Default)]
 struct Counts {
@@ -191,12 +198,14 @@ fn catalog_text_input_retires_failed_cancelled_and_abandoned_original_views() {
         let source = source(mode);
         let weak = Arc::downgrade(&source);
         let original = source.control.clone();
-        let control = StorageReadControl::with_limit(if mode == "unfunded" {
-            size_of::<Input>() + 128
-        } else {
-            65536
-        });
+        let control = StorageReadControl::with_limit(65536);
         let mut input = CatalogTextInput::new(source, b"k/", decode, limits(), &control).unwrap();
+        let denied = (mode == "unfunded").then(|| {
+            control
+                .memory()
+                .reserve(control.memory().available() - 128)
+                .unwrap()
+        });
         if mode == "source_cancel" {
             original.cancellation().cancel();
         } else if mode == "input_cancel" {
@@ -207,8 +216,8 @@ fn catalog_text_input_retires_failed_cancelled_and_abandoned_original_views() {
             assert!(matches!(result, Err(_) | Ok(Err(_))), "{mode}");
             assert!(input.advance().is_err());
             assert!(weak.upgrade().is_none());
-            assert_eq!(control.memory().used(), 0);
         }
+        drop(denied);
         drop(input);
         assert!(weak.upgrade().is_none());
         assert_eq!(control.memory().used(), 0);

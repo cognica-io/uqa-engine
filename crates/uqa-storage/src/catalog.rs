@@ -23,6 +23,7 @@ pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
+pub mod input;
 mod record_revisions;
 mod relation;
 pub mod relation_acl;
@@ -297,6 +298,18 @@ pub trait CatalogFacade: Send + Sync {
         control.check()?;
         Err(StorageBackendError::Other(
             "retained catalog text input is not supported".into(),
+        ))
+    }
+
+    /// Retain secondary-index definitions from the same native read boundary. Each row preserves its original encoded columns, parameters and optional semantic definition; later consumers own catalog ordering and reference validation.
+    fn begin_index_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<CatalogIndexRow>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog index input is not supported".into(),
         ))
     }
 

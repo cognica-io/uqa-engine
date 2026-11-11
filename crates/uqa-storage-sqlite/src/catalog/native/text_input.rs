@@ -6,17 +6,16 @@
 
 //! Native catalog text uses the same row-key validation as ordinary reads.
 
-use super::{string_ref, Catalog, Family, NativeRecordOwner};
-use crate::mvcc::native::{decode_record, NativeRecordIdentity};
+use super::{string_ref, Catalog, Family};
+use crate::mvcc::native::decode_record;
 use rusqlite::types::ValueRef;
 use uqa_core::memory::Budgeted;
 use uqa_storage::{
     catalog::text_input::{
         CatalogTextDecoder, CatalogTextFamily, CatalogTextInput, CatalogTextLimits, CatalogTextRow,
     },
-    key_value::KeyValueRead,
     read_control::StorageReadControl,
-    StorageBackendError, StorageBackendResult,
+    StorageBackendResult,
 };
 
 impl Catalog {
@@ -26,10 +25,6 @@ impl Catalog {
         limits: CatalogTextLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogTextInput> {
-        control.check()?;
-        let snapshot = self.conn.native_snapshot()?.ok_or_else(|| {
-            StorageBackendError::Other("retained catalog text input requires native records".into())
-        })?;
         let (family, decoder): (_, CatalogTextDecoder) = match family {
             CatalogTextFamily::Metadata => (Family::Metadata, decode),
             CatalogTextFamily::Models => (Family::Models, decode),
@@ -38,13 +33,7 @@ impl Catalog {
             CatalogTextFamily::AnalyzerDescriptors => (Family::Analyzers, decode_descriptor),
             CatalogTextFamily::PathIndexes => (Family::PathIndexes, decode),
         };
-        let prefix =
-            NativeRecordIdentity::new(family, NativeRecordOwner::Database(snapshot.database))
-                .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?
-                .encode_prefix(&[], control)
-                .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
-        let read = snapshot.record_read().retain(&[&prefix])?;
-        CatalogTextInput::new(read, &prefix, decoder, limits, control)
+        self.native_row_input(family, decoder, limits, control)
     }
 }
 

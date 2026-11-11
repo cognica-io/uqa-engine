@@ -45,6 +45,7 @@ mod graph_observations;
 mod graph_view;
 mod graphs;
 mod indexes;
+mod input;
 pub(super) mod keys;
 mod migration;
 mod models;
@@ -100,6 +101,14 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn begin_index_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::input::CatalogInput<crate::CatalogIndexRow>> {
+        self.index_input(limits, control)
+    }
+
     fn begin_text_input(
         &self,
         family: crate::catalog::text_input::CatalogTextFamily,
