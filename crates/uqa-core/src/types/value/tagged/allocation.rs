@@ -7,13 +7,14 @@
 //! Tagged conversion retains the input lease while old and replacement payloads overlap.
 
 use crate::{
-    memory::{MemoryError, MemoryReservation},
+    memory::{MemoryError, MemoryReservation, ProductionControl},
     ArrayValue, CancellationToken, DecimalValue, Value, ValueRetentionError,
 };
 
 pub(super) struct Workspace<'a> {
     memory: Option<MemoryReservation>,
     cancellation: Option<&'a CancellationToken>,
+    invoking: Option<&'a CancellationToken>,
 }
 
 impl<'a> Workspace<'a> {
@@ -21,19 +22,28 @@ impl<'a> Workspace<'a> {
         Self {
             memory: None,
             cancellation: None,
+            invoking: None,
         }
     }
 
-    pub(super) fn bounded(memory: MemoryReservation, cancellation: &'a CancellationToken) -> Self {
+    pub(super) fn bounded(
+        memory: MemoryReservation,
+        cancellation: &'a CancellationToken,
+        invoking: &'a CancellationToken,
+    ) -> Self {
         Self {
             memory: Some(memory),
             cancellation: Some(cancellation),
+            invoking: Some(invoking),
         }
     }
 
     pub(super) fn check(&self) -> Result<(), ValueRetentionError> {
         if let Some(cancellation) = self.cancellation {
             cancellation.check()?;
+        }
+        if let Some(invoking) = self.invoking {
+            invoking.check()?;
         }
         Ok(())
     }
@@ -69,13 +79,16 @@ impl<'a> Workspace<'a> {
     ) -> Result<Option<DecimalValue>, ValueRetentionError> {
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
-                let Some(value) =
-                    DecimalValue::parse_budgeted(text, memory.budget(), cancellation)?
-                else {
+                let control = ProductionControl::new(
+                    memory.budget(),
+                    cancellation,
+                    self.invoking.expect("controlled tagged input"),
+                );
+                let Some(value) = DecimalValue::parse_with_control(text, &control)? else {
                     return Ok(None);
                 };
                 let (value, memory) = value.into_parts();
-                self.absorb(memory);
+                self.absorb(memory.expect("controlled decimal input"));
                 Ok(Some(value))
             }
             _ => Ok(DecimalValue::parse(text)),
@@ -89,17 +102,18 @@ impl<'a> Workspace<'a> {
     ) -> Result<Option<Vec<usize>>, ValueRetentionError> {
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
-                let Some(shape) = ArrayValue::decoded_shape_budgeted(
-                    elements,
-                    bound_count,
+                let control = ProductionControl::new(
                     memory.budget(),
                     cancellation,
-                )?
+                    self.invoking.expect("controlled tagged input"),
+                );
+                let Some(shape) =
+                    ArrayValue::decoded_shape_with_control(elements, bound_count, &control)?
                 else {
                     return Ok(None);
                 };
                 let (dimensions, memory) = shape.into_parts();
-                self.absorb(memory);
+                self.absorb(memory.expect("controlled array shape"));
                 Ok(Some(dimensions))
             }
             _ => Ok(ArrayValue::decoded_shape(elements, bound_count)),
@@ -119,7 +133,11 @@ impl<'a> Workspace<'a> {
     ) -> Result<MemoryReservation, ValueRetentionError> {
         let memory = self.memory.as_mut().expect("controlled tagged conversion");
         let cancellation = self.cancellation.expect("controlled tagged conversion");
-        let bytes = value.retained_payload_bytes(memory.budget(), cancellation)?;
+        let invoking = self.invoking.expect("controlled tagged conversion");
+        let bytes = value.retained_payload_bytes_with_check(memory.budget(), || {
+            cancellation.check()?;
+            invoking.check()
+        })?;
         assert!(bytes <= memory.bytes(), "tagged conversion payload lease");
         Ok(memory.split(bytes))
     }

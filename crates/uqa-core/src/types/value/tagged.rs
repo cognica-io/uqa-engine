@@ -71,13 +71,22 @@ pub(super) fn value_from_tagged_map(map: BTreeMap<String, Value>) -> Result<Valu
     convert(map, &mut Workspace::unbounded()).map_err(|error| error.to_string())
 }
 
-/// The input lease includes live map entries, key capacities and nested value payloads. Reserve new tag representations before allocation, then retain only the resulting value's payload.
+#[cfg(test)]
 pub(super) fn value_from_tagged_map_budgeted(
     map: Budgeted<BTreeMap<String, Value>>,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Value>, ValueRetentionError> {
+    value_from_tagged_map_scoped(map, cancellation, cancellation)
+}
+
+/// The input lease includes live map entries, key capacities and nested value payloads. Reserve new tag representations before allocation under both cancellation owners, then retain only the resulting value's payload.
+pub(super) fn value_from_tagged_map_scoped(
+    map: Budgeted<BTreeMap<String, Value>>,
+    cancellation: &CancellationToken,
+    invoking: &CancellationToken,
+) -> Result<Budgeted<Value>, ValueRetentionError> {
     let (map, memory) = map.into_parts();
-    let mut workspace = Workspace::bounded(memory, cancellation);
+    let mut workspace = Workspace::bounded(memory, cancellation, invoking);
     let value = convert(map, &mut workspace)?;
     let retained = workspace.retained(&value)?;
     Ok(Budgeted::new(value, retained))

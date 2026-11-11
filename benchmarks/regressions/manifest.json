@@ -55898,6 +55898,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_value_input_preserves_original_and_invoking_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/decoding/tests/owners.rs",
+      "capability": "Independent stored value input owners",
+      "workload": "Cancel each independent owner across value, fields and visitor input after retaining a completed value.",
+      "invariant": "All input forms reject cancellation while completed values retain their original payload and allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_value_visitors_cancel_before_the_next_original_field",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/decoding/tests/owners.rs",
+      "capability": "Stored value field cancellation boundary",
+      "workload": "Cancel each owner from a field visitor before a large following tagged field.",
+      "invariant": "The next field is not materialized and the completed visitor value remains independently retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "tagged_conversion_suboperations_check_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/tagged/controlled_tests/owners.rs",
+      "capability": "Native tag conversion cancellation propagation",
+      "workload": "Cancel either owner before replacement buffers, decimal parsing, shape traversal and final accounting.",
+      "invariant": "Every native suboperation observes both owners and leaves no reserved scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "tagged_conversion_retires_active_payloads_when_either_owner_cancels",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/tagged/controlled_tests/owners.rs",
+      "capability": "Active native tag conversion retirement",
+      "workload": "Cancel either owner after observing a real replacement allocation for a large hexadecimal carrier.",
+      "invariant": "Partial replacement and original map payloads retire with their reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
