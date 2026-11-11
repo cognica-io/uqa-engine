@@ -201,24 +201,21 @@ async fn registry(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<Nativ
     registry.next_label_id = u32::from_le_bytes(input.array().await?);
     let count = item_count::<(String, u32)>(input).await?;
     for _ in 0..count {
-        let (label, memory) = input.text().await?.into_parts();
+        let label = input.text().await?;
         ordered_text(
             registry.labels.last_key_value().map(|(key, _)| key),
             &label,
             input,
         )
         .await?;
+        let id = u32::from_le_bytes(input.array().await?);
         let bytes = label.capacity();
-        registry.labels.insert_admitted(
-            label,
-            u32::from_le_bytes(input.array().await?),
-            memory,
-            bytes,
-        )?;
+        let (label, memory) = label.into_parts();
+        registry.labels.insert_admitted(label, id, memory, bytes)?;
     }
     let count = item_count::<(String, LabelKind)>(input).await?;
     for _ in 0..count {
-        let (label, memory) = input.text().await?.into_parts();
+        let label = input.text().await?;
         ordered_text(
             registry.kinds.last_key_value().map(|(key, _)| key),
             &label,
@@ -231,6 +228,7 @@ async fn registry(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<Nativ
             _ => return Err(invalid()),
         };
         let bytes = label.capacity();
+        let (label, memory) = label.into_parts();
         registry.kinds.insert_admitted(label, kind, memory, bytes)?;
     }
     let count = item_count::<(u32, u64)>(input).await?;

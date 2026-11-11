@@ -21,7 +21,7 @@ use uqa_analysis::{
 };
 use uqa_core::{
     image_io::{decode_image, AsyncImageInput},
-    memory::BudgetedVec,
+    memory::{Budgeted, BudgetedVec},
 };
 
 mod capture;
@@ -153,11 +153,15 @@ pub(crate) async fn read_owned_analyzer_image_from(
         previous = Some((kind, sha256));
     }
     input.end().await?;
-    let (artifacts, _memory) = artifacts.into_parts();
     control.check()?;
-    let analyzer = resources
-        .restore_owned_image_with_input(descriptor, artifacts, input)
+    let (artifacts, memory) = artifacts.into_parts();
+    let analyzer = Budgeted::new(artifacts, memory)
+        .try_map_async(|artifacts| {
+            resources.restore_owned_image_with_input(descriptor, artifacts, input)
+        })
         .await?;
+    let (analyzer, workspace) = analyzer.into_parts();
+    drop(workspace);
     control.check()?;
     Ok(analyzer)
 }

@@ -54589,6 +54589,19 @@
     {
       "package": "uqa-graph",
       "kind": "lib",
+      "test": "graph_registry_input_retires_labels_at_ordering_and_tag_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Graph registry input retirement",
+      "workload": "Suspend long common-prefix labels before their ID/kind tags; cancel, abandon, truncate or reject their ordering while an independent sibling remains admitted.",
+      "invariant": "Private labels and their original allowances retire together without touching sibling admission, reading after terminal failure or publishing partial registries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
       "test": "path_input_preserves_independent_long_prefixes_pairs_and_native_charges",
       "cases": 1,
       "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",

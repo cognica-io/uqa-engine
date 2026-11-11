@@ -180,3 +180,77 @@ fn graph_input_errors_and_denied_admission_retire_the_original_continuation() {
     drop(occupied);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn graph_registry_input_retires_labels_at_ordering_and_tag_boundaries() {
+    let mut source = source();
+    let prefix = "registry한글".repeat(1024);
+    let first = format!("{prefix}a");
+    let second = format!("{prefix}b");
+    source.allocate_vertex_id(&first, "g").unwrap();
+    source.allocate_vertex_id(&second, "g").unwrap();
+    let wire = encode(&source);
+    let ends: Vec<_> = wire
+        .windows(second.len())
+        .enumerate()
+        .filter_map(|(offset, bytes)| (bytes == second.as_bytes()).then_some(offset + second.len()))
+        .collect();
+    assert_eq!(ends.len(), 2, "one label ID and one kind entry");
+    let control = StorageReadControl::with_limit(2 << 20);
+    assert_eq!(encode(&decode(&wire, &control)), wire);
+    assert_eq!(control.memory().used(), 0);
+    for end in ends {
+        for action in ["cancel", "drop", "truncated", "unordered"] {
+            let mut bytes = wire.clone();
+            if action == "truncated" {
+                bytes.truncate(end);
+            } else if action == "unordered" {
+                bytes[end - 1] = b'a';
+            }
+            let control = StorageReadControl::with_limit(2 << 20);
+            let sibling = control.memory().reserve(37).unwrap();
+            let mut decoder = input(&control);
+            let mut reader = Reader::new(&bytes);
+            while reader.bytes < end {
+                let remaining = end - reader.bytes;
+                assert!(decoder
+                    .advance(
+                        &mut reader,
+                        ImageDecodeWindow {
+                            bytes: remaining.min(4096),
+                            steps: 1,
+                        },
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+            assert!(control.memory().used() > second.len() + sibling.bytes());
+            let calls = reader.calls;
+            if action == "cancel" {
+                control.cancellation().cancel();
+            }
+            if action != "drop" {
+                loop {
+                    match decoder.advance(&mut reader, ImageDecodeWindow { bytes: 1, steps: 1 }) {
+                        Ok(None) => (),
+                        Ok(Some(_)) => panic!("incomplete label input was published"),
+                        Err(_) => break,
+                    }
+                }
+                assert_eq!(control.memory().used(), sibling.bytes());
+                let terminal_calls = reader.calls;
+                assert!(decoder
+                    .advance(&mut reader, ImageDecodeWindow { bytes: 1, steps: 1 })
+                    .is_err());
+                assert_eq!(reader.calls, terminal_calls);
+            }
+            drop(decoder);
+            if matches!(action, "cancel" | "drop" | "unordered") {
+                assert_eq!(reader.calls, calls);
+            }
+            assert_eq!(control.memory().used(), sibling.bytes());
+            drop(sibling);
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+}
