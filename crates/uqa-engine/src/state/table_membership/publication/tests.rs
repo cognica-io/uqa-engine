@@ -6,9 +6,11 @@
 
 use crate::{tests::providers::Provider, Engine};
 use uqa_core::RelationIdentity;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use uqa_storage::{read_control::StorageReadControl, vector_index::MemoryVectorIndex};
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn denied_live_table_publication_preserves_members_and_child_update_addresses() {
     let engine = Engine::new();
     for name in ["kept", "second", "detached"] {

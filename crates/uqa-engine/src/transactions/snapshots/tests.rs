@@ -9,29 +9,53 @@ use std::sync::{mpsc, Arc};
 use uqa_core::RelationIdentity;
 use uqa_storage::read_control::StorageReadControl;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod authority;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod authority_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod capture;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod catalogs;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod comments;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod database_authority;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod event_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod events;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod graph_oid_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod identifiers;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod idle;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod live_publication;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod resources;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod role_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod routine_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod schema_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod sequence_values;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod sequences;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod server_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod table_metadata;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod type_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod undo_sources;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod view_roots;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod wrapper_roots;
 
 fn sql(engine: &Engine, text: &str) {

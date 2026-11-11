@@ -8,10 +8,9 @@
 
 use super::{Arc, CancellationToken, NotificationFailureKind};
 use crate::{Engine, NotificationSubscriptionOptions};
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use std::time::Instant;
+use std::{sync::mpsc, time::Duration};
 
 fn options() -> NotificationSubscriptionOptions {
     NotificationSubscriptionOptions {
@@ -23,6 +22,7 @@ fn options() -> NotificationSubscriptionOptions {
     }
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn until(mut observed: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !observed() {

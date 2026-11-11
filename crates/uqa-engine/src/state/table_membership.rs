@@ -323,7 +323,7 @@ impl TableRegistry {
         self.0.read().live.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
     pub(crate) fn key(
         &self,
     ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedTableMembership>>
