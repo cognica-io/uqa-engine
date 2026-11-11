@@ -55950,6 +55950,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_retains_complete_selected_metadata_and_legacy_defaults",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests.rs",
+      "capability": "Stored call metadata preservation",
+      "workload": "Decode complete and predecessor stored call metadata, invocation modes, deferred errors and collation selections.",
+      "invariant": "Stable identities, native type declarations and selected call metadata match ordinary deserialization without resolution or execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_preserves_all_native_dispatch_shapes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests.rs",
+      "capability": "Stored native dispatch input",
+      "workload": "Decode every unit dispatch and every structured dispatch shape, including array omission masks and range metadata.",
+      "invariant": "Dispatch identities, flags and scalar metadata remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_preserves_unknown_duplicate_optional_and_flattened_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/compatibility.rs",
+      "capability": "Stored call field selection",
+      "workload": "Supply unknown and duplicate fields, absent metadata, flattened alternatives, legacy sequences and malformed optional binding content.",
+      "invariant": "Field selection, defaults and original acceptance agree with the existing stored representation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_matches_native_json_field_and_integer_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/compatibility.rs",
+      "capability": "Stored call scalar input",
+      "workload": "Remove or null each field and test signed zero, integer boundaries and fractional/exponent tokens.",
+      "invariant": "Direct input and buffered flattened content preserve their distinct native number semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_matches_native_rejection_at_every_truncation_and_mutation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/compatibility.rs",
+      "capability": "Stored call corruption rejection",
+      "workload": "Truncate and mutate every ASCII byte of complete call and assignment metadata.",
+      "invariant": "Accepted representations and rejection agree with the independent ordinary decoder; partial owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_preserves_generic_content_and_nested_type_depth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/compatibility.rs",
+      "capability": "Stored call recursion bound",
+      "workload": "Exercise generic unknown content and recursively nested type fields around the original JSON recursion limit.",
+      "invariant": "Every recognized generic container preserves the original depth boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_output_retains_exact_live_allocations_and_retires_every_denial",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/retention.rs",
+      "capability": "Stored call allocation ownership",
+      "workload": "Measure complete metadata allocations and deny progressively larger budgets including peak-minus-one.",
+      "invariant": "Returned reservations equal live native allocations; every failed partial candidate releases all memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_preserves_both_cancellation_owners_and_admits_before_name_copy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/retention.rs",
+      "capability": "Stored call pre-admission",
+      "workload": "Cancel either owner before input and deny a one-megabyte name before allocation.",
+      "invariant": "Cancellation allocates no payload and denied input never copies the oversized name.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_optional_binding_rejection_has_no_unadmitted_diagnostic_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/retention.rs",
+      "capability": "Stored optional binding admission",
+      "workload": "Decode malformed optional flattened metadata that the native format treats as absent while measuring actual allocations.",
+      "invariant": "Accepted absent metadata does not allocate an unadmitted internal diagnostic; live and peak allocations remain covered.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_call_input_cancels_during_original_argument_production",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/function_binding/input/tests/retention.rs",
+      "capability": "Stored call active cancellation",
+      "workload": "Cancel the original or invoking owner after a large argument buffer begins production.",
+      "invariant": "The active producer observes either cancellation and retires its complete partial candidate.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

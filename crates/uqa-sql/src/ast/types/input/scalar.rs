@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, ColumnType, SQLError};
+use super::{invalid, ColumnType, InputError};
 use crate::ast::{IntervalFields, RangeAlignment, RangeSubtype};
 
 pub(super) fn column(tag: &str) -> Option<ColumnType> {
@@ -51,7 +51,7 @@ pub(super) fn column(tag: &str) -> Option<ColumnType> {
     })
 }
 
-pub(super) fn range(tag: &str) -> Result<RangeSubtype, SQLError> {
+pub(super) fn range(tag: &str) -> Result<RangeSubtype, InputError> {
     Ok(match tag {
         "Integer" => RangeSubtype::Integer,
         "BigInteger" => RangeSubtype::BigInteger,
@@ -63,7 +63,7 @@ pub(super) fn range(tag: &str) -> Result<RangeSubtype, SQLError> {
     })
 }
 
-pub(super) fn alignment(tag: &str) -> Result<RangeAlignment, SQLError> {
+pub(super) fn alignment(tag: &str) -> Result<RangeAlignment, InputError> {
     Ok(match tag {
         "Integer" => RangeAlignment::Integer,
         "Double" => RangeAlignment::Double,
@@ -71,7 +71,7 @@ pub(super) fn alignment(tag: &str) -> Result<RangeAlignment, SQLError> {
     })
 }
 
-pub(super) fn interval(tag: &str) -> Result<IntervalFields, SQLError> {
+pub(super) fn interval(tag: &str) -> Result<IntervalFields, InputError> {
     Ok(match tag {
         "All" => IntervalFields::All,
         "Year" => IntervalFields::Year,

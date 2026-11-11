@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored SQL function bindings under their original allowance and both cancellation owners. Preserve selected routine identities, native dispatch, invocation types, composite/assignment metadata and deferred errors without rebinding names or executing routines.
+
 - Preserve independent original and invoking cancellation during retained JSON value input, including tagged conversions, decimal parsing, array shape checks and final payload accounting. Completed values keep their existing ownership after either caller cancels.
 
 - Decode stored SQL column types under the original memory allowance and cancellation owners, preserving complete type identities and existing JSON forms. Names and nested type nodes retain their admitted allocations through completion or failure.

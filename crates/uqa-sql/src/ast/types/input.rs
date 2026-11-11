@@ -14,11 +14,10 @@ use uqa_core::{
 };
 
 mod fields;
-mod json;
 mod references;
 mod scalar;
 
-use json::{invalid, number, optional, Input};
+use crate::ast::stored_input::{invalid, number, optional, Input, InputError};
 
 impl ColumnType {
     /// Read the existing stored JSON representation, admitting every temporary and output allocation before construction. This decodes the declaration; catalog identity and type validation remain with their existing owners.
@@ -35,7 +34,10 @@ impl ColumnType {
 }
 
 impl<'a> Input<'a, '_> {
-    fn column(&mut self, first: JsonToken<'a>) -> Result<Produced<ColumnType>, SQLError> {
+    pub(crate) fn column(
+        &mut self,
+        first: JsonToken<'a>,
+    ) -> Result<Produced<ColumnType>, InputError> {
         let (tag, object) = self.tag(first)?;
         let value = if let Some(value) = scalar::column(&tag) {
             if object && self.next()? != JsonToken::Null {
@@ -57,7 +59,7 @@ impl<'a> Input<'a, '_> {
         &mut self,
         tag: &str,
         token: JsonToken<'a>,
-    ) -> Result<Produced<ColumnType>, SQLError> {
+    ) -> Result<Produced<ColumnType>, InputError> {
         let scalar = match tag {
             "Named" => {
                 let (name, memory) = self.text(token)?.into_parts();
@@ -90,7 +92,7 @@ impl<'a> Input<'a, '_> {
         self.finish(scalar)
     }
 
-    fn finish(&self, value: ColumnType) -> Result<Produced<ColumnType>, SQLError> {
+    fn finish(&self, value: ColumnType) -> Result<Produced<ColumnType>, InputError> {
         Ok(self
             .control
             .finish(value, self.control.empty_reservation())?)

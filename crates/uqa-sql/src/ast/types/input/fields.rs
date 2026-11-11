@@ -4,13 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    json::{number, optional, Input},
-    scalar, ColumnType, JsonToken, Produced, SQLError,
-};
+use super::{scalar, ColumnType, InputError, JsonToken, Produced};
+use crate::ast::stored_input::{number, optional, Input};
 
 impl<'a> Input<'a, '_> {
-    pub(super) fn numeric(&mut self, token: JsonToken<'a>) -> Result<ColumnType, SQLError> {
+    pub(super) fn numeric(&mut self, token: JsonToken<'a>) -> Result<ColumnType, InputError> {
         let (mut precision, mut scale) = (None, None);
         self.fields(token, &["precision", "scale"], 0, |_, index, token| {
             if index == 0 {
@@ -23,7 +21,7 @@ impl<'a> Input<'a, '_> {
         Ok(ColumnType::Numeric { precision, scale })
     }
 
-    pub(super) fn interval(&mut self, token: JsonToken<'a>) -> Result<ColumnType, SQLError> {
+    pub(super) fn interval(&mut self, token: JsonToken<'a>) -> Result<ColumnType, InputError> {
         let (mut fields, mut precision) = (None, None);
         self.fields(token, &["fields", "precision"], 1, |input, index, token| {
             if index == 0 {
@@ -42,7 +40,7 @@ impl<'a> Input<'a, '_> {
     pub(super) fn domain(
         &mut self,
         token: JsonToken<'a>,
-    ) -> Result<Produced<ColumnType>, SQLError> {
+    ) -> Result<Produced<ColumnType>, InputError> {
         let (mut schema, mut name, mut base) = (None, None, None);
         let (mut oid, mut array_oid, mut collation_oid) = (0, None, None);
         self.fields(

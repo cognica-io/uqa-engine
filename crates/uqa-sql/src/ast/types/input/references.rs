@@ -4,10 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    json::{number, Input},
-    scalar, ColumnType, JsonToken, Produced, SQLError,
-};
+use super::{scalar, ColumnType, InputError, JsonToken, Produced};
+use crate::ast::stored_input::{number, Input};
 use crate::ast::{CompositeTypeReference, EnumTypeReference, RangeAlignment, RangeTypeReference};
 
 impl<'a> Input<'a, '_> {
@@ -15,7 +13,7 @@ impl<'a> Input<'a, '_> {
         &mut self,
         tag: &str,
         token: JsonToken<'a>,
-    ) -> Result<Produced<ColumnType>, SQLError> {
+    ) -> Result<Produced<ColumnType>, InputError> {
         let names: &[&str] = match tag {
             "Enum" => &["schema", "name", "oid", "array_oid"],
             "Composite" => &["schema", "name", "oid", "array_oid", "relation_oid"],

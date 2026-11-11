@@ -49,6 +49,7 @@ mod routine_source;
 mod routines;
 mod sequence;
 mod sequence_declaration;
+mod stored_input;
 mod table_alteration;
 mod type_lifecycle;
 mod type_privileges;
