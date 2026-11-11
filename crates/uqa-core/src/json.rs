@@ -12,8 +12,10 @@ use crate::{
 };
 
 mod lexical;
+mod object;
 mod string;
 mod work;
+pub use object::JsonObjectProjection;
 use work::Work;
 pub use work::Work as JsonReadWork;
 

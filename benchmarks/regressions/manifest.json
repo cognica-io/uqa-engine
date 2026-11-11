@@ -55339,6 +55339,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_preserves_sorted_last_values_and_original_source_spans",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Compare ordered duplicate/escaped names, nested values and original numeric spellings against public JSON decoding.",
+      "invariant": "Projection order and last-value selection match the original map, while each returned value remains a slice of the original text.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_preserves_complete_string_grammar_and_original_depth_limit",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Validate malformed Unicode and overwritten values, invalid syntax and nesting around the original serde container limit.",
+      "invariant": "Invalid discarded values are still rejected, and acceptance at every tested nesting boundary agrees with the independent parser.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_borrows_large_values_and_retains_exact_key_and_node_allowances",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Project one- and four-megabyte duplicate values with a 64-KiB allowance while measuring actual retained allocations.",
+      "invariant": "Only decoded names and exact native nodes allocate; original value bytes are never copied or reserialized.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_retires_truncation_cancelled_and_denied_names_without_copying_values",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Cut every prefix of a nested Unicode object, cancel before input and deny one-megabyte key construction under partial quotas.",
+      "invariant": "Failures retire the unfinished projection without releasing sibling leases or allocating a denied key.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
