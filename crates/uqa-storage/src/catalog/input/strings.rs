@@ -14,14 +14,41 @@ use uqa_core::{
 };
 
 /// Decode the stored struct's map or positional representation. Unknown map fields remain ignored, duplicate known fields fail, and nullable fields retain their absent/null default.
-pub(super) fn fields<const N: usize>(
+pub(crate) fn fields<const N: usize>(
     bytes: &[u8],
     names: [(&'static str, bool); N],
     control: &StorageReadControl,
 ) -> StorageBackendResult<[Option<Budgeted<String>>; N]> {
     let mut reader = JsonReader::from_slice(bytes, control.memory(), control.cancellation())
         .with_ignored_string_escapes();
-    let first = next(&mut reader)?;
+    let (result, _) = read_fields(&mut reader, names, control)?;
+    if reader.next_event().map_err(json_error)?.is_some() {
+        return Err(invalid("trailing catalog value"));
+    }
+    control.check()?;
+    Ok(result)
+}
+
+/// Read one original struct and return its closing delimiter offset, leaving the surrounding metadata suffix untouched.
+pub(crate) fn fields_prefix<const N: usize>(
+    bytes: &[u8],
+    names: [(&'static str, bool); N],
+    control: &StorageReadControl,
+) -> StorageBackendResult<([Option<Budgeted<String>>; N], usize)> {
+    control.check()?;
+    let mut reader = JsonReader::from_slice(bytes, control.memory(), control.cancellation())
+        .with_ignored_string_escapes();
+    let result = read_fields(&mut reader, names, control)?;
+    control.check()?;
+    Ok(result)
+}
+
+fn read_fields<const N: usize>(
+    reader: &mut JsonReader<'_, '_>,
+    names: [(&'static str, bool); N],
+    control: &StorageReadControl,
+) -> StorageBackendResult<([Option<Budgeted<String>>; N], usize)> {
+    let first = next(reader)?;
     let object = match first {
         JsonToken::StartObject => true,
         JsonToken::StartArray => false,
@@ -30,13 +57,17 @@ pub(super) fn fields<const N: usize>(
     let mut seen = [false; N];
     let mut result = std::array::from_fn(|_| None);
     let mut position = 0;
-    loop {
-        let token = next(&mut reader)?;
+    let end = loop {
+        let event = reader
+            .next_event()
+            .map_err(json_error)?
+            .ok_or_else(|| invalid("unexpected end of catalog text"))?;
+        let token = event.token;
         if matches!(
             (object, token),
             (true, JsonToken::EndObject) | (false, JsonToken::EndArray)
         ) {
-            break;
+            break event.range.end;
         }
         let selected = if object {
             let JsonToken::Key(key) = token else {
@@ -56,9 +87,9 @@ pub(super) fn fields<const N: usize>(
         if let Some(index) = selected.filter(|index| seen[*index]) {
             return Err(invalid(format!("duplicate field `{}`", names[index].0)));
         }
-        let value = if object { next(&mut reader)? } else { token };
+        let value = if object { next(reader)? } else { token };
         let Some(index) = selected else {
-            skip(value, &mut reader)?;
+            skip(value, reader)?;
             continue;
         };
         seen[index] = true;
@@ -75,17 +106,13 @@ pub(super) fn fields<const N: usize>(
                 )))
             }
         };
-    }
+    };
     for (index, (name, nullable)) in names.into_iter().enumerate() {
         if !seen[index] && !nullable {
             return Err(invalid(format!("missing field `{name}`")));
         }
     }
-    if reader.next_event().map_err(json_error)?.is_some() {
-        return Err(invalid("trailing catalog value"));
-    }
-    control.check()?;
-    Ok(result)
+    Ok((result, end))
 }
 
 fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {

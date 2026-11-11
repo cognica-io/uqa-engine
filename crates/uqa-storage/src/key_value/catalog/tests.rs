@@ -29,7 +29,7 @@ fn legacy_security(
     RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
         role_owner: role_owner.into(),
         acl,
-        column_acls,
+        column_acls: column_acls.into_iter().collect(),
     })
 }
 

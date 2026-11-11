@@ -8,6 +8,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Assemble admitted persistent table catalogs from original definitions, owner bindings and ordered ACL replacements. Native SQLite, SQLite Key/Value and redb preserve existing ordering and error precedence; cancellation or failure retires incomplete catalogs without publication. Assembly preserves the original control context, and failed authority construction frees native values before releasing their allowance.
+
+- Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.
+
+- Decode projected authority JSON with sorted last-value object fields and integer classification, retaining admitted recipient, grantor, column and path allocations without copying discarded values.
+
+- Project stored JSON object fields in sorted last-value order while retaining original value bytes, admitting decoded names and map nodes without building another value tree.
+
+- Read native SQLite table definitions and independent ACL replacements from one retained catalog view, admitting decoded buffers before allocation and retiring both inputs on failure or cancellation.
+
+- Decode stored named ACL paths with pre-admitted recipient, grantor and column buffers. SQL adopts the original named-authority map nodes without allocating replacement nodes; Rust `LegacyRelationSecurity` and `TableSecurity` column ACL constructors now use Core `OwnedMap`, with unchanged serialized data and migration rules.
+
+- Decode independent ACL metadata keys under their original catalog allowance, preserving canonical relation/column spelling and error order without allocating a second serialized key.
+
+- Decode independent relation ACL replacement tuples under the original record memory allowance, retaining their ordered path buffers and preserving stored field and revision validation order.
+
+- Decode stored full-text and vector field declarations under the original memory allowance, preserving ordered names, duplicate entries, vector dimensions and stored JSON forms. Input failure releases partial fields before returning their allowance.
+
+- Decode durable role identities and bound relation/column ACL JSON under the caller's memory allowance, preserving existing struct forms, numeric classifications, path order and duplicate-key behavior. Failed or cancelled input releases partial buffers.
+
 - Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
 
 - Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.

@@ -50,7 +50,7 @@ fn existing_grantee_or_grantor_and_public_or_owner_do_not_add_dependencies() {
     let before = TableSecurity {
         role_owner: "owner".into(),
         acl: Some(vec![acl("reader", "grantor")]),
-        column_acls: std::collections::BTreeMap::new(),
+        column_acls: uqa_core::memory::OwnedMap::new(),
     };
     let mut after = before.clone();
     let entries = after.acl.as_mut().unwrap();

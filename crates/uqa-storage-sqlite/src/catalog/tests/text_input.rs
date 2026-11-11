@@ -8,6 +8,43 @@ use crate::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
 use uqa_storage::PersistentStorageProvider;
 
 #[test]
+fn sqlite_native_catalog_table_load_assembles_original_private_definitions_and_replacements() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_table_load(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_catalog_table_load_assembles_original_private_definitions_and_replacements() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_table_load(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_native_catalog_table_input_retains_private_definitions_and_acl_replacements() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let provider = SQLiteStorageProvider::new(connection);
+    uqa_storage::key_value::conformance::verify_catalog_table_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_catalog_table_input_retains_private_definitions_and_acl_replacements() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_table_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn sqlite_native_catalog_index_input_retains_original_definitions_and_private_membership() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let provider = SQLiteStorageProvider::new(connection);

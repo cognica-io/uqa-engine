@@ -15,6 +15,8 @@ use uqa_core::{
 };
 use uqa_storage::RelationSecurityRow;
 
+pub(super) mod input;
+
 fn encode_identity(identity: RoleIdentity) -> Result<Value> {
     if !identity.is_valid() {
         return Err(SQLiteError::StorageBackend(
@@ -225,15 +227,16 @@ pub(super) fn decode_relation_cells(
     acl: ValueRef<'_>,
     columns: ValueRef<'_>,
 ) -> Result<RelationSecurityRow> {
-    fn optional_text(value: ValueRef<'_>) -> Result<Option<&str>> {
-        if value == ValueRef::Null {
-            return Ok(None);
-        }
-        value.as_str().map(Some).map_err(|_| {
-            SQLiteError::StorageBackend("relation ACL has an invalid text storage class".into())
-        })
-    }
     decode_relation(owner, optional_text(acl)?, optional_text(columns)?)
+}
+
+fn optional_text(value: ValueRef<'_>) -> Result<Option<&str>> {
+    if value == ValueRef::Null {
+        return Ok(None);
+    }
+    value.as_str().map(Some).map_err(|_| {
+        SQLiteError::StorageBackend("relation ACL has an invalid text storage class".into())
+    })
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@
 
 use super::{KeyValueCatalog, TAG_CATALOG_INDEX};
 use crate::{
-    catalog::input::{CatalogInput, CatalogInputLimits, CatalogRowDecoder},
+    catalog::input::{strings, CatalogInput, CatalogInputLimits, CatalogRowDecoder},
     key_value::codec::read_str_ref,
     read_control::StorageReadControl,
     CatalogIndexRow, RelationIdentity, StorageBackendError, StorageBackendResult,
@@ -17,8 +17,6 @@ use uqa_core::{
     memory::{Budgeted, ProductionControl},
     RelationName, RelationReference,
 };
-
-mod strings;
 
 impl KeyValueCatalog {
     pub(super) fn row_input<T>(

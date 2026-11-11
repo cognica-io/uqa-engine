@@ -12,6 +12,7 @@ mod foreign_servers;
 mod metadata;
 mod metadata_prefix;
 mod migration;
+mod table_input;
 mod text_input;
 mod version_migrations;
 mod view_provenance;
@@ -81,7 +82,8 @@ fn view_rows_round_trip_role_ownership() {
     let catalog = fresh();
     catalog.save_schema("application").unwrap();
     let acl = sample_table_acl();
-    let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
+    let column_acls =
+        uqa_core::memory::OwnedMap::from_iter([("title".to_string(), sample_table_acl())]);
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("application", "owned_view"),
@@ -188,7 +190,8 @@ fn migration_creates_tables_table() {
 fn save_load_round_trip() {
     let cat = fresh();
     let acl = sample_table_acl();
-    let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
+    let column_acls =
+        uqa_core::memory::OwnedMap::from_iter([("title".to_string(), sample_table_acl())]);
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
         security: uqa_storage::RelationSecurityRow::Legacy(

@@ -6,8 +6,8 @@
 
 use super::*;
 
-fn column_acl() -> std::collections::BTreeMap<String, Vec<uqa_storage::catalog::TableAclEntry>> {
-    std::collections::BTreeMap::from([(
+fn column_acl() -> uqa_core::memory::OwnedMap<String, Vec<uqa_storage::catalog::TableAclEntry>> {
+    uqa_core::memory::OwnedMap::from_iter([(
         "visible".into(),
         vec![uqa_storage::catalog::TableAclEntry {
             role: "reader".into(),

@@ -16,8 +16,10 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog_index_input;
 mod catalog_revisions;
+mod catalog_table_input;
 mod catalog_text_input;
 pub use catalog_index_input::verify_catalog_index_input;
+pub use catalog_table_input::{verify_catalog_table_input, verify_catalog_table_load};
 pub use catalog_text_input::verify_catalog_text_input;
 mod foreign_servers;
 pub use catalog_revisions::verify_catalog_record_revisions;

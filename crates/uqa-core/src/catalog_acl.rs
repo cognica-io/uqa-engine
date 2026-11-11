@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 mod grantee;
 pub use grantee::AclGrantee;
+pub mod input;
 mod relation_security;
 pub use relation_security::{BoundRelationSecurity, LegacyRelationSecurity, RelationAclRevisions};
 

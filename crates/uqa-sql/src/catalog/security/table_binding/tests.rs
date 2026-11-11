@@ -13,6 +13,53 @@ use crate::catalog::security::{
 };
 
 #[test]
+fn named_relation_authority_adoption_keeps_original_nodes_and_path_buffers() {
+    use uqa_core::{catalog_acl::LegacyRelationSecurity, memory::Budgeted};
+
+    let memory = uqa_core::memory::MemoryBudget::new(65536);
+    let cancellation = uqa_core::CancellationToken::new();
+    let columns = uqa_core::catalog_acl::input::legacy_column_entries(
+        br#"{"field":[{"role":"reader","grantor":"owner"}]}"#,
+        &memory,
+        &cancellation,
+    )
+    .unwrap();
+    let (name, entries) = columns.iter().next().unwrap();
+    let original_node = std::ptr::from_ref(name) as usize;
+    let original_paths = entries.as_ptr();
+    let original_role = entries[0].role.role_name().unwrap().as_ptr();
+    let mut allowance = memory.reserve(5).unwrap();
+    let role_owner = "owner".to_owned();
+    let (column_acls, columns_memory) = columns.into_parts();
+    allowance.absorb(columns_memory);
+    let row = Budgeted::new(
+        LegacyRelationSecurity {
+            role_owner,
+            acl: None,
+            column_acls,
+        },
+        allowance,
+    );
+    let used = memory.used();
+    let mut result = None;
+    let measured = allocation_counter::measure(|| {
+        result = Some(
+            row.try_map(|row| Ok::<_, ()>(TableSecurity::from_legacy(row)))
+                .unwrap(),
+        );
+    });
+    assert_eq!(measured.count_total, 0);
+    let result = result.unwrap();
+    let (name, entries) = result.column_acls.iter().next().unwrap();
+    assert_eq!(std::ptr::from_ref(name) as usize, original_node);
+    assert_eq!(entries.as_ptr(), original_paths);
+    assert_eq!(entries[0].role.role_name().unwrap().as_ptr(), original_role);
+    assert_eq!(memory.used(), used);
+    drop(result);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn captured_table_security_keeps_full_acl_tuple_identity_and_releases_failed_copies() {
     let roles = roles();
     let mut source = security(&roles);

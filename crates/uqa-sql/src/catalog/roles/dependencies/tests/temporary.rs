@@ -16,7 +16,7 @@ use crate::{
     },
     plan::UnifiedPlan,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
@@ -69,7 +69,7 @@ fn temporary_view() -> StoredView {
             &crate::catalog::security::TableSecurity {
                 role_owner: "view_owner".into(),
                 acl: Some(vec![entry("reader", Some("uqa"))]),
-                column_acls: BTreeMap::new(),
+                column_acls: uqa_core::memory::OwnedMap::new(),
             },
             &roles(),
         )

@@ -54923,6 +54923,877 @@
       "capability": "Persistent catalog authority ownership",
       "workload": "Thirty-two separately admitted authority-map nodes and an exhausted shared allowance with an independent sibling.",
       "invariant": "Adoption preserves every original node lease without requesting new admission; removal and final retirement release only the corresponding original reservations."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_relation_acl_input_preserves_existing_struct_and_map_shapes",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Optional ACLs, map and positional structs, escaped field names, duplicate column keys and deeply nested ignored values.",
+      "invariant": "Controlled input matches the existing durable decoder while preserving path order, null semantics, last-value collisions and wire output."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_role_input_preserves_integer_boundaries_and_original_validity_checks",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Role identity endpoints, positional records, integer boundaries, negative zero and invalid identity field shapes.",
+      "invariant": "Known numeric fields use the existing fixed-width scalar decoder; semantic identity validity remains in the original catalog validator."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_relation_acl_input_keeps_duplicate_and_missing_field_error_order",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Duplicate and missing ACL and privilege fields combined with malformed or trailing values.",
+      "invariant": "Original duplicate and missing-field precedence is preserved, and rejected input retires all admitted workspace."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_column_acl_input_retains_exact_buffers_and_releases_replaced_paths",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Wide column names and 257-path ACL vectors with replaced keys, plus a rejected four MiB name.",
+      "invariant": "Retained allocation bytes equal owned node, name and vector reservations; replacement releases old paths and rejection precedes large copies."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_column_acl_input_retires_truncation_cancellation_and_partial_admission",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Every truncated prefix, nine admission ceilings, an independent sibling reservation, cancellation and corrupt column values.",
+      "invariant": "No partial authority escapes; failure releases only its own input and output reservations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_preserves_original_sequence_shapes_and_spelling",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Empty and repeated full-text names, escaped UTF-8, positional and named vector declarations, numeric boundaries and deeply nested ignored values.",
+      "invariant": "Decoded values and ordered wire observations match the original stored serde representation without changing field validation."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_preserves_numeric_and_duplicate_error_order",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Malformed field arrays, u32 overflow and numeric forms, missing and duplicate vector properties combined with malformed or trailing JSON.",
+      "invariant": "Existing accepted shapes, numeric classification and duplicate/missing-field precedence remain intact; errors retain no input allocations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_accounts_destinations_before_copy_and_retains_their_lease",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "257 wide text/vector field declarations, independent sibling reservation and a denied four-MiB field name.",
+      "invariant": "Native allocation observation equals the returned buffer capacities; admission precedes copying and returned values retain their original allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_retires_every_truncation_cancellation_and_partial_admission",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Every truncation of named/positional field input, eight allocation ceilings and cancellation.",
+      "invariant": "Terminal failures retire all partial fields and vector workspace without changing independent reservations."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_acl_token_input_preserves_the_enclosing_stream_and_original_admission",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Two nested optional ACLs followed by a distinct trailing value in one original token stream.",
+      "invariant": "One ACL consumes only its own tokens; the enclosing continuation and exact original ACL reservation remain intact."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_preserves_stored_forms_and_nested_field_order",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Named, reordered, escaped and positional ACL tuples with null, empty and populated ACLs and ignored nested values.",
+      "invariant": "Controlled decoding matches the existing stored tuple and serialized observations without an intermediate JSON tree."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_preserves_corruption_and_identity_validation_order",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Corrupt tuple fields, numeric limits, duplicate/missing/unknown fields and invalid tuple identities combined with malformed tails.",
+      "invariant": "Original field diagnostics and syntax-before-identity ordering are preserved; rejected tuples retain no allocations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_keeps_original_path_buffers_until_the_tuple_retires",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "257 ACL paths and an independent live sibling reservation.",
+      "invariant": "Native allocation observation equals the returned original path buffer capacity; tuple retirement releases only its own allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_retires_truncation_denial_cancellation_and_invalid_revisions",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Every tuple truncation, seven admission limits, invalid complete revisions and cancellation.",
+      "invariant": "Every terminal path retires the original parser and partial tuple before returning the associated memory allowance."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_acl_token_input_rejects_cancellation_after_the_parent_reads_its_first_token",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "The parent consumes the first null or array token, then cancels before handing the original stream to the ACL owner.",
+      "invariant": "The nested authority operation rejects cancelled admission even when its scalar value needs no further token reads."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_preserves_canonical_names_and_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_rejects_noncanonical_relations_and_columns_in_original_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_retires_partial_names_and_preserves_sibling_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_denies_large_names_before_copying_or_reserializing",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_preserves_original_recipient_forms_and_defaults",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_column_acl_input_keeps_nodes_names_and_replacement_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_retires_partial_fields_and_denied_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_preserves_named_security_wire_after_node_adoption",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_relation_authority_adoption_keeps_original_nodes_and_path_buffers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests.rs",
+      "capability": "Original named authority adoption",
+      "workload": "Move an admitted stored named authority into SQL and inspect original column nodes, path buffers and recipient names.",
+      "invariant": "Adoption allocates no replacement nodes or payloads and retains the original allowance until the SQL owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_bounds_slots_and_keeps_one_view_through_the_definition_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Visit one tombstone, a definition, the definition boundary and an independent ACL from a retained instrumented source.",
+      "invariant": "Each advance consumes at most one physical slot; one original view survives both streams and closes before idempotent completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_retires_both_sources_after_late_error_unwind_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Fail or unwind while reading ACLs, cancel either control, and abandon the input after definitions finish.",
+      "invariant": "Both streams retire with their original view and allowance; terminal calls perform no more reads and sibling admission remains held.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_authority_input_preserves_original_storage_classes_nulls_and_recipient_shapes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Compare 252 original-decoder combinations of text/blob/invalid owners, optional ACL cells and bound/named column ACLs.",
+      "invariant": "Accepted authority, storage-class error precedence and typed error categories match ordinary catalog restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_authority_input_retains_exact_admitted_cells_and_retires_partial_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Measure actual named authority allocations and exercise every column-JSON truncation, denied quotas and cancellation.",
+      "invariant": "Every retained allocation has its original allowance; partial failures release only their own buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_retains_matching_definition_and_acl_generations_after_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Capture a native table and relation/column ACL replacements, overwrite both, then close the original connection beside unrelated four-MiB metadata.",
+      "invariant": "The paired input reconstructs the original ordinary-loader result, including independent revisions, without reading unrelated payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_keeps_private_membership_through_rollback_and_name_reuse",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Capture private table membership, roll back and reuse its name with different object/generation identity.",
+      "invariant": "The retained definitions preserve the original private rows and descriptors through source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_retires_both_streams_on_cancel_limits_and_abandonment",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Cancel before or after definition completion, deny encoded record sizes and abandon an unread native input.",
+      "invariant": "Typed cancellation/limit errors retire both streams; terminal calls cannot resume and unrelated leases survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_denies_large_definition_buffers_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Decode native table records containing one-MiB and four-MiB descriptors under a 64-KiB allowance.",
+      "invariant": "Oversized destinations fail with typed admission errors before a complete field allocation and retain no input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_preserves_sorted_last_values_and_original_source_spans",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Compare ordered duplicate/escaped names, nested values and original numeric spellings against public JSON decoding.",
+      "invariant": "Projection order and last-value selection match the original map, while each returned value remains a slice of the original text.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_preserves_complete_string_grammar_and_original_depth_limit",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Validate malformed Unicode and overwritten values, invalid syntax and nesting around the original serde container limit.",
+      "invariant": "Invalid discarded values are still rejected, and acceptance at every tested nesting boundary agrees with the independent parser.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_borrows_large_values_and_retains_exact_key_and_node_allowances",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Project one- and four-megabyte duplicate values with a 64-KiB allowance while measuring actual retained allocations.",
+      "invariant": "Only decoded names and exact native nodes allocate; original value bytes are never copied or reserialized.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "json_object_projection_retires_truncation_cancelled_and_denied_names_without_copying_values",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests.rs",
+      "capability": "Borrowed ordered JSON object input",
+      "workload": "Cut every prefix of a nested Unicode object, cancel before input and deny one-megabyte key construction under partial quotas.",
+      "invariant": "Failures retire the unfinished projection without releasing sibling leases or allocating a denied key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_authority_roles_preserve_last_fields_and_value_integer_classification",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_bound_authority_preserves_recursive_collisions_and_sorted_validation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_named_authority_preserves_recipient_tags_and_overwritten_values",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_column_authority_admits_only_final_paths_and_keeps_exact_live_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_authority_retires_partial_input_and_denied_names_without_value_copies",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_preserves_flattened_security_versions_and_original_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_preserves_known_duplicates_and_projected_authority_collisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_keeps_field_error_order_before_later_syntax_and_security",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_retains_exact_buffers_and_skips_discarded_large_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_retires_all_truncations_cancellation_and_partial_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_filters_live_metadata_before_any_value_read",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_retires_selection_failures_before_value_access",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_table_input_preserves_original_key_identity_and_validation_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_acl_selection_preserves_original_string_prefix_and_suffix_handling",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_preserves_replacement_order_duplicate_relations_and_exact_live_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_retires_views_and_payloads_on_every_partial_drop_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_denies_peak_shortfall_and_preserves_late_input_error_precedence",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_owner_failure_precedes_acl_reads_and_unwinding_retires_the_view",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_checks_duplicate_objects_after_each_original_owner_predicate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/predicates.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_preserves_legacy_and_orphan_replacement_rules",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/predicates.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_owner_input_matches_original_binding_and_identity_predicates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/table_owners/input/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_owner_input_rejects_large_physical_binding_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/table_owners/input/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_column_failure_destroys_native_values_before_returning_their_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority destruction ownership",
+      "workload": "Reject a later column after retaining 1,024 drop-observed native values in the first path.",
+      "invariant": "Every native value is destroyed while its allocation allowance remains reserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_rejects_a_different_retained_context_before_source_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/control.rs",
+      "capability": "Table catalog construction context",
+      "workload": "Combine an original physical input with a different memory, cancellation or temporary-file context.",
+      "invariant": "Construction rejects the mismatch before reading records or allocating a continuation and releases the consumed input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_accepts_clones_of_its_original_retained_context",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/control.rs",
+      "capability": "Retained table catalog context cloning",
+      "workload": "Assemble complete table definitions and ACL replacements with cloned original control handles.",
+      "invariant": "Shared original controls preserve exact table output and all retained allocations retire.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

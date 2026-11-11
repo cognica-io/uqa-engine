@@ -59,6 +59,7 @@ mod relations;
 mod schema_table;
 mod sequences;
 mod table_data;
+mod table_input;
 mod tables;
 mod text_input;
 mod views;
@@ -348,6 +349,22 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
         self.save_table_impl(schema)
+    }
+
+    fn begin_table_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::table_load::CatalogTableLoad> {
+        self.table_load(limits, control)
+    }
+
+    fn begin_table_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::table_input::CatalogTableInput> {
+        self.table_input(limits, control)
     }
 
     fn load_tables(&self) -> StorageBackendResult<Vec<TableSchema>> {

@@ -32,7 +32,7 @@ fn key_value_catalog_preserves_core_registries() {
                 uqa_core::catalog_acl::LegacyRelationSecurity {
                     role_owner: "docs_owner".into(),
                     acl: Some(table_acl.clone()),
-                    column_acls: std::collections::BTreeMap::new(),
+                    column_acls: uqa_core::memory::OwnedMap::new(),
                 },
             ),
             object_id: [1; 16],
@@ -61,7 +61,7 @@ fn key_value_catalog_preserves_core_registries() {
         crate::RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
             role_owner: "docs_owner".into(),
             acl: Some(table_acl),
-            column_acls: std::collections::BTreeMap::new()
+            column_acls: uqa_core::memory::OwnedMap::new()
         })
     );
     assert_eq!(
