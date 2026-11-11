@@ -18,6 +18,14 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn begin_table_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::table_input::CatalogTableInput> {
+        self.native_table_input(limits, control)
+    }
+
     fn begin_index_input(
         &self,
         limits: uqa_storage::catalog::input::CatalogInputLimits,

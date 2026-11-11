@@ -55235,6 +55235,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_bounds_slots_and_keeps_one_view_through_the_definition_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Visit one tombstone, a definition, the definition boundary and an independent ACL from a retained instrumented source.",
+      "invariant": "Each advance consumes at most one physical slot; one original view survives both streams and closes before idempotent completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_retires_both_sources_after_late_error_unwind_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Fail or unwind while reading ACLs, cancel either control, and abandon the input after definitions finish.",
+      "invariant": "Both streams retire with their original view and allowance; terminal calls perform no more reads and sibling admission remains held.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_authority_input_preserves_original_storage_classes_nulls_and_recipient_shapes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Compare 252 original-decoder combinations of text/blob/invalid owners, optional ACL cells and bound/named column ACLs.",
+      "invariant": "Accepted authority, storage-class error precedence and typed error categories match ordinary catalog restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_authority_input_retains_exact_admitted_cells_and_retires_partial_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Measure actual named authority allocations and exercise every column-JSON truncation, denied quotas and cancellation.",
+      "invariant": "Every retained allocation has its original allowance; partial failures release only their own buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_retains_matching_definition_and_acl_generations_after_source_closure",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Capture a native table and relation/column ACL replacements, overwrite both, then close the original connection beside unrelated four-MiB metadata.",
+      "invariant": "The paired input reconstructs the original ordinary-loader result, including independent revisions, without reading unrelated payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_keeps_private_membership_through_rollback_and_name_reuse",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Capture private table membership, roll back and reuse its name with different object/generation identity.",
+      "invariant": "The retained definitions preserve the original private rows and descriptors through source closure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_retires_both_streams_on_cancel_limits_and_abandonment",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Cancel before or after definition completion, deny encoded record sizes and abandon an unread native input.",
+      "invariant": "Typed cancellation/limit errors retire both streams; terminal calls cannot resume and unrelated leases survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_table_input_denies_large_definition_buffers_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/table_input.rs",
+      "capability": "Retained table definition and authority input",
+      "workload": "Decode native table records containing one-MiB and four-MiB descriptors under a 64-KiB allowance.",
+      "invariant": "Oversized destinations fail with typed admission errors before a complete field allocation and retain no input allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

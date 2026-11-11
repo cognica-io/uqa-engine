@@ -19,6 +19,7 @@ mod relation_acl;
 mod relations;
 mod sequences;
 mod stats;
+mod table_input;
 mod tables;
 mod text_input;
 mod validation;

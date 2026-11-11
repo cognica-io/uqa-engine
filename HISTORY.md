@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Read native SQLite table definitions and independent ACL replacements from one retained catalog view, admitting decoded buffers before allocation and retiring both inputs on failure or cancellation.
+
 - Decode stored named ACL paths with pre-admitted recipient, grantor and column buffers. SQL adopts the original named-authority map nodes without allocating replacement nodes; Rust `LegacyRelationSecurity` and `TableSecurity` column ACL constructors now use Core `OwnedMap`, with unchanged serialized data and migration rules.
 
 - Decode independent ACL metadata keys under their original catalog allowance, preserving canonical relation/column spelling and error order without allocating a second serialized key.

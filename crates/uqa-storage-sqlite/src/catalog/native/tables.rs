@@ -95,15 +95,6 @@ impl Catalog {
         self.read_native(|snapshot| {
             let mut tables = Vec::new();
             snapshot.visit_rows(Family::Tables, None, &[], |row| {
-                let identity = |value: ValueRef<'_>| -> Result<[u8; 16]> {
-                    value
-                        .as_blob()
-                        .ok()
-                        .and_then(|value| value.try_into().ok())
-                        .ok_or_else(|| {
-                            SQLiteError::StorageBackend("invalid native table identity".into())
-                        })
-                };
                 tables.push(TableSchema {
                     relation: RelationIdentity::new(string(row[0])?, string(row[1])?),
                     analyzer_json: string(row[3])?,
@@ -131,4 +122,12 @@ impl Catalog {
             Ok(tables)
         })
     }
+}
+
+pub(super) fn identity(value: ValueRef<'_>) -> Result<[u8; 16]> {
+    value
+        .as_blob()
+        .ok()
+        .and_then(|value| value.try_into().ok())
+        .ok_or_else(|| SQLiteError::StorageBackend("invalid native table identity".into()))
 }
