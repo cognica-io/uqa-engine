@@ -8,6 +8,7 @@ use super::*;
 use std::sync::Arc;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
+mod input;
 mod projection;
 
 fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
@@ -32,12 +33,13 @@ fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
         constraints_json: encode(&constraints).unwrap(),
     };
     let names = KeyConstraintNames {
-        names: Some(BTreeMap::from([(
+        names: Some(OwnedMap::from_iter([(
             [3; 16],
             KeyName {
                 table: schema.relation.clone(),
                 table_object_id: schema.object_id,
                 name: "current".into(),
+                _memory: None,
             },
         )])),
     };

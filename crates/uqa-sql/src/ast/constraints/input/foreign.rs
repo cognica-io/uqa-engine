@@ -6,55 +6,11 @@
 
 use super::{Input, InputError, JsonToken, Parts, Produced};
 use crate::ast::{
-    stored_input::{boolean, number, unit},
-    ConstraintCatalogIdentity, ForeignKeyAction, ForeignKeyMatch, ForeignKeyRef,
-    ReferencedPartitionConstraint,
+    stored_input::{boolean, unit},
+    ForeignKeyAction, ForeignKeyMatch, ForeignKeyRef, ReferencedPartitionConstraint,
 };
 
 impl<'a> Input<'a, '_> {
-    pub(super) fn optional_identity(
-        &mut self,
-        token: JsonToken<'a>,
-    ) -> Result<Option<[u8; 16]>, InputError> {
-        if token == JsonToken::Null {
-            Ok(None)
-        } else {
-            self.identity(token).map(Some)
-        }
-    }
-
-    pub(super) fn optional_catalog_identity(
-        &mut self,
-        token: JsonToken<'a>,
-    ) -> Result<Option<ConstraintCatalogIdentity>, InputError> {
-        if token == JsonToken::Null {
-            Ok(None)
-        } else {
-            self.catalog_identity(token).map(Some)
-        }
-    }
-
-    fn catalog_identity(
-        &mut self,
-        token: JsonToken<'a>,
-    ) -> Result<ConstraintCatalogIdentity, InputError> {
-        let (mut object_id, mut oid) = ([0; 16], 0);
-        self.closed_fields(
-            token,
-            &["object_id", "oid"],
-            [3, 3],
-            |input, index, token| {
-                if index == 0 {
-                    object_id = input.identity(token)?;
-                } else {
-                    oid = number(token)?;
-                }
-                Ok(())
-            },
-        )?;
-        Ok(ConstraintCatalogIdentity { object_id, oid })
-    }
-
     pub(super) fn foreign_key_reference(
         &mut self,
         token: JsonToken<'a>,

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode complete stored index definitions and restore index-owned constraint names under their original allowance and cancellation owners. Preserve legacy versions, current names, table incarnations and ordered local/inherited key structure; failed name input retires its entire prefix.
+
 - Decode stored table constraints and hierarchy under their original allowance and cancellation owners. Preserve CHECK and key definitions, foreign-key families, dropped attributes, partition bounds and identity overrides without evaluating expressions or rebuilding catalog identities.
 
 - Decode complete stored column declarations under their original allowance and cancellation owners. Retain defaults, generated expressions, checks, identity provenance, physical column identities and foreign-key metadata without evaluation or catalog rebinding.

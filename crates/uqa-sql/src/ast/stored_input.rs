@@ -13,6 +13,7 @@ mod error;
 pub(crate) use error::InputError;
 
 mod fields;
+mod identities;
 mod native_values;
 pub(crate) use native_values::Values;
 mod objects;

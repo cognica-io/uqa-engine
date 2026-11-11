@@ -56470,6 +56470,227 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_preserves_complete_fields_and_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests.rs",
+      "capability": "Complete stored index representation",
+      "workload": "Decode every native index field and an absent legacy definition.",
+      "invariant": "Full native serialization and legacy defaults match ordinary decoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_preserves_positional_forms_and_column_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests.rs",
+      "capability": "Stored index positional input",
+      "workload": "Decode positional index, identity, relationship and ordering fields and compiled scalar predicates.",
+      "invariant": "Original positions, type constructors, ordering flags and scalar syntax are retained.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_rejects_query_and_window_predicates_without_execution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests.rs",
+      "capability": "Stored index scalar predicate domain",
+      "workload": "Attempt stored subquery and window predicates.",
+      "invariant": "Query nodes cannot escape the scalar input boundary and no SQL executes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_preserves_defaults_and_strict_field_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/compatibility.rs",
+      "capability": "Stored index field compatibility",
+      "workload": "Omit, null, reverse and duplicate fields and vary strict versus ignored unknown metadata.",
+      "invariant": "Original required/default masks and field rejection remain equivalent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_preserves_numeric_classification_and_nested_depth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/compatibility.rs",
+      "capability": "Stored index nested input boundaries",
+      "workload": "Compare direct identity integers, generic expression integers and deep types or predicates.",
+      "invariant": "Integer classification and the original remaining recursion allowance are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_matches_native_truncation_and_mutation_rejection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/compatibility.rs",
+      "capability": "Stored index damaged input",
+      "workload": "Truncate every fixture boundary and mutate each byte with seven structural replacements.",
+      "invariant": "Native metadata acceptance and malformed-input rejection remain equivalent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_retains_native_allocations_and_retires_denied_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/retention.rs",
+      "capability": "Stored index allocation ownership",
+      "workload": "Measure live/peak native allocation and deny sampled admission boundaries.",
+      "invariant": "Completed definitions retain their native charge and every failed candidate releases its reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_checks_both_owners_and_admits_before_payload_copy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/retention.rs",
+      "capability": "Stored index entry admission",
+      "workload": "Cancel either owner before entry and deny a two-megabyte physical name before copying.",
+      "invariant": "Both cancellation owners remain active and denied payload size does not allocate unrestricted storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_cancellation_retires_active_metadata_and_predicates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/retention.rs",
+      "capability": "Stored index active cancellation",
+      "workload": "Cancel at a parser boundary after real physical-key or predicate allocation.",
+      "invariant": "The selected cancellation retires active metadata and predicate owners without scheduler timing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_definition_deep_predicate_input_and_retirement_use_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/input/definition/tests/retention.rs",
+      "capability": "Stored index deep expression ownership",
+      "workload": "Decode and retire a 124-node predicate on a 128 KiB thread stack.",
+      "invariant": "Explicit parent frames and native retirement preserve the bounded stack contract.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_names_preserve_current_names_and_inherited_structure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input.rs",
+      "capability": "Admitted current key names",
+      "workload": "Compare admitted and ordinary catalog loading for local and inherited keys.",
+      "invariant": "Names follow the same owned index while key structure and identities remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_names_preserve_legacy_versions_and_reject_unknown_formats",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input.rs",
+      "capability": "Key-name registry version boundaries",
+      "workload": "Read legacy and current version metadata and feed malformed unrelated rows to legacy input.",
+      "invariant": "Legacy declarations retain their names without inspecting indexes and unknown versions are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_name_input_retires_every_prefix_after_invalid_ownership_or_definition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input.rs",
+      "capability": "Key-name input failure ownership",
+      "workload": "Reject duplicate owners, mismatched namespaces, missing identities and malformed types after a valid prefix.",
+      "invariant": "The entire prefix retires and failed input cannot resume or publish.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_names_reject_missing_recreated_and_redundant_table_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input.rs",
+      "capability": "Key-name table incarnation ownership",
+      "workload": "Vary table relation/incarnation, constraint identity and redundant stored names during restoration.",
+      "invariant": "Each original ownership predicate rejects inconsistent metadata without changing the retained name map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_name_maps_retain_exact_nodes_and_release_every_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/retention.rs",
+      "capability": "Exact key-name map ownership",
+      "workload": "Measure complete map allocations and deny sampled native construction boundaries.",
+      "invariant": "Nodes and names retain their original allowance and every failed prefix releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_name_input_checks_both_owners_at_entry_progress_and_completion",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/retention.rs",
+      "capability": "Key-name cancellation lifecycle",
+      "workload": "Cancel each owner at entry, after an admitted row, before completion and before drop.",
+      "invariant": "Cancellation precedes new work and retires the entire private map at every terminal boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "admitted_key_name_restoration_retains_exact_output_and_denies_copies_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/retention.rs",
+      "capability": "Admitted key-name restoration output",
+      "workload": "Measure reconstructed table allocations and deny a one-megabyte current-name copy under a small destination allowance.",
+      "invariant": "Completed declarations retain all owned payloads and denied copies leave both destination and original map ownership intact.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
