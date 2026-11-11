@@ -13,6 +13,9 @@ use uqa_storage::{
     CatalogFacade, RelationSecurityRow, StorageBackendError, StorageBackendResult, TableSchema,
 };
 
+mod table_input;
+pub use table_input::{PreparedTableDeclaration, PreparedTableDeclarations, TableDeclarationInput};
+
 pub fn restore_security(
     row: &RelationSecurityRow,
     columns: Option<&[String]>,
@@ -116,12 +119,7 @@ pub fn restore_tables(
             .map(|column| column.name)
             .collect::<Vec<_>>();
         let security = restore_security(&schema.security, Some(&columns), roles, allow_migration)
-            .map_err(|error| {
-            StorageBackendError::Other(format!(
-                "table `{}` has invalid security metadata: {error}",
-                schema.relation.qualified_name()
-            ))
-        })?;
+            .map_err(|error| table_security_error(&schema.relation, error))?;
         if matches!(schema.security, RelationSecurityRow::Legacy(_)) {
             schema.security = security.row().into();
             migrations.push(restored.len());
@@ -132,6 +130,19 @@ pub fn restore_tables(
         catalog.save_table(&restored[index].0)?;
     }
     Ok(restored)
+}
+
+fn table_security_error(
+    relation: &uqa_core::RelationIdentity,
+    error: StorageBackendError,
+) -> StorageBackendError {
+    match error {
+        StorageBackendError::Other(message) => StorageBackendError::Other(format!(
+            "table `{}` has invalid security metadata: {message}",
+            relation.qualified_name()
+        )),
+        error => error,
+    }
 }
 
 #[cfg(test)]

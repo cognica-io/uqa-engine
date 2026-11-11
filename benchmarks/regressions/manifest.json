@@ -57536,6 +57536,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_tables_keep_original_fields_and_native_columns_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/table_input/tests.rs",
+      "capability": "Persistent table declaration preparation",
+      "workload": "Prepare sorted physical table rows, retain original field addresses and cancel the retired source.",
+      "invariant": "Only native columns and the original independent physical/authority fields remain charged after completion; final retirement returns the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_table_authority_preserves_later_errors_before_any_hydration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/table_input/tests.rs",
+      "capability": "Persistent table declaration preparation",
+      "workload": "Combine an earlier uninterpreted analyzer/constraint record with later legacy, owner or column authority defects.",
+      "invariant": "Preparation preserves ordinary authority diagnostic order and returns no partially prepared catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_tables_retire_unread_and_completed_owners_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/table_input/tests.rs",
+      "capability": "Persistent table declaration preparation",
+      "workload": "Drop or cancel the input at each one-step continuation boundary across two complete table declarations.",
+      "invariant": "Unread rows, decoded columns, authority scratch, original fields and source/output buffers retire together on every incomplete boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "prepared_table_input_rejects_unrelated_or_exhausted_allowances",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/table_input/tests.rs",
+      "capability": "Persistent table declaration preparation",
+      "workload": "Attempt construction under another allowance and exhaust memory before both construction and active preparation.",
+      "invariant": "Unrelated admission is rejected; memory errors remain typed and retire every unpublished input and output owner.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
