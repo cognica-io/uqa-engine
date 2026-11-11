@@ -32,14 +32,18 @@ enum Source {
 #[derive(Clone)]
 pub struct KeyValueDocumentStore {
     source: Source,
-    table: String,
+    table: crate::StorageName,
 }
 
 impl KeyValueDocumentStore {
     pub fn new(store: Arc<dyn KeyValueStore>, table: impl Into<String>) -> Self {
+        Self::from_name(store, table.into().into())
+    }
+
+    pub(crate) fn from_name(store: Arc<dyn KeyValueStore>, table: crate::StorageName) -> Self {
         Self {
             source: Source::Live(store),
-            table: table.into(),
+            table,
         }
     }
 

@@ -28,6 +28,7 @@ mod occurrence_commits;
 mod read;
 mod receipts;
 mod reclamation;
+mod retained_handles;
 mod serializable;
 mod vector_spill;
 

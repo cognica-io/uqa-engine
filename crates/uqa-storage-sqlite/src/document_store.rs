@@ -57,7 +57,7 @@ use typed_value::{
 #[derive(Clone)]
 pub struct SQLiteDocumentStore {
     conn: ManagedConnection,
-    table: String,
+    table: uqa_storage::StorageName,
     retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
 }
 

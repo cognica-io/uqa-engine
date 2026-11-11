@@ -60,7 +60,8 @@ pub mod test_support;
 pub use backend::{
     CommittedDataRevision, PersistentStorageBackend, PersistentStorageIdentity,
     PersistentStorageProvider, PersistentStorageSession, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, StorageSessionAffinity, StorageSessionMismatch, StorageTransactionModel,
+    StorageHandle, StorageName, StorageSavepointId, StorageSessionAffinity, StorageSessionMismatch,
+    StorageTransactionModel,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;

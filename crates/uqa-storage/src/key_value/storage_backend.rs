@@ -141,6 +141,22 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         Box::new(KeyValueDocumentStore::new(Arc::clone(&self.store), table))
     }
 
+    fn document_store_with_control(
+        &self,
+        table: crate::StorageName,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::StorageHandle<dyn DocumentStore>> {
+        table.check_control(control)?;
+        let memory = control
+            .memory()
+            .reserve(size_of::<KeyValueDocumentStore>())?;
+        let value: Box<dyn DocumentStore> =
+            Box::new(KeyValueDocumentStore::from_name(self.store.clone(), table));
+        let value = uqa_core::memory::Budgeted::new(value, memory);
+        control.check()?;
+        Ok(value.into())
+    }
+
     fn migrate_document_storage(&self) -> StorageBackendResult<()> {
         KeyValueDocumentStore::migrate_legacy_storage(self.store.as_ref())
     }
@@ -151,6 +167,27 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
             table,
             analyzer,
         ))
+    }
+
+    fn inverted_index_with_control(
+        &self,
+        table: crate::StorageName,
+        default: crate::inverted_index::AnalyzerDefault,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::StorageHandle<dyn InvertedIndex>> {
+        table.check_control(control)?;
+        let memory = control
+            .memory()
+            .reserve(size_of::<KeyValueInvertedIndex>())?;
+        let value: Box<dyn InvertedIndex> = Box::new(KeyValueInvertedIndex::with_control(
+            self.store.clone(),
+            table,
+            default,
+            control,
+        )?);
+        let value = uqa_core::memory::Budgeted::new(value, memory);
+        control.check()?;
+        Ok(value.into())
     }
 
     fn migrate_inverted_index_storage(&self) -> StorageBackendResult<()> {

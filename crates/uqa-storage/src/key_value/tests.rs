@@ -33,6 +33,7 @@ mod hnsw_records;
 mod index_retention;
 mod indexes;
 mod occurrences;
+mod retained_handles;
 mod tuple_metadata;
 
 #[test]

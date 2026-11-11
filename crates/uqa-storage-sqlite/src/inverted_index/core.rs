@@ -15,13 +15,27 @@ impl SQLiteInvertedIndex {
     pub const BLOCK_SIZE: usize = DEFAULT_BLOCK_SIZE;
 
     pub fn new(conn: ManagedConnection, table: impl Into<String>, analyzer: Analyzer) -> Self {
-        Self {
+        Self::from_bindings(
             conn,
-            table: table.into(),
-            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer),
-            retention_control: uqa_storage::read_control::StorageReadControl::with_limit(
+            table.into().into(),
+            uqa_storage::inverted_index::AnalyzerBindings::new(analyzer),
+            uqa_storage::read_control::StorageReadControl::with_limit(
                 uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
             ),
+        )
+    }
+
+    pub(crate) fn from_bindings(
+        conn: ManagedConnection,
+        table: uqa_storage::StorageName,
+        bindings: uqa_storage::inverted_index::AnalyzerBindings,
+        retention_control: uqa_storage::read_control::StorageReadControl,
+    ) -> Self {
+        Self {
+            conn,
+            table,
+            bindings,
+            retention_control,
         }
     }
 

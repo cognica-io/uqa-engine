@@ -57393,6 +57393,123 @@
       "capability": "Retained table authority traversal",
       "workload": "Abandonment and original or invoking cancellation at every retained authority restoration boundary.",
       "invariant": "Every interrupted restoration retires the original authority, validation scratch and continuation without publishing a partial result."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "admitted_storage_names_share_original_buffers_until_the_last_handle_retires",
+      "source": "crates/uqa-storage/src/backend/retained_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Clone an admitted multibyte name and retire the input before the final handle.",
+      "invariant": "Cloning allocates nothing and preserves the original buffer; the final native owner returns the exact name and shared-header allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "admitted_storage_names_reject_unrelated_factories_and_retire_failed_headers",
+      "source": "crates/uqa-storage/src/backend/retained_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Native or unrelated names and denied shared-header admission.",
+      "invariant": "Controlled construction rejects mismatched ownership and every rejected name retires without leaked allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "admitted_storage_handles_retire_payload_before_returning_the_box_allowance",
+      "source": "crates/uqa-storage/src/backend/retained_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Mutate an admitted native object and observe its destruction.",
+      "invariant": "The object remains writable while its fixed box allocation stays admitted; payload destruction precedes returning that allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "controlled_key_value_handles_remain_writable_after_input_retirement",
+      "source": "crates/uqa-storage/src/key_value/tests/retained_handles.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Open document and text-index handles from one admitted name and lazy default, then cancel the input.",
+      "invariant": "Normal reads and writes preserve original values and analysis; independently retiring handles release their actual allocations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "controlled_key_value_handle_admission_retires_rejected_input_and_headers",
+      "source": "crates/uqa-storage/src/key_value/tests/retained_handles.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Exhaust the original allowance before document/index construction, with and without prior cancellation.",
+      "invariant": "Cancellation keeps precedence over denied allocation and every failed factory retires unpublished input and headers."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "image_default_opens_independent_writable_field_maps_without_copying_configuration",
+      "source": "crates/uqa-storage/src/inverted_index/bindings/image/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Share an admitted default between two live bindings, assign and remove one field after input cancellation.",
+      "invariant": "Native configuration identity and lazy default resolution remain shared while field assignments stay independently writable."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "test": "sqlite_controlled_handles_preserve_mutation_rollback_and_input_independence",
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Document/text mutations and rollback through native SQLite, SQLite KV and legacy SQLite handles.",
+      "invariant": "Original input cancellation cannot poison published handles; rows, term frequencies, rollback and final allocation retirement remain exact."
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "test": "sqlite_controlled_handle_rejection_retires_all_unpublished_allocations",
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Denied allocation and pre-existing cancellation across native SQLite, SQLite KV and legacy SQLite.",
+      "invariant": "No failed factory publishes a handle or leaks its admitted native inputs."
+    },
+    {
+      "package": "uqa-storage-redb",
+      "test": "redb_controlled_handles_preserve_writes_rollback_and_reopen_after_input_retirement",
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/retained_handles.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained persistent storage handles",
+      "workload": "Write through admitted redb handles, roll back a later mutation, retire the input and reopen the database.",
+      "invariant": "Persisted rows and term frequencies preserve the exact committed state and every original handle allocation retires."
     }
   ]
 }

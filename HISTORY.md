@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation.
+
 - Resume stored table-authority validation across bounded work windows while preserving role incarnations, grant-path order and original allocation ownership.
 
 - Restore independently retained table authority without copying ACL payloads, and decode current key names from separate relation, identity and constraint fields. Preserve load-only migration rejection and original resource diagnostics.

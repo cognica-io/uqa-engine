@@ -23,6 +23,13 @@ use crate::inverted_index::InvertedIndex;
 use crate::vector_index::{VectorIndex, VectorIndexOpenMode, VectorIndexSpec};
 use crate::CatalogFacade;
 
+mod handle;
+mod name;
+#[cfg(test)]
+mod retained_tests;
+pub use handle::StorageHandle;
+pub use name::StorageName;
+
 /// A session's completed record commit usable after the caller classifies its changes as data-only. A provider with cache generations also certifies that catalog, registry, graph and storage-schema generations stayed unchanged. Providers without those generations rely on the caller's classification. This is commit evidence, not a read of the latest database state.
 #[derive(Clone)]
 pub struct CommittedDataRevision {
@@ -469,12 +476,37 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore>;
 
+    /// Restore a writable document handle with its original admitted name and boxed allocation. Providers must implement this ownership boundary explicitly; the ordinary factory cannot establish allocation admission after construction.
+    fn document_store_with_control(
+        &self,
+        _table: StorageName,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn DocumentStore>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled document handles are not implemented by this backend".into(),
+        ))
+    }
+
     /// Upgrade backend-owned document records before table handles are restored. Implementations must make the rewrite atomic and idempotent.
     fn migrate_document_storage(&self) -> StorageBackendResult<()> {
         Ok(())
     }
 
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
+
+    /// Restore a writable text-index handle sharing the original admitted name and lazy default. Construction must not resolve resources or retain the input cancellation signal.
+    fn inverted_index_with_control(
+        &self,
+        _table: StorageName,
+        _default: crate::inverted_index::AnalyzerDefault,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn InvertedIndex>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled inverted-index handles are not implemented by this backend".into(),
+        ))
+    }
 
     /// Upgrade backend-owned inverted-index values before table handles are
     /// restored. Implementations must make the rewrite atomic and idempotent.

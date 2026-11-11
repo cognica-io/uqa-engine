@@ -26,7 +26,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<()> {
         let _bindings = reserve_bindings(control, &[self.table.as_bytes()])?;
         let format: Option<i64> = connection.query_row(
-            "SELECT CASE format WHEN 'occurrences-v2' THEN 1 WHEN 'source-rebuild' THEN 2 ELSE 0 END FROM _occurrence_formats WHERE table_name = ?1", [&self.table], |row| row.get(0),
+            "SELECT CASE format WHEN 'occurrences-v2' THEN 1 WHEN 'source-rebuild' THEN 2 ELSE 0 END FROM _occurrence_formats WHERE table_name = ?1", [self.table.as_str()], |row| row.get(0),
         ).optional()?;
         control.check()?;
         match format {
@@ -79,7 +79,7 @@ impl SQLiteInvertedIndex {
         sql.push_str(" WHERE table_name = ?1)")?;
         // SQLite retains the prepared SQL text until the statement is finalized.
         let _sql = control.memory().reserve(sql.len())?;
-        let found = connection.query_row(&sql, [&self.table], |row| row.get(0))?;
+        let found = connection.query_row(&sql, [self.table.as_str()], |row| row.get(0))?;
         control.check()?;
         Ok(found)
     }
@@ -93,7 +93,7 @@ impl SQLiteInvertedIndex {
         let _bindings = reserve_bindings(control, &[self.table.as_bytes(), field.as_bytes()])?;
         let _payload = control.memory().reserve(40)?;
         let mut statement = connection.prepare("SELECT CASE WHEN typeof(revision) = 'blob' AND length(revision) = 40 THEN revision END, doc_count, total_length FROM _occurrence_fields WHERE table_name = ?1 AND field = ?2")?;
-        let mut rows = statement.query(params![self.table, field])?;
+        let mut rows = statement.query(params![self.table.as_str(), field])?;
         let Some(row) = rows.next()? else {
             control.check()?;
             return Ok(None);
@@ -126,7 +126,7 @@ impl SQLiteInvertedIndex {
             let _payload = control.memory().reserve(84)?;
             let mut statement = connection.prepare("SELECT CASE WHEN typeof(metadata_blob) = 'blob' AND length(metadata_blob) = 84 THEN metadata_blob END FROM _occurrence_documents WHERE table_name = ?1 AND doc_id = ?2 AND field = ?3")?;
             let mut rows = statement.query(params![
-                self.table,
+                self.table.as_str(),
                 encode_index_u64("document", doc_id)?,
                 field
             ])?;

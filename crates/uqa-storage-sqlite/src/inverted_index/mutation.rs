@@ -144,15 +144,15 @@ impl SQLiteInvertedIndex {
         for table in ["_occurrence_documents", "_occurrence_lengths"] {
             conn.execute(
                 &format!("DELETE FROM {table} WHERE table_name = ?1 AND doc_id = ?2"),
-                params![self.table, doc_id],
+                params![self.table.as_str(), doc_id],
             )?;
         }
         for (field, snapshot) in fields {
             let terms = snapshot.postings.keys().cloned().collect::<Vec<_>>();
             let terms = clustered_result(encode_term_keys(&terms))?;
             let metadata = clustered_result(snapshot.metadata.to_bytes())?;
-            conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table, doc_id, field, terms, metadata.as_slice()])?;
-            conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table, doc_id, field, encode_index_counter("document length", snapshot.metadata.length)?])?;
+            conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table.as_str(), doc_id, field, terms, metadata.as_slice()])?;
+            conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table.as_str(), doc_id, field, encode_index_counter("document length", snapshot.metadata.length)?])?;
         }
         Ok(())
     }
@@ -169,11 +169,11 @@ impl SQLiteInvertedIndex {
                 }
                 conn.execute(
                     "DELETE FROM _occurrence_fields WHERE table_name = ?1 AND field = ?2",
-                    params![self.table, field],
+                    params![self.table.as_str(), field],
                 )?;
             } else {
                 let revision = clustered_result(stats.revision.to_bytes())?;
-                conn.execute("INSERT INTO _occurrence_fields(table_name, field, revision, doc_count, total_length) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(table_name, field) DO UPDATE SET revision = excluded.revision, doc_count = excluded.doc_count, total_length = excluded.total_length", params![self.table, field, revision.as_slice(), encode_index_counter("field document count", stats.doc_count)?, encode_index_counter("total field length", stats.total_length)?])?;
+                conn.execute("INSERT INTO _occurrence_fields(table_name, field, revision, doc_count, total_length) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(table_name, field) DO UPDATE SET revision = excluded.revision, doc_count = excluded.doc_count, total_length = excluded.total_length", params![self.table.as_str(), field, revision.as_slice(), encode_index_counter("field document count", stats.doc_count)?, encode_index_counter("total field length", stats.total_length)?])?;
             }
         }
         Ok(())
@@ -380,8 +380,8 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<()> {
         let doc_id = encode_index_u64("document", record.doc_id)?;
         let metadata = clustered_result(record.metadata.to_bytes())?;
-        conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table, doc_id, record.field, record.terms, metadata.as_slice()])?;
-        conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table, doc_id, record.field, encode_index_counter("document length", record.metadata.length)?])?;
+        conn.execute("INSERT INTO _occurrence_documents(table_name, doc_id, field, terms_blob, metadata_blob) VALUES (?1, ?2, ?3, ?4, ?5)", params![self.table.as_str(), doc_id, record.field, record.terms, metadata.as_slice()])?;
+        conn.execute("INSERT INTO _occurrence_lengths(table_name, doc_id, field, length) VALUES (?1, ?2, ?3, ?4)", params![self.table.as_str(), doc_id, record.field, encode_index_counter("document length", record.metadata.length)?])?;
         Ok(())
     }
 }

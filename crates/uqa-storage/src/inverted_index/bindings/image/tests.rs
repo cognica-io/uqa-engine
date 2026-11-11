@@ -76,3 +76,52 @@ fn image_default_does_not_open_missing_resources_before_ordinary_first_use() {
     assert_eq!(source.memory().used(), 0);
     assert_eq!(rejected.memory().used(), 0);
 }
+
+#[test]
+fn image_default_opens_independent_writable_field_maps_without_copying_configuration() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let definition = definition(&uqa_analysis::whitespace_analyzer(), &control);
+    let pointer = std::ptr::from_ref(definition.configuration());
+    let default =
+        AnalyzerDefault::from_definition(definition, AnalyzerResources::default(), &control)
+            .unwrap();
+    let bytes = control.memory().used();
+    let mut first = AnalyzerBindings::from_default(default.clone());
+    let second = AnalyzerBindings::from_default(default);
+    assert_eq!(std::ptr::from_ref(first.default_configuration()), pointer);
+    assert_eq!(std::ptr::from_ref(second.default_configuration()), pointer);
+    assert_eq!(control.memory().used(), bytes);
+    control.cancellation().cancel();
+    first
+        .bind(
+            "body",
+            &uqa_analysis::keyword_analyzer(),
+            super::super::AnalyzerPhase::Both,
+        )
+        .unwrap();
+    assert_eq!(
+        first
+            .index_revision("body")
+            .unwrap()
+            .analyze("First WORD")
+            .unwrap(),
+        ["First WORD"]
+    );
+    assert_eq!(
+        second
+            .index_revision("body")
+            .unwrap()
+            .analyze("First WORD")
+            .unwrap(),
+        ["first", "word"]
+    );
+    first.remove("body");
+    assert!(Arc::ptr_eq(
+        &first.index_revision("body").unwrap(),
+        &second.index_revision("body").unwrap()
+    ));
+    drop(first);
+    assert_eq!(control.memory().used(), bytes);
+    drop(second);
+    assert_eq!(control.memory().used(), 0);
+}

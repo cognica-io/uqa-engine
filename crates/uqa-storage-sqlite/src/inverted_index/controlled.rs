@@ -42,7 +42,7 @@ impl SQLiteInvertedIndex {
                 let mut statement = connection.prepare(
                     "SELECT DISTINCT field FROM _occurrence_lengths WHERE table_name = ?1",
                 )?;
-                let mut rows = statement.query([&self.table])?;
+                let mut rows = statement.query([self.table.as_str()])?;
                 let mut fields = uqa_core::memory::BudgetedVec::new(control.memory());
                 while let Some(row) = rows.next()? {
                     control.check()?;
@@ -105,14 +105,14 @@ impl SQLiteInvertedIndex {
                 };
                 let row: Option<(i64, i64, i64)> = connection.query_row(
                     sql,
-                    params![self.table, field, term.as_bytes(), last], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    params![self.table.as_str(), field, term.as_bytes(), last], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 ).optional()?;
                 let Some((id, count, length)) = row else { break; };
                 let length = payload_length(length)?;
                 control.check()?;
                 let _payload = control.memory().reserve(length)?;
                 let mut statement = connection.prepare("SELECT score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4")?;
-                let mut rows = statement.query(params![self.table, field, term.as_bytes(), id])?;
+                let mut rows = statement.query(params![self.table.as_str(), field, term.as_bytes(), id])?;
                 let row = rows.next()?.ok_or_else(changed_snapshot)?;
                 let bytes = blob(row, 0)?;
                 if bytes.len() != length { return Err(changed_snapshot()); }
@@ -142,7 +142,7 @@ impl SQLiteInvertedIndex {
                 let _bindings = reserve_bindings(control, &[self.table.as_bytes(), field.as_bytes(), term.as_bytes()])?;
                 let sizes: Option<(i64, i64, i64)> = connection.query_row(
                     "SELECT posting_count, CASE WHEN typeof(score_blob) = 'blob' THEN length(score_blob) ELSE -1 END, CASE WHEN typeof(positions_blob) = 'blob' THEN length(positions_blob) ELSE -1 END FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4",
-                    params![self.table, field, term.as_bytes(), stored_cluster], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    params![self.table.as_str(), field, term.as_bytes(), stored_cluster], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 ).optional()?;
                 control.check()?;
                 let Some((stored_count, score_size, position_size)) = sizes else { return Ok(Budgeted::new(Vec::new(), control.memory().empty_reservation())); };
@@ -151,7 +151,7 @@ impl SQLiteInvertedIndex {
                 control.check()?;
                 let _payload = control.memory().reserve(score_size.checked_add(position_size).ok_or(MemoryError::SizeOverflow)?)?;
                 let mut statement = connection.prepare("SELECT score_blob, positions_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4")?;
-                let mut rows = statement.query(params![self.table, field, term.as_bytes(), stored_cluster])?;
+                let mut rows = statement.query(params![self.table.as_str(), field, term.as_bytes(), stored_cluster])?;
                 let row = rows.next()?.ok_or_else(changed_snapshot)?;
                 let score = blob(row, 0)?;
                 let positions = blob(row, 1)?;

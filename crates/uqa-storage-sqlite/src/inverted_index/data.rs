@@ -29,7 +29,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<Option<FieldStats>> {
         let row: Option<(Vec<u8>, i64, i64)> = conn.query_row(
             "SELECT revision, doc_count, total_length FROM _occurrence_fields WHERE table_name = ?1 AND field = ?2",
-            params![self.table, field], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            params![self.table.as_str(), field], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).optional()?;
         row.map(|(revision, count, total)| {
             let doc_count = decode_index_u64("field document count", count)?;
@@ -102,7 +102,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<Option<IndexedFieldMetadata>> {
         let bytes: Option<Vec<u8>> = conn.query_row(
             "SELECT metadata_blob FROM _occurrence_documents WHERE table_name = ?1 AND doc_id = ?2 AND field = ?3",
-            params![self.table, doc_id, field], |row| row.get(0),
+            params![self.table.as_str(), doc_id, field], |row| row.get(0),
         ).optional()?;
         bytes
             .map(|bytes| {
@@ -127,7 +127,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<BTreeMap<FieldName, StagedField>> {
         let lengths = load_document_lengths(conn, &self.table, doc_id)?;
         let mut statement = conn.prepare("SELECT field, terms_blob FROM _occurrence_documents WHERE table_name = ?1 AND doc_id = ?2 ORDER BY field")?;
-        let rows = statement.query_map(params![self.table, doc_id], |row| {
+        let rows = statement.query_map(params![self.table.as_str(), doc_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?;
         let mut fields = BTreeMap::new();
