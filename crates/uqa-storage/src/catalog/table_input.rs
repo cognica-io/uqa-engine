@@ -65,6 +65,7 @@ pub enum CatalogTableInputStep {
 /// Read original physical definitions followed by ACL replacements from one retained view. Returned definitions contain their inline authority; they are not an assembled catalog until the owner has applied the replacement records and its existing validation rules.
 pub struct CatalogTableInput {
     state: State,
+    control: StorageReadControl,
 }
 
 enum State {
@@ -79,6 +80,10 @@ struct Input {
 }
 
 impl CatalogTableInput {
+    pub(crate) fn control(&self) -> &StorageReadControl {
+        &self.control
+    }
+
     /// Both physical streams retain the supplied view before either reads a value. Prefixes must select exactly the provider's table definitions and independent ACL metadata.
     pub fn new(
         read: Arc<dyn KeyValueRead + Send + Sync>,
@@ -120,6 +125,7 @@ impl CatalogTableInput {
             CatalogInput::new(read, acls.0, acls.1, limits, control)?
         };
         Ok(Self {
+            control: control.clone(),
             state: State::Reading(Budgeted::new(
                 Box::new(Input {
                     definitions: Some(definitions),

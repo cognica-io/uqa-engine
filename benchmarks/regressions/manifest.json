@@ -55755,6 +55755,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_column_failure_destroys_native_values_before_returning_their_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority destruction ownership",
+      "workload": "Reject a later column after retaining 1,024 drop-observed native values in the first path.",
+      "invariant": "Every native value is destroyed while its allocation allowance remains reserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_rejects_a_different_retained_context_before_source_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/control.rs",
+      "capability": "Table catalog construction context",
+      "workload": "Combine an original physical input with a different memory, cancellation or temporary-file context.",
+      "invariant": "Construction rejects the mismatch before reading records or allocating a continuation and releases the consumed input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_accepts_clones_of_its_original_retained_context",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/control.rs",
+      "capability": "Retained table catalog context cloning",
+      "workload": "Assemble complete table definitions and ACL replacements with cloned original control handles.",
+      "invariant": "Shared original controls preserve exact table output and all retained allocations retire.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

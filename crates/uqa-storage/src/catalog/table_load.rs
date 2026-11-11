@@ -74,12 +74,19 @@ pub struct CatalogTableLoad {
 }
 
 impl CatalogTableLoad {
+    /// Assemble under the input's original memory, cancellation and temporary-file context. A different context is rejected before reading the source or allocating a continuation.
     pub fn new(
         source: CatalogTableInput,
         order: CatalogTableOrder,
         validation: Option<CatalogTableValidation>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if !source.control().shares_context(control) {
+            return Err(StorageBackendError::Other(
+                "table catalog input and loader must share their original control".into(),
+            ));
+        }
         let owner = control.clone();
         let input = ImageDecoder::new(
             control.memory(),

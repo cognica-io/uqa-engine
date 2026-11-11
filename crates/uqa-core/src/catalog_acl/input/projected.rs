@@ -87,8 +87,8 @@ fn columns<'a, 'c, T>(
     mut path: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, JsonToken<'a>) -> Result<Budgeted<Vec<T>>>,
 ) -> Result<Budgeted<OwnedMap<String, Vec<T>>>> {
     let projection = JsonObjectProjection::read(bytes, memory, cancellation)?;
-    let mut columns = OwnedMap::new();
     let mut lease = memory.empty_reservation();
+    let mut columns = OwnedMap::new();
     for (name, bytes) in projection.iter() {
         cancellation.check()?;
         let mut owned_name = BudgetedString::new(memory);

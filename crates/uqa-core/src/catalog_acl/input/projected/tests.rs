@@ -10,6 +10,56 @@ use crate::json::JsonReadError;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 
+#[test]
+fn projected_column_failure_destroys_native_values_before_returning_their_allowance() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct Observation {
+        minimum: AtomicUsize,
+        dropped: AtomicUsize,
+    }
+    struct Probe {
+        memory: MemoryBudget,
+        observed: Arc<Observation>,
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            self.observed
+                .minimum
+                .fetch_min(self.memory.used(), Ordering::SeqCst);
+            self.observed.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let observed = Arc::new(Observation {
+        minimum: AtomicUsize::new(usize::MAX),
+        dropped: AtomicUsize::new(0),
+    });
+    let mut count = 0;
+    let result = columns(br#"{"a":0,"b":0}"#, &memory, &token, |_, _| {
+        count += 1;
+        if count == 2 {
+            return Err(invalid("later column rejection"));
+        }
+        let mut values = crate::memory::BudgetedVec::new(&memory);
+        for _ in 0..1024 {
+            values.push(Probe {
+                memory: memory.clone(),
+                observed: observed.clone(),
+            })?;
+        }
+        let (values, lease) = values.into_parts();
+        Ok(Budgeted::new(values, lease))
+    });
+    assert!(result.is_err());
+    assert_eq!(observed.dropped.load(Ordering::SeqCst), 1024);
+    assert!(observed.minimum.load(Ordering::SeqCst) >= 1024 * size_of::<Probe>());
+    assert_eq!(memory.used(), 0);
+}
+
 fn reference<T: DeserializeOwned>(text: &str) -> serde_json::Result<T> {
     serde_json::from_str::<serde_json::Value>(text).and_then(serde_json::from_value)
 }
