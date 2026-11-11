@@ -54884,6 +54884,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_security_adopts_original_acl_nodes_without_allocation",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority ownership",
+      "workload": "A captured authority row containing 1,024 column ACLs, independent tuple revisions and subsequent destination edits.",
+      "invariant": "Storage-to-SQL adoption performs zero allocations, preserves original node and payload addresses and retains the same ordered persistent bytes and independent cloned values."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_security_keeps_original_node_admission_until_retirement",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority ownership",
+      "workload": "Thirty-two separately admitted authority-map nodes and an exhausted shared allowance with an independent sibling.",
+      "invariant": "Adoption preserves every original node lease without requesting new admission; removal and final retirement release only the corresponding original reservations."
     }
   ]
 }

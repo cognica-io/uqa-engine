@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
+
 - Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.
 
 - Retain persistent catalog text reads on one committed/private snapshot, including model, scoring, analyzer and path definitions. Each transition consumes one record slot, including deletions, and checks encoded key/value limits before owned payload admission. Typed catalog and Engine restore integration remain under implementation.

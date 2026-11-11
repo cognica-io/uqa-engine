@@ -4,6 +4,8 @@ This page records unreleased migration requirements and UQA Engine 0.6.3 and ear
 
 ## Unreleased
 
+Rust code constructing `uqa_core::catalog_acl::BoundRelationSecurity` uses `uqa_core::memory::OwnedMap` for `column_acls`; `Default::default()` and collecting `(name, entries)` pairs initialize the field. SQL adopts this map directly, retaining original nodes and node reservations. Existing serialized relation security remains unchanged and requires no data migration. Legacy name-based relation security retains its existing representation and initial-migration rules.
+
 Rust resolvers that exhaustively match Analysis's `DictionaryBytes` must also handle `Retained`, which carries an admitted shared encoded buffer through its last resource owner. `AsRef<[u8]>` continues to expose all variants uniformly. Existing `Static` and `Shared` construction remains unchanged; the [analyzer image contract](../internals/04-analyzer-pipeline.md#analyzer-images) describes restoration and allocation ownership.
 
 SQLite record format 68 and redb record format 64 add retained autonomous identifier generations for joint backup snapshots. Opening an earlier supported database atomically initializes every existing allocation at metadata epoch zero while preserving its database identity, records, commit sequence, identifier watermarks and receipts. Upgrade all owners before using the new format; older binaries reject it. Both native SQLite and SQLite Key/Value use the new guarded metadata tables. This provider snapshot interface does not yet expose complete Engine backup or restore.
