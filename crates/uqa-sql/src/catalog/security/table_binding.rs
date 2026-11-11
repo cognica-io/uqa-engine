@@ -9,11 +9,12 @@
 use super::{role_bindings, TableAclEntry, TablePrivileges, TableSecurity};
 use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{RoleIdentity, RoleReference};
-use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_role::BoundAclEntry;
 use uqa_core::memory::OwnedMap;
 
 mod production;
+mod resolution;
+mod validation;
 pub use production::{CapturedTablePrivileges, CapturedTableSecurity};
 
 pub type BoundTableAclEntry = BoundAclEntry<TablePrivileges>;
@@ -122,14 +123,12 @@ impl BoundTableSecurity {
         columns: Option<&[String]>,
         roles: &RoleDefinitions,
     ) -> Result<(), String> {
-        if self.acl_revisions.relation == Some([0; 16])
-            || self.acl_revisions.columns.iter().any(|(column, revision)| {
-                *revision == [0; 16] || columns.is_some_and(|columns| !columns.contains(column))
-            })
-        {
-            return Err("invalid relation or attribute ACL tuple identity".into());
-        }
-        super::table::validate_table_security_invariants(&self.resolve(roles)?, columns, roles)
+        self.validate_with_control(
+            columns.map(|columns| columns.iter().map(String::as_str)),
+            roles,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .map_err(resolution::diagnostic)
     }
 
     pub fn depends_on(&self, role: RoleIdentity) -> bool {
@@ -162,29 +161,17 @@ fn resolve_privileges<'a>(
     columns: impl Iterator<Item = (&'a String, &'a Vec<BoundTableAclEntry>)>,
     roles: &RoleDefinitions,
 ) -> Result<TableSecurity, String> {
-    let name = |identity| role_bindings::role_name(roles, identity, "table").map(str::to_owned);
-    let entries = |entries: &[BoundTableAclEntry]| {
-        entries
-            .iter()
-            .map(|entry| {
-                Ok(TableAclEntry {
-                    role: entry
-                        .role
-                        .map(name)
-                        .transpose()?
-                        .map_or(AclGrantee::Public, AclGrantee::Role),
-                    grantor: Some(name(entry.grantor)?),
-                    privileges: entry.privileges,
-                    grant_options: entry.grant_options,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()
-    };
-    Ok(TableSecurity {
-        role_owner: name(owner)?,
-        acl: acl.map(entries).transpose()?,
-        column_acls: columns
-            .map(|(column, acl)| Ok((column.clone(), entries(acl)?)))
-            .collect::<Result<_, String>>()?,
+    resolution::resolve(
+        owner,
+        acl,
+        columns,
+        roles,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary privilege projection")
     })
+    .map_err(resolution::diagnostic)
 }

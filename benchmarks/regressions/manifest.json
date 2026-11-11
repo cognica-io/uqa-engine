@@ -57185,6 +57185,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_table_authority_preserves_original_diagnostics_and_validation_order",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/validation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted stored table authority validation",
+      "workload": "Malformed revisions, role incarnations, table and column grant paths, and absent public columns.",
+      "invariant": "Controlled validation preserves the original ordered diagnostics while releasing all unpublished projection and scratch."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_table_authority_releases_projection_and_grant_scratch_on_every_exit",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/validation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted stored table authority validation",
+      "workload": "Deny projection and grant-closure allocations; cancel either owner before validation and while admitted authority is live.",
+      "invariant": "Original authority remains unchanged and every failed or completed validation returns its temporary allowance."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_table_authority_rejects_large_name_projection_before_copying",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/validation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted stored table authority validation",
+      "workload": "A two-megabyte current role name with a 1,024-byte validation allowance.",
+      "invariant": "Name projection is denied before copying the payload, with allocation bounded independently of the rejected name."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "admitted_table_authority_uses_current_names_and_separate_relation_column_closures",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/validation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Admitted stored table authority validation",
+      "workload": "Rename all bound roles, then supply a table grant cycle that can only be reached through a column grant.",
+      "invariant": "Bound identity resolution uses current names; column grant closure cannot authorize relation grant paths."
     }
   ]
 }

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Admit stored table-authority name projection and grant-path validation under the original memory and cancellation controls while preserving existing validation order and diagnostics.
+
 - Decode stored column statistics in Planner and retain their original payload allowance through immutable publication. Preserve legacy wide-value omission, paired frequencies, numeric representations and catalog diagnostic order.
 
 - Retain stored-statistics controls across input steps, discard the complete unpublished generation on failure, and publish its exact retained footprint without scanning prior rows.
