@@ -12,6 +12,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod continuation;
+
 fn admitted(memory: &MemoryBudget) -> Budgeted<RelationSecurityRow> {
     let token = CancellationToken::new();
     let entry = BoundAclEntry {

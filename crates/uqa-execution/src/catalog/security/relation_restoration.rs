@@ -44,6 +44,33 @@ pub fn restore_security_with_control<'a>(
     roles: &RoleDefinitions,
     control: &ProductionControl<'_>,
 ) -> StorageBackendResult<Budgeted<BoundTableSecurity>> {
+    let security = current_security(row, control)?;
+    security
+        .validate_with_control(columns, roles, control)
+        .map_err(security_error)?;
+    Ok(security)
+}
+
+/// Retain native authority and validation scratch across the enclosing restore's work windows. Success transfers the original ACL allocations; interruption retires the entire unpublished authority.
+pub async fn restore_security_from_input<'a>(
+    row: Budgeted<RelationSecurityRow>,
+    columns: Option<impl Iterator<Item = &'a str> + Clone>,
+    roles: &RoleDefinitions,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<BoundTableSecurity>> {
+    let security = current_security(row, control)?;
+    security
+        .validate_from_input(columns, roles, control, input)
+        .await
+        .map_err(security_error)?;
+    Ok(security)
+}
+
+fn current_security(
+    row: Budgeted<RelationSecurityRow>,
+    control: &ProductionControl<'_>,
+) -> StorageBackendResult<Budgeted<BoundTableSecurity>> {
     control.check_cancellation()?;
     if !control
         .budget()
@@ -59,16 +86,16 @@ pub fn restore_security_with_control<'a>(
                 "relation security requires initial catalog migration".into(),
             ));
         };
-        let security = BoundTableSecurity::from_row(row);
-        security
-            .validate_with_control(columns, roles, control)
-            .map_err(|error| match error {
-                uqa_sql::SQLError::Internal(message) => StorageBackendError::Other(message),
-                uqa_sql::SQLError::Cancelled(error) => StorageBackendError::Cancelled(error),
-                error => StorageBackendError::backend("stored relation security", error),
-            })?;
-        Ok(security)
+        Ok(BoundTableSecurity::from_row(row))
     })
+}
+
+fn security_error(error: uqa_sql::SQLError) -> StorageBackendError {
+    match error {
+        uqa_sql::SQLError::Internal(message) => StorageBackendError::Other(message),
+        uqa_sql::SQLError::Cancelled(error) => StorageBackendError::Cancelled(error),
+        error => StorageBackendError::backend("stored relation security", error),
+    }
 }
 
 pub fn restore_tables(

@@ -398,18 +398,28 @@ impl RoleSubject for RoleIdentity {
         roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
-        control.check()?;
-        if !self.is_valid() {
-            return Ok(None);
-        }
-        for role in roles.values() {
-            control.check()?;
-            if role.identity() == *self {
-                return Ok(Some(role));
-            }
-        }
-        Ok(None)
+        crate::catalog::work::inline(find_identity(*self, roles, control, &mut ()))
     }
+}
+
+pub(crate) async fn find_identity<'a>(
+    identity: RoleIdentity,
+    roles: &'a RoleDefinitions,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<Option<&'a RoleDefinition>, SQLError> {
+    control.check()?;
+    if !identity.is_valid() {
+        return Ok(None);
+    }
+    for role in roles.values() {
+        work.checkpoint().await?;
+        control.check()?;
+        if role.identity() == identity {
+            return Ok(Some(role));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

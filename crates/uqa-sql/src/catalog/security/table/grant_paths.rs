@@ -43,6 +43,24 @@ pub(in crate::catalog::security) fn extend<'a>(
     reachable: &mut impl Paths<'a>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(extend_from(
+        owner,
+        acl,
+        privilege,
+        reachable,
+        control,
+        &mut (),
+    ))
+}
+
+pub(in crate::catalog::security) async fn extend_from<'a>(
+    owner: &'a str,
+    acl: Option<&'a [TableAclEntry]>,
+    privilege: TableAclPrivilege,
+    reachable: &mut impl Paths<'a>,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<(), SQLError> {
     control.check()?;
     let Some(acl) = acl else {
         return Ok(());
@@ -50,6 +68,7 @@ pub(in crate::catalog::security) fn extend<'a>(
     loop {
         let mut changed = false;
         for entry in acl {
+            work.checkpoint().await?;
             control.check()?;
             let Some(role) = entry.role.role_name() else {
                 continue;

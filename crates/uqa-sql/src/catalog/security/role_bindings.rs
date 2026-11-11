@@ -78,15 +78,30 @@ pub(super) fn role_definition_with_control<'a>(
     catalog: &str,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<&'a RoleDefinition, SQLError> {
-    use crate::catalog::roles::identity::RoleSubject;
+    crate::catalog::work::inline(role_definition_from(
+        roles,
+        identity,
+        catalog,
+        control,
+        &mut (),
+    ))
+}
+
+pub(super) async fn role_definition_from<'a>(
+    roles: &'a RoleDefinitions,
+    identity: RoleIdentity,
+    catalog: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<&'a RoleDefinition, SQLError> {
     control.check()?;
     if !identity.is_valid() {
         return Err(SQLError::Internal(format!(
             "invalid persisted {catalog} role identity"
         )));
     }
-    identity
-        .role_definition_with_control(roles, control)?
+    crate::catalog::roles::identity::find_identity(identity, roles, control, work)
+        .await?
         .ok_or_else(|| {
             SQLError::Internal(format!(
                 "persisted {catalog} privileges reference missing role incarnation {}",

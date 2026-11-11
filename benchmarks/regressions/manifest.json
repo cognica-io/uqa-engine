@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -57328,6 +57328,71 @@
       "capability": "Independent stored table reconstruction",
       "workload": "Restore an index-owned key from independent identity and JSON fields, then retire text before publication.",
       "invariant": "Current names and native key buffers survive without retaining the discarded serialized declaration."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "retained_authority_validation_resumes_original_roles_and_grant_closure",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/continuation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table authority traversal",
+      "workload": "One-, three- and sixty-four-step authority validation with literal revision, role and column diagnostics.",
+      "invariant": "Suspension preserves role projection, relation-before-column grant closure, diagnostic order and original immutable authority without serialized replay."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "retained_authority_validation_retires_scratch_at_every_pending_boundary",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/continuation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table authority traversal",
+      "workload": "Abandonment and both cancellation owners at every pending position, with a sweep of denied allocation limits.",
+      "invariant": "Every interrupted traversal retires all scratch and captured references; cancellation and denied memory retain their typed errors."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "retained_authority_validation_copies_utf8_role_names_in_bounded_fragments",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/continuation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table authority traversal",
+      "workload": "A long multibyte owner name resolved through its unchanged role incarnation.",
+      "invariant": "Role projection yields between UTF-8 fragments, preserves authority semantics and retires the complete temporary projection."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "retained_relation_restoration_preserves_original_authority_through_work_windows",
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/tests/admitted/continuation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table authority traversal",
+      "workload": "Consume admitted relation and column authority through single-work-step windows.",
+      "invariant": "Native ACL buffers and map nodes retain their exact addresses and original allowance after the input and role view retire."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "retained_relation_restoration_retires_authority_at_every_pending_boundary",
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/tests/admitted/continuation.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table authority traversal",
+      "workload": "Abandonment and original or invoking cancellation at every retained authority restoration boundary.",
+      "invariant": "Every interrupted restoration retires the original authority, validation scratch and continuation without publishing a partial result."
     }
   ]
 }

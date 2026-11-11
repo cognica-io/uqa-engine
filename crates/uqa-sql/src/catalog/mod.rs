@@ -8,6 +8,7 @@
 
 use crate::ast::ColumnType;
 mod schema_production;
+pub(crate) mod work;
 use schema_production::CatalogColumnType::{self, Array, Domain, Inline};
 
 pub mod access_methods;
