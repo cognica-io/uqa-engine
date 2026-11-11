@@ -57276,6 +57276,58 @@
       "capability": "Retained table catalog field projection",
       "workload": "Move a completed table into an input continuation with a different memory allowance.",
       "invariant": "The owning projection rejects the mismatch and retires all captured payload and continuation allocations."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "admitted_relation_restoration_preserves_original_authority_buffers_and_allowance",
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/tests/admitted.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Independent stored table reconstruction",
+      "workload": "Adopt decoded relation and column ACLs, then retire the role view and cancel the source.",
+      "invariant": "Native ACL vectors and map nodes retain their original addresses and exact allowance; validation scratch is temporary."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "admitted_relation_restoration_preserves_migration_and_authority_diagnostics",
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/tests/admitted.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Independent stored table reconstruction",
+      "workload": "Legacy, invalid tuple revision, missing owner, missing column and invalid grantor records.",
+      "invariant": "Consuming restoration preserves ordinary diagnostic precedence and retires rejected authority."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "admitted_relation_restoration_retires_input_on_resource_failure_and_cancellation",
+      "source": "crates/uqa-execution/src/catalog/security/relation_restoration/tests/admitted.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Independent stored table reconstruction",
+      "workload": "Denied validation scratch, both pre-existing and active cancellation owners, and unrelated allowance.",
+      "invariant": "Every exit retires the source; cancellation and memory errors retain their SQL state."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "independent_constraint_fields_retire_json_before_native_table_publication",
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/native.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Independent stored table reconstruction",
+      "workload": "Restore an index-owned key from independent identity and JSON fields, then retire text before publication.",
+      "invariant": "Current names and native key buffers survive without retaining the discarded serialized declaration."
     }
   ]
 }

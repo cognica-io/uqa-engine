@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore independently retained table authority without copying ACL payloads, and decode current key names from separate relation, identity and constraint fields. Preserve load-only migration rejection and original resource diagnostics.
+
 - Transfer retained persistent table definitions into independently owned fields without copying their buffers. Field visits use the original input work channel, and decoded JSON can retire separately from native table metadata.
 
 - Admit stored table-authority name projection and grant-path validation under the original memory and cancellation controls while preserving existing validation order and diagnostics.

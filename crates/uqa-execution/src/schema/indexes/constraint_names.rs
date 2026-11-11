@@ -162,11 +162,27 @@ impl KeyConstraintNames {
         original: &CancellationToken,
         invoking: &CancellationToken,
     ) -> StorageBackendResult<StoredTableConstraints> {
-        let text = if schema.constraints_json.is_empty() {
-            "{}"
-        } else {
-            &schema.constraints_json
-        };
+        self.decode_stored_fields_with_control(
+            &schema.relation,
+            schema.object_id,
+            &schema.constraints_json,
+            memory,
+            original,
+            invoking,
+        )
+    }
+
+    /// Decode independently retained fields without rebuilding the surrounding stored table. Current index names remain bound to the exact relation and object identity.
+    pub fn decode_stored_fields_with_control(
+        &self,
+        relation: &RelationIdentity,
+        table_object_id: [u8; 16],
+        text: &str,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> StorageBackendResult<StoredTableConstraints> {
+        let text = if text.is_empty() { "{}" } else { text };
         let mut constraints =
             StoredTableConstraints::read_stored_json(text, memory, original, invoking)
                 .map_err(input::sql_error)?;
@@ -193,7 +209,7 @@ impl KeyConstraintNames {
                             StoredKeyLocation::Declared(index),
                         )
                     };
-                    let name = restored_key_name(names, schema, key, &control)?;
+                    let name = restored_key_name(names, relation, table_object_id, key, &control)?;
                     constraints
                         .replace_key_name(location, name)
                         .map_err(input::sql_error)?;
@@ -221,7 +237,9 @@ impl KeyConstraintNames {
                 .iter_mut()
                 .chain(&mut constraints.hierarchy.partition_inherited_key_constraints)
             {
-                let (name, owned) = restored_key_name(names, schema, key, control)?.into_parts();
+                let (name, owned) =
+                    restored_key_name(names, &schema.relation, schema.object_id, key, control)?
+                        .into_parts();
                 key.name = Some(name);
                 memory = control.combine(memory, owned);
             }
@@ -284,7 +302,8 @@ impl KeyConstraintNames {
 
 fn restored_key_name(
     names: &OwnedMap<[u8; 16], KeyName>,
-    schema: &TableSchema,
+    relation: &RelationIdentity,
+    table_object_id: [u8; 16],
     key: &TableKeyConstraint,
     control: &ProductionControl<'_>,
 ) -> StorageBackendResult<Produced<String>> {
@@ -292,7 +311,7 @@ fn restored_key_name(
     if key.name.is_some() {
         return Err(invalid("stored key name must be owned by its index"));
     }
-    let name = current_name(names, &schema.relation, schema.object_id, key)?;
+    let name = current_name(names, relation, table_object_id, key)?;
     Ok(control.copy_text(name)?)
 }
 

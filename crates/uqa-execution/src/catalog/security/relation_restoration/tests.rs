@@ -11,6 +11,8 @@ use uqa_sql::catalog::roles::RoleDefinition;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
+mod admitted;
+
 fn fixture() -> (KeyValueCatalog, RoleDefinitions) {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     catalog.save_schema("public").unwrap();

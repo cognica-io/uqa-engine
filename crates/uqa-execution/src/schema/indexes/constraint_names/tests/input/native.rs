@@ -7,6 +7,36 @@
 use super::*;
 
 #[test]
+fn independent_constraint_fields_retire_json_before_native_table_publication() {
+    let (schema, _, names) = fixture();
+    let expected = names.decode(&schema).unwrap();
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let text = control.copy_text(&schema.constraints_json).unwrap();
+    let relation = schema.relation;
+    let object_id = schema.object_id;
+    drop(schema.constraints_json);
+    let stored = names
+        .decode_stored_fields_with_control(&relation, object_id, &text, &memory, &token, &token)
+        .unwrap();
+    let keys = stored.key_constraints.as_ptr();
+    let before = memory.used();
+    let text_bytes = text.reserved_bytes();
+    drop(text);
+    assert_eq!(memory.used(), before - text_bytes);
+    let native = stored.into_native().unwrap();
+    drop((relation, names));
+    assert_eq!(native.key_constraints.as_ptr(), keys);
+    assert_eq!(
+        serde_json::to_value(&*native.key_constraints).unwrap(),
+        serde_json::to_value(&expected.key_constraints).unwrap()
+    );
+    drop(native);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn stored_key_restoration_publishes_original_local_and_inherited_definitions() {
     let (mut schema, mut expected, ordinary_names) = fixture();
     expected.hierarchy.partition_inherited_key_constraints = expected.key_constraints.clone();

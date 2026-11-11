@@ -6,6 +6,7 @@
 
 //! Bind legacy relation security only inside complete initial catalog restoration.
 
+use uqa_core::memory::{Budgeted, ProductionControl};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::{BoundTableSecurity, TableSecurity};
 use uqa_storage::{
@@ -34,6 +35,40 @@ pub fn restore_security(
         .validate(columns, roles)
         .map_err(StorageBackendError::Other)?;
     Ok(security)
+}
+
+/// Consume an admitted current-format authority without copying its ACL buffers or column nodes. Load-only restoration never binds legacy names or writes a migration.
+pub fn restore_security_with_control<'a>(
+    row: Budgeted<RelationSecurityRow>,
+    columns: Option<impl Iterator<Item = &'a str> + Clone>,
+    roles: &RoleDefinitions,
+    control: &ProductionControl<'_>,
+) -> StorageBackendResult<Budgeted<BoundTableSecurity>> {
+    control.check_cancellation()?;
+    if !control
+        .budget()
+        .is_some_and(|memory| memory.shares_allowance(row.budget()))
+    {
+        return Err(StorageBackendError::Other(
+            "stored relation security requires its original allowance".into(),
+        ));
+    }
+    row.try_map(|row| {
+        let RelationSecurityRow::Bound(row) = row else {
+            return Err(StorageBackendError::Other(
+                "relation security requires initial catalog migration".into(),
+            ));
+        };
+        let security = BoundTableSecurity::from_row(row);
+        security
+            .validate_with_control(columns, roles, control)
+            .map_err(|error| match error {
+                uqa_sql::SQLError::Internal(message) => StorageBackendError::Other(message),
+                uqa_sql::SQLError::Cancelled(error) => StorageBackendError::Cancelled(error),
+                error => StorageBackendError::backend("stored relation security", error),
+            })?;
+        Ok(security)
+    })
 }
 
 pub fn restore_tables(
