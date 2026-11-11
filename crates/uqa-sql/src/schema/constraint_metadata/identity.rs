@@ -13,6 +13,9 @@ pub mod claims;
 pub mod foreign_keys;
 pub mod keys;
 pub mod legacy;
+mod validation;
+
+use uqa_core::memory::{OwnedSet, ProductionControl};
 
 /// `DefineIndex` and `index_constraint_create`: a key's enforcing index takes its OID, then the constraint takes its own.
 pub fn materialize_key_identity(
@@ -131,13 +134,25 @@ fn validate(identity: ConstraintCatalogIdentity) -> ConstraintMetadataResult<()>
 }
 
 pub fn validate_not_null_identities(columns: &[ColumnDef]) -> ConstraintMetadataResult<()> {
-    let mut identities = std::collections::BTreeSet::new();
-    let mut oids = std::collections::BTreeSet::new();
+    validate_not_null_identities_with_control(columns, &ProductionControl::uncontrolled())
+}
+
+/// Validate the same original identities while temporary claims retain the supplied allowance and both cancellation owners.
+pub fn validate_not_null_identities_with_control(
+    columns: &[ColumnDef],
+    control: &ProductionControl<'_>,
+) -> ConstraintMetadataResult<()> {
+    validation::check(control)?;
+    let mut identities = OwnedSet::new();
+    let mut oids = OwnedSet::new();
     for column in columns {
+        validation::check(control)?;
         match (column.not_null, column.not_null_identity) {
             (true, Some(identity)) => {
                 validate(identity)?;
-                if !identities.insert(identity.object_id) || !oids.insert(identity.oid) {
+                if !validation::insert(&mut identities, identity.object_id, control)?
+                    || !validation::insert(&mut oids, identity.oid, control)?
+                {
                     return Err(ConstraintMetadataError::Invalid(
                         "duplicate NOT NULL constraint catalog identity".into(),
                     ));
@@ -156,7 +171,7 @@ pub fn validate_not_null_identities(columns: &[ColumnDef]) -> ConstraintMetadata
             (false, None) => {}
         }
     }
-    Ok(())
+    validation::check(control)
 }
 
 /// Called only during the initial catalog transaction, before a legacy database becomes visible.

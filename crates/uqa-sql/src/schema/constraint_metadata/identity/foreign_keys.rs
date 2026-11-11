@@ -6,11 +6,12 @@
 
 //! Foreign-key catalog rows have independent identities even when partition copies share enforcement.
 
+use super::validation;
 use crate::ast::{ColumnDef, ConstraintCatalogIdentity, TableConstraintSet};
 use crate::schema::constraint_metadata::{
     CatalogIdentityAllocator, ConstraintMetadataError, ConstraintMetadataResult,
 };
-use std::collections::BTreeSet;
+use uqa_core::memory::{OwnedSet, ProductionControl};
 use uqa_core::RelationIdentity;
 
 pub(crate) fn materialize(
@@ -78,32 +79,46 @@ pub fn validate(
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
 ) -> ConstraintMetadataResult<()> {
-    let mut objects = BTreeSet::new();
-    let mut oids = BTreeSet::new();
+    validate_with_control(columns, constraints, &ProductionControl::uncontrolled())
+}
+
+/// Borrow the original row order and partition provenance under the supplied temporary allowance.
+pub fn validate_with_control(
+    columns: &[ColumnDef],
+    constraints: &TableConstraintSet,
+    control: &ProductionControl<'_>,
+) -> ConstraintMetadataResult<()> {
+    validation::check(control)?;
+    let mut objects = OwnedSet::new();
+    let mut oids = OwnedSet::new();
     for identity in identities(columns, constraints) {
+        validation::check(control)?;
         let identity = identity.ok_or_else(|| {
             ConstraintMetadataError::Invalid(
                 "foreign keys require an initial catalog identity migration".into(),
             )
         })?;
         validate_identity(identity)?;
-        if !objects.insert(identity.object_id) || !oids.insert(identity.oid) {
+        if !validation::insert(&mut objects, identity.object_id, control)?
+            || !validation::insert(&mut oids, identity.oid, control)?
+        {
             return Err(ConstraintMetadataError::Invalid(
                 "duplicate foreign-key catalog identity".into(),
             ));
         }
     }
     for inherited in &constraints.hierarchy.partition_inherited_foreign_keys {
-        if !constraints.foreign_keys.iter().any(|key| {
+        validation::check(control)?;
+        if !validation::any(&constraints.foreign_keys, control, |key| {
             key.catalog_identity == inherited.catalog_identity
                 && key.object_id == inherited.object_id
-        }) {
+        })? {
             return Err(ConstraintMetadataError::Invalid(
                 "partition foreign-key provenance does not identify its catalog row".into(),
             ));
         }
     }
-    Ok(())
+    validation::check(control)
 }
 
 /// Capture missing identities before materialization so only legacy catalog rows retain name-derived OIDs.

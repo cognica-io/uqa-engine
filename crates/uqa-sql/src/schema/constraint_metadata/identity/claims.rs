@@ -6,8 +6,12 @@
 
 //! Read catalog addresses without binding expressions, resolving references or projecting query rows.
 
+use super::validation;
 use crate::ast::{ColumnDef, ForeignKey, TableCheck, TableKeyConstraint};
-use uqa_core::RelationIdentity;
+use uqa_core::{
+    memory::{OwnedSet, ProductionControl},
+    RelationIdentity,
+};
 
 /// Existing rows in an incomplete declaration candidate. Missing identities are filled by materialization, while supplied identities are validated before allocation.
 pub fn identities(
@@ -70,7 +74,22 @@ pub fn validate_present_identities(
     columns: &[ColumnDef],
     constraints: &crate::ast::TableConstraintSet,
 ) -> super::ConstraintMetadataResult<()> {
+    validate_present_identities_with_control(
+        columns,
+        constraints,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+/// Inspect present catalog identities without materializing an intermediate row vector.
+pub fn validate_present_identities_with_control(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+) -> super::ConstraintMetadataResult<()> {
+    validation::check(control)?;
     for column in columns {
+        validation::check(control)?;
         if column.check.is_none()
             && (column.check_object_id.is_some() || column.check_catalog_oid.is_some())
         {
@@ -84,26 +103,31 @@ pub fn validate_present_identities(
             ));
         }
     }
-    if constraints
-        .checks
-        .iter()
-        .any(|check| check.catalog_oid.is_some() && check.object_id.is_none())
-    {
+    if validation::any(&constraints.checks, control, |check| {
+        check.catalog_oid.is_some() && check.object_id.is_none()
+    })? {
         return Err(invalid(
             "CHECK catalog address has no constraint incarnation",
         ));
     }
-    let mut objects = std::collections::BTreeSet::new();
-    let mut oids = std::collections::BTreeSet::new();
-    for identity in identities(columns, constraints) {
-        let kind = if columns
-            .iter()
-            .any(|column| column.not_null_identity == Some(identity))
-        {
+    let mut objects = OwnedSet::new();
+    let mut oids = OwnedSet::new();
+    for identity in row_identities(
+        columns,
+        &constraints.checks,
+        &constraints.key_constraints,
+        &constraints.foreign_keys,
+    ) {
+        validation::check(control)?;
+        let kind = if validation::any(columns, control, |column| {
+            column.not_null_identity == Some(identity)
+        })? {
             "NOT NULL constraint"
-        } else if super::foreign_keys::identities(columns, constraints)
-            .any(|foreign| foreign == Some(identity))
-        {
+        } else if validation::any(
+            super::foreign_keys::identities(columns, constraints),
+            control,
+            |foreign| foreign == Some(identity),
+        )? {
             "foreign-key"
         } else {
             "key or CHECK constraint"
@@ -111,11 +135,13 @@ pub fn validate_present_identities(
         if !identity.is_valid() {
             return Err(invalid(&format!("invalid {kind} catalog identity")));
         }
-        if !objects.insert(identity.object_id) || !oids.insert(identity.oid) {
+        if !validation::insert(&mut objects, identity.object_id, control)?
+            || !validation::insert(&mut oids, identity.oid, control)?
+        {
             return Err(invalid(&format!("duplicate {kind} catalog identity")));
         }
     }
-    Ok(())
+    validation::check(control)
 }
 
 /// Current persisted definitions must have complete identities; load-only paths never repair them.
@@ -123,38 +149,59 @@ pub fn validate_constraint_identities(
     columns: &[ColumnDef],
     constraints: &crate::ast::TableConstraintSet,
 ) -> super::ConstraintMetadataResult<()> {
-    super::validate_not_null_identities(columns)?;
-    super::foreign_keys::validate(columns, constraints)?;
-    validate_key_and_check_identities(columns, constraints)
+    validate_constraint_identities_with_control(
+        columns,
+        constraints,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+/// Validate complete persisted row identities under the original allowance without migrations or syntax reconstruction.
+pub fn validate_constraint_identities_with_control(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+) -> super::ConstraintMetadataResult<()> {
+    super::validate_not_null_identities_with_control(columns, control)?;
+    super::foreign_keys::validate_with_control(columns, constraints, control)?;
+    validate_key_and_check_identities_with_control(columns, constraints, control)
 }
 
 pub fn validate_key_and_check_identities(
     columns: &[ColumnDef],
     constraints: &crate::ast::TableConstraintSet,
 ) -> super::ConstraintMetadataResult<()> {
-    validate_present_identities(columns, constraints)?;
-    if constraints
-        .key_constraints
-        .iter()
-        .any(|key| key.catalog_identity.is_none())
-    {
+    validate_key_and_check_identities_with_control(
+        columns,
+        constraints,
+        &ProductionControl::uncontrolled(),
+    )
+}
+
+pub fn validate_key_and_check_identities_with_control(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+) -> super::ConstraintMetadataResult<()> {
+    validate_present_identities_with_control(columns, constraints, control)?;
+    if validation::any(&constraints.key_constraints, control, |key| {
+        key.catalog_identity.is_none()
+    })? {
         return Err(invalid(
             "key constraints require an initial catalog identity migration",
         ));
     }
-    if columns.iter().any(|column| {
+    if validation::any(columns, control, |column| {
         column.check.is_some()
             && (column.check_object_id.is_none() || column.check_catalog_oid.is_none())
-    }) || constraints
-        .checks
-        .iter()
-        .any(|check| check.object_id.is_none() || check.catalog_oid.is_none())
-    {
+    })? || validation::any(&constraints.checks, control, |check| {
+        check.object_id.is_none() || check.catalog_oid.is_none()
+    })? {
         return Err(invalid(
             "CHECK constraints require an initial catalog identity migration",
         ));
     }
-    super::keys::validate_provenance(constraints)
+    super::keys::validate_provenance_with_control(constraints, control)
 }
 
 fn invalid(message: &str) -> super::ConstraintMetadataError {

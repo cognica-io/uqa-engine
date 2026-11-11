@@ -56834,6 +56834,84 @@
       "capability": "Native stored table constraint publication",
       "workload": "Publish stored metadata at 32 and 320 entries and compare capture charges with independent exhaustive footprint accounting.",
       "invariant": "Publication makes zero payload visits while retaining exactly the original decoded field allocations and shared headers."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_constraint_identity_validation_borrows_complete_native_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Validate mixed native NOT NULL, key, CHECK and foreign-key identities, including inherited provenance and megabyte names.",
+      "invariant": "Only exact temporary identity nodes allocate; all syntax remains borrowed and unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constraint_identity_node_admission_retires_partial_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Deny each object/OID node boundary through all six identity claims.",
+      "invariant": "Every denied native node reports 53200, never exceeds its allowance and retires every earlier claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_constraint_identity_validation_preserves_original_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Exercise fourteen missing, invalid, duplicate, cross-kind and inherited identity failures.",
+      "invariant": "Original diagnostic precedence and complete input bytes are preserved for ordinary and admitted validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constraint_identity_validation_observes_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Invoke all six validator entry points after either the original or invoking token is cancelled.",
+      "invariant": "57014 precedes any native allocation for both cancellation owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constraint_identity_claims_release_retained_prefixes_after_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Cancel either owner after retaining an actual identity node, then attempt the next insertion.",
+      "invariant": "Cancelled insertion cannot replace or enlarge the prefix; its original lease retires with its node.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "empty_constraint_identity_validation_has_no_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests.rs",
+      "capability": "Admitted native constraint identity validation",
+      "workload": "Validate an empty complete native declaration with a zero-byte allowance.",
+      "invariant": "Empty validation is allocation-free and retains no resource allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
