@@ -20988,7 +20988,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -55118,6 +55118,58 @@
       "capability": "Persistent catalog authority input",
       "workload": "The parent consumes the first null or array token, then cancels before handing the original stream to the ACL owner.",
       "invariant": "The nested authority operation rejects cancelled admission even when its scalar value needs no further token reads."
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_preserves_canonical_names_and_exact_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_rejects_noncanonical_relations_and_columns_in_original_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_retires_partial_names_and_preserves_sibling_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_acl_key_input_denies_large_names_before_copying_or_reserializing",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/relation_acl/key_input/tests.rs",
+      "capability": "Controlled independent ACL metadata keys",
+      "workload": "Decode canonical relation/column keys with escaped names, original error order, every truncation, exhausted admission and cancellation.",
+      "invariant": "Original relation and column identities retain exact admitted buffers; failed input releases only its own storage without allocating a serialized key copy.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

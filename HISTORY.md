@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode independent ACL metadata keys under their original catalog allowance, preserving canonical relation/column spelling and error order without allocating a second serialized key.
+
 - Decode independent relation ACL replacement tuples under the original record memory allowance, retaining their ordered path buffers and preserving stored field and revision validation order.
 
 - Decode stored full-text and vector field declarations under the original memory allowance, preserving ordered names, duplicate entries, vector dimensions and stored JSON forms. Input failure releases partial fields before returning their allowance.

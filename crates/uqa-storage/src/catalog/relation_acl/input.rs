@@ -128,7 +128,7 @@ fn number<T: serde::de::DeserializeOwned>(value: JsonToken<'_>) -> StorageBacken
     Ok(serde_json::from_str(value)?)
 }
 
-fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
+pub(super) fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
     reader
         .next_event()
         .map_err(json_error)?
@@ -136,11 +136,11 @@ fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'
         .ok_or_else(|| invalid("unexpected end of ACL tuple JSON"))
 }
 
-fn invalid(message: impl std::fmt::Display) -> StorageBackendError {
+pub(super) fn invalid(message: impl std::fmt::Display) -> StorageBackendError {
     StorageBackendError::Serde(serde_json::Error::custom(message))
 }
 
-fn json_error(error: JsonReadError) -> StorageBackendError {
+pub(super) fn json_error(error: JsonReadError) -> StorageBackendError {
     match error {
         JsonReadError::Memory(error) => error.into(),
         JsonReadError::Cancelled(error) => error.into(),
