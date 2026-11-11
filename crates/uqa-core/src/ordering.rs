@@ -33,8 +33,8 @@ pub fn sort_by_with_control<T, E>(
 
 /// Owning work for resumable ordering, including suspension within a long comparison.
 pub trait SortProgress<T, E> {
-    fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;
-    fn compare(&mut self, left: &T, right: &T) -> impl Future<Output = Result<Ordering, E>> + Send;
+    fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>>;
+    fn compare(&mut self, left: &T, right: &T) -> impl Future<Output = Result<Ordering, E>>;
 }
 
 /// Drive the same allocation-free, unstable ordering through retained progress. A failed comparison or checkpoint preserves the original elements and their allocations, with a possibly incomplete order.

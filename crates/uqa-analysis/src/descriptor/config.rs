@@ -23,6 +23,15 @@ pub(crate) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> Analysi
     Ok(())
 }
 
+pub(crate) async fn check_config_with(
+    config: &Analyzer,
+    limits: AnalyzerLimits,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<()> {
+    check_shape(config, limits, work).await?;
+    crate::configuration::check_encoded_size(config, limits.max_descriptor_bytes, work).await
+}
+
 async fn check_shape(
     config: &Analyzer,
     limits: AnalyzerLimits,

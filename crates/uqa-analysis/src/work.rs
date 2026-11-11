@@ -11,6 +11,10 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub(crate) mod ordering;
+pub(crate) mod progress;
+
 pub(crate) trait Work<E>: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;
 
@@ -39,6 +43,21 @@ impl<E: From<uqa_core::image_io::ImageIoError>> Work<E>
             .map_err(Into::into)
     }
 }
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub(crate) trait ResourceWork:
+    Work<crate::AnalysisError> + crate::morphology::work::Work
+{
+}
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+impl<W> ResourceWork for W where W: Work<crate::AnalysisError> + crate::morphology::work::Work {}
+
+#[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+pub(crate) trait ResourceWork: Work<crate::AnalysisError> {}
+
+#[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+impl<W: Work<crate::AnalysisError>> ResourceWork for W {}
 
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);

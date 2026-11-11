@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct resolved analyzers through retained descriptor, dictionary, language-pipeline and executable preparation. Image restoration preserves exact encoded resource ownership, user rules, stop sets and token output without consulting live resolvers or publishing partial cache entries. Enclosing Storage framing and complete Engine restoration remain under implementation.
+
 - Retain Korean and Japanese user-rule parsing, stable UTF-16 ordering and lexical construction through input progress. Shared Core heap transitions preserve ordinary allocation-free sorting; user sources, duplicate rules, CSV/comment handling and token observations remain unchanged. Enclosing analyzer restoration remains under implementation.
 
 - Retain common compiled analyzer preparation across input windows, including mapping order, stop/synonym ownership and regex replacement fragments. Original descriptors, canonical settings, token output and cache publication remain unchanged; language resource and enclosing restore integration remain under implementation.

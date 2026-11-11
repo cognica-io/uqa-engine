@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_analyzer_image_preparation_preserves_exact_descriptor_and_independent_token_output",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Prepare wide mapping/synonym stages through one-poll windows without transport reads.",
+      "invariant": "Exact descriptor identity, independently expected terms and bounded fixture allocations survive retained reconstruction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_analyzer_image_preparation_retires_candidates_on_cancel_invalid_windows_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Interrupt multiple complete analyzer preparation positions through cancellation, invalid windows and abandonment.",
+      "invariant": "All candidate owners retire without live cache publication or another admission being released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_descriptor_and_image_compose_without_transport_replay_or_input_owner_leaks",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Compose native descriptor syntax and complete executable preparation through one input work channel.",
+      "invariant": "Exact descriptor bytes and token output survive source-owner retirement without transport replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_korean_image_preserves_user_rules_dictionary_bytes_and_private_ownership",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Restore original Korean user rules and a mixed language closure when Japanese support is enabled.",
+      "invariant": "Original encoded addresses, first-definition rules, exact output and private cache ownership remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_image_prepares_user_rules_and_large_case_insensitive_stop_sets",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Restore Japanese user CSV and a wide stop set with long prefixes and lowercase duplicates.",
+      "invariant": "UTF-16 ordering, pinned case mapping, stop removal and original resource ownership preserve independent expected output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_image_failure_order_keeps_unused_artifacts_lazy_and_retires_requested_bytes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/image/tests/retained/languages.rs",
+      "capability": "Retained resolved analyzer image preparation",
+      "workload": "Present unused invalid artifacts, missing requested resources and interrupted dictionary hashing/decoding.",
+      "invariant": "Closure diagnostics retain their order, host resolvers are never used and supplied encoded admissions retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "retained_ordering_matches_native_order_and_bounds_comparison_progress",

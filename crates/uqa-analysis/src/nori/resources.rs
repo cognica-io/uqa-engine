@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{DictionaryId, DictionaryResult, NoriDictionary, UserDictionary};
 
 mod hash;
+pub(crate) mod preparation;
 
 use crate::morphology::resources::{Artifact, Request, Resources};
 pub use crate::morphology::resources::{DictionaryBytes, ResourceCacheStats, ResourceLimits};
@@ -192,14 +193,11 @@ impl NoriResources {
                 })
             },
             |artifact| {
-                let model =
-                    NoriDictionary::from_bytes(artifact.bytes.as_ref(), self.limits().dictionary)?;
-                Ok(ResolvedDictionary {
-                    image: crate::analyzer::image_source::DictionaryImageCache::default(),
-                    sha256: ResourceHash::from_bytes(artifact.sha256),
-                    bytes: artifact.bytes,
-                    model,
-                })
+                crate::morphology::work::inline(ResolvedDictionary::from_artifact_with(
+                    artifact,
+                    self.limits().dictionary,
+                    &mut (),
+                ))
             },
         )
     }

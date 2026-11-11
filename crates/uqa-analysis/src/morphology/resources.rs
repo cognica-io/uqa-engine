@@ -121,21 +121,30 @@ impl<K, V> Default for Snapshot<K, V> {
     }
 }
 
+pub(crate) trait Source<K, V>: Sync {
+    type Error: From<super::DictionaryError>;
+    fn load(
+        &self,
+        request: &K,
+        work: &mut impl super::work::Work,
+    ) -> impl std::future::Future<Output = Result<Arc<V>, Self::Error>> + Send;
+}
+
 impl<K: PartialEq, V> Snapshot<K, V> {
-    pub(crate) fn load<E>(
+    pub(crate) async fn load<S: Source<K, V>>(
         &mut self,
         request: K,
         same_artifact: impl Fn(&K, &V) -> bool,
-        resolve: impl FnOnce(&K) -> Result<Arc<V>, E>,
-    ) -> Result<Arc<V>, E> {
-        if let Some((_, value)) = self
-            .entries
-            .iter()
-            .find(|(prior, value)| prior == &request || same_artifact(&request, value))
-        {
-            return Ok(value.clone());
+        source: &S,
+        work: &mut impl super::work::Work,
+    ) -> Result<Arc<V>, S::Error> {
+        for (index, (prior, value)) in self.entries.iter().enumerate() {
+            work.records(index).await?;
+            if prior == &request || same_artifact(&request, value) {
+                return Ok(value.clone());
+            }
         }
-        let value = resolve(&request)?;
+        let value = source.load(&request, work).await?;
         self.entries.push((request, value.clone()));
         Ok(value)
     }
@@ -189,17 +198,12 @@ impl<D, U, I: Copy + PartialEq> Resources<D, U, I> {
         }
         // Host callbacks may reenter resource resolution, so they run outside the cache lock.
         let artifact = resolve()?.ok_or_else(|| Error::Missing(request.to_string()))?;
-        check_limit(
-            "encoded bytes",
-            artifact.bytes.as_ref().len(),
-            self.limits.dictionary.max_encoded_bytes,
-        )
-        .map_err(Error::from)?;
-        let hash: [u8; 32] = Sha256::digest(artifact.bytes.as_ref()).into();
-        verify_hash(artifact.sha256, hash)?;
-        if let Request::Sha256(expected) = request {
-            verify_hash(expected, hash)?;
-        }
+        let hash = super::work::inline(validate_artifact(
+            request,
+            &artifact,
+            self.limits.dictionary,
+            &mut (),
+        ))?;
         let mut state = self.state.lock();
         if let Some(cached) = state.dictionaries.get(&hash) {
             return Ok(cached);
@@ -245,6 +249,30 @@ impl<D, U, I: Copy + PartialEq> Resources<D, U, I> {
         );
         Ok(resolved)
     }
+}
+
+pub(crate) async fn validate_artifact(
+    request: Request<'_>,
+    artifact: &Artifact,
+    limits: DictionaryLimits,
+    work: &mut impl super::work::Work,
+) -> Result<[u8; 32], Error> {
+    check_limit(
+        "encoded bytes",
+        artifact.bytes.as_ref().len(),
+        limits.max_encoded_bytes,
+    )?;
+    let mut digest = Sha256::new();
+    for bytes in artifact.bytes.as_ref().chunks(4096) {
+        work.checkpoint().await?;
+        digest.update(bytes);
+    }
+    let hash = digest.finalize().into();
+    verify_hash(artifact.sha256, hash)?;
+    if let Request::Sha256(expected) = request {
+        verify_hash(expected, hash)?;
+    }
+    Ok(hash)
 }
 
 fn verify_hash(expected: [u8; 32], actual: [u8; 32]) -> Result<(), Error> {

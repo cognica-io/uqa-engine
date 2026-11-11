@@ -14,8 +14,10 @@ use serde_json::{value::RawValue, Value};
 use crate::{AnalysisError, AnalysisResult, Analyzer};
 
 mod config;
-#[cfg(any(test, feature = "kuromoji"))]
+#[cfg(test)]
 pub(crate) use config::check_config as check_configuration;
+#[cfg(feature = "kuromoji")]
+pub(crate) use config::check_config_with as check_configuration_with;
 mod hash;
 mod json;
 pub(crate) mod limits;
@@ -149,6 +151,15 @@ impl AnalyzerDescriptor {
         crate::work::inline(Self::from_json_with(json, limits, &mut ()))
     }
 
+    /// Validate exact descriptor syntax, fields, fingerprints and runtime profiles through retained input work. The JSON is already admitted by its enclosing owner; this operation never reads the transport.
+    pub async fn from_json_with_input(
+        json: &str,
+        limits: AnalyzerLimits,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> AnalysisResult<Arc<Self>> {
+        Self::from_json_with(json, limits, input).await
+    }
+
     pub(crate) async fn from_json_with(
         json: &str,
         limits: AnalyzerLimits,
@@ -256,6 +267,21 @@ impl AnalyzerDescriptor {
         work: &mut impl crate::work::Work<AnalysisError>,
     ) -> AnalysisResult<Analyzer> {
         crate::configuration::decode(&self.data.pipeline, work).await
+    }
+
+    pub(crate) async fn validated_configuration_with(
+        &self,
+        limits: AnalyzerLimits,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Analyzer> {
+        limits::check_limit(
+            "analyzer descriptor bytes",
+            self.canonical_json().len(),
+            limits.max_descriptor_bytes,
+        )?;
+        let config = self.configuration_with(work).await?;
+        config::check_config_with(&config, limits, work).await?;
+        Ok(config)
     }
 
     pub(crate) fn validate_limits(&self, limits: AnalyzerLimits) -> AnalysisResult<()> {

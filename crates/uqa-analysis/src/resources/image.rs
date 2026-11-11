@@ -19,11 +19,15 @@ pub struct AnalyzerResourceInput {
     pub bytes: Arc<uqa_core::memory::Budgeted<Vec<u8>>>,
 }
 
-struct ImageResources {
+struct ImageResources<'a> {
     inputs: Vec<AnalyzerResourceInput>,
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    owner: &'a AnalyzerResources,
+    #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+    owner: std::marker::PhantomData<&'a AnalyzerResources>,
 }
 
-impl ImageResources {
+impl ImageResources<'_> {
     #[cfg(any(feature = "nori", feature = "kuromoji"))]
     fn find(&self, kind: AnalyzerResourceKind, sha256: [u8; 32]) -> Option<&AnalyzerResourceInput> {
         self.inputs
@@ -64,51 +68,106 @@ impl AnalyzerResources {
         descriptor: Arc<AnalyzerDescriptor>,
         inputs: Vec<AnalyzerResourceInput>,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
+        crate::work::inline(self.restore_image_with(descriptor, inputs, &mut ()))
+    }
+
+    /// Reconstruct the same private revision through the caller's original input work channel. Encoded artifacts retain their original admitted allocations; preparation performs no source reads, host resolution or cache publication.
+    pub async fn restore_image_with_input(
+        &self,
+        descriptor: Arc<AnalyzerDescriptor>,
+        inputs: Vec<AnalyzerResourceInput>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
+        self.restore_image_with(descriptor, inputs, input).await
+    }
+
+    async fn restore_image_with(
+        &self,
+        descriptor: Arc<AnalyzerDescriptor>,
+        inputs: Vec<AnalyzerResourceInput>,
+        work: &mut impl crate::work::ResourceWork,
+    ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
         crate::descriptor::limits::check_limit(
             "image dictionary artifacts",
             inputs.len(),
             self.limits().max_stages.saturating_add(2),
         )?;
-        if inputs
-            .windows(2)
-            .any(|pair| (pair[0].kind, pair[0].sha256) >= (pair[1].kind, pair[1].sha256))
-        {
-            return Err(AnalysisError::Descriptor(
-                "unordered or duplicate image resources",
-            ));
+        for (index, pair) in inputs.windows(2).enumerate() {
+            crate::work::Work::<AnalysisError>::records(work, index).await?;
+            if (pair[0].kind, pair[0].sha256) >= (pair[1].kind, pair[1].sha256) {
+                return Err(AnalysisError::Descriptor(
+                    "unordered or duplicate image resources",
+                ));
+            }
         }
-        for input in &inputs {
+        for (index, input) in inputs.iter().enumerate() {
+            crate::work::Work::<AnalysisError>::records(work, index).await?;
             crate::descriptor::limits::check_limit(
                 "image dictionary bytes",
                 input.bytes.len(),
                 self.image_resource_byte_limit(input.kind)?,
             )?;
         }
-        let resources = Arc::new(ImageResources { inputs });
-        let owner = AnalyzerResources::builder(self.limits());
+        let resources = ImageResources {
+            inputs,
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            owner: self,
+            #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
+            owner: std::marker::PhantomData,
+        };
+        let config = descriptor
+            .validated_configuration_with(self.limits(), work)
+            .await?;
+        #[cfg(any(feature = "nori", feature = "kuromoji"))]
+        let mut config = config;
         #[cfg(feature = "nori")]
-        let owner = owner.nori_resources(crate::nori::NoriResources::with_resolver(
-            resources.clone(),
-            self.nori_resources().limits(),
-        ));
+        let nori = {
+            crate::nori::pipeline::check_resolved_with(&config, work).await?;
+            crate::nori::pipeline::ResolvedNoriPipeline::resolve_with(&mut config, &resources, work)
+                .await?
+        };
         #[cfg(feature = "kuromoji")]
-        let owner = owner.kuromoji_resources(crate::kuromoji::KuromojiResources::with_resolver(
-            resources.clone(),
-            self.kuromoji_resources().limits(),
-        ));
-        let compiled = owner.build().restore(descriptor)?;
-        if !compiled
-            .dictionary_resources()
-            .map(|resource| (resource.kind(), resource.sha256()))
-            .eq(resources
-                .inputs
-                .iter()
-                .map(|input| (input.kind, input.sha256)))
-        {
+        let kuromoji = {
+            crate::kuromoji::pipeline::check_resolved_with(&config, work).await?;
+            crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve_with(
+                &mut config,
+                &resources,
+                self.limits(),
+                work,
+            )
+            .await?
+        };
+        let compiled = Arc::new(
+            CompiledAnalyzer::prepare_configuration_with(
+                descriptor,
+                config,
+                #[cfg(feature = "nori")]
+                nori,
+                #[cfg(feature = "kuromoji")]
+                kuromoji,
+                work,
+            )
+            .await?,
+        );
+        let mut actual = compiled.dictionary_resources();
+        for (index, expected) in resources.inputs.iter().enumerate() {
+            crate::work::Work::<AnalysisError>::records(work, index).await?;
+            if actual
+                .next()
+                .map(|resource| (resource.kind(), resource.sha256()))
+                != Some((expected.kind, expected.sha256))
+            {
+                return Err(AnalysisError::Descriptor(
+                    "image resources differ from the descriptor closure",
+                ));
+            }
+        }
+        if actual.next().is_some() {
             return Err(AnalysisError::Descriptor(
                 "image resources differ from the descriptor closure",
             ));
         }
+        drop(actual);
         Ok(compiled)
     }
 }
@@ -116,38 +175,5 @@ impl AnalyzerResources {
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "nori")]
-impl crate::nori::DictionaryResolver for ImageResources {
-    fn resolve(
-        &self,
-        request: &crate::nori::DictionaryRequest,
-    ) -> crate::nori::DictionaryResult<Option<crate::nori::DictionaryArtifact>> {
-        let crate::nori::DictionaryRequest::Sha256(hash) = request else {
-            return Ok(None);
-        };
-        Ok(self
-            .find(AnalyzerResourceKind::Nori, hash.into_bytes())
-            .map(|input| crate::nori::DictionaryArtifact {
-                sha256: *hash,
-                bytes: crate::nori::DictionaryBytes::Retained(input.bytes.clone()),
-            }))
-    }
-}
-
-#[cfg(feature = "kuromoji")]
-impl crate::kuromoji::DictionaryResolver for ImageResources {
-    fn resolve(
-        &self,
-        request: &crate::kuromoji::DictionaryRequest,
-    ) -> crate::kuromoji::DictionaryResult<Option<crate::kuromoji::DictionaryArtifact>> {
-        let crate::kuromoji::DictionaryRequest::Sha256(hash) = request else {
-            return Ok(None);
-        };
-        Ok(self
-            .find(AnalyzerResourceKind::Kuromoji, hash.into_bytes())
-            .map(|input| crate::kuromoji::DictionaryArtifact {
-                sha256: *hash,
-                bytes: crate::kuromoji::DictionaryBytes::Retained(input.bytes.clone()),
-            }))
-    }
-}
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
+mod preparation;

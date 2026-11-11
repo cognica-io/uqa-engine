@@ -85,6 +85,25 @@ impl CompiledAnalyzer {
     ) -> AnalysisResult<Self> {
         work.checkpoint().await?;
         let config = descriptor.configuration_with(work).await?;
+        Self::prepare_configuration_with(
+            descriptor,
+            config,
+            #[cfg(feature = "nori")]
+            nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
+            work,
+        )
+        .await
+    }
+
+    pub(crate) async fn prepare_configuration_with(
+        descriptor: Arc<AnalyzerDescriptor>,
+        config: Analyzer,
+        #[cfg(feature = "nori")] nori: crate::nori::pipeline::ResolvedNoriPipeline,
+        #[cfg(feature = "kuromoji")] kuromoji: crate::kuromoji::pipeline::ResolvedKuromojiPipeline,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Self> {
         let unicode_profile = descriptor.unicode_profile()?;
         let mut char_filters = Vec::with_capacity(config.char_filters.len());
         for (index, filter) in config.char_filters.iter().enumerate() {
