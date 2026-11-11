@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode durable role identities and bound relation/column ACL JSON under the caller's memory allowance, preserving existing struct forms, numeric classifications, path order and duplicate-key behavior. Failed or cancelled input releases partial buffers.
+
 - Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
 
 - Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.

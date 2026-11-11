@@ -54923,6 +54923,71 @@
       "capability": "Persistent catalog authority ownership",
       "workload": "Thirty-two separately admitted authority-map nodes and an exhausted shared allowance with an independent sibling.",
       "invariant": "Adoption preserves every original node lease without requesting new admission; removal and final retirement release only the corresponding original reservations."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_relation_acl_input_preserves_existing_struct_and_map_shapes",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Optional ACLs, map and positional structs, escaped field names, duplicate column keys and deeply nested ignored values.",
+      "invariant": "Controlled input matches the existing durable decoder while preserving path order, null semantics, last-value collisions and wire output."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_role_input_preserves_integer_boundaries_and_original_validity_checks",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Role identity endpoints, positional records, integer boundaries, negative zero and invalid identity field shapes.",
+      "invariant": "Known numeric fields use the existing fixed-width scalar decoder; semantic identity validity remains in the original catalog validator."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_relation_acl_input_keeps_duplicate_and_missing_field_error_order",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Duplicate and missing ACL and privilege fields combined with malformed or trailing values.",
+      "invariant": "Original duplicate and missing-field precedence is preserved, and rejected input retires all admitted workspace."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_column_acl_input_retains_exact_buffers_and_releases_replaced_paths",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Wide column names and 257-path ACL vectors with replaced keys, plus a rejected four MiB name.",
+      "invariant": "Retained allocation bytes equal owned node, name and vector reservations; replacement releases old paths and rejection precedes large copies."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_column_acl_input_retires_truncation_cancellation_and_partial_admission",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Every truncated prefix, nine admission ceilings, an independent sibling reservation, cancellation and corrupt column values.",
+      "invariant": "No partial authority escapes; failure releases only its own input and output reservations."
     }
   ]
 }

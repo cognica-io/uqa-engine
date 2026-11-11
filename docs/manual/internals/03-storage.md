@@ -617,6 +617,8 @@ Runtime host-language callback code is not a durable catalog object.
 
 `CatalogFacade::begin_index_input` retains secondary-index definitions through the same record input owner. Returned rows preserve the original relation identity, method, backing table, encoded columns and parameters, and optional semantic definition. Native providers keep their existing row/key validation, while Key/Value input accepts the original object and positional encodings and legacy relation keys. Every returned field retains its admitted buffer. Consuming catalog owners still apply the original ordering and complete reference validation before activation; see the [field correspondence](../../design/backup-image-format.md#retained-persistent-index-definitions).
 
+Core's `catalog_acl::input` decodes stored role identities and bound relation/column ACL JSON under a supplied allowance and cancellation token. `role_identity`, `entries` and `column_entries` preserve the existing durable shapes, PUBLIC/null distinction, ordered grant paths and last-value column collisions. Completed maps retain original admitted strings, vector capacities and exact ordered-map nodes; replacement and failed construction release their discarded buffers. Semantic role validity, ownership binding and independent ACL tuple composition remain with their existing catalog owners. See the [authority input argument](../../design/backup-image-format.md#controlled-durable-authority-json-input).
+
 Analyzer JSON, field-phase assignments, GIN ownership, reopen behavior, and external synonym resources are detailed in [Analyzer pipeline internals](04-analyzer-pipeline.md).
 
 ## Full-text posting layout
