@@ -115,11 +115,27 @@ impl Value {
         &'a self,
         control: ProductionControl<'a>,
     ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
-        let mut state = Some(Traversal::new(self, control.budget()));
+        self.payload_parts(control.budget(), move || control.check_cancellation())
+    }
+
+    /// Observe the same native payload transitions with admitted scratch and a caller-owned cancellation check. The iterator owns no payload and never combines a deep return chain into one step.
+    pub fn retained_payload_parts_with_check<'a>(
+        &'a self,
+        budget: &'a MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled> + Send + 'a,
+    ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
+        self.payload_parts(Some(budget), check)
+    }
+
+    fn payload_parts<'a>(
+        &'a self,
+        budget: Option<&'a MemoryBudget>,
+        mut check: impl FnMut() -> Result<(), QueryCancelled> + Send + 'a,
+    ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
+        let mut state = Some(Traversal::new(self, budget));
         std::iter::from_fn(move || {
             let mut traversal = state.take()?;
-            let result = control
-                .check_cancellation()
+            let result = check()
                 .map_err(ValueRetentionError::from)
                 .and_then(|()| traversal.step().map_err(ValueRetentionError::from));
             match result {

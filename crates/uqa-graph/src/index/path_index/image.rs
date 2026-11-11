@@ -50,7 +50,18 @@ impl PathIndex {
         input: &mut dyn Read,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        input::read(input, control)
+        uqa_core::image_io::decode_image(
+            input,
+            control.memory(),
+            control.cancellation(),
+            async |mut input| Self::read_image_from(&mut input).await,
+        )
+    }
+    /// Decode complete evaluated paths through the enclosing byte/poll channel, retaining sequence comparisons and original allocation ownership without reevaluating a graph.
+    pub async fn read_image_from(
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        input::read_from(input).await
     }
 }
 

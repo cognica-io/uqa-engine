@@ -11,9 +11,8 @@ use super::GraphLabelRegistry;
 use super::{LabelKind, MemoryGraphStore, NativeLabels, Partition};
 use uqa_core::{Edge, Vertex};
 use uqa_storage::{
-    image_io::{ImageInput, ImageOutput},
-    read_control::StorageReadControl,
-    StorageBackendError, StorageBackendResult,
+    image_io::ImageOutput, read_control::StorageReadControl, StorageBackendError,
+    StorageBackendResult,
 };
 
 mod capture;
@@ -84,6 +83,17 @@ impl MemoryGraphStore {
         input: &mut dyn std::io::Read,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        input::read(input, control)
+        uqa_core::image_io::decode_image(
+            input,
+            control.memory(),
+            control.cancellation(),
+            async |mut input| Self::read_image_from(&mut input).await,
+        )
+    }
+    /// Decode through one enclosing input channel, including property adoption, native index reconstruction and final validation after the single EOF.
+    pub async fn read_image_from(
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        input::read_from(input).await
     }
 }

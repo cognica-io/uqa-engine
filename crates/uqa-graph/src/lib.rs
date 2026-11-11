@@ -22,6 +22,7 @@ pub mod cypher;
 mod delta;
 mod embedding;
 mod handle;
+mod image_work;
 mod incremental_match;
 mod index;
 mod memory_store;

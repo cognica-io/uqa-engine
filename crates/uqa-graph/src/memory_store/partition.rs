@@ -58,13 +58,23 @@ impl Partition {
     }
 
     pub(super) fn add_vertex(&mut self, vertex: &Vertex) -> Result<(), MemoryError> {
+        crate::image_work::inline(self.add_vertex_with(vertex, &mut ()))
+    }
+
+    pub(super) async fn add_vertex_with<E: From<MemoryError>>(
+        &mut self,
+        vertex: &Vertex,
+        work: &mut impl crate::image_work::Work<E>,
+    ) -> Result<(), E> {
         self.vertex_ids.insert(vertex.vertex_id, 0)?;
-        update_label_index(
+        update_label_index_with(
             &mut self.vertex_label_index,
             &vertex.label,
             vertex.vertex_id,
             true,
+            work,
         )
+        .await
     }
 
     pub(super) fn remove_vertex(&mut self, vertex: &Vertex) -> Result<(), MemoryError> {
@@ -78,10 +88,18 @@ impl Partition {
     }
 
     pub(super) fn add_edge(&mut self, edge: &Edge) -> Result<(), MemoryError> {
+        crate::image_work::inline(self.add_edge_with(edge, &mut ()))
+    }
+
+    pub(super) async fn add_edge_with<E: From<MemoryError>>(
+        &mut self,
+        edge: &Edge,
+        work: &mut impl crate::image_work::Work<E>,
+    ) -> Result<(), E> {
         self.edge_ids.insert(edge.edge_id, 0)?;
         update_index(&mut self.adj_out, edge.source_id, edge.edge_id, true)?;
         update_index(&mut self.adj_in, edge.target_id, edge.edge_id, true)?;
-        update_label_index(&mut self.label_index, &edge.label, edge.edge_id, true)
+        update_label_index_with(&mut self.label_index, &edge.label, edge.edge_id, true, work).await
     }
 
     pub(super) fn remove_edge(&mut self, edge: &Edge) -> Result<(), MemoryError> {
@@ -121,6 +139,16 @@ fn update_label_index(
     id: u64,
     add: bool,
 ) -> Result<(), MemoryError> {
+    crate::image_work::inline(update_label_index_with(map, label, id, add, &mut ()))
+}
+
+async fn update_label_index_with<E: From<MemoryError>>(
+    map: &mut NativeMap<String, NativeSet<u64>>,
+    label: &str,
+    id: u64,
+    add: bool,
+    work: &mut impl crate::image_work::Work<E>,
+) -> Result<(), E> {
     let existing = map.get(label);
     if !add && existing.is_none() {
         return Ok(());
@@ -135,5 +163,5 @@ fn update_label_index(
         ids.remove(&id)?;
     }
     let bytes = ids.retained_bytes()?;
-    map.insert_named(label, ids, 0, bytes)
+    map.insert_named_with(label, ids, 0, bytes, work).await
 }

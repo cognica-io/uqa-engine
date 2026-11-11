@@ -144,6 +144,15 @@ fn value_error(error: uqa_core::value_image::ValueImageError) -> StorageBackendE
     }
 }
 
+/// Reuse Core's retained value input through the enclosing transport and preserve Storage's value-error boundary. The returned native allocation keeps its original input reservation.
+pub async fn read_value_image_from(
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<uqa_core::Value>> {
+    uqa_core::value_image::ValueImageInput::read_from(input)
+        .await
+        .map_err(value_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -20988,7 +20988,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -54543,6 +54543,110 @@
       "capability": "Field catalog input retirement",
       "workload": "Reject duplicate field identity and cancel, abandon or invalidate partially reconstructed private bindings.",
       "invariant": "Both unpublished catalog roots and children retire together without changing retained prior membership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retains_current_windows_and_validation_after_single_eof",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retires_partial_fields_and_post_eof_candidates",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_errors_and_denied_admission_retire_the_original_continuation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_preserves_independent_long_prefixes_pairs_and_native_charges",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_retires_partial_and_post_eof_owners_without_source_replay",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_rejects_ordering_truncation_and_denied_native_admission",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_input_keeps_original_name_and_retires_post_eof_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_catalog_input_keeps_original_name_and_retires_post_eof_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
       "case_names": [
         ""
       ]
