@@ -11,16 +11,17 @@ use super::{
     FieldAnalyzerBinding,
 };
 use crate::{
-    analyzer_image::read_analyzer_image,
-    image_io::{
-        framed_image_reader, FramedImageInput, ImageInput, ImageOwner, ImageRead, ImageReader,
-    },
+    analyzer_image::read_analyzer_image_from,
+    image_io::{framed_image_reader, read_framed_image_from, ImageOwner, ImageRead, ImageReader},
     read_control::StorageReadControl,
     AnalyzerPhase, StorageBackendError, StorageBackendResult,
 };
 use std::{io::Read, sync::Arc};
 use uqa_analysis::AnalyzerResources;
-use uqa_core::memory::{Budgeted, MemoryReservation};
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput},
+    memory::{Budgeted, MemoryReservation},
+};
 
 const MAGIC: &[u8; 8] = b"UQAFAB01";
 
@@ -147,14 +148,14 @@ impl ImageRead for Output<'_> {
     }
 }
 
-fn name(
-    input: &mut ImageInput<'_>,
+async fn name(
+    input: &mut AsyncImageInput<'_>,
     memory: &mut MemoryReservation,
 ) -> StorageBackendResult<Option<String>> {
-    match input.array::<1>()?[0] {
+    match input.array::<1>().await?[0] {
         0 => Ok(None),
         1 => {
-            let (value, lease) = input.text()?.into_parts();
+            let (value, lease) = input.text().await?.into_parts();
             memory.absorb(lease);
             Ok(Some(value))
         }
@@ -169,30 +170,46 @@ impl FieldAnalyzerBinding {
         resources: &AnalyzerResources,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Self>> {
-        control.check()?;
-        let mut memory = control.memory().reserve(size_of::<Self>())?;
-        let mut input = ImageInput { reader, control };
-        if &input.array::<8>()? != MAGIC {
+        decode_image(
+            reader,
+            control.memory(),
+            control.cancellation(),
+            async |mut input| Self::read_image_from(&mut input, resources).await,
+        )
+    }
+
+    /// Retain both framed analyzer revisions and their original name allocations through the caller's byte/poll channel. Only complete validated bindings are returned; failed or abandoned preparation retires both private revisions.
+    pub async fn read_image_from(
+        input: &mut AsyncImageInput<'_>,
+        resources: &AnalyzerResources,
+    ) -> StorageBackendResult<Budgeted<Self>> {
+        input.cancellation.check()?;
+        let mut memory = input.memory.reserve(size_of::<Self>())?;
+        if &input.array::<8>().await? != MAGIC {
             return Err(invalid());
         }
-        let owner = match input.array::<1>()?[0] {
+        let owner = match input.array::<1>().await?[0] {
             0 => AnalyzerBindingOwner::Field,
             1 => AnalyzerBindingOwner::Gin,
             _ => return Err(invalid()),
         };
-        let last_phase = match input.array::<1>()?[0] {
+        let last_phase = match input.array::<1>().await?[0] {
             0 => AnalyzerPhase::Index,
             1 => AnalyzerPhase::Search,
             2 => AnalyzerPhase::Both,
             _ => return Err(invalid()),
         };
-        let index_name = name(&mut input, &mut memory)?;
-        let search_name = name(&mut input, &mut memory)?;
-        let index =
-            read_analyzer_image(&mut FramedImageInput::new(input.reader), resources, control)?;
-        let search =
-            read_analyzer_image(&mut FramedImageInput::new(input.reader), resources, control)?;
-        input.end()?;
+        let index_name = name(input, &mut memory).await?;
+        let search_name = name(input, &mut memory).await?;
+        let index = read_framed_image_from(input, async |mut child| {
+            read_analyzer_image_from(&mut child, resources).await
+        })
+        .await?;
+        let search = read_framed_image_from(input, async |mut child| {
+            read_analyzer_image_from(&mut child, resources).await
+        })
+        .await?;
+        input.end().await?;
         let value = Self {
             index: BoundAnalyzerRevision {
                 name: index_name,
@@ -206,7 +223,7 @@ impl FieldAnalyzerBinding {
             last_phase,
         };
         value.validate()?;
-        control.check()?;
+        input.cancellation.check()?;
         Ok(Budgeted::new(value, memory))
     }
 }

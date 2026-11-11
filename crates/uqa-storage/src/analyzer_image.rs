@@ -7,7 +7,7 @@
 //! Framing for one resolved descriptor and its exact immutable dictionary closure.
 
 use crate::{
-    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
+    image_io::{ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
@@ -19,7 +19,10 @@ use uqa_analysis::{
     AnalyzerDescriptor, AnalyzerResource, AnalyzerResourceInput, AnalyzerResourceKind,
     AnalyzerResources, CompiledAnalyzer,
 };
-use uqa_core::memory::BudgetedVec;
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput},
+    memory::BudgetedVec,
+};
 
 mod capture;
 mod stream;
@@ -89,33 +92,50 @@ pub fn read_analyzer_image(
     resources: &AnalyzerResources,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Arc<CompiledAnalyzer>> {
-    let mut input = ImageInput { reader, control };
-    if &input.array::<8>()? != MAGIC {
+    decode_image(
+        reader,
+        control.memory(),
+        control.cancellation(),
+        async |mut input| read_analyzer_image_from(&mut input, resources).await,
+    )
+}
+
+/// Read one complete private analyzer through its enclosing image channel. Framing, descriptor preparation, exact dictionary input and native reconstruction retain the original byte/poll window and input reservations.
+pub async fn read_analyzer_image_from(
+    input: &mut AsyncImageInput<'_>,
+    resources: &AnalyzerResources,
+) -> StorageBackendResult<Arc<CompiledAnalyzer>> {
+    let control = StorageReadControl::new(input.memory, input.cancellation);
+    if &input.array::<8>().await? != MAGIC {
         return Err(invalid());
     }
-    let encoded = input.bytes_with_limit(resources.limits().max_descriptor_bytes)?;
-    let descriptor = AnalyzerDescriptor::from_json(
+    let encoded = input
+        .bytes_with_limit(resources.limits().max_descriptor_bytes)
+        .await?;
+    let descriptor = AnalyzerDescriptor::from_json_with_input(
         std::str::from_utf8(&encoded).map_err(|_| invalid())?,
         resources.limits(),
-    )?;
+        input,
+    )
+    .await?;
     drop(encoded);
-    let count = input.count()?;
+    let count = input.count().await?;
     control.check_value_size(count, resources.limits().max_stages.saturating_add(2))?;
     let mut artifacts = BudgetedVec::new(control.memory());
     artifacts.reserve(count)?;
     let mut previous = None;
     for _ in 0..count {
-        let kind = match input.array::<1>()?[0] {
+        let kind = match input.array::<1>().await?[0] {
             0 => AnalyzerResourceKind::Nori,
             1 => AnalyzerResourceKind::Kuromoji,
             _ => return Err(invalid()),
         };
         let limit = resources.image_resource_byte_limit(kind)?;
-        let sha256 = input.array()?;
+        let sha256 = input.array().await?;
         if previous.is_some_and(|previous| previous >= (kind, sha256)) {
             return Err(invalid());
         }
-        let bytes = input.bytes_with_limit(limit)?.into_shared()?;
+        let bytes = input.bytes_with_limit(limit).await?.into_shared()?;
         artifacts.push(AnalyzerResourceInput {
             kind,
             sha256,
@@ -123,10 +143,12 @@ pub fn read_analyzer_image(
         })?;
         previous = Some((kind, sha256));
     }
-    input.end()?;
+    input.end().await?;
     let (artifacts, _memory) = artifacts.into_parts();
     control.check()?;
-    let analyzer = resources.restore_image(descriptor, artifacts)?;
+    let analyzer = resources
+        .restore_image_with_input(descriptor, artifacts, input)
+        .await?;
     control.check()?;
     Ok(analyzer)
 }

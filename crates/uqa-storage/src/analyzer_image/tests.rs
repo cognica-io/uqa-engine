@@ -7,6 +7,7 @@
 use super::*;
 use uqa_analysis::{Analyzer, AnalyzerLimits};
 
+mod retained;
 mod stream;
 
 fn encode(source: &CompiledAnalyzer) -> Vec<u8> {

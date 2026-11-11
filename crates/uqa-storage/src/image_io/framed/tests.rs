@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod native;
+
 struct Bytes<'a>(&'a [u8]);
 impl ImageRead for Bytes<'_> {
     fn read(&mut self, output: &mut [u8]) -> StorageBackendResult<usize> {

@@ -2,6 +2,123 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_preserve_canonical_boundaries_and_parent_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Read canonical empty, short, exact-chunk and multichunk children with one-byte and fragmented parent windows.",
+      "invariant": "Child EOF preserves the next parent field and source bytes remain within each current limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_reject_truncation_noncanonical_frames_and_unconsumed_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Truncate every position of a small framed child and supply oversized, repeated-short and unconsumed child frames.",
+      "invariant": "Invalid or incomplete children fail terminally without consuming a successful parent tail or retaining allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_resume_interrupts_and_retire_failed_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Interrupt partial frame headers and payloads, then cancel a retained framed child.",
+      "invariant": "Interrupted reads consume bounded attempts and resume in place; cancellation retires the complete original owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_preserves_original_wire_and_current_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Retained analyzer image framing",
+      "workload": "Decode a wide descriptor through one-byte, short and full windows with interrupted transport.",
+      "invariant": "Wire bytes, independent token terms, exact source position and private resource ownership are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_continues_preparation_after_eof_and_retires_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Analyzer input failure retirement",
+      "workload": "Cancel, abandon or invalidate input before and after source EOF.",
+      "invariant": "No post-EOF source replay occurs and unpublished owners release their original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_rejects_corruption_without_escaping_read_or_admission_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Analyzer input validation order",
+      "workload": "Read truncated, invalid UTF-8, trailing and over-limit descriptors through small windows.",
+      "invariant": "The first validation error and allocation admission precede later bytes, and terminal readers cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_dictionary_input_preserves_exact_images_and_independent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Retained dictionary artifact framing",
+      "workload": "Restore enabled Korean and Japanese dictionaries with interrupted input and original window ceilings.",
+      "invariant": "Exact encoded images and complete token observations survive source loss; final owners retain and release original input admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_binding_input_preserves_both_revisions_names_and_framed_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests/retained.rs",
+      "capability": "Retained field analyzer input",
+      "workload": "Restore large UTF-8 names and independently framed index/search revisions through one-byte windows.",
+      "invariant": "Original names, phases, wire bytes and token observations survive without substituting existing cached analyzers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_binding_input_retires_names_and_completed_first_child_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests/retained.rs",
+      "capability": "Field analyzer input retirement",
+      "workload": "Cancel, abandon, invalidate or truncate input after names and either child revision.",
+      "invariant": "Partial and complete unpublished children release their original admission and preserve existing analyzer caches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-analysis",
       "kind": "lib",
       "test": "retained_analyzer_image_preparation_preserves_exact_descriptor_and_independent_token_output",

@@ -12,6 +12,9 @@ use std::io::{self, Read};
 
 const CHUNK: usize = 4096;
 
+mod input;
+pub use input::read_framed_image_from;
+
 /// Frame one complete owner image with little-endian u32 lengths, full 4 KiB chunks, an optional short final chunk and a zero terminator. Admission covers the fixed buffer; preparation remains with the original owner.
 pub fn framed_image_reader<'a>(
     source: ImageReader<'a>,
@@ -85,56 +88,52 @@ impl ImageRead for FramedImage<'_> {
 /// Present exactly one framed child as a complete Read stream. The enclosing controlled decoder owns cancellation checks; Interrupted attempts preserve framing progress. Other errors and unwinds make this reader terminal.
 pub struct FramedImageInput<'a> {
     source: &'a mut dyn Read,
+    state: Option<FrameState>,
+}
+
+#[derive(Default)]
+struct FrameState {
     header: [u8; 4],
     header_used: usize,
     remaining: usize,
     short: bool,
     complete: bool,
-    failed: bool,
 }
 
 impl<'a> FramedImageInput<'a> {
     pub fn new(source: &'a mut dyn Read) -> Self {
         Self {
             source,
-            header: [0; 4],
-            header_used: 0,
-            remaining: 0,
-            short: false,
-            complete: false,
-            failed: false,
+            state: Some(FrameState::default()),
         }
     }
+}
 
-    fn read_inner(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if output.is_empty() || self.complete {
-            return Ok(0);
+impl FrameState {
+    fn accept_header_bytes(&mut self, count: usize) -> io::Result<()> {
+        if count == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        if self.remaining == 0 {
-            while self.header_used < 4 {
-                let count = self.source.read(&mut self.header[self.header_used..])?;
-                if count == 0 {
-                    return Err(io::ErrorKind::UnexpectedEof.into());
-                }
-                if count > 4 - self.header_used {
-                    return Err(io::ErrorKind::InvalidData.into());
-                }
-                self.header_used += count;
-            }
-            let length = u32::from_le_bytes(self.header) as usize;
-            self.header_used = 0;
-            if length > CHUNK || (self.short && length != 0) {
-                return Err(io::ErrorKind::InvalidData.into());
-            }
-            if length == 0 {
-                self.complete = true;
-                return Ok(0);
-            }
-            self.short = length < CHUNK;
-            self.remaining = length;
+        if count > 4 - self.header_used {
+            return Err(io::ErrorKind::InvalidData.into());
         }
-        let limit = output.len().min(self.remaining);
-        let count = self.source.read(&mut output[..limit])?;
+        self.header_used += count;
+        Ok(())
+    }
+
+    fn finish_header(&mut self) -> io::Result<()> {
+        let length = u32::from_le_bytes(self.header) as usize;
+        self.header_used = 0;
+        if length > CHUNK || (self.short && length != 0) {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        self.complete = length == 0;
+        self.short = length < CHUNK;
+        self.remaining = length;
+        Ok(())
+    }
+
+    fn accept_payload(&mut self, count: usize, limit: usize) -> io::Result<usize> {
         if count == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
@@ -144,19 +143,39 @@ impl<'a> FramedImageInput<'a> {
         self.remaining -= count;
         Ok(count)
     }
+
+    fn read(&mut self, source: &mut dyn Read, output: &mut [u8]) -> io::Result<usize> {
+        if output.is_empty() || self.complete {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            while self.header_used < 4 {
+                let count = source.read(&mut self.header[self.header_used..])?;
+                self.accept_header_bytes(count)?;
+            }
+            self.finish_header()?;
+            if self.complete {
+                return Ok(0);
+            }
+        }
+        let limit = output.len().min(self.remaining);
+        let count = source.read(&mut output[..limit])?;
+        self.accept_payload(count, limit)
+    }
 }
 
 impl Read for FramedImageInput<'_> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if std::mem::replace(&mut self.failed, true) {
-            return Err(io::Error::other("failed framed image input"));
-        }
-        let result = self.read_inner(output);
+        let mut state = self
+            .state
+            .take()
+            .ok_or_else(|| io::Error::other("failed framed image input"))?;
+        let result = state.read(self.source, output);
         if match &result {
             Ok(_) => true,
             Err(error) => error.kind() == io::ErrorKind::Interrupted,
         } {
-            self.failed = false;
+            self.state = Some(state);
         }
         result
     }
