@@ -4,11 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{sql, Engine, StorageReadControl};
+use super::sql;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use super::{Engine, StorageReadControl};
 use crate::tests::providers::Provider;
 use std::sync::Arc;
-use uqa_core::{RelationIdentity, Value};
-use uqa_sql::ast::{Expr, PartitionBound, PartitionRangeDatum};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_core::RelationIdentity;
+use uqa_core::Value;
+use uqa_sql::ast::Expr;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_sql::ast::{PartitionBound, PartitionRangeDatum};
 
 #[derive(Debug)]
 struct FailedLiteral;
@@ -77,6 +83,7 @@ fn failed_native_table_definition_publication_restores_the_original_default(
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_memory_table_expressions_capture_original_native_generations() {
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE parent(payload text DEFAULT 'original', CHECK(payload <> 'forbidden')) PARTITION BY RANGE(payload); CREATE TABLE saved PARTITION OF parent FOR VALUES FROM ('a') TO ('z')");

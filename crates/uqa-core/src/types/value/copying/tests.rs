@@ -7,6 +7,8 @@
 use super::*;
 use crate::{memory::MemoryError, DecimalValue, TemporalValue};
 
+mod input;
+
 fn values() -> Vec<Value> {
     vec![
         Value::Null,

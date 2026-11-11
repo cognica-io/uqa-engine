@@ -136,6 +136,7 @@ fn denied_metadata_capture_does_not_prevent_scoring_parameter_publication() {
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_scoring_capture_and_later_writes_do_not_copy_unrelated_payloads() {
     let engine = Engine::new();
     // Keep registration admission live while checking that later writes do not change the retained payload charge.

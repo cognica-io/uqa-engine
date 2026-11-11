@@ -25,6 +25,7 @@ macro_rules! table_sources {
             $(pub(super) $field: MemoryCaptureKey<$frozen>,)*
         }
 
+        #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         pub(crate) struct CapturedTable {
             pub(crate) control: uqa_storage::read_control::StorageReadControl,
             pub(crate) object_id: [u8; 16],
@@ -34,6 +35,7 @@ macro_rules! table_sources {
             $(pub(crate) $field: std::sync::Arc<uqa_core::memory::Budgeted<$frozen>>,)*
         }
 
+        #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         #[cfg(test)]
         impl CapturedTable {
             pub(crate) fn assert_original_allowance(&self, memory: &uqa_core::memory::MemoryBudget) {
@@ -78,7 +80,7 @@ macro_rules! table_sources {
                 Ok(selected)
             }
 
-            #[cfg(test)]
+            #[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
             pub(super) fn assert_unread(&self, cut: &uqa_storage::memory_capture::MemoryCapture) {
                 $(assert!(self.$field.retained(cut).unwrap().is_none(), stringify!($field));)*
             }
@@ -96,6 +98,7 @@ macro_rules! table_sources {
                 Ok(source)
             }
 
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             pub(super) fn capture(&self, cut: &uqa_storage::memory_capture::MemoryCapture) -> StorageBackendResult<CapturedTable> {
                 cut.check()?;
                 let value = CapturedTable {

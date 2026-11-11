@@ -59,13 +59,18 @@ impl UnicodeTable {
         })
     }
 
-    pub fn decode(reader: &mut Reader<'_>, script_count: usize) -> DictionaryResult<Self> {
+    pub async fn decode_with(
+        reader: &mut Reader<'_>,
+        script_count: usize,
+        work: &mut impl super::work::Work,
+    ) -> DictionaryResult<Self> {
         if reader.u32()? != CODE_POINTS {
             return Err(reader.invalid("incomplete Unicode profile"));
         }
         let count = reader.count(12)?;
         let mut ranges = vector(count)?;
-        for _ in 0..count {
+        for index in 0..count {
+            work.records(index).await?;
             ranges.push(UnicodeRange {
                 end: reader.u32()?,
                 properties: Properties {
@@ -77,14 +82,24 @@ impl UnicodeTable {
             });
         }
         let table = Self { ranges };
-        table.validate(script_count)?;
+        table.validate_with(script_count, work).await?;
         Ok(table)
     }
 
+    #[cfg(any(feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn validate(&self, script_count: usize) -> DictionaryResult<()> {
+        super::work::inline(self.validate_with(script_count, &mut ()))
+    }
+
+    async fn validate_with(
+        &self,
+        script_count: usize,
+        work: &mut impl super::work::Work,
+    ) -> DictionaryResult<()> {
         let mut start = 0;
         let mut previous = None;
-        for range in &self.ranges {
+        for (index, range) in self.ranges.iter().enumerate() {
+            work.records(index).await?;
             let p = range.properties;
             if range.end <= start
                 || range.end > CODE_POINTS

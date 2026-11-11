@@ -145,7 +145,7 @@ impl UserDictionary {
                 right_context,
                 segment_lengths: segments,
             });
-            builder.insert(surface)?;
+            builder = builder.insert(surface)?;
             previous = Some(line.surface());
         }
         let lexicon = builder.finish(limits.max_surface_utf16)?;

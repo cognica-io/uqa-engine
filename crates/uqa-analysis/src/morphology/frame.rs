@@ -13,6 +13,9 @@ use super::io::{vector, Reader};
 use super::limits::DictionaryLimits;
 use super::{DictionaryError, DictionaryResult};
 
+mod input;
+pub(crate) use input::FrameInput;
+
 const HEADER_SIZE: usize = 56;
 const DIRECTORY_SIZE: usize = 72;
 
@@ -27,6 +30,21 @@ pub(crate) struct Section {
     pub kind: u32,
     pub records: u64,
     pub bytes: Vec<u8>,
+}
+
+pub(crate) type DecodedFrame = ([u8; 32], Vec<Section>);
+
+impl Section {
+    pub(crate) fn reader(&self) -> Reader<'_> {
+        Reader::new(&self.bytes, "dictionary section", false)
+    }
+
+    pub(crate) fn finish(&self, reader: Reader<'_>, count: usize) -> DictionaryResult<()> {
+        if count as u64 != self.records {
+            return Err(reader.invalid("directory and decoded record counts differ"));
+        }
+        reader.finish()
+    }
 }
 
 struct DirectoryEntry {
@@ -56,11 +74,36 @@ fn size(reader: &mut Reader<'_>) -> DictionaryResult<usize> {
     usize::try_from(reader.u64()?).map_err(|_| reader.invalid("size exceeds address space"))
 }
 
+#[cfg(test)]
 pub(crate) fn decode(
     format: &Format,
     bytes: &[u8],
     limits: DictionaryLimits,
-) -> DictionaryResult<([u8; 32], Vec<Section>)> {
+) -> DictionaryResult<DecodedFrame> {
+    super::work::inline(decode_with(format, bytes, limits, &mut ()))
+}
+
+pub(crate) async fn decode_with(
+    format: &Format,
+    bytes: &[u8],
+    limits: DictionaryLimits,
+    work: &mut impl super::work::Work,
+) -> DictionaryResult<DecodedFrame> {
+    let mut input = FrameInput::new(format, bytes, limits)?;
+    loop {
+        work.checkpoint().await?;
+        match input.advance()? {
+            std::ops::ControlFlow::Continue(next) => input = next,
+            std::ops::ControlFlow::Break(value) => return Ok(value),
+        }
+    }
+}
+
+fn directory(
+    format: &Format,
+    bytes: &[u8],
+    limits: DictionaryLimits,
+) -> DictionaryResult<([u8; 32], Vec<DirectoryEntry>)> {
     check_limit("encoded bytes", bytes.len(), limits.max_encoded_bytes)?;
     let mut reader = Reader::new(bytes, "bundle frame", false);
     if reader.take(8)? != format.magic {
@@ -113,44 +156,7 @@ pub(crate) fn decode(
     if identity(format, &entries) != id {
         return Err(DictionaryError::Checksum(0));
     }
-    let mut sections = vector(format.section_count)?;
-    for entry in entries {
-        let stored = &bytes[entry.offset..entry.offset + entry.stored];
-        let mut data = vector(entry.decoded)?;
-        if entry.codec == 0 {
-            data.extend_from_slice(stored);
-        } else {
-            data.resize(entry.decoded, 0);
-            let mut state = miniz_oxide::inflate::stream::InflateState::new_boxed(
-                miniz_oxide::DataFormat::Zlib,
-            );
-            let result = miniz_oxide::inflate::stream::inflate(
-                &mut state,
-                stored,
-                &mut data,
-                miniz_oxide::MZFlush::Finish,
-            );
-            if result.status != Ok(miniz_oxide::MZStatus::StreamEnd)
-                || result.bytes_written != data.len()
-                || result.bytes_consumed != stored.len()
-            {
-                return Err(invalid(
-                    "compressed section",
-                    "invalid or incorrectly sized zlib stream",
-                ));
-            }
-        }
-        let hash: [u8; 32] = Sha256::digest(&data).into();
-        if hash != entry.hash {
-            return Err(DictionaryError::Checksum(entry.kind));
-        }
-        sections.push(Section {
-            kind: entry.kind,
-            records: entry.records,
-            bytes: data,
-        });
-    }
-    Ok((id, sections))
+    Ok((id, entries))
 }
 
 #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
@@ -223,36 +229,10 @@ pub(crate) fn encode(
     Ok(output.0)
 }
 
-pub(crate) fn take_section<T, E>(
-    sections: &mut Vec<Section>,
-    kind: u32,
-    decode: impl FnOnce(&mut Reader<'_>) -> Result<(T, usize), E>,
-) -> Result<T, E>
-where
-    E: From<DictionaryError>,
-{
+pub(crate) fn take_section(sections: &mut Vec<Section>, kind: u32) -> DictionaryResult<Section> {
     let index = sections
         .iter()
         .position(|section| section.kind == kind)
         .ok_or_else(|| invalid("bundle", "missing section"))?;
-    read_section(sections.remove(index), decode)
-}
-
-pub(crate) fn read_section<T, E>(
-    section: Section,
-    decode: impl FnOnce(&mut Reader<'_>) -> Result<(T, usize), E>,
-) -> Result<T, E>
-where
-    E: From<DictionaryError>,
-{
-    let mut reader = Reader::new(&section.bytes, "dictionary section", false);
-    let (value, count) = decode(&mut reader)?;
-    if count as u64 != section.records {
-        return Err(reader
-            .invalid("directory and decoded record counts differ")
-            .into());
-    }
-    reader.finish()?;
-    drop(section);
-    Ok(value)
+    Ok(sections.remove(index))
 }

@@ -38,10 +38,12 @@ impl Publication {
         })
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn registry(&self) -> &MemoryCaptureRegistry {
         &self.registry
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn selected(&self) -> uqa_storage::memory_capture::MemoryCaptureSources {
         self.owner.snapshot()
     }

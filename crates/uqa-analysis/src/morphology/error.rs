@@ -8,6 +8,8 @@
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DictionaryError {
+    #[error(transparent)]
+    Input(#[from] uqa_core::image_io::ImageIoError),
     #[error("invalid provenance manifest: {0}")]
     Manifest(#[from] serde_json::Error),
     #[error("unsupported bundle version {0}")]
@@ -30,6 +32,41 @@ pub(crate) enum DictionaryError {
     Allocation(#[from] std::collections::TryReserveError),
     #[error("invalid UTF-8 in dictionary: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+    #[error("invalid UTF-8 in dictionary: {diagnostic}", diagnostic = utf8_diagnostic(*offset, error))]
+    Utf8Offset {
+        offset: usize,
+        #[source]
+        error: std::str::Utf8Error,
+    },
+}
+
+pub(crate) fn utf8_diagnostic(offset: usize, error: &std::str::Utf8Error) -> Utf8Diagnostic {
+    Utf8Diagnostic {
+        valid_up_to: offset + error.valid_up_to(),
+        error_len: error.error_len(),
+    }
+}
+
+pub(crate) struct Utf8Diagnostic {
+    valid_up_to: usize,
+    error_len: Option<usize>,
+}
+
+impl std::fmt::Display for Utf8Diagnostic {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.error_len {
+            Some(length) => write!(
+                output,
+                "invalid utf-8 sequence of {length} bytes from index {}",
+                self.valid_up_to
+            ),
+            None => write!(
+                output,
+                "incomplete utf-8 byte sequence from index {}",
+                self.valid_up_to
+            ),
+        }
+    }
 }
 
 pub(super) fn invalid(section: &'static str, reason: &'static str) -> DictionaryError {

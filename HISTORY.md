@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Compile native memory-backup capture adapters and their unit-test consumers under the same platform boundary as the local repository API, preserving strict browser WASM library/test builds and native transaction snapshots.
+
+- Reuse canonical JSON string workspace and borrow ordered object traversal during dictionary loading, preserving the existing allocation ceilings and insertion-order JSON compatibility.
+
+- Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; enclosing analyzer restoration remains under implementation.
+
+- Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.
 - Validate legacy trigger targets through their exact stored schema/function name when an immutable function identity is absent. Original absent identity fields remain unchanged, and ambiguous or missing handlers reject before activation. Trigger activation consumes one event row even when the stored handler declaration includes `SETOF`.
 
 - Validate selected trigger function signatures, result types and languages during native restoration without compiling deferred bodies. Ordinary creation, catalog projection and restoration share the trigger contract, including PostgreSQL-compatible `RETURNS SETOF trigger` declarations.

@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::Engine;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use uqa_storage::memory_capture::MemoryCapture;
 
 fn sql(engine: &Engine, text: &str) {
@@ -27,6 +28,7 @@ fn names(captured: &CapturedTableMembership) -> Vec<String> {
         .collect()
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn capture_table(
     membership: &CapturedTableMembership,
     relation: &RelationIdentity,
@@ -47,6 +49,7 @@ fn capture_table(
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn table_membership_preserves_unread_incarnations_without_retaining_live_tables() {
     for mutate in [false, true] {
         let engine = Engine::new();
@@ -117,6 +120,7 @@ fn table_membership_preserves_unread_incarnations_without_retaining_live_tables(
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn table_membership_rollback_restores_the_original_root_without_another_live_map_owner() {
     let engine = Engine::new();
     sql(
@@ -230,6 +234,7 @@ fn table_membership_capture_does_not_copy_the_relation_corpus_or_temporary_paylo
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn denied_table_membership_retention_does_not_consume_publication_or_an_independent_cut() {
     let engine = Engine::new();
     engine.create_default_table("kept", vec![]).unwrap();

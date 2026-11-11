@@ -85,8 +85,8 @@ pub(in crate::kuromoji) fn sections() -> Vec<Section> {
 fn lexical_section() -> Section {
     section(1, 2, |output| {
         let mut builder = Builder::new();
-        builder.insert("令和".encode_utf16().collect())?;
-        builder.insert("食べた".encode_utf16().collect())?;
+        builder = builder.insert("令和".encode_utf16().collect())?;
+        builder = builder.insert("食べた".encode_utf16().collect())?;
         let lexicon = builder.finish(16)?;
         let surfaces = [
             SurfaceWords {

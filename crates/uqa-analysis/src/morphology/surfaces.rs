@@ -18,22 +18,27 @@ pub struct SurfaceWords {
     pub word_ids: Range<u32>,
 }
 
-pub(crate) fn decode(
+pub(crate) async fn decode_with(
     reader: &mut Reader<'_>,
     maximum_text: usize,
     known_words: u32,
+    work: &mut impl super::work::Work,
 ) -> DictionaryResult<(Lexicon, Vec<SurfaceWords>)> {
-    let lexicon = Lexicon::decode(reader, maximum_text)?;
+    let lexicon = Lexicon::decode_with(reader, maximum_text, work).await?;
     let count = reader.count(2)?;
     if count != lexicon.len() {
         return Err(reader.invalid("surface table and lexicon lengths differ"));
     }
     let mut seen = vector(count)?;
-    seen.resize(count, false);
+    while seen.len() < count {
+        work.checkpoint().await?;
+        seen.resize((seen.len() + 4096).min(count), false);
+    }
     let mut surfaces = vector(count)?;
     let mut next_word = 0;
     let mut previous_id = 0_i64;
-    for _ in 0..count {
+    for index in 0..count {
+        work.records(index).await?;
         let delta = reader.var_u32()?;
         let delta = ((delta >> 1) as i32) ^ -((delta & 1) as i32);
         let id = previous_id + i64::from(delta);
@@ -73,11 +78,7 @@ pub(crate) fn word_range(start: u32, count: u32, length: usize) -> DictionaryRes
     Ok(start..end)
 }
 
-#[cfg(any(
-    feature = "nori-tools",
-    feature = "kuromoji-tools",
-    all(test, feature = "kuromoji")
-))]
+#[cfg(any(feature = "nori-tools", feature = "kuromoji-tools", test))]
 pub(crate) fn encode(
     lexicon: &Lexicon,
     surfaces: &[SurfaceWords],

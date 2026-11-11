@@ -12,6 +12,11 @@ use crate::{
     ValueRetentionError,
 };
 
+#[cfg(test)]
+mod input_tests;
+mod work;
+use work::{inline, Work};
+
 impl RelationReference<'_> {
     /// Decode borrowed components directly into their retained identity buffers.
     pub fn identity_with_control(
@@ -33,24 +38,48 @@ impl RelationReference<'_> {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
-        control.check()?;
-        let mut output = ProductionString::new(*control);
-        if let Some(schema) = self.schema {
-            component(schema, &mut output, control)?;
-            output.push('.')?;
-        }
-        component(self.name, &mut output, control)?;
-        output.finish()
+        inline(render(*self, control, &mut ()))
+    }
+
+    /// Render the same canonical spelling through a retained input's work channel without reading source bytes.
+    pub async fn render_from(
+        &self,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::memory::Budgeted<String>, ValueRetentionError> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        Ok(render(*self, &control, input)
+            .await?
+            .into_budgeted()
+            .expect("native relation rendering retains its allowance"))
     }
 }
 
-fn component(
+async fn render(
+    reference: RelationReference<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<Produced<String>, ValueRetentionError> {
+    control.check()?;
+    let mut output = ProductionString::new(*control);
+    if let Some(schema) = reference.schema {
+        component(schema, &mut output, control, work).await?;
+        output.push('.')?;
+    }
+    component(reference.name, &mut output, control, work).await?;
+    output.finish()
+}
+
+async fn component(
     name: RelationName<'_>,
     output: &mut ProductionString<'_>,
     control: &ProductionControl<'_>,
+    work: &mut impl Work,
 ) -> Result<(), ValueRetentionError> {
     let mut bare = name.chars().next().is_some();
     for (index, character) in name.chars().enumerate() {
+        if index % 1024 == 0 {
+            work.checkpoint().await?;
+        }
         control.check()?;
         bare &= match character {
             'a'..='z' | '_' => true,
@@ -61,7 +90,10 @@ fn component(
     if !bare {
         output.push('"')?;
     }
-    for character in name.chars() {
+    for (index, character) in name.chars().enumerate() {
+        if index % 1024 == 0 {
+            work.checkpoint().await?;
+        }
         control.check()?;
         if character == '"' {
             output.push('"')?;

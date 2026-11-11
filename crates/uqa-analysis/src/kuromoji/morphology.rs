@@ -70,13 +70,19 @@ impl<'a> DictionaryWord<'a> {
 }
 
 impl Morphology {
-    pub fn decode(reader: &mut Reader<'_>, limits: DictionaryLimits) -> DictionaryResult<Self> {
+    pub async fn decode_with(
+        reader: &mut Reader<'_>,
+        limits: DictionaryLimits,
+        work: &mut impl crate::morphology::work::Work,
+    ) -> DictionaryResult<Self> {
         Ok(Self {
-            strings: crate::morphology::strings::decode(
+            strings: crate::morphology::strings::decode_with(
                 reader,
                 limits.max_strings,
                 limits.max_text_utf16,
-            )?,
+                work,
+            )
+            .await?,
         })
     }
 
@@ -86,11 +92,12 @@ impl Morphology {
     }
 }
 
-pub(super) fn decode_words(
+pub(super) async fn decode_words_with(
     reader: &mut Reader<'_>,
     morphology: &Morphology,
     forward: usize,
     backward: usize,
+    work: &mut impl crate::morphology::work::Work,
 ) -> DictionaryResult<(u32, Vec<WordEntry>)> {
     let known = reader.u32()?;
     let count = reader.count(36)?;
@@ -99,7 +106,8 @@ pub(super) fn decode_words(
     }
     let mut words = vector(count)?;
     let mut previous_id = 0_i64;
-    for _ in 0..count {
+    for index in 0..count {
+        work.records(index).await?;
         let id = previous_id + i64::from(reader.i32()?);
         let original_id = u32::try_from(id)
             .map_err(|_| reader.invalid("original word ID delta is out of range"))?;

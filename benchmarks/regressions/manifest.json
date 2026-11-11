@@ -53051,6 +53051,825 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "mutable_box_keeps_original_allowance_through_failure_unwinding_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Mutate an admitted boxed continuation and complete, return an error or unwind through its destructor.",
+      "invariant": "The original fixed-header allowance remains held during value destruction and returns only after the value retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_owned_mapping_retires_input_before_allowance_on_error_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Transfer an admitted input through successful, failing and unwinding owning transformations.",
+      "invariant": "The original reservation outlives input destruction on every path and remains attached to successful output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_decode_windows_preserve_split_utf8_and_original_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Decode split UTF-8 across 1-, 3-, 17-, 4096- and 16384-byte windows with independent poll limits.",
+      "invariant": "Actual source bytes stay within each window; exact completed text retains only its original payload reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_decode_checkpoints_bound_non_io_steps_without_reader_calls",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Resume 103 explicit metadata checkpoints through seven-poll windows and a source that rejects every read.",
+      "invariant": "Each call performs at most seven checkpoint operations, performs no I/O and retires all continuation memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "interrupted_native_reads_consume_work_and_resume_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Return only interrupted reads for three five-step windows before supplying the original image.",
+      "invariant": "Each interrupted attempt consumes one step, later input is not replayed and completion releases original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "partial_native_decoders_retire_on_quota_cancel_invalid_input_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Fail a partial decoder with zero limits, cancellation, quota exhaustion, short/invalid/trailing input and a reader panic.",
+      "invariant": "Every terminal path immediately releases original continuation and payload reservations and rejects reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_continuation_keeps_original_header_until_future_destruction",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/ownership.rs",
+      "capability": "Native value input",
+      "workload": "Observe the exact admitted future/channel bytes from a destructor on completion, failure, invalid pending work, cancellation, zero windows, drop and unwind.",
+      "invariant": "The original header reservation remains unchanged until the future is destroyed exactly once; no reservation survives termination.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_continuation_admits_before_constructor_and_retires_constructor_unwind",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/ownership.rs",
+      "capability": "Native value input",
+      "workload": "Deny shared input admission after the fixed future reservation, then unwind inside an admitted constructor.",
+      "invariant": "Denied admission never invokes the constructor; both failure paths return every original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_preserves_every_carrier_with_independent_byte_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Decode every native carrier, large UTF-8/binary fields and 128 nested containers with one-byte and independent poll windows.",
+      "invariant": "Each call respects source-byte/read-attempt limits, preserves exact native images, leaves enclosing bytes unread and transfers only original payload ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_retires_partial_nested_payloads_between_calls",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Cancel, deny memory, drop or truncate a partially decoded record with large native children.",
+      "invariant": "Typed failures retire all original nested payloads immediately while the decoder object remains alive and cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_utf8_input_rejects_invalid_prefixes_at_every_read_width",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests.rs",
+      "capability": "Native value input",
+      "workload": "Read overlong, surrogate, out-of-range, incomplete and malformed UTF-8 through five byte-window widths.",
+      "invariant": "The standard UTF-8 oracle rejects every input; each continuation preserves the invalid-input diagnostic and releases its original memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_input_keeps_synchronous_and_retained_frames_bounded",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/input.rs",
+      "capability": "Native value input",
+      "workload": "Decode every native carrier through both entry points on the existing 128 KiB stack budget and measure fixed scalar allocations.",
+      "invariant": "Both entry points preserve exact values without stack growth; scalar input performs no heap allocation or memory-budget reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_text_copy_yields_per_fragment_without_io_and_preserves_original_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/copying.rs",
+      "capability": "Checkpointed native text copying",
+      "workload": "Copy empty and large mixed-width UTF-8 fields with one, three and seven continuation polls per call and through the synchronous codec.",
+      "invariant": "Exact text, independently predicted completion calls, zero source reads and original input/destination allocation retirement are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_text_copy_retires_source_and_partial_destination_on_cancel_quota_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/copying.rs",
+      "capability": "Native text copy retirement",
+      "workload": "Cancel, exhaust destination admission and drop a suspended large UTF-8 copy.",
+      "invariant": "The owning transition retires both the original source and partial destination; terminal input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_input_preserves_parent_windows_and_original_child_payload",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Decode nested UTF-8 fields through 1-, 17- and 4096-byte parent windows and then read an independent parent tail.",
+      "invariant": "Child reads preserve each caller byte limit, exact parent position and the original completed payload allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_work_checkpoints_yield_without_reading_the_parent",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Drive 103 nested child checkpoints with a parent that rejects every read and a three-poll work window.",
+      "invariant": "Child work cannot bypass the enclosing poll bound or perform unintended source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_input_retires_child_state_on_cancellation_and_denied_payload",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Native value input",
+      "workload": "Cancel or exhaust memory after a nested native decoder has retained partial input.",
+      "invariant": "The original child continuation and partial payload retire before their reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_preserve_independent_capacity_counts_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_resume_deep_parent_retirement_without_recursive_or_unbounded_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_payload_parts_retire_original_scratch_on_denial_cancellation_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests/parts.rs",
+      "capability": "Resumable retained footprint publication",
+      "workload": "Observe retained Value payloads one borrowed field or traversal transition at a time, including 4,096 nested parents on a 128 KiB stack.",
+      "invariant": "Native capacities and original/invoking cancellation remain exact; completion, denial and drop release admitted scratch without copying payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "suspended_owned_mapping_keeps_input_admission_until_transformation_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests/asynchronous.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Suspend owned transformations before completion, error, construction/poll unwind and abandonment.",
+      "invariant": "The native input retires before its original allocation reservation, including unpolled and suspended futures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_json_continuation_bounds_long_tokens_and_preserves_original_ranges",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Advance long JSON numbers, UTF-8 strings, escapes and whitespace with one-poll windows and no source reads.",
+      "invariant": "Original ranges, grammar, independently constructed string capacities and prior reservations survive; terminal failure retires every incomplete owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_string_continuation_preserves_unicode_capacity_and_failure_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/resumable.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Advance long JSON numbers, UTF-8 strings, escapes and whitespace with one-poll windows and no source reads.",
+      "invariant": "Original ranges, grammar, independently constructed string capacities and prior reservations survive; terminal failure retires every incomplete owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copies_preserve_native_variants_capacities_and_shared_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Native retained value copying",
+      "workload": "Copy native variants with one-poll windows and compare original values, capacities and shared descriptors; interrupt a partially copied nested value.",
+      "invariant": "Synchronous scalar copying allocates nothing; suspended copies preserve exact destination admission and retire partial owners on cancellation, denial, invalid windows and drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_failure_retires_each_partially_constructed_native_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Native retained value copying",
+      "workload": "Copy native variants with one-poll windows and compare original values, capacities and shared descriptors; interrupt a partially copied nested value.",
+      "invariant": "Synchronous scalar copying allocates nothing; suspended copies preserve exact destination admission and retire partial owners on cancellation, denial, invalid windows and drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_rendering_resumes_quoted_components_with_exact_native_capacity",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Retained canonical relation spelling",
+      "workload": "Render long quoted Unicode components and escaped quotes through one-poll windows.",
+      "invariant": "Ordinary and retained rendering have identical canonical bytes, capacities and admission without source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_rendering_retires_partial_names_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Canonical name retirement",
+      "workload": "Cancel, deny memory, supply an invalid window or drop a partially rendered long name.",
+      "invariant": "Every terminal path releases the original output and continuation reservations and prevents reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_frame_fragments_preserve_exact_plain_and_compressed_payloads",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/frame/input/tests.rs",
+      "capability": "Native dictionary frame input",
+      "workload": "Decode independent empty, short, repetitive and nontrivial plain/compressed frames one fragment at a time.",
+      "invariant": "Each supplied input/output fragment is at most 4 KiB; exact payloads, semantic identities, record counts and native capacities survive completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_frame_rejects_incomplete_streams_excess_output_and_wrong_checksums",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/frame/input/tests.rs",
+      "capability": "Native dictionary frame rejection",
+      "workload": "Decode independently framed truncated, trailing, overlong, undersized and checksum-corrupt sections under explicit decoded limits.",
+      "invariant": "No invalid frame publishes output; every failed candidate releases its allocations and size-limit denial precedes allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "abandoned_dictionary_frames_release_all_partial_sections_and_inflate_state",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/frame/input/tests.rs",
+      "capability": "Native dictionary frame lifetime",
+      "workload": "Abandon plain and compressed frames at selected partial source and output positions.",
+      "invariant": "Every partial decoded buffer and inflater allocation retires with its consumed frame owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_frame_failure_retires_completed_and_partial_sections_together",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/frame/input/tests.rs",
+      "capability": "Native dictionary frame publication",
+      "workload": "Interrupt a three-section frame after earlier sections complete and corrupt the final compressed section.",
+      "invariant": "Completed and partial sections remain private until exact whole-frame completion and retire together on drop or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "nori_dictionary_tables_resume_with_exact_native_images_and_no_source_reads",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/input.rs",
+      "capability": "Native dictionary table continuation",
+      "workload": "Reconstruct a captured native model with a wide signed cost matrix under changing one-poll and larger work windows.",
+      "invariant": "All native table images, semantic identity, capacities and connection costs stay exact without reopening the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "nori_dictionary_table_failure_retires_the_complete_private_candidate",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/input.rs",
+      "capability": "Native dictionary candidate retirement",
+      "workload": "Cancel, abandon or deny a work window at selected frame and model-table progress positions.",
+      "invariant": "The complete partial candidate and its controls release all allocations; retained immutable models stay unchanged and terminal input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "nori_dictionary_table_rejection_keeps_native_diagnostics_and_releases_all_sections",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/input.rs",
+      "capability": "Native dictionary table rejection",
+      "workload": "Reconstruct frames with invalid matrix dimensions, late directory-count conflicts and trailing Unicode table bytes.",
+      "invariant": "Retained input reports the same structural diagnostics as ordinary loading and releases every private section and model allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "kuromoji_dictionary_tables_resume_with_exact_native_images_and_no_source_reads",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/input.rs",
+      "capability": "Native dictionary table continuation",
+      "workload": "Reconstruct a captured native model with a wide signed cost matrix under changing one-poll and larger work windows.",
+      "invariant": "All native table images, semantic identity, capacities and connection costs stay exact without reopening the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "kuromoji_dictionary_table_failure_retires_the_complete_private_candidate",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/input.rs",
+      "capability": "Native dictionary candidate retirement",
+      "workload": "Cancel, abandon or deny a work window at selected frame and model-table progress positions.",
+      "invariant": "The complete partial candidate and its controls release all allocations; retained immutable models stay unchanged and terminal input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "kuromoji_dictionary_table_rejection_keeps_native_diagnostics_and_releases_all_sections",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/input.rs",
+      "capability": "Native dictionary table rejection",
+      "workload": "Reconstruct frames with invalid matrix dimensions, late directory-count conflicts and trailing Unicode table bytes.",
+      "invariant": "Retained input reports the same structural diagnostics as ordinary loading and releases every private section and model allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "lexical_input_retains_wide_arcs_deep_paths_and_shared_suffixes_across_polls",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lexicon/tests/input.rs",
+      "capability": "Retained lexical validation",
+      "workload": "Decode independent wire graphs with 5,000 shared-suffix arcs or one 6,000-unit path through one-poll windows.",
+      "invariant": "Exact byte images, UTF-16 ranks, paths and native capacities survive retained arc, length and reachability validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "lexical_input_rejection_and_abandonment_retire_every_native_table_and_validation_stack",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lexicon/tests/input.rs",
+      "capability": "Lexical input failure ownership",
+      "workload": "Interrupt wide/deep graphs at native progress positions and reject unordered, cyclic, unpaired-surrogate and unreachable graphs.",
+      "invariant": "Native tables, scratch and traversal stacks retire together; exact structural diagnostics and terminal input admission are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_string_input_preserves_split_unicode_limits_and_native_capacities",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/strings/tests.rs",
+      "capability": "Retained native dictionary string input",
+      "workload": "Decode thousands of empty strings and long mixed Unicode fields across changing input windows and split scalar boundaries.",
+      "invariant": "Exact native bytes, UTF-16 limits and reserved capacities survive bounded validation and copying without source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_string_input_preserves_global_utf8_diagnostics_before_length_limits",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/strings/tests.rs",
+      "capability": "Native UTF-8 error positions",
+      "workload": "Reject invalid widths, surrogate encodings, overlong scalars and incomplete sequences at boundary offsets and after a 160,000-byte valid prefix.",
+      "invariant": "The ordinary standard error and retained prefix/fragment error have identical absolute positions, invalid widths and diagnostics; UTF-8 errors precede text limits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "dictionary_string_input_retires_completed_and_partial_strings_at_every_copy_poll",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/strings/tests.rs",
+      "capability": "Native string candidate retirement",
+      "workload": "Cancel, invalidate a work window or abandon every poll of two long fields, then reject exact pool and UTF-16 limits.",
+      "invariant": "Every completed and partial native string and control owner retires without leaked allocations or reusable failed input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "nori_dictionary_string_pools_resume_and_reject_at_absolute_utf8_positions",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/input.rs",
+      "capability": "Native model string input",
+      "workload": "Reconstruct a complete dictionary with an added long mixed Unicode string and reject an invalid byte after that string.",
+      "invariant": "Complete model images and capacities remain exact; late UTF-8 rejection preserves the original absolute diagnostic and retires all sections and native tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "kuromoji_dictionary_string_pools_resume_and_reject_at_absolute_utf8_positions",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/input.rs",
+      "capability": "Native model string input",
+      "workload": "Reconstruct a complete dictionary with an added long mixed Unicode string and reject an invalid byte after that string.",
+      "invariant": "Complete model images and capacities remain exact; late UTF-8 rejection preserves the original absolute diagnostic and retires all sections and native tables.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_lexicon_builder_retains_wide_arcs_deep_paths_and_exact_wire_records",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lexicon/builder/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Build 5,000-way and 6,000-unit lexical graphs with varied poll windows.",
+      "invariant": "Independent wire graphs, exact ranks and native record order survive retained construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_lexicon_builder_failure_retires_input_pending_paths_and_interned_states",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lexicon/builder/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Cancel, abandon and invalidate partially built wide/deep graphs; reject duplicate, reversed, malformed and oversized keys.",
+      "invariant": "Consuming transitions retire completed and partial native owners without reusable incomplete builders or retained allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_lexicon_builder_hash_collisions_compare_complete_signatures_before_reuse",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lexicon/builder/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Force every candidate into one collision chain, including 5,000-arc signatures differing at the final target.",
+      "invariant": "Hashes only select candidates; exact terminal/label/target equality preserves state identities and accepted-word ranks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_completion_input_preserves_utf16_order_exact_images_and_ranks",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/analysis/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Decode long shared-prefix stop sets and completion keys spanning supplementary and private-use scalars, with duplicate alternatives.",
+      "invariant": "UTF-16 order, exact analysis bytes, alternatives and native lexical ranks survive every tested positive poll window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_completion_candidate_interruption_retires_strings_paths_and_interned_states",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/analysis/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Cancel, abandon and invalidate completion preparation before and during long-prefix construction.",
+      "invariant": "Partial strings, pending paths, interned native states and input owners retire together before publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_completion_candidate_preserves_validation_order_before_length_failure",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/analysis/tests.rs",
+      "capability": "Retained native lexical construction",
+      "workload": "Combine malformed stop order, late completion order, empty alternatives and oversized valid keys.",
+      "invariant": "The original key-order and alternative diagnostics precede final native length validation; ordinary and retained errors agree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_canonical_output_preserves_unknown_values_escaping_order_and_precision",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Serialize wide/deep metadata, long escaped Unicode and a 20,000-digit arbitrary-precision number under varied poll windows.",
+      "invariant": "Exact sorted canonical bytes preserve every unknown field, scalar escape and native number spelling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_canonical_interruption_retires_output_and_ordering_workspace",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Cancel, abandon and invalidate canonical output during wide object traversal.",
+      "invariant": "Partial output, borrowed-key ordering maps and continuation frames retire together without retained allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_runtime_equality_keeps_all_native_json_distinctions",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Compare complete unknown runtime values, differing final Unicode scalars, wide object members and numeric representations.",
+      "invariant": "Retained comparison matches native JSON equality without collapsing number spellings, values or object membership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_vocabularies_and_inventories_resume_complete_native_validation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Validate long-prefix script names, a late invalid byte and 5,000 independent inventory identities.",
+      "invariant": "Original vocabulary capacities and complete uniqueness/membership predicates survive suspension and invalid input retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_digest_search_preserves_the_first_marker_and_exact_errors",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Scan digest-pinned references at fragment boundaries and after 160,000 bytes, including absent and repeated markers.",
+      "invariant": "The original first-marker rule and empty/invalid digest diagnostics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_nori_provenance_retains_complete_canonical_fields_and_reference_validation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/provenance_input.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Decode complete language provenance with unknown fields, large runtime metadata, long script names and varied poll windows.",
+      "invariant": "All original JSON and vocabulary fields, canonical bytes and reference predicates survive retained post-parse work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_nori_provenance_errors_and_interruption_retire_all_candidate_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/tests/provenance_input.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Cancel or abandon early/late provenance preparation and combine malformed JSON, noncanonical bytes and conflicting structural errors.",
+      "invariant": "Original parser and validation diagnostic order remains intact; every failed candidate releases all native allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_kuromoji_provenance_retains_complete_canonical_fields_and_reference_validation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/provenance_input.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Decode complete language provenance with unknown fields, large runtime metadata, long script names and varied poll windows.",
+      "invariant": "All original JSON and vocabulary fields, canonical bytes and reference predicates survive retained post-parse work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_kuromoji_provenance_errors_and_interruption_retire_all_candidate_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/tests/provenance_input.rs",
+      "capability": "Retained native provenance validation",
+      "workload": "Cancel or abandon early/late provenance preparation and combine malformed JSON, noncanonical bytes and conflicting structural errors.",
+      "invariant": "Original parser and validation diagnostic order remains intact; every failed candidate releases all native allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_json_constructs_original_values_through_retained_token_windows",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests/input.rs",
+      "capability": "Retained native provenance input",
+      "workload": "Read wide/deep manifests, escaped Unicode, arbitrary precision values and malformed prefixes through the existing retained input scheduler.",
+      "invariant": "Retained construction preserves decoded Unicode, complete containers, duplicate-key semantics and arbitrary-precision numeric values under varied poll windows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_provenance_json_preserves_reference_syntax_and_nesting_limits",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/manifest/tests/input.rs",
+      "capability": "Retained native provenance input",
+      "workload": "Read wide/deep manifests, escaped Unicode, arbitrary precision values and malformed prefixes through the existing retained input scheduler.",
+      "invariant": "The native grammar matches independent serde JSON acceptance, truncation rejection and the original nesting ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "canonical_json_reuses_string_encoding_workspace_across_native_fields",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/json/output/tests.rs",
+      "capability": "Retained native JSON encoding workspace",
+      "workload": "Encode 4096 native string values through one canonical output continuation.",
+      "invariant": "Exact public JSON bytes use one reusable string workspace; allocation follows output capacity instead of field count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "canonical_json_borrows_ordered_objects_and_sorts_unordered_members",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/json/output/tests.rs",
+      "capability": "Canonical native object traversal",
+      "workload": "Encode 4096 ordered native properties and the same properties inserted in reverse order.",
+      "invariant": "Ordered input is borrowed without a second key index; both native map configurations retain exactly the canonical bytes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

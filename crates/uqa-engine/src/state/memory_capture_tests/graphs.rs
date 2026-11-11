@@ -4,12 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{sql, Engine, StorageReadControl};
+use super::sql;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use super::{Engine, StorageReadControl};
 use crate::tests::providers::Provider;
 use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, Vertex};
-use uqa_graph::{GraphCatalog, GraphImageSnapshot, GraphStore};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_graph::GraphImageSnapshot;
+use uqa_graph::{GraphCatalog, GraphStore};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn image(source: &GraphImageSnapshot) -> Vec<u8> {
     let mut bytes = Vec::new();
     source
@@ -19,6 +24,7 @@ fn image(source: &GraphImageSnapshot) -> Vec<u8> {
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_graph_capture_keeps_original_membership_after_rename_and_retirement() {
     let engine = Engine::new();
     for id in 0..64 {
@@ -62,6 +68,7 @@ fn committed_graph_capture_keeps_original_membership_after_rename_and_retirement
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_graph_image_reader_owns_its_source_after_engine_and_cut_retirement() {
     let engine = Engine::new();
     engine

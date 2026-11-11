@@ -11,28 +11,24 @@ use serde_json::Value;
 use crate::kuromoji::error::invalid;
 use crate::kuromoji::DictionaryResult;
 
-use crate::morphology::manifest::{hex, inventory, text};
+use crate::morphology::manifest::{equal_with, hex, inventory_with, pinned_digest_with, text};
+use crate::morphology::work::Work;
 
-pub(super) fn validate(json: &Value) -> DictionaryResult<()> {
+pub(super) async fn validate_with(json: &Value, work: &mut impl Work) -> DictionaryResult<()> {
     hex(&json["exporter_sha256"], 64)?;
-    inventory(&json["files"], "path", super::FILES)?;
+    inventory_with(&json["files"], "path", super::FILES, work).await?;
     let reference = &json["reference"];
     text(&reference["lucene_version"])?;
     hex(&reference["lucene_commit"], 40)?;
-    let image = text(&reference["docker_image"])?;
-    let (_, digest) = image
-        .split_once("@sha256:")
-        .filter(|(name, _)| !name.is_empty())
-        .ok_or_else(|| invalid("provenance", "Docker image is not digest pinned"))?;
-    hex(&Value::String(digest.to_owned()), 64)?;
+    pinned_digest_with(&reference["docker_image"], work).await?;
     let runtime = &reference["runtime"];
     for key in ["java_version", "java_runtime_version", "java_vendor"] {
         text(&runtime[key])?;
     }
-    if runtime != &json["model"]["runtime"] {
+    if !equal_with(runtime, &json["model"]["runtime"], work).await? {
         return Err(invalid("provenance", "reference and model runtimes differ"));
     }
-    inventory(
+    inventory_with(
         &reference["jars"],
         "artifact",
         &[
@@ -40,11 +36,13 @@ pub(super) fn validate(json: &Value) -> DictionaryResult<()> {
             "lucene-analysis-common",
             "lucene-analysis-kuromoji",
         ],
-    )?;
+        work,
+    )
+    .await?;
     for jar in reference["jars"].as_array().expect("inventory validated") {
         text(&jar["url"])?;
     }
-    inventory(
+    inventory_with(
         &reference["dictionary_resources"],
         "path",
         &[
@@ -58,8 +56,10 @@ pub(super) fn validate(json: &Value) -> DictionaryResult<()> {
             "org/apache/lucene/analysis/ja/dict/UnknownDictionary$posDict.dat",
             "org/apache/lucene/analysis/ja/dict/UnknownDictionary$targetMap.dat",
         ],
-    )?;
-    inventory(
+        work,
+    )
+    .await?;
+    inventory_with(
         &reference["analysis_resources"],
         "path",
         &[
@@ -67,7 +67,9 @@ pub(super) fn validate(json: &Value) -> DictionaryResult<()> {
             "org/apache/lucene/analysis/ja/stoptags.txt",
             "org/apache/lucene/analysis/ja/completion/romaji_map.txt",
         ],
-    )?;
+        work,
+    )
+    .await?;
     for name in ["dictionary_patch", "generation_recipe"] {
         let input = &reference[name];
         text(&input["url"])?;

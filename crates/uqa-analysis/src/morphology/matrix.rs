@@ -24,7 +24,15 @@ impl Matrix {
         Some(self.costs[backward * self.forward + forward])
     }
 
+    #[cfg(any(feature = "nori-tools", feature = "kuromoji-tools"))]
     pub fn decode(reader: &mut Reader<'_>) -> DictionaryResult<Self> {
+        super::work::inline(Self::decode_with(reader, &mut ()))
+    }
+
+    pub async fn decode_with(
+        reader: &mut Reader<'_>,
+        work: &mut impl super::work::Work,
+    ) -> DictionaryResult<Self> {
         let forward = reader.u32()? as usize;
         let backward = reader.u32()? as usize;
         let count = forward
@@ -39,7 +47,8 @@ impl Matrix {
             return Err(reader.invalid("invalid connection matrix dimensions"));
         }
         let mut costs = vector(count)?;
-        for _ in 0..count {
+        for index in 0..count {
+            work.records(index).await?;
             costs.push(reader.u16()? as i16);
         }
         Ok(Self {

@@ -8,6 +8,9 @@
 
 use std::collections::BTreeMap;
 
+mod work;
+use work::{inline, Work};
+
 use crate::{
     memory::{
         Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, Produced, ProductionControl,
@@ -42,6 +45,23 @@ impl Value {
         .map(|value| value.into_budgeted().expect("controlled value copy"))
     }
 
+    /// Copy through an enclosing image work channel without reading source bytes. The native copy traversal and allocation requests are shared with synchronous copying; every completed destination keeps its own payload reservation.
+    pub async fn clone_budgeted_from(
+        &self,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<Budgeted<Self>, ValueRetentionError> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        copy_with_work(
+            self,
+            control,
+            &mut || control.check(),
+            &mut |_| Ok::<_, ValueRetentionError>(None),
+            input,
+        )
+        .await
+        .map(|value| value.into_budgeted().expect("controlled value copy"))
+    }
+
     /// Copy native containers with an iterative, admitted traversal. A replacement owns its admitted payload under the same control and stops traversal at that node; all other nodes preserve their shape, bounds and descriptors. Replacements are never interpreted by Core. A failed transform releases every partial copy.
     pub fn transform_with_control<E: From<ValueRetentionError>>(
         &self,
@@ -52,22 +72,38 @@ impl Value {
     }
 }
 
-struct Copier<'a> {
+struct Copier<'a, C, W> {
     control: ProductionControl<'a>,
-    check: &'a mut dyn FnMut() -> Result<(), ValueRetentionError>,
+    check: &'a mut C,
+    work: &'a mut W,
 }
 
 fn copy<E: From<ValueRetentionError>>(
     source: &Value,
     control: ProductionControl<'_>,
-    check: &mut dyn FnMut() -> Result<(), ValueRetentionError>,
+    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
     replace: &mut impl FnMut(&Value) -> Result<Option<Produced<Value>>, E>,
 ) -> Result<Produced<Value>, E> {
-    let mut copier = Copier { control, check };
+    inline(copy_with_work(source, control, check, replace, &mut ()))
+}
+
+async fn copy_with_work<E: From<ValueRetentionError>>(
+    source: &Value,
+    control: ProductionControl<'_>,
+    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
+    replace: &mut impl FnMut(&Value) -> Result<Option<Produced<Value>>, E>,
+    work: &mut impl Work,
+) -> Result<Produced<Value>, E> {
+    let mut copier = Copier {
+        control,
+        check,
+        work,
+    };
     let mut stack = Stack::new(control.budget());
     let mut next = Some(source);
     let mut ready = None;
     loop {
+        copier.work.checkpoint().await?;
         (copier.check)()?;
         if let Some(source) = next.take() {
             if let Some(value) = replace(source)? {
@@ -76,14 +112,14 @@ fn copy<E: From<ValueRetentionError>>(
             } else {
                 match Frame::new(source, &mut copier)? {
                     Some(mut frame) => {
-                        if let Some(child) = frame.next(&mut copier)? {
+                        if let Some(child) = frame.next(&mut copier).await? {
                             stack.push(frame).map_err(ValueRetentionError::from)?;
                             next = Some(child);
                             continue;
                         }
-                        ready = Some(frame.finish(&mut copier)?);
+                        ready = Some(frame.finish(&mut copier).await?);
                     }
-                    None => ready = Some(copier.scalar(source)?),
+                    None => ready = Some(copier.scalar(source).await?),
                 }
             }
         }
@@ -95,14 +131,15 @@ fn copy<E: From<ValueRetentionError>>(
             parent.push(value, &mut copier)?;
         }
         if let Some(frame) = stack.last_mut() {
-            if let Some(child) = frame.next(&mut copier)? {
+            if let Some(child) = frame.next(&mut copier).await? {
                 next = Some(child);
             } else {
                 ready = Some(
                     stack
                         .pop()
                         .expect("active copy frame")
-                        .finish(&mut copier)?,
+                        .finish(&mut copier)
+                        .await?,
                 );
             }
         }
@@ -175,7 +212,7 @@ struct Frame<'source, 'control> {
 impl<'source, 'control> Frame<'source, 'control> {
     fn new(
         source: &'source Value,
-        copier: &mut Copier<'control>,
+        copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
     ) -> Result<Option<Self>, ValueRetentionError> {
         let (input, output) = match source {
             Value::List(values) => {
@@ -232,9 +269,9 @@ impl<'source, 'control> Frame<'source, 'control> {
         }))
     }
 
-    fn next(
+    async fn next(
         &mut self,
-        copier: &mut Copier<'control>,
+        copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
     ) -> Result<Option<&'source Value>, ValueRetentionError> {
         (copier.check)()?;
         let (name, value) = match &mut self.input {
@@ -246,7 +283,7 @@ impl<'source, 'control> Frame<'source, 'control> {
             if matches!(self.output, Output::Map(_)) {
                 copier.grow(&mut self.memory, size_of::<(String, Value)>())?;
             }
-            self.key = Some(copier.text(name)?);
+            self.key = Some(copier.text(name).await?);
         }
         Ok(value)
     }
@@ -254,7 +291,7 @@ impl<'source, 'control> Frame<'source, 'control> {
     fn push(
         &mut self,
         value: Produced<Value>,
-        copier: &mut Copier<'control>,
+        copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
     ) -> Result<(), ValueRetentionError> {
         match &mut self.output {
             Output::Values(values, _) => values.push_produced(value)?,
@@ -271,9 +308,9 @@ impl<'source, 'control> Frame<'source, 'control> {
         Ok(())
     }
 
-    fn finish(
+    async fn finish(
         mut self,
-        copier: &mut Copier<'control>,
+        copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
     ) -> Result<Produced<Value>, ValueRetentionError> {
         (copier.check)()?;
         let value = match self.output {
@@ -284,7 +321,15 @@ impl<'source, 'control> Frame<'source, 'control> {
                     Sequence::List => Value::List(values),
                     Sequence::Record(source) => {
                         let descriptor = source.descriptor().clone();
-                        copier.grow(&mut self.memory, descriptor.retained_payload_bytes()?)?;
+                        let mut bytes = descriptor.retained_buffer_bytes()?;
+                        for name in descriptor.field_names() {
+                            copier.work.checkpoint().await?;
+                            (copier.check)()?;
+                            bytes = bytes
+                                .checked_add(name.capacity())
+                                .ok_or(crate::memory::MemoryError::SizeOverflow)?;
+                        }
+                        copier.grow(&mut self.memory, bytes)?;
                         copier.grow(
                             &mut self.memory,
                             crate::RecordValue::retained_header_bytes(),
@@ -302,8 +347,8 @@ impl<'source, 'control> Frame<'source, 'control> {
                         Value::Row(RowValue::from_shared_parts(values, descriptor))
                     }
                     Sequence::Array(source, legacy_kind) => {
-                        let dimensions = copier.slice(source.dimensions())?;
-                        let lower_bounds = copier.slice(source.lower_bounds())?;
+                        let dimensions = copier.slice(source.dimensions()).await?;
+                        let lower_bounds = copier.slice(source.lower_bounds()).await?;
                         copier.grow(&mut self.memory, ArrayValue::decoded_header_bytes())?;
                         let (dimensions, dimensions_memory) = dimensions.into_parts();
                         let (lower_bounds, lower_memory) = lower_bounds.into_parts();
@@ -329,7 +374,7 @@ impl<'source, 'control> Frame<'source, 'control> {
     }
 }
 
-impl Copier<'_> {
+impl<C: FnMut() -> Result<(), ValueRetentionError>, W: Work> Copier<'_, C, W> {
     fn grow(
         &self,
         memory: &mut Option<MemoryReservation>,
@@ -340,12 +385,13 @@ impl Copier<'_> {
         Ok(())
     }
 
-    fn text(&mut self, text: &str) -> Result<Produced<String>, ValueRetentionError> {
+    async fn text(&mut self, text: &str) -> Result<Produced<String>, ValueRetentionError> {
         (self.check)()?;
         let mut copied = ProductionString::new(self.control);
         copied.reserve(text.len())?;
         let mut begin = 0;
         while begin < text.len() {
+            self.work.checkpoint().await?;
             (self.check)()?;
             let mut end = begin.saturating_add(4096).min(text.len());
             while !text.is_char_boundary(end) {
@@ -358,11 +404,15 @@ impl Copier<'_> {
         copied.finish()
     }
 
-    fn slice<T: Copy>(&mut self, source: &[T]) -> Result<Produced<Vec<T>>, ValueRetentionError> {
+    async fn slice<T: Copy + Send + Sync>(
+        &mut self,
+        source: &[T],
+    ) -> Result<Produced<Vec<T>>, ValueRetentionError> {
         (self.check)()?;
         let mut copied = ProductionVec::new(self.control);
         copied.reserve(source.len())?;
         for chunk in source.chunks((4096 / size_of::<T>().max(1)).max(1)) {
+            self.work.checkpoint().await?;
             (self.check)()?;
             copied.extend_from_slice(chunk)?;
         }
@@ -370,7 +420,7 @@ impl Copier<'_> {
         copied.finish()
     }
 
-    fn scalar(&mut self, source: &Value) -> Result<Produced<Value>, ValueRetentionError> {
+    async fn scalar(&mut self, source: &Value) -> Result<Produced<Value>, ValueRetentionError> {
         (self.check)()?;
         let mut memory = self.control.empty_reservation();
         let value = match source {
@@ -381,7 +431,7 @@ impl Copier<'_> {
             Value::Float(value) => Value::Float(*value),
             Value::Temporal(value) => Value::Temporal(value.clone()),
             Value::Str(text) | Value::FixedChar(text) | Value::Json(text) | Value::JsonB(text) => {
-                let (text, charge) = self.text(text)?.into_parts();
+                let (text, charge) = self.text(text).await?.into_parts();
                 memory = self.control.combine(memory, charge);
                 match source {
                     Value::Str(_) => Value::Str(text),
@@ -392,13 +442,13 @@ impl Copier<'_> {
                 }
             }
             Value::Bytes(bytes) => {
-                let (bytes, charge) = self.slice(bytes)?.into_parts();
+                let (bytes, charge) = self.slice(bytes).await?.into_parts();
                 memory = self.control.combine(memory, charge);
                 Value::Bytes(bytes)
             }
             Value::BitString(value) => {
                 self.grow(&mut memory, crate::BitStringValue::retained_header_bytes())?;
-                let (bytes, charge) = self.slice(value.as_bytes())?.into_parts();
+                let (bytes, charge) = self.slice(value.as_bytes()).await?.into_parts();
                 memory = self.control.combine(memory, charge);
                 Value::BitString(
                     crate::BitStringValue::try_from_packed(bytes, value.bit_len())

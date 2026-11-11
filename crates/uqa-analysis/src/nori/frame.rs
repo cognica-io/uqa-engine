@@ -68,11 +68,12 @@ impl<'de> Deserialize<'de> for DictionaryId {
     }
 }
 
-pub(super) fn decode(
+pub(super) async fn decode_with(
     bytes: &[u8],
     limits: DictionaryLimits,
+    work: &mut impl crate::morphology::work::Work,
 ) -> DictionaryResult<(DictionaryId, Vec<Section>)> {
-    let (id, sections) = frame::decode(&FORMAT, bytes, limits)?;
+    let (id, sections) = frame::decode_with(&FORMAT, bytes, limits, work).await?;
     Ok((DictionaryId(id), sections))
 }
 

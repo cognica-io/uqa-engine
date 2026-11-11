@@ -13,7 +13,9 @@ use crate::{
     CancellationToken, Value, ValueRetentionError,
 };
 
+mod input;
 mod read;
+pub use input::ValueImageInput;
 mod stream;
 mod write;
 
@@ -76,17 +78,9 @@ pub fn read_value_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> ValueImageResult<Budgeted<Value>> {
-    let mut reader = read::Reader {
-        input,
-        memory,
-        cancellation,
-    };
-    if reader.fixed::<8>()? != *MAGIC {
-        return Err(ValueImageError::Invalid("version header"));
-    }
-    let value = reader.value(0)?;
-    cancellation.check()?;
-    Ok(value)
+    crate::image_io::decode_image(input, memory, cancellation, async |mut input| {
+        ValueImageInput::read_from(&mut input).await
+    })
 }
 
 /// Decode a complete standalone image, rejecting trailing bytes.
