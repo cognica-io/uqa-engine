@@ -14,6 +14,7 @@ use std::sync::Arc;
 use uqa_core::memory::{Budgeted, BudgetedVec};
 
 pub mod index;
+pub mod table;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogInputLimits {

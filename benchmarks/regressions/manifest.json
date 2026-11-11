@@ -20988,7 +20988,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -54988,6 +54988,58 @@
       "capability": "Persistent catalog authority input",
       "workload": "Every truncated prefix, nine admission ceilings, an independent sibling reservation, cancellation and corrupt column values.",
       "invariant": "No partial authority escapes; failure releases only its own input and output reservations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_preserves_original_sequence_shapes_and_spelling",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Empty and repeated full-text names, escaped UTF-8, positional and named vector declarations, numeric boundaries and deeply nested ignored values.",
+      "invariant": "Decoded values and ordered wire observations match the original stored serde representation without changing field validation."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_preserves_numeric_and_duplicate_error_order",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Malformed field arrays, u32 overflow and numeric forms, missing and duplicate vector properties combined with malformed or trailing JSON.",
+      "invariant": "Existing accepted shapes, numeric classification and duplicate/missing-field precedence remain intact; errors retain no input allocations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_accounts_destinations_before_copy_and_retains_their_lease",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "257 wide text/vector field declarations, independent sibling reservation and a denied four-MiB field name.",
+      "invariant": "Native allocation observation equals the returned buffer capacities; admission precedes copying and returned values retain their original allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_field_input_retires_every_truncation_cancellation_and_partial_admission",
+      "source": "crates/uqa-storage/src/catalog/input/table/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent table field input",
+      "workload": "Every truncation of named/positional field input, eight allocation ceilings and cancellation.",
+      "invariant": "Terminal failures retire all partial fields and vector workspace without changing independent reservations."
     }
   ]
 }

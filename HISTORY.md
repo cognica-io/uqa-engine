@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored full-text and vector field declarations under the original memory allowance, preserving ordered names, duplicate entries, vector dimensions and stored JSON forms. Input failure releases partial fields before returning their allowance.
+
 - Decode durable role identities and bound relation/column ACL JSON under the caller's memory allowance, preserving existing struct forms, numeric classifications, path order and duplicate-key behavior. Failed or cancelled input releases partial buffers.
 
 - Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
