@@ -303,6 +303,110 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_type_input_preserves_every_variant_and_owned_identity_field",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests.rs",
+      "capability": "Stored type representation preservation",
+      "workload": "Decode every stored type variant, interval restriction and range subtype with ordinary and object unit tags.",
+      "invariant": "All names, identifiers, modifiers and recursively owned fields match the original public decoder.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_fields_preserve_maps_sequences_defaults_and_duplicate_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/compatibility.rs",
+      "capability": "Stored type field compatibility",
+      "workload": "Decode maps and positional sequences, omit each field, duplicate fields and discard unknown values.",
+      "invariant": "Original defaults, required positions, duplicate failures and ignored-value semantics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_numbers_and_unit_tags_match_the_public_json_decoder",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/compatibility.rs",
+      "capability": "Bounded stored type scalar input",
+      "workload": "Exercise integer boundaries, negative zero, floating tokens, escaped tags and enormous numeric tokens.",
+      "invariant": "Fixed-width fields preserve original acceptance while scalar conversion visits at most eleven bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_preserves_recursion_ignored_values_and_truncation_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/compatibility.rs",
+      "capability": "Stored type grammar boundaries",
+      "workload": "Cross recognized nesting limits, read deeper ignored values and reject each truncated declaration.",
+      "invariant": "The original recursion, trailing-input and discarded-value contracts are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_matches_original_errors_for_mutated_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/compatibility.rs",
+      "capability": "Stored type malformed input parity",
+      "workload": "Replace each byte of every structured declaration with seven independent token characters.",
+      "invariant": "Original and admitted decoders agree on rejection and on every resulting valid declaration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_output_retains_exact_live_allocations_and_admits_before_copy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/retention.rs",
+      "capability": "Stored type input allocation ownership",
+      "workload": "Measure live output allocations, exact peak and peak-minus-one admission; deny a one-MiB name.",
+      "invariant": "Every retained payload is charged exactly and denial precedes oversized materialization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_failures_and_both_cancellation_owners_retire_partial_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/retention.rs",
+      "capability": "Stored type failed input retirement",
+      "workload": "Deny partial declarations, reject late duplicates and cancel either original or invoking owner.",
+      "invariant": "All failed paths retire their payloads and reservations with original SQLSTATEs for cancellation and memory denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_cancels_during_original_name_production",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/input/tests/retention.rs",
+      "capability": "Stored type active input cancellation",
+      "workload": "Cancel each independent owner after observing an actual name output allocation.",
+      "invariant": "Active string construction stops and releases all partial payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_column_images_match_independent_physical_attribute_bytes",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests.rs",

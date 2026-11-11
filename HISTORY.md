@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored SQL column types under the original memory allowance and cancellation owners, preserving complete type identities and existing JSON forms. Names and nested type nodes retain their admitted allocations through completion or failure.
+
 - Assemble admitted persistent table catalogs from original definitions, owner bindings and ordered ACL replacements. Native SQLite, SQLite Key/Value and redb preserve existing ordering and error precedence; cancellation or failure retires incomplete catalogs without publication. Assembly preserves the original control context, and failed authority construction frees native values before releasing their allowance.
 
 - Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.
