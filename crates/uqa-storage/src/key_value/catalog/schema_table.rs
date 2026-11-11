@@ -126,27 +126,32 @@ pub(super) fn visit_metadata(
     let seek = encoded.as_deref().unwrap_or(&[TAG_METADATA]);
     read.visit_prefix(seek, &mut |key, value| {
         read.control().check()?;
-        let mut offset = 1;
-        let name = std::str::from_utf8(super::super::codec::read_segment(key, &mut offset)?)
-            .map_err(|error| {
-                StorageBackendError::Other(format!("invalid UTF-8 metadata key: {error}"))
-            })?;
-        if offset != key.len() {
-            return Err(StorageBackendError::Other(
-                "metadata key has trailing bytes".into(),
-            ));
-        }
+        let name = metadata_key(key)?;
         if name.starts_with(prefix) && key_bytes.is_none_or(|length| name.len() == length) {
-            visit(
-                name,
-                std::str::from_utf8(value).map_err(|error| {
-                    StorageBackendError::Other(format!("invalid UTF-8 metadata value: {error}"))
-                })?,
-            )?;
+            visit(name, metadata_value(value)?)?;
         }
         read.control().check()
     })?;
     read.control().check()
+}
+
+pub(super) fn metadata_key(key: &[u8]) -> StorageBackendResult<&str> {
+    let mut offset = 1;
+    let name = std::str::from_utf8(super::super::codec::read_segment(key, &mut offset)?).map_err(
+        |error| StorageBackendError::Other(format!("invalid UTF-8 metadata key: {error}")),
+    )?;
+    if offset != key.len() {
+        return Err(StorageBackendError::Other(
+            "metadata key has trailing bytes".into(),
+        ));
+    }
+    Ok(name)
+}
+
+pub(super) fn metadata_value(value: &[u8]) -> StorageBackendResult<&str> {
+    std::str::from_utf8(value).map_err(|error| {
+        StorageBackendError::Other(format!("invalid UTF-8 metadata value: {error}"))
+    })
 }
 
 impl KeyValueCatalog {

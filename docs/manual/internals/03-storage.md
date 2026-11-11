@@ -613,6 +613,8 @@ The persistent catalog records:
 
 Runtime host-language callback code is not a durable catalog object.
 
+`CatalogFacade::begin_text_input(family, limits, control)` retains one native catalog view for metadata, model definitions, scoring parameters, analyzer configurations/descriptors or path definitions. `CatalogTextInput::advance` consumes at most one merged record slot and returns `Pending`, an admitted original `CatalogTextRow`, or `Complete`. Deleted slots consume their own transition. The key cap precedes copying the continuation key, and the value cap precedes provider payload materialization. Original UTF-8 and stored JSON spelling remain unchanged; native analyzer rows without a descriptor produce no descriptor row. Physical key order is exposed, so a consuming catalog owner retains its existing logical ordering and validation rules. SQLite native, SQLite KV and redb use their committed/private read owners; providers without this capability reject it. No write, migration, SQL evaluation or resource resolution runs during input. Failure, cancellation or abandonment retires the cursor and its view, while returned rows retain their allocation allowance independently. Complete input releases the view and remains complete after cancellation. This boundary is part of bounded persistent loading; typed catalog assembly and the Engine restore lifecycle remain separate integration work. See the [catalog text input argument](../../design/backup-image-format.md#retained-persistent-catalog-text-input).
+
 Analyzer JSON, field-phase assignments, GIN ownership, reopen behavior, and external synonym resources are detailed in [Analyzer pipeline internals](04-analyzer-pipeline.md).
 
 ## Full-text posting layout

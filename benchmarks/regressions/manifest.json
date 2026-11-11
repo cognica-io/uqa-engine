@@ -54715,6 +54715,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_bounds_tombstones_and_preserves_original_owned_text",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Advance through 257 tombstones before an original Unicode text row.",
+      "invariant": "Each transition consumes at most one record slot and one bounded value; completed rows retain only their original native capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_retires_failed_cancelled_and_abandoned_original_views",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Inject read errors, malformed UTF-8, absent selected values, denied memory, cancellation and unwinding.",
+      "invariant": "Failure consumes the original view and continuation, releases unpublished reservations and prevents reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_checks_encoded_limits_before_value_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Deny encoded key and value sizes, zero limits and cursor header admission.",
+      "invariant": "Admission precedes payload materialization and decoding; failed input releases its entire owned allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_record_slots_count_tombstones_without_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Retain 512 spilled private records with alternating tombstones, retire the original view and advance one slot at a time.",
+      "invariant": "Deleted slots consume the same window as live slots, keys remain ordered, no payload is read, zero windows emit nothing and both cancellation owners are honored.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six native SQLite catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six SQLite Key/Value catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six redb catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

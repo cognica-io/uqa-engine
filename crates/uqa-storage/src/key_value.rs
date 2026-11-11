@@ -61,6 +61,7 @@ mod view;
 pub use view::{
     KeyPresenceVisitor, KeyValueMutation, KeyValuePointVisitor, KeyValueRead,
     KeyValueReadKeyIterator, KeyValueReadRevision, KeyValueReadScope, KeyValueVersionedMutation,
+    RecordKeyReadVisitor,
 };
 
 const TAG_METADATA: u8 = b'm';

@@ -19,6 +19,7 @@ mod relations;
 mod sequences;
 mod stats;
 mod tables;
+mod text_input;
 mod validation;
 mod views;
 pub(super) use analyzers::FieldWrite;

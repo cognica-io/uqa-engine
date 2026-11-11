@@ -59,6 +59,7 @@ mod schema_table;
 mod sequences;
 mod table_data;
 mod tables;
+mod text_input;
 mod views;
 
 use keys::{
@@ -99,6 +100,15 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn begin_text_input(
+        &self,
+        family: crate::catalog::text_input::CatalogTextFamily,
+        limits: crate::catalog::text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::text_input::CatalogTextInput> {
+        self.text_input(family, limits, control)
+    }
+
     fn record_revisions(
         &self,
         records: &[crate::catalog::CatalogRecordRef<'_>],
