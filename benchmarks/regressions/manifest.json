@@ -54455,6 +54455,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_retains_progress_and_preserves_cached_capture_ownership",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Private analyzer image publication",
+      "workload": "Prepare a wide Unicode descriptor through one-poll windows, then capture with exhausted admission and retire its executable revision.",
+      "invariant": "Encoded bytes preserve the original descriptor, cached capture shares its completed owner, and image lifetime is independent of execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_retires_unshared_revisions_after_terminal_failures",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Private analyzer image retirement",
+      "workload": "Cancel, abandon, invalidate or deny retained private image preparation at multiple suspension positions.",
+      "invariant": "Terminal failures release every candidate and original descriptor owner without publishing caches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_detaches_dictionary_bytes_from_import_admission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Independent analyzer image ownership",
+      "workload": "Prepare enabled Korean and Japanese retained dictionary images, then retire the compiled revision and imported buffers.",
+      "invariant": "Captured artifact bytes remain exact and independently admitted without retaining the executable models or import allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_analyzer_catalog_input_preserves_native_roots_names_and_independent_capture",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests/retained.rs",
+      "capability": "Native analyzer catalog input",
+      "workload": "Restore wide names and descriptor images under changing read/poll limits, capture and mutate with a new allowance.",
+      "invariant": "Original name addresses, token observations, immutable generations and independent encoded images survive input cancellation and exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_analyzer_catalog_failure_preserves_retained_roots_and_retires_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests/retained.rs",
+      "capability": "Analyzer catalog input retirement",
+      "workload": "Reject duplicate or foreign names and cancel, abandon or invalidate a retained catalog candidate.",
+      "invariant": "Prior roots remain unchanged while failed private revisions and their admission are completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_catalog_input_preserves_both_native_roots_through_new_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests/retained.rs",
+      "capability": "Native field catalog input",
+      "workload": "Restore long table/field keys and independent historical index/search revisions, capture and mutate after cancelling input.",
+      "invariant": "Both native roots preserve original identity, exact image bytes and historical tokens under independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_catalog_failure_retires_both_private_roots_and_preserves_prior_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests/retained.rs",
+      "capability": "Field catalog input retirement",
+      "workload": "Reject duplicate field identity and cancel, abandon or invalidate partially reconstructed private bindings.",
+      "invariant": "Both unpublished catalog roots and children retire together without changing retained prior membership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

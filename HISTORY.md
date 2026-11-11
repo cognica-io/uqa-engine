@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Restore resolved analyzer and field-binding images through the caller's byte and work windows, preserving original descriptors, dictionary bytes, user rules, index/search revisions and allocation ownership. Completed images use captured resources independently of live analyzer caches. Public Engine restoration remains under implementation.
+- Restore resolved analyzer and field-binding images through the caller's byte and work windows, preserving original descriptors, dictionary bytes, user rules, index/search revisions and allocation ownership. Native named/field catalog publication retains both runtime and encoded roots, and capture images own copied descriptor/artifact bytes independently of imported executable revisions. Completed images use captured resources independently of live analyzer caches. Public Engine restoration remains under implementation.
 
 - Compile native memory-backup capture adapters and their unit-test consumers under the same platform boundary as the local repository API, preserving strict browser WASM library/test builds and native transaction snapshots.
 

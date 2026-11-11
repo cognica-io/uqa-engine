@@ -11,13 +11,13 @@ use super::{
     FieldAnalyzerBinding,
 };
 use crate::{
-    analyzer_image::read_analyzer_image_from,
+    analyzer_image::read_owned_analyzer_image_from,
     image_io::{framed_image_reader, read_framed_image_from, ImageOwner, ImageRead, ImageReader},
     read_control::StorageReadControl,
     AnalyzerPhase, StorageBackendError, StorageBackendResult,
 };
 use std::{io::Read, sync::Arc};
-use uqa_analysis::AnalyzerResources;
+use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
 use uqa_core::{
     image_io::{decode_image, AsyncImageInput},
     memory::{Budgeted, MemoryReservation},
@@ -183,6 +183,15 @@ impl FieldAnalyzerBinding {
         input: &mut AsyncImageInput<'_>,
         resources: &AnalyzerResources,
     ) -> StorageBackendResult<Budgeted<Self>> {
+        Self::read_owned_image_from(input, resources)
+            .await?
+            .try_map(|value| Ok(value.into_shared()))
+    }
+
+    pub(crate) async fn read_owned_image_from(
+        input: &mut AsyncImageInput<'_>,
+        resources: &AnalyzerResources,
+    ) -> StorageBackendResult<Budgeted<FieldAnalyzerBinding<CompiledAnalyzer>>> {
         input.cancellation.check()?;
         let mut memory = input.memory.reserve(size_of::<Self>())?;
         if &input.array::<8>().await? != MAGIC {
@@ -202,15 +211,15 @@ impl FieldAnalyzerBinding {
         let index_name = name(input, &mut memory).await?;
         let search_name = name(input, &mut memory).await?;
         let index = read_framed_image_from(input, async |mut child| {
-            read_analyzer_image_from(&mut child, resources).await
+            read_owned_analyzer_image_from(&mut child, resources).await
         })
         .await?;
         let search = read_framed_image_from(input, async |mut child| {
-            read_analyzer_image_from(&mut child, resources).await
+            read_owned_analyzer_image_from(&mut child, resources).await
         })
         .await?;
         input.end().await?;
-        let value = Self {
+        let value = FieldAnalyzerBinding {
             index: BoundAnalyzerRevision {
                 name: index_name,
                 compiled: index,
@@ -225,6 +234,23 @@ impl FieldAnalyzerBinding {
         value.validate()?;
         input.cancellation.check()?;
         Ok(Budgeted::new(value, memory))
+    }
+}
+
+impl FieldAnalyzerBinding<CompiledAnalyzer> {
+    pub(crate) fn into_shared(self) -> FieldAnalyzerBinding {
+        FieldAnalyzerBinding {
+            index: BoundAnalyzerRevision {
+                name: self.index.name,
+                compiled: Arc::new(self.index.compiled),
+            },
+            search: BoundAnalyzerRevision {
+                name: self.search.name,
+                compiled: Arc::new(self.search.compiled),
+            },
+            owner: self.owner,
+            last_phase: self.last_phase,
+        }
     }
 }
 

@@ -88,6 +88,17 @@ impl AnalyzerCatalog {
     ) -> StorageBackendResult<()> {
         let production = ProductionControl::new(self.images.budget(), cancellation, cancellation);
         let image = compiled.image_source_with_control(&production)?;
+        self.insert_prepared(revision_name, image_name, compiled, image, cancellation)
+    }
+
+    fn insert_prepared(
+        &mut self,
+        revision_name: Produced<String>,
+        image_name: Produced<String>,
+        compiled: Arc<CompiledAnalyzer>,
+        image: AnalyzerImageSource,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
         let payload_bytes = image_name
             .capacity()
             .checked_add(image.retained_bytes())
@@ -109,6 +120,22 @@ impl AnalyzerCatalog {
         compiled: Arc<CompiledAnalyzer>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        self.validate_image_name(&name, control)?;
+        let image_name = ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(&name)?;
+        self.insert_names(name.into(), image_name, compiled, control.cancellation())?;
+        Ok(self)
+    }
+
+    fn validate_image_name(
+        &self,
+        name: &Budgeted<String>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
         control.check()?;
         if !name.budget().shares_allowance(control.memory())
             || !self.images.budget().shares_allowance(control.memory())
@@ -120,13 +147,29 @@ impl AnalyzerCatalog {
                 "invalid analyzer image admission or identity".into(),
             ));
         }
-        let image_name = ProductionControl::new(
-            control.memory(),
-            control.cancellation(),
-            control.cancellation(),
-        )
-        .copy_text(&name)?;
-        self.insert_names(name.into(), image_name, compiled, control.cancellation())?;
+        Ok(())
+    }
+
+    /// Decode and publish one private revision through the original transport's work channel. Native name admission, exact image preparation and both immutable roots remain one consuming operation.
+    pub async fn read_image_from(
+        mut self,
+        name: Budgeted<String>,
+        resources: &uqa_analysis::AnalyzerResources,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let compiled =
+            crate::analyzer_image::read_owned_analyzer_image_from(input, resources).await?;
+        let control = StorageReadControl::new(input.memory, input.cancellation);
+        self.validate_image_name(&name, &control)?;
+        let image_name = input.copy_text(&name).await?;
+        let (compiled, image) = compiled.into_image_source_with_input(input).await?;
+        self.insert_prepared(
+            name.into(),
+            image_name.into(),
+            compiled,
+            image,
+            input.cancellation,
+        )?;
         Ok(self)
     }
 

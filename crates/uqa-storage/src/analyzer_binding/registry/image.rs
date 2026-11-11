@@ -14,7 +14,7 @@ use crate::{
     },
     analyzer_image::AnalyzerImageSnapshot,
     read_control::StorageReadControl,
-    AnalyzerPhase, StorageBackendResult,
+    AnalyzerPhase, StorageBackendError, StorageBackendResult,
 };
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -57,34 +57,112 @@ impl ImageBinding {
         control: &ProductionControl<'_>,
     ) -> StorageBackendResult<Arc<Produced<Self>>> {
         let side = |value: &BoundAnalyzerRevision| -> StorageBackendResult<_> {
-            let (name, memory) = copy_name(value.name.as_deref(), control)?.into_parts();
+            let name = copy_name(value.name.as_deref(), control)?;
             let image = value.compiled.image_source_with_control(control)?;
-            let bytes = name
-                .as_ref()
-                .map_or(0, String::capacity)
-                .checked_add(image.retained_bytes())
-                .ok_or(MemoryError::SizeOverflow)?;
-            Ok((ImageSide { name, image }, memory, bytes))
+            Self::side(name, image, control)
         };
-        let (index, index_memory, index_bytes) = side(&value.index)?;
-        let (search, search_memory, search_bytes) = side(&value.search)?;
-        let bytes = size_of::<Produced<Self>>()
-            .checked_add(index_bytes)
-            .and_then(|bytes| bytes.checked_add(search_bytes))
-            .ok_or(MemoryError::SizeOverflow)?;
+        Self::finish(
+            side(&value.index)?,
+            side(&value.search)?,
+            value.owner,
+            value.last_phase,
+            control,
+        )
+    }
+
+    fn side(
+        name: Produced<Option<String>>,
+        image: AnalyzerImageSource,
+        control: &ProductionControl<'_>,
+    ) -> StorageBackendResult<Produced<ImageSide>> {
+        let (name, memory) = name.into_parts();
+        Ok(control.finish(ImageSide { name, image }, memory)?)
+    }
+
+    fn finish(
+        index: Produced<ImageSide>,
+        search: Produced<ImageSide>,
+        owner: AnalyzerBindingOwner,
+        last_phase: AnalyzerPhase,
+        control: &ProductionControl<'_>,
+    ) -> StorageBackendResult<Arc<Produced<Self>>> {
+        let mut bytes = size_of::<Produced<Self>>();
+        for side in [&*index, &*search] {
+            bytes = bytes
+                .checked_add(side.name.as_ref().map_or(0, String::capacity))
+                .and_then(|bytes| bytes.checked_add(side.image.retained_bytes()))
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
+        let (index, index_memory) = index.into_parts();
+        let (search, search_memory) = search.into_parts();
         Ok(control
             .finish(
                 Self {
                     index,
                     search,
-                    owner: value.owner,
-                    last_phase: value.last_phase,
+                    owner,
+                    last_phase,
                     bytes,
                 },
                 control.combine(index_memory, search_memory),
             )?
             .into_shared(control)?)
     }
+
+    pub(super) async fn prepare_owned(
+        value: Budgeted<FieldAnalyzerBinding<uqa_analysis::CompiledAnalyzer>>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<(Budgeted<FieldAnalyzerBinding>, Arc<Produced<Self>>)> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        let result = value
+            .try_map_async(|value| async move {
+                let index_name = copy_name_from(value.index.name.as_deref(), input).await?;
+                let (index_compiled, index_image) = value
+                    .index
+                    .compiled
+                    .into_image_source_with_input(input)
+                    .await?;
+                let index = Self::side(index_name, index_image, &control)?;
+                let search_name = copy_name_from(value.search.name.as_deref(), input).await?;
+                let (search_compiled, search_image) = value
+                    .search
+                    .compiled
+                    .into_image_source_with_input(input)
+                    .await?;
+                let search = Self::side(search_name, search_image, &control)?;
+                let image = Self::finish(index, search, value.owner, value.last_phase, &control)?;
+                let value = FieldAnalyzerBinding {
+                    index: BoundAnalyzerRevision {
+                        name: value.index.name,
+                        compiled: index_compiled,
+                    },
+                    search: BoundAnalyzerRevision {
+                        name: value.search.name,
+                        compiled: search_compiled,
+                    },
+                    owner: value.owner,
+                    last_phase: value.last_phase,
+                };
+                Ok::<_, StorageBackendError>((value, image))
+            })
+            .await?;
+        let ((value, image), memory) = result.into_parts();
+        Ok((Budgeted::new(value, memory), image))
+    }
+}
+
+async fn copy_name_from(
+    name: Option<&str>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<Produced<Option<String>>> {
+    let (name, memory) = match name {
+        Some(name) => {
+            let (name, memory) = input.copy_text(name).await?.into_parts();
+            (Some(name), memory)
+        }
+        None => (None, input.memory.empty_reservation()),
+    };
+    Ok(Budgeted::new(name, memory).into())
 }
 
 type Child = Arc<Budgeted<CapturedFieldAnalyzerBinding>>;

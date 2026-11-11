@@ -8,6 +8,8 @@ use super::*;
 use crate::StorageBackendError;
 use uqa_analysis::{Analyzer, AnalyzerLimits, AnalyzerResources};
 
+mod retained;
+
 #[test]
 fn decoded_analyzer_catalog_names_and_historical_revisions_survive_new_destination_writes() {
     let resources = AnalyzerResources::new(AnalyzerLimits::default());

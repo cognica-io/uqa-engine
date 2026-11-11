@@ -10,6 +10,8 @@ use crate::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod retained;
+
 #[test]
 fn analyzer_native_image_capture_is_constant_and_retires_the_executable_owner() {
     for count in [1, 64, 4096] {

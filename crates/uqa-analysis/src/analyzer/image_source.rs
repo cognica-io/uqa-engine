@@ -12,12 +12,11 @@ use super::{AnalyzerResource, CompiledAnalyzer};
 use parking_lot::Mutex;
 use std::sync::{Arc, Weak};
 use uqa_core::{
-    memory::{MemoryError, Produced, ProductionControl},
+    memory::{Produced, ProductionControl},
     ValueRetentionError,
 };
 
-#[cfg(any(feature = "nori", feature = "kuromoji"))]
-use uqa_core::memory::ProductionVec;
+mod preparation;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 mod dictionary;
@@ -61,68 +60,23 @@ impl CompiledAnalyzer {
         if let Some(source) = cached.upgrade() {
             return Ok(AnalyzerImageSource(source));
         }
-        let (descriptor, descriptor_memory) = control
-            .copy_text(self.descriptor().canonical_json())?
-            .into_parts();
-        #[cfg(any(feature = "nori", feature = "kuromoji"))]
-        let (resources, resource_memory, resource_bytes) = {
-            let mut resources = ProductionVec::<ImageResource>::new(*control);
-            resources.reserve(self.dictionary_resources().count())?;
-            #[cfg(feature = "nori")]
-            for dictionary in &self.nori_dictionaries {
-                resources.push_produced(control.finish(
-                    ImageResource {
-                        kind: AnalyzerResourceKind::Nori,
-                        sha256: dictionary.sha256().into_bytes(),
-                        image: dictionary.image_source(control)?,
-                    },
-                    control.empty_reservation(),
-                )?)?;
-            }
-            #[cfg(feature = "kuromoji")]
-            for dictionary in &self.kuromoji_dictionaries {
-                resources.push_produced(control.finish(
-                    ImageResource {
-                        kind: AnalyzerResourceKind::Kuromoji,
-                        sha256: dictionary.sha256().into_bytes(),
-                        image: dictionary.image_source(control)?,
-                    },
-                    control.empty_reservation(),
-                )?)?;
-            }
-            let (resources, resource_memory) = resources.finish()?.into_parts();
-            let resource_bytes = resources.iter().try_fold(
-                resources
-                    .capacity()
-                    .checked_mul(size_of::<ImageResource>())
-                    .ok_or(MemoryError::SizeOverflow)?,
-                |bytes, resource| {
-                    bytes
-                        .checked_add(resource.image.retained_bytes())
-                        .ok_or(MemoryError::SizeOverflow)
-                },
-            )?;
-            (resources, resource_memory, resource_bytes)
-        };
-        #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
-        let (resource_memory, resource_bytes) = (control.empty_reservation(), 0);
-        let retained_bytes = size_of::<Produced<ImageData>>()
-            .checked_add(descriptor.capacity())
-            .and_then(|bytes| bytes.checked_add(resource_bytes))
-            .ok_or(MemoryError::SizeOverflow)?;
-        let source = control
-            .finish(
-                ImageData {
-                    descriptor,
-                    #[cfg(any(feature = "nori", feature = "kuromoji"))]
-                    resources,
-                    retained_bytes,
-                },
-                control.combine(descriptor_memory, resource_memory),
-            )?
-            .into_shared(control)?;
+        let source = crate::work::inline(preparation::prepare(self, control, &mut ()))?;
         *cached = Arc::downgrade(&source);
         Ok(AnalyzerImageSource(source))
+    }
+}
+
+impl CompiledAnalyzer {
+    /// Prepare independent encoded catalog ownership before sharing a freshly reconstructed revision. Consuming the private revision keeps its caches inaccessible throughout suspension; the returned image owns its copied descriptor/artifacts independently of imported allocations and executable models.
+    pub async fn into_image_source_with_input(
+        mut self,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<(Arc<Self>, AnalyzerImageSource), ValueRetentionError> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        let source =
+            preparation::prepare(&self, &control, &mut preparation::Retained(input)).await?;
+        *self.image_source.0.get_mut() = Arc::downgrade(&source);
+        Ok((Arc::new(self), AnalyzerImageSource(source)))
     }
 }
 

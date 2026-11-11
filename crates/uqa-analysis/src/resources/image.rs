@@ -68,7 +68,7 @@ impl AnalyzerResources {
         descriptor: Arc<AnalyzerDescriptor>,
         inputs: Vec<AnalyzerResourceInput>,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
-        crate::work::inline(self.restore_image_with(descriptor, inputs, &mut ()))
+        crate::work::inline(self.restore_image_with(descriptor, inputs, &mut ())).map(Arc::new)
     }
 
     /// Reconstruct the same private revision through the caller's original input work channel. Encoded artifacts retain their original admitted allocations; preparation performs no source reads, host resolution or cache publication.
@@ -78,6 +78,18 @@ impl AnalyzerResources {
         inputs: Vec<AnalyzerResourceInput>,
         input: &mut uqa_core::image_io::AsyncImageInput<'_>,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
+        self.restore_image_with(descriptor, inputs, input)
+            .await
+            .map(Arc::new)
+    }
+
+    /// Reconstruct a private, exclusively owned revision before native catalog publication. Its descriptor and resources follow the same exact validation as `restore_image_with_input`; no compiled or resource cache exposes this value during preparation.
+    pub async fn restore_owned_image_with_input(
+        &self,
+        descriptor: Arc<AnalyzerDescriptor>,
+        inputs: Vec<AnalyzerResourceInput>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> AnalysisResult<CompiledAnalyzer> {
         self.restore_image_with(descriptor, inputs, input).await
     }
 
@@ -86,7 +98,7 @@ impl AnalyzerResources {
         descriptor: Arc<AnalyzerDescriptor>,
         inputs: Vec<AnalyzerResourceInput>,
         work: &mut impl crate::work::ResourceWork,
-    ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
+    ) -> AnalysisResult<CompiledAnalyzer> {
         crate::descriptor::limits::check_limit(
             "image dictionary artifacts",
             inputs.len(),
@@ -137,18 +149,16 @@ impl AnalyzerResources {
             )
             .await?
         };
-        let compiled = Arc::new(
-            CompiledAnalyzer::prepare_configuration_with(
-                descriptor,
-                config,
-                #[cfg(feature = "nori")]
-                nori,
-                #[cfg(feature = "kuromoji")]
-                kuromoji,
-                work,
-            )
-            .await?,
-        );
+        let compiled = CompiledAnalyzer::prepare_configuration_with(
+            descriptor,
+            config,
+            #[cfg(feature = "nori")]
+            nori,
+            #[cfg(feature = "kuromoji")]
+            kuromoji,
+            work,
+        )
+        .await?;
         let mut actual = compiled.dictionary_resources();
         for (index, expected) in resources.inputs.iter().enumerate() {
             crate::work::Work::<AnalysisError>::records(work, index).await?;

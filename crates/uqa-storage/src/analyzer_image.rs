@@ -105,6 +105,15 @@ pub async fn read_analyzer_image_from(
     input: &mut AsyncImageInput<'_>,
     resources: &AnalyzerResources,
 ) -> StorageBackendResult<Arc<CompiledAnalyzer>> {
+    read_owned_analyzer_image_from(input, resources)
+        .await
+        .map(Arc::new)
+}
+
+pub(crate) async fn read_owned_analyzer_image_from(
+    input: &mut AsyncImageInput<'_>,
+    resources: &AnalyzerResources,
+) -> StorageBackendResult<CompiledAnalyzer> {
     let control = StorageReadControl::new(input.memory, input.cancellation);
     if &input.array::<8>().await? != MAGIC {
         return Err(invalid());
@@ -147,7 +156,7 @@ pub async fn read_analyzer_image_from(
     let (artifacts, _memory) = artifacts.into_parts();
     control.check()?;
     let analyzer = resources
-        .restore_image_with_input(descriptor, artifacts, input)
+        .restore_owned_image_with_input(descriptor, artifacts, input)
         .await?;
     control.check()?;
     Ok(analyzer)
