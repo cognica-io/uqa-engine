@@ -6,7 +6,9 @@
 
 //! Exact storage names bind nonzero object generations and independent document-ID watermarks.
 
+mod input;
 mod lifecycle;
+pub(super) use input::validate_table_with_control;
 
 use uqa_core::memory::BudgetedVec;
 
@@ -24,7 +26,7 @@ use super::{KeyValueRead, TAG_METADATA, TAG_TABLE};
 
 pub(super) use lifecycle::{drop_binding, prepare_table, rename_bindings};
 
-const TAG: u8 = b'O';
+pub(super) const TAG: u8 = b'O';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Owner {

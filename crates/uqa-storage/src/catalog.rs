@@ -50,6 +50,7 @@ pub use sequence_values::{
 };
 mod table;
 pub mod table_input;
+pub mod table_load;
 pub mod text_input;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
@@ -289,6 +290,18 @@ pub struct SequenceRow {
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Retain and assemble a complete admitted table catalog, preserving the provider's original cross-record predicates, ACL replacement order and result ordering.
+    fn begin_table_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<table_load::CatalogTableLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog table loading is not supported".into(),
+        ))
+    }
+
     /// Retain physical table definitions and independent ACL replacements from one view, without assembling or validating the complete catalog. The consumer preserves its existing ordering, cross-record predicates and ACL application boundary.
     fn begin_table_input(
         &self,

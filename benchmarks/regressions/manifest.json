@@ -55612,6 +55612,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_preserves_replacement_order_duplicate_relations_and_exact_live_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_retires_views_and_payloads_on_every_partial_drop_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_denies_peak_shortfall_and_preserves_late_input_error_precedence",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_owner_failure_precedes_acl_reads_and_unwinding_retires_the_view",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_checks_duplicate_objects_after_each_original_owner_predicate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/predicates.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_load_preserves_legacy_and_orphan_replacement_rules",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/predicates.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_owner_input_matches_original_binding_and_identity_predicates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/table_owners/input/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_owner_input_rejects_large_physical_binding_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/table_owners/input/tests.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_table_load_assembles_original_private_definitions_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Admitted complete table catalog loading",
+      "workload": "Compare original table and ACL assembly, owner predicates, private rollback and source retirement; interrupt every continuation and deny exact peak memory.",
+      "invariant": "Original ordering and error precedence are preserved; complete tables own every live allocation and partial failures retire their original view.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

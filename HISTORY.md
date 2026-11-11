@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Assemble admitted persistent table catalogs from original definitions, owner bindings and ordered ACL replacements. Native SQLite, SQLite Key/Value and redb preserve existing ordering and error precedence; cancellation or failure retires incomplete catalogs without publication.
+
 - Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.
 
 - Decode projected authority JSON with sorted last-value object fields and integer classification, retaining admitted recipient, grantor, column and path allocations without copying discarded values.

@@ -12,6 +12,7 @@ use crate::{
         input::{table, CatalogInputLimits},
         relation_acl::METADATA_PREFIX,
         table_input::{CatalogTableAcl, CatalogTableInput},
+        table_load::{CatalogTableLoad, CatalogTableOrder, CatalogTableValidation},
     },
     key_value::codec::read_str_ref,
     read_control::StorageReadControl,
@@ -20,29 +21,71 @@ use crate::{
 use uqa_core::memory::{Budgeted, ProductionControl};
 
 impl KeyValueCatalog {
+    pub(super) fn table_load(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogTableLoad> {
+        let read = self.table_read(control)?;
+        let source = physical_input(read.clone(), limits, control)?;
+        let validation = self
+            .store
+            .identifier_allocator()
+            .map(|_| CatalogTableValidation {
+                read,
+                validate: super::super::table_owners::validate_table_with_control,
+                limits,
+            });
+        CatalogTableLoad::new(
+            source,
+            CatalogTableOrder::AfterReplacements,
+            validation,
+            control,
+        )
+    }
+
     pub(super) fn table_input(
         &self,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogTableInput> {
+        physical_input(self.table_read(control)?, limits, control)
+    }
+
+    fn table_read(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<std::sync::Arc<dyn crate::key_value::KeyValueRead + Send + Sync>>
+    {
         control.check()?;
         if !self.store.transaction_model().is_versioned() {
             return Err(StorageBackendError::Other(
                 "retained catalog input requires a versioned read owner".into(),
             ));
         }
-        let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
-            read.retain(&[&[TAG_TABLE], &[TAG_METADATA]])
-        })?;
-        CatalogTableInput::new_filtered(
-            read,
-            (&[TAG_TABLE], definition),
-            (&[TAG_METADATA], acl),
-            select_acl,
-            limits,
-            control,
-        )
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            read.retain(&[
+                &[TAG_TABLE],
+                &[TAG_METADATA],
+                &[super::super::table_owners::TAG],
+            ])
+        })
     }
+}
+
+fn physical_input(
+    read: std::sync::Arc<dyn crate::key_value::KeyValueRead + Send + Sync>,
+    limits: CatalogInputLimits,
+    control: &StorageReadControl,
+) -> StorageBackendResult<CatalogTableInput> {
+    CatalogTableInput::new_filtered(
+        read,
+        (&[TAG_TABLE], definition),
+        (&[TAG_METADATA], acl),
+        select_acl,
+        limits,
+        control,
+    )
 }
 
 fn definition(

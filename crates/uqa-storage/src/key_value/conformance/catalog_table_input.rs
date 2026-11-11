@@ -24,22 +24,80 @@ pub fn verify_catalog_table_input(source: PersistentStorageSession) -> StorageBa
         maximum_key_bytes: 4096,
         maximum_value_bytes: 8192,
     };
-    let (mut input, expected, later) = prepare(source, limits, &control)?;
+    let (mut input, expected, later) =
+        prepare(source, limits, &control, |catalog, limits, control| {
+            catalog.begin_table_input(limits, control)
+        })?;
     verify_original(&mut input, &expected, &control)?;
     verify_denial(&later, limits)
 }
 
-type Prepared = (
-    crate::catalog::table_input::CatalogTableInput,
-    Vec<TableSchema>,
-    PersistentStorageSession,
-);
+/// Assemble the original complete catalog after rollback and source retirement, including independent replacement revisions and provider owner bindings.
+pub fn verify_catalog_table_load(source: PersistentStorageSession) -> StorageBackendResult<()> {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let limits = CatalogInputLimits {
+        maximum_key_bytes: 4096,
+        maximum_value_bytes: 8192,
+    };
+    let (mut loader, expected, _) =
+        prepare(source, limits, &control, |catalog, limits, control| {
+            catalog.begin_table_load(limits, control)
+        })?;
+    let mut output = None;
+    for _ in 0..4096 {
+        output = loader.advance(1)?;
+        if output.is_some() {
+            break;
+        }
+    }
+    let output = output.ok_or_else(|| {
+        crate::StorageBackendError::Other("finite table catalog did not complete".into())
+    })?;
+    expect_eq(
+        &output.len(),
+        &expected.len(),
+        "same original table membership",
+    )?;
+    for (actual, expected) in output.iter().zip(&expected) {
+        expect_eq(
+            &serde_json::to_value(&**actual)?,
+            &serde_json::to_value(expected)?,
+            "same original table definition",
+        )?;
+        expect_eq(
+            &actual.security,
+            &expected.security,
+            "same original ACL replacements and revisions",
+        )?;
+    }
+    expect(
+        control.memory().used() > 0,
+        "complete catalog retains its admitted payloads",
+    )?;
+    expect(
+        loader.advance(1).is_err(),
+        "completed catalog loader cannot replay",
+    )?;
+    drop(output);
+    expect_eq(
+        &control.memory().used(),
+        &0,
+        "catalog retirement returns all allowances",
+    )
+}
 
-fn prepare(
+type Prepared<T> = (T, Vec<TableSchema>, PersistentStorageSession);
+
+fn prepare<T>(
     source: PersistentStorageSession,
     limits: CatalogInputLimits,
     control: &StorageReadControl,
-) -> StorageBackendResult<Prepared> {
+    capture: impl FnOnce(
+        &dyn crate::CatalogFacade,
+        CatalogInputLimits,
+        &StorageReadControl,
+    ) -> StorageBackendResult<T>,
+) -> StorageBackendResult<Prepared<T>> {
     source.catalog.initialize_storage()?;
     source.catalog.save_schema("table_input")?;
     let mut first = table("first", 1);
@@ -64,7 +122,7 @@ fn prepare(
         .catalog
         .save_relation_acl(&first.relation, Some("column"), &column_acl)?;
     let expected = source.catalog.load_tables()?;
-    let input = source.catalog.begin_table_input(limits, control)?;
+    let input = capture(source.catalog.as_ref(), limits, control)?;
     source.backend.rollback_to_savepoint(savepoint)?;
     source.backend.rollback_transaction()?;
     let later = source.backend.open_session()?;
