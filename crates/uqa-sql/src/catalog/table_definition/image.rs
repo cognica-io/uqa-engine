@@ -6,7 +6,7 @@
 
 //! Native image construction transfers decoded definitions and their original admission.
 
-use super::{Budgeted, MemoryBudget, MemoryError, TableDefinition, TableDefinitionValue};
+use super::{Budgeted, MemoryBudget, ProductionControl, TableDefinition, TableDefinitionValue};
 use crate::{
     ast::{ColumnDef, TableCheck, TableHierarchy},
     catalog::image,
@@ -21,14 +21,12 @@ impl<T: TableDefinitionValue> TableDefinition<T> {
         children: usize,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
-        cancellation.check()?;
-        let value = value.into_shared()?;
-        let bytes = value
-            .reserved_bytes()
-            .checked_add(children)
-            .ok_or(MemoryError::SizeOverflow)?;
-        cancellation.check()?;
-        Ok(Self { value, bytes })
+        let memory = value.budget().clone();
+        Self::from_decoded_parts(
+            value,
+            children,
+            &ProductionControl::new(&memory, cancellation, cancellation),
+        )
     }
 }
 

@@ -56691,6 +56691,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_column_generation_transfers_native_payloads_and_captures_after_source_retirement",
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/stored.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored column publication",
+      "workload": "Two megabytes of stored default and missing-value payloads under the decoder peak plus one shared header; source retirement and independent capture.",
+      "invariant": "Native publication moves the original decoded buffers; exact image bytes and allocation-free capture survive source and cancellation retirement."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_column_generation_retires_both_cancellation_paths_and_denied_shared_headers",
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/stored.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored column publication",
+      "workload": "Original and invoking cancellation during admitted parsing, cancelled entry, and an allowance below the fixed shared header.",
+      "invariant": "Every failure retires partial values and their leases, and a denied shared owner is rejected before its allocation."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_column_generation_publication_detaches_without_changing_retained_snapshots",
+      "source": "crates/uqa-sql/src/catalog/table_definition/tests/stored.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored column publication",
+      "workload": "A restored column generation is retained, its input cancelled, and its name changed through ordinary native publication.",
+      "invariant": "Schema mutation publishes a distinct generation; old snapshots preserve their original bytes and allowance until the last owner retires."
     }
   ]
 }
