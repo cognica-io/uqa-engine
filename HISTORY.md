@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode projected authority JSON with sorted last-value object fields and integer classification, retaining admitted recipient, grantor, column and path allocations without copying discarded values.
+
 - Project stored JSON object fields in sorted last-value order while retaining original value bytes, admitting decoded names and map nodes without building another value tree.
 
 - Read native SQLite table definitions and independent ACL replacements from one retained catalog view, admitting decoded buffers before allocation and retiring both inputs on failure or cancellation.

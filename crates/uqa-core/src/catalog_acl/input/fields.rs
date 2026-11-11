@@ -8,13 +8,13 @@
 
 use super::{decode_json_string, invalid, Input, JsonToken, Result};
 
-impl<'a> Input<'a, '_, '_> {
+impl<'a, 'c> Input<'a, 'c, '_> {
     pub(super) fn fields<const N: usize>(
         &mut self,
         first: JsonToken<'a>,
         names: [&str; N],
         required: [bool; N],
-        field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<()>,
+        field: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, usize, JsonToken<'a>) -> Result<()>,
     ) -> Result<()> {
         self.fields_with_unknown(first, names, required, false, field)
     }
@@ -25,13 +25,16 @@ impl<'a> Input<'a, '_, '_> {
         names: [&str; N],
         required: [bool; N],
         deny_unknown: bool,
-        mut field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<()>,
+        mut field: impl for<'r> FnMut(&mut Input<'a, 'c, 'r>, usize, JsonToken<'a>) -> Result<()>,
     ) -> Result<()> {
         let object = match first {
             JsonToken::StartObject => true,
             JsonToken::StartArray => false,
             _ => return Err(invalid("expected an authority struct")),
         };
+        if object && self.projection.is_some() {
+            return self.projected_fields(first, names, required, deny_unknown, field);
+        }
         let mut seen = [false; N];
         let mut position = 0;
         loop {
@@ -79,7 +82,7 @@ impl<'a> Input<'a, '_, '_> {
         Ok(())
     }
 
-    fn skip(&mut self, first: JsonToken<'a>) -> Result<()> {
+    pub(super) fn skip(&mut self, first: JsonToken<'a>) -> Result<()> {
         let mut depth = usize::from(matches!(
             first,
             JsonToken::StartArray | JsonToken::StartObject

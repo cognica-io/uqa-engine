@@ -98,7 +98,10 @@ fn acl_bytes(entries: &Vec<TableAclEntry>, cancellation: &CancellationToken) -> 
 }
 
 impl<'a> Input<'a, '_, '_> {
-    fn legacy_acl(&mut self, first: JsonToken<'a>) -> Result<Budgeted<Vec<TableAclEntry>>> {
+    pub(super) fn legacy_acl(
+        &mut self,
+        first: JsonToken<'a>,
+    ) -> Result<Budgeted<Vec<TableAclEntry>>> {
         if first != JsonToken::StartArray {
             return Err(invalid("expected an ACL path array"));
         }

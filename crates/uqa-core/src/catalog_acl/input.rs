@@ -8,6 +8,7 @@
 
 mod fields;
 mod legacy;
+pub mod projected;
 pub use legacy::{legacy_column_entries, legacy_entries};
 
 use super::TablePrivileges;
@@ -118,6 +119,8 @@ struct Input<'a, 'c, 'r> {
     reader: &'r mut JsonReader<'a, 'c>,
     memory: &'c MemoryBudget,
     cancellation: &'c CancellationToken,
+    projection: Option<&'a [u8]>,
+    range: std::ops::Range<usize>,
 }
 
 impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
@@ -130,6 +133,8 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
             reader,
             memory,
             cancellation,
+            projection: None,
+            range: 0..0,
         }
     }
 
@@ -143,10 +148,12 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
     }
 
     fn next(&mut self) -> Result<JsonToken<'a>> {
-        self.reader
+        let event = self
+            .reader
             .next_event()?
-            .map(|event| event.token)
-            .ok_or_else(|| invalid("unexpected end of authority JSON"))
+            .ok_or_else(|| invalid("unexpected end of authority JSON"))?;
+        self.range = event.range;
+        Ok(event.token)
     }
 
     fn end(&mut self) -> Result<()> {
@@ -166,7 +173,7 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
             [true; 2],
             |input, index, value| {
                 match index {
-                    0 => oid = number(value)?,
+                    0 => oid = input.number(value)?,
                     1 => object_id = input.identity(value)?,
                     _ => unreachable!(),
                 }
@@ -182,7 +189,8 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
         }
         let mut identity = [0; 16];
         for byte in &mut identity {
-            *byte = number(self.next()?)?;
+            let value = self.next()?;
+            *byte = self.number(value)?;
         }
         if self.next()? != JsonToken::EndArray {
             return Err(invalid("invalid catalog incarnation width"));
@@ -269,6 +277,14 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
             trigger,
             maintain,
         })
+    }
+
+    fn number<T: serde::de::DeserializeOwned>(&self, token: JsonToken<'_>) -> Result<T> {
+        if self.projection.is_some() {
+            projected::integer(token)
+        } else {
+            number(token)
+        }
     }
 }
 

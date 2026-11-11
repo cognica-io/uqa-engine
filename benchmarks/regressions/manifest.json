@@ -55391,6 +55391,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_authority_roles_preserve_last_fields_and_value_integer_classification",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_bound_authority_preserves_recursive_collisions_and_sorted_validation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_named_authority_preserves_recipient_tags_and_overwritten_values",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_column_authority_admits_only_final_paths_and_keeps_exact_live_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_authority_retires_partial_input_and_denied_names_without_value_copies",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/projected/tests.rs",
+      "capability": "Projected authority input",
+      "workload": "Compare original Value-based authority decoding, recursive collisions, integer boundaries and admitted ownership.",
+      "invariant": "Final authority paths retain original ordered values and exact native allocations; invalid or denied input retires partial state.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
