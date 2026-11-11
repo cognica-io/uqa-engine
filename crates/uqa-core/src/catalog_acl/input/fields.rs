@@ -8,7 +8,7 @@
 
 use super::{decode_json_string, invalid, Input, JsonToken, Result};
 
-impl<'a> Input<'a, '_> {
+impl<'a> Input<'a, '_, '_> {
     pub(super) fn fields<const N: usize>(
         &mut self,
         first: JsonToken<'a>,

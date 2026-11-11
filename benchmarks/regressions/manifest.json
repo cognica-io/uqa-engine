@@ -55040,6 +55040,84 @@
       "capability": "Persistent table field input",
       "workload": "Every truncation of named/positional field input, eight allocation ceilings and cancellation.",
       "invariant": "Terminal failures retire all partial fields and vector workspace without changing independent reservations."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_acl_token_input_preserves_the_enclosing_stream_and_original_admission",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Two nested optional ACLs followed by a distinct trailing value in one original token stream.",
+      "invariant": "One ACL consumes only its own tokens; the enclosing continuation and exact original ACL reservation remain intact."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_preserves_stored_forms_and_nested_field_order",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Named, reordered, escaped and positional ACL tuples with null, empty and populated ACLs and ignored nested values.",
+      "invariant": "Controlled decoding matches the existing stored tuple and serialized observations without an intermediate JSON tree."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_preserves_corruption_and_identity_validation_order",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Corrupt tuple fields, numeric limits, duplicate/missing/unknown fields and invalid tuple identities combined with malformed tails.",
+      "invariant": "Original field diagnostics and syntax-before-identity ordering are preserved; rejected tuples retain no allocations."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_keeps_original_path_buffers_until_the_tuple_retires",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "257 ACL paths and an independent live sibling reservation.",
+      "invariant": "Native allocation observation equals the returned original path buffer capacity; tuple retirement releases only its own allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_acl_tuple_input_retires_truncation_denial_cancellation_and_invalid_revisions",
+      "source": "crates/uqa-storage/src/catalog/relation_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "Every tuple truncation, seven admission limits, invalid complete revisions and cancellation.",
+      "invariant": "Every terminal path retires the original parser and partial tuple before returning the associated memory allowance."
+    },
+    {
+      "package": "uqa-core",
+      "test": "durable_acl_token_input_rejects_cancellation_after_the_parent_reads_its_first_token",
+      "source": "crates/uqa-core/src/catalog_acl/input/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority input",
+      "workload": "The parent consumes the first null or array token, then cancels before handing the original stream to the ACL owner.",
+      "invariant": "The nested authority operation rejects cancelled admission even when its scalar value needs no further token reads."
     }
   ]
 }

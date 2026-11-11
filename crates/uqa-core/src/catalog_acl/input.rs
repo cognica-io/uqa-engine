@@ -26,7 +26,8 @@ pub fn role_identity(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<RoleIdentity> {
-    let mut input = Input::new(bytes, memory, cancellation);
+    let mut tokens = reader(bytes, memory, cancellation);
+    let mut input = Input::new(&mut tokens, memory, cancellation);
     let token = input.next()?;
     let role = input.role(token)?;
     input.end()?;
@@ -39,15 +40,24 @@ pub fn entries(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Option<Vec<Entry>>>> {
-    let mut input = Input::new(bytes, memory, cancellation);
+    let mut tokens = reader(bytes, memory, cancellation);
+    let mut input = Input::new(&mut tokens, memory, cancellation);
     let token = input.next()?;
-    let value = if token == JsonToken::Null {
-        Budgeted::new(None, memory.empty_reservation())
-    } else {
-        let (entries, memory) = input.acl(token)?.into_parts();
-        Budgeted::new(Some(entries), memory)
-    };
+    let value = input.optional_acl(token)?;
     input.end()?;
+    Ok(value)
+}
+
+/// Consume one optional ACL after its first token was read from the supplied enclosing stream, leaving the following token unread. The enclosing reader owns its syntax policy; durable catalog envelopes use ignored-string escape handling for discarded fields. Typed ACL fields retain strict validation and their original memory owner.
+pub fn entries_from_token<'a, 'c>(
+    first: JsonToken<'a>,
+    reader: &mut JsonReader<'a, 'c>,
+    memory: &'c MemoryBudget,
+    cancellation: &'c CancellationToken,
+) -> Result<Budgeted<Option<Vec<Entry>>>> {
+    cancellation.check()?;
+    let value = Input::new(reader, memory, cancellation).optional_acl(first)?;
+    cancellation.check()?;
     Ok(value)
 }
 
@@ -57,7 +67,8 @@ pub fn column_entries(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<Columns>> {
-    let mut input = Input::new(bytes, memory, cancellation);
+    let mut tokens = reader(bytes, memory, cancellation);
+    let mut input = Input::new(&mut tokens, memory, cancellation);
     if input.next()? != JsonToken::StartObject {
         return Err(invalid("expected a column ACL map"));
     }
@@ -93,19 +104,39 @@ pub fn column_entries(
     Ok(Budgeted::new(columns, reservation))
 }
 
-struct Input<'a, 'c> {
-    reader: JsonReader<'a, 'c>,
+fn reader<'a, 'c>(
+    bytes: &'a [u8],
+    memory: &MemoryBudget,
+    cancellation: &'c CancellationToken,
+) -> JsonReader<'a, 'c> {
+    JsonReader::from_slice(bytes, memory, cancellation).with_ignored_string_escapes()
+}
+
+struct Input<'a, 'c, 'r> {
+    reader: &'r mut JsonReader<'a, 'c>,
     memory: &'c MemoryBudget,
     cancellation: &'c CancellationToken,
 }
 
-impl<'a, 'c> Input<'a, 'c> {
-    fn new(bytes: &'a [u8], memory: &'c MemoryBudget, cancellation: &'c CancellationToken) -> Self {
+impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
+    fn new(
+        reader: &'r mut JsonReader<'a, 'c>,
+        memory: &'c MemoryBudget,
+        cancellation: &'c CancellationToken,
+    ) -> Self {
         Self {
-            reader: JsonReader::from_slice(bytes, memory, cancellation)
-                .with_ignored_string_escapes(),
+            reader,
             memory,
             cancellation,
+        }
+    }
+
+    fn optional_acl(&mut self, token: JsonToken<'a>) -> Result<Budgeted<Option<Vec<Entry>>>> {
+        if token == JsonToken::Null {
+            Ok(Budgeted::new(None, self.memory.empty_reservation()))
+        } else {
+            let (entries, memory) = self.acl(token)?.into_parts();
+            Ok(Budgeted::new(Some(entries), memory))
         }
     }
 

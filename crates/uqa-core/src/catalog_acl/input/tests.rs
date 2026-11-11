@@ -17,6 +17,55 @@ fn entry() -> Entry {
 }
 
 #[test]
+fn durable_acl_token_input_preserves_the_enclosing_stream_and_original_admission() {
+    let encoded = serde_json::to_string(&vec![entry(); 17]).unwrap();
+    let bytes = format!("[{encoded},null,\"tail\"]");
+    let memory = MemoryBudget::new(65536);
+    let cancellation = CancellationToken::new();
+    let mut reader = JsonReader::from_slice(bytes.as_bytes(), &memory, &cancellation)
+        .with_ignored_string_escapes();
+    assert_eq!(
+        reader.next_event().unwrap().unwrap().token,
+        JsonToken::StartArray
+    );
+    let first = reader.next_event().unwrap().unwrap().token;
+    let value = entries_from_token(first, &mut reader, &memory, &cancellation).unwrap();
+    assert_eq!(value.as_ref().unwrap().len(), 17);
+    assert_eq!(value.reserved_bytes(), memory.used());
+    let first = reader.next_event().unwrap().unwrap().token;
+    let absent = entries_from_token(first, &mut reader, &memory, &cancellation).unwrap();
+    assert!(absent.is_none());
+    assert_eq!(absent.reserved_bytes(), 0);
+    assert_eq!(
+        reader.next_event().unwrap().unwrap().token,
+        JsonToken::String(br#""tail""#)
+    );
+    assert_eq!(
+        reader.next_event().unwrap().unwrap().token,
+        JsonToken::EndArray
+    );
+    assert!(reader.next_event().unwrap().is_none());
+    drop(value);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn durable_acl_token_input_rejects_cancellation_after_the_parent_reads_its_first_token() {
+    for bytes in [b"null".as_slice(), b"[]"] {
+        let memory = MemoryBudget::new(65536);
+        let cancellation = CancellationToken::new();
+        let mut reader = JsonReader::from_slice(bytes, &memory, &cancellation);
+        let first = reader.next_event().unwrap().unwrap().token;
+        cancellation.cancel();
+        assert!(matches!(
+            entries_from_token(first, &mut reader, &memory, &cancellation),
+            Err(JsonReadError::Cancelled(_))
+        ));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn durable_relation_acl_input_preserves_existing_struct_and_map_shapes() {
     let role = serde_json::to_string(&RoleIdentity::BOOTSTRAP).unwrap();
     let entry = serde_json::to_string(&entry()).unwrap();
