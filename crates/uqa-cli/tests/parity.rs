@@ -450,6 +450,16 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
 #[test]
 fn terminal_editor_signals_and_idle_notifications_use_the_real_binary() {
     let dir = tempfile::tempdir().unwrap();
+    let protocol = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/terminal.py"
+        ))
+        .arg("--check-waits")
+        .arg(dir.path())
+        .output()
+        .expect("verify terminal startup and editor progress deadlines");
+    assert!(protocol.status.success(), "{}", stderr(&protocol));
     let output = std::process::Command::new("python3")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),

@@ -8,38 +8,34 @@
 
 use super::{
     invalid, CapturedPath, CapturedPathIndex, MemoryPaths, PathIndex, PathStorage,
-    StorageBackendResult, StorageReadControl, MAGIC,
+    StorageBackendResult, MAGIC,
 };
-use std::{cmp::Ordering, io::Read, sync::Arc};
+use std::{cmp::Ordering, sync::Arc};
+use uqa_core::image_io::AsyncImageInput;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
-use uqa_storage::image_io::ImageInput;
 
-pub(super) fn read(
-    reader: &mut dyn Read,
-    control: &StorageReadControl,
-) -> StorageBackendResult<PathIndex> {
-    let mut input = ImageInput { reader, control };
-    if &input.array::<8>()? != MAGIC {
+pub(super) async fn read_from(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<PathIndex> {
+    if &input.array::<8>().await? != MAGIC {
         return Err(invalid());
     }
-    let mut memory = control.memory().reserve(size_of::<MemoryPaths>())?;
-    let count = input.count()?;
-    let mut paths: BudgetedVec<CapturedPath> = BudgetedVec::new(control.memory());
+    let mut memory = input.memory.reserve(size_of::<MemoryPaths>())?;
+    let count = input.count().await?;
+    let mut paths: BudgetedVec<CapturedPath> = BudgetedVec::new(input.memory);
     paths.reserve(count)?;
     for _ in 0..count {
-        let sequence = sequence(&mut input, &mut memory)?;
+        let sequence = sequence(input, &mut memory).await?;
         if let Some(previous) = paths.last() {
-            if compare(&previous.sequence, &sequence, control)? != Ordering::Less {
+            if compare(&previous.sequence, &sequence, input).await? != Ordering::Less {
                 return Err(invalid());
             }
         }
-        let pairs = pairs(&mut input, &mut memory)?;
+        let pairs = pairs(input, &mut memory).await?;
         paths.push(CapturedPath { sequence, pairs })?;
     }
-    input.end()?;
+    input.end().await?;
     let (paths, reservation) = paths.into_parts();
     memory.absorb(reservation);
-    control.check()?;
+    input.checkpoint().await?;
     Ok(PathIndex {
         storage: PathStorage::Memory(Arc::new(MemoryPaths::from_admitted(
             CapturedPathIndex { paths },
@@ -48,15 +44,15 @@ pub(super) fn read(
     })
 }
 
-fn sequence(
-    input: &mut ImageInput<'_>,
+async fn sequence(
+    input: &mut AsyncImageInput<'_>,
     memory: &mut MemoryReservation,
 ) -> StorageBackendResult<Vec<String>> {
-    let count = input.count()?;
-    let mut sequence = BudgetedVec::new(input.control.memory());
+    let count = input.count().await?;
+    let mut sequence = BudgetedVec::new(input.memory);
     sequence.reserve(count)?;
     for _ in 0..count {
-        let (label, reservation) = input.text()?.into_parts();
+        let (label, reservation) = input.text().await?.into_parts();
         memory.absorb(reservation);
         sequence.push(label)?;
     }
@@ -65,17 +61,17 @@ fn sequence(
     Ok(sequence)
 }
 
-fn pairs(
-    input: &mut ImageInput<'_>,
+async fn pairs(
+    input: &mut AsyncImageInput<'_>,
     memory: &mut MemoryReservation,
 ) -> StorageBackendResult<Vec<(u64, u64)>> {
-    let count = input.count()?;
-    let mut pairs = BudgetedVec::new(input.control.memory());
+    let count = input.count().await?;
+    let mut pairs = BudgetedVec::new(input.memory);
     pairs.reserve(count)?;
     for _ in 0..count {
         let pair = (
-            u64::from_le_bytes(input.array()?),
-            u64::from_le_bytes(input.array()?),
+            u64::from_le_bytes(input.array().await?),
+            u64::from_le_bytes(input.array().await?),
         );
         if pairs.last().is_some_and(|previous| *previous >= pair) {
             return Err(invalid());
@@ -87,19 +83,19 @@ fn pairs(
     Ok(pairs)
 }
 
-fn compare(
+async fn compare(
     left: &[String],
     right: &[String],
-    control: &StorageReadControl,
+    input: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<Ordering> {
     for (left, right) in left.iter().zip(right) {
-        control.check()?;
+        input.checkpoint().await?;
         for (left, right) in left
             .as_bytes()
             .chunks(4096)
             .zip(right.as_bytes().chunks(4096))
         {
-            control.check()?;
+            input.checkpoint().await?;
             let order = left.cmp(right);
             if order != Ordering::Equal {
                 return Ok(order);
@@ -110,6 +106,6 @@ fn compare(
             return Ok(order);
         }
     }
-    control.check()?;
+    input.checkpoint().await?;
     Ok(left.len().cmp(&right.len()))
 }

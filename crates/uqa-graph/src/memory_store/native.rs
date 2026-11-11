@@ -135,16 +135,43 @@ impl<V> NativeMap<String, V> {
         own_payload: usize,
         retained_payload: usize,
     ) -> Result<(), MemoryError> {
+        crate::image_work::inline(self.insert_named_with(
+            name,
+            value,
+            own_payload,
+            retained_payload,
+            &mut (),
+        ))
+    }
+
+    pub(super) async fn insert_named_with<E: From<MemoryError>>(
+        &mut self,
+        name: &str,
+        value: V,
+        own_payload: usize,
+        retained_payload: usize,
+        work: &mut impl crate::image_work::Work<E>,
+    ) -> Result<(), E> {
         let mut memory = self.budget().reserve(own_payload)?;
         let mut key = uqa_core::memory::BudgetedString::new(self.budget());
-        key.push_str(name)?;
+        key.reserve(name.len())?;
+        let mut start = 0;
+        while start < name.len() {
+            work.checkpoint().await?;
+            let mut end = (start + 4096).min(name.len());
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            key.push_str(&name[start..end])?;
+            start = end;
+        }
         let (key, key_memory) = key.into_parts();
         let retained = key
             .capacity()
             .checked_add(retained_payload)
             .ok_or(MemoryError::SizeOverflow)?;
         memory.absorb(key_memory);
-        self.insert_admitted(key, value, memory, retained)
+        Ok(self.insert_admitted(key, value, memory, retained)?)
     }
 }
 
@@ -255,10 +282,14 @@ impl<'a, K> IntoIterator for &'a NativeSet<K> {
 }
 
 impl NativeSet<String> {
-    pub(super) fn insert_name(&mut self, name: &str) -> Result<(), MemoryError> {
+    pub(super) async fn insert_name_with<E: From<MemoryError>>(
+        &mut self,
+        name: &str,
+        work: &mut impl crate::image_work::Work<E>,
+    ) -> Result<(), E> {
         if self.contains(name) {
             return Ok(());
         }
-        self.0.insert_named(name, (), 0, 0)
+        self.0.insert_named_with(name, (), 0, 0, work).await
     }
 }

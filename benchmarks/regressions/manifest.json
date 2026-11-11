@@ -2,6 +2,123 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_preserve_canonical_boundaries_and_parent_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Read canonical empty, short, exact-chunk and multichunk children with one-byte and fragmented parent windows.",
+      "invariant": "Child EOF preserves the next parent field and source bytes remain within each current limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_reject_truncation_noncanonical_frames_and_unconsumed_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Truncate every position of a small framed child and supply oversized, repeated-short and unconsumed child frames.",
+      "invariant": "Invalid or incomplete children fail terminally without consuming a successful parent tail or retaining allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_framed_children_resume_interrupts_and_retire_failed_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/image_io/framed/tests/native.rs",
+      "capability": "Native image framing",
+      "workload": "Interrupt partial frame headers and payloads, then cancel a retained framed child.",
+      "invariant": "Interrupted reads consume bounded attempts and resume in place; cancellation retires the complete original owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_preserves_original_wire_and_current_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Retained analyzer image framing",
+      "workload": "Decode a wide descriptor through one-byte, short and full windows with interrupted transport.",
+      "invariant": "Wire bytes, independent token terms, exact source position and private resource ownership are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_continues_preparation_after_eof_and_retires_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Analyzer input failure retirement",
+      "workload": "Cancel, abandon or invalidate input before and after source EOF.",
+      "invariant": "No post-EOF source replay occurs and unpublished owners release their original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_input_rejects_corruption_without_escaping_read_or_admission_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Analyzer input validation order",
+      "workload": "Read truncated, invalid UTF-8, trailing and over-limit descriptors through small windows.",
+      "invariant": "The first validation error and allocation admission precede later bytes, and terminal readers cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_analyzer_dictionary_input_preserves_exact_images_and_independent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_image/tests/retained.rs",
+      "capability": "Retained dictionary artifact framing",
+      "workload": "Restore enabled Korean and Japanese dictionaries with interrupted input and original window ceilings.",
+      "invariant": "Exact encoded images and complete token observations survive source loss; final owners retain and release original input admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_binding_input_preserves_both_revisions_names_and_framed_read_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests/retained.rs",
+      "capability": "Retained field analyzer input",
+      "workload": "Restore large UTF-8 names and independently framed index/search revisions through one-byte windows.",
+      "invariant": "Original names, phases, wire bytes and token observations survive without substituting existing cached analyzers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_field_binding_input_retires_names_and_completed_first_child_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/image/tests/retained.rs",
+      "capability": "Field analyzer input retirement",
+      "workload": "Cancel, abandon, invalidate or truncate input after names and either child revision.",
+      "invariant": "Partial and complete unpublished children release their original admission and preserve existing analyzer caches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-analysis",
       "kind": "lib",
       "test": "retained_analyzer_image_preparation_preserves_exact_descriptor_and_independent_token_output",
@@ -54338,6 +54455,474 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_retains_progress_and_preserves_cached_capture_ownership",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Private analyzer image publication",
+      "workload": "Prepare a wide Unicode descriptor through one-poll windows, then capture with exhausted admission and retire its executable revision.",
+      "invariant": "Encoded bytes preserve the original descriptor, cached capture shares its completed owner, and image lifetime is independent of execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_retires_unshared_revisions_after_terminal_failures",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Private analyzer image retirement",
+      "workload": "Cancel, abandon, invalidate or deny retained private image preparation at multiple suspension positions.",
+      "invariant": "Terminal failures release every candidate and original descriptor owner without publishing caches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "private_analyzer_image_publication_detaches_dictionary_bytes_from_import_admission",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/retained.rs",
+      "capability": "Independent analyzer image ownership",
+      "workload": "Prepare enabled Korean and Japanese retained dictionary images, then retire the compiled revision and imported buffers.",
+      "invariant": "Captured artifact bytes remain exact and independently admitted without retaining the executable models or import allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_analyzer_catalog_input_preserves_native_roots_names_and_independent_capture",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests/retained.rs",
+      "capability": "Native analyzer catalog input",
+      "workload": "Restore wide names and descriptor images under changing read/poll limits, capture and mutate with a new allowance.",
+      "invariant": "Original name addresses, token observations, immutable generations and independent encoded images survive input cancellation and exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_analyzer_catalog_failure_preserves_retained_roots_and_retires_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_catalog/tests/retained.rs",
+      "capability": "Analyzer catalog input retirement",
+      "workload": "Reject duplicate or foreign names and cancel, abandon or invalidate a retained catalog candidate.",
+      "invariant": "Prior roots remain unchanged while failed private revisions and their admission are completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_catalog_input_preserves_both_native_roots_through_new_mutations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests/retained.rs",
+      "capability": "Native field catalog input",
+      "workload": "Restore long table/field keys and independent historical index/search revisions, capture and mutate after cancelling input.",
+      "invariant": "Both native roots preserve original identity, exact image bytes and historical tokens under independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_catalog_failure_retires_both_private_roots_and_preserves_prior_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests/retained.rs",
+      "capability": "Field catalog input retirement",
+      "workload": "Reject duplicate field identity and cancel, abandon or invalidate partially reconstructed private bindings.",
+      "invariant": "Both unpublished catalog roots and children retire together without changing retained prior membership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retains_current_windows_and_validation_after_single_eof",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_retires_partial_fields_and_post_eof_candidates",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_input_errors_and_denied_admission_retire_the_original_continuation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_registry_input_retires_labels_at_ordering_and_tag_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/image/tests/input.rs",
+      "capability": "Graph registry input retirement",
+      "workload": "Suspend long common-prefix labels before their ID/kind tags; cancel, abandon, truncate or reject their ordering while an independent sibling remains admitted.",
+      "invariant": "Private labels and their original allowances retire together without touching sibling admission, reading after terminal failure or publishing partial registries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_preserves_independent_long_prefixes_pairs_and_native_charges",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_retires_partial_and_post_eof_owners_without_source_replay",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_input_rejects_ordering_truncation_and_denied_native_admission",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/image/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_catalog_input_keeps_original_name_and_retires_post_eof_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/catalog/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_catalog_input_keeps_original_name_and_retires_post_eof_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_retains_current_windows_exact_bits_and_post_eof_validation",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_retires_partial_fields_and_post_eof_candidates",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_rejects_malformed_truncated_and_unfunded_images_without_publication",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "native_model_input_resumes_footprint_and_publication_with_original_name_admission",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/continuation.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "native_model_input_retires_the_entire_candidate_after_eof_interruption",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/continuation.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_bounds_tombstones_and_preserves_original_owned_text",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Advance through 257 tombstones before an original Unicode text row.",
+      "invariant": "Each transition consumes at most one record slot and one bounded value; completed rows retain only their original native capacities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_retires_failed_cancelled_and_abandoned_original_views",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Inject read errors, malformed UTF-8, absent selected values, denied memory, cancellation and unwinding.",
+      "invariant": "Failure consumes the original view and continuation, releases unpublished reservations and prevents reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_input_checks_encoded_limits_before_value_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Deny encoded key and value sizes, zero limits and cursor header admission.",
+      "invariant": "Admission precedes payload materialization and decoding; failed input releases its entire owned allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_text_record_slots_count_tombstones_without_payload_reads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/cursors.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Retain 512 spilled private records with alternating tombstones, retire the original view and advance one slot at a time.",
+      "invariant": "Deleted slots consume the same window as live slots, keys remain ordered, no payload is read, zero windows emit nothing and both cancellation owners are honored.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six native SQLite catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six SQLite Key/Value catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_text_input_retains_private_rows_and_source_lifetime",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent catalog text input",
+      "workload": "Capture all six redb catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_preserves_stored_struct_and_legacy_name_forms",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode object and positional catalog encodings, escaped field names, nullable definitions, deeply nested ignored fields and legacy/composite physical keys.",
+      "invariant": "The stored decoder and retained input produce identical relation names and every original encoded string.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_rejects_invalid_field_shapes_without_retained_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode missing or duplicate fields, wrong types, malformed strings, extra positional fields and trailing values.",
+      "invariant": "Invalid shapes fail without retaining output buffers or reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_index_input_accounts_original_buffers_and_retires_denied_construction",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Decode long Unicode/escaped definitions under actual allocation observation, several denied allowances and cancellation.",
+      "invariant": "Successful native field capacities equal their retained reservation; partial construction retires on every denied path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture native SQLite index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture SQLite Key/Value index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_index_input_retains_original_definitions_and_private_membership",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent index catalog input",
+      "workload": "Capture redb index definitions during private replacement, insertion and deletion, then roll back, commit later writes and drop the source catalog.",
+      "invariant": "Original optional definitions, quoted names, encoded fields and private membership survive; tombstones consume bounded transitions and terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_security_adopts_original_acl_nodes_without_allocation",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority ownership",
+      "workload": "A captured authority row containing 1,024 column ACLs, independent tuple revisions and subsequent destination edits.",
+      "invariant": "Storage-to-SQL adoption performs zero allocations, preserves original node and payload addresses and retains the same ordered persistent bytes and independent cloned values."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_security_keeps_original_node_admission_until_retirement",
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests/production.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Persistent catalog authority ownership",
+      "workload": "Thirty-two separately admitted authority-map nodes and an exhausted shared allowance with an independent sibling.",
+      "invariant": "Adoption preserves every original node lease without requesting new admission; removal and final retirement release only the corresponding original reservations."
     }
   ]
 }

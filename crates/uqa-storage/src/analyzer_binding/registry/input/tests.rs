@@ -12,6 +12,8 @@ use crate::{
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_analysis::AnalyzerResources;
 
+mod retained;
+
 fn key(table: &str, field: &str, input: &StorageReadControl) -> Budgeted<(String, String)> {
     let control =
         ProductionControl::new(input.memory(), input.cancellation(), input.cancellation());

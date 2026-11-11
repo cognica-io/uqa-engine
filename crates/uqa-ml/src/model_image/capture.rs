@@ -91,18 +91,41 @@ pub(crate) fn retained_model_bytes<E: From<MemoryError>>(
     model: &DeepModel,
     mut check: impl FnMut() -> Result<(), E>,
 ) -> Result<usize, E> {
-    let DeepModel {
-        layers,
-        alpha: _,
-        gating: _,
-    } = model;
-    let mut bytes = size_of::<DeepModel>();
-    buffer::<DeepLayerSpec>(&mut bytes, layers.capacity())?;
-    for layer in layers {
-        check()?;
-        retain_layer(layer, &mut bytes)?;
+    let mut retention = ModelRetention::new(model)?;
+    loop {
+        if let Some(bytes) = retention.advance(&mut check)? {
+            return Ok(bytes);
+        }
     }
-    Ok(bytes)
+}
+
+pub(crate) struct ModelRetention<'a> {
+    layers: std::slice::Iter<'a, DeepLayerSpec>,
+    bytes: usize,
+}
+
+impl<'a> ModelRetention<'a> {
+    pub(crate) fn new(model: &'a DeepModel) -> Result<Self, MemoryError> {
+        let mut bytes = size_of::<DeepModel>();
+        buffer::<DeepLayerSpec>(&mut bytes, model.layers.capacity())?;
+        Ok(Self {
+            layers: model.layers.iter(),
+            bytes,
+        })
+    }
+
+    /// Count one layer's fixed set of native buffer capacities without walking its weights or labels.
+    pub(crate) fn advance<E: From<MemoryError>>(
+        &mut self,
+        check: impl FnOnce() -> Result<(), E>,
+    ) -> Result<Option<usize>, E> {
+        let Some(layer) = self.layers.next() else {
+            return Ok(Some(self.bytes));
+        };
+        check()?;
+        retain_layer(layer, &mut self.bytes)?;
+        Ok(None)
+    }
 }
 
 fn buffer<T>(bytes: &mut usize, capacity: usize) -> Result<(), MemoryError> {

@@ -83,6 +83,14 @@ impl ResolvedDictionary {
     ) -> Result<crate::analyzer::image_source::DictionaryImage, uqa_core::ValueRetentionError> {
         self.image.prepare(&self.bytes, control)
     }
+    pub(crate) async fn image_source_with_work(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut impl crate::work::Work<uqa_core::ValueRetentionError>,
+    ) -> Result<crate::analyzer::image_source::DictionaryImage, uqa_core::ValueRetentionError> {
+        crate::analyzer::image_source::DictionaryImage::prepare_with(&self.bytes, control, work)
+            .await
+    }
     pub fn sha256(&self) -> ResourceHash {
         self.sha256
     }

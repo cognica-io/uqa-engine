@@ -28,15 +28,15 @@ pub enum AnalyzerBindingOwner {
 }
 
 #[derive(Debug, Clone)]
-pub struct BoundAnalyzerRevision {
+pub struct BoundAnalyzerRevision<T = Arc<CompiledAnalyzer>> {
     pub name: Option<String>,
-    pub compiled: Arc<CompiledAnalyzer>,
+    pub compiled: T,
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldAnalyzerBinding {
-    pub index: BoundAnalyzerRevision,
-    pub search: BoundAnalyzerRevision,
+pub struct FieldAnalyzerBinding<T = Arc<CompiledAnalyzer>> {
+    pub index: BoundAnalyzerRevision<T>,
+    pub search: BoundAnalyzerRevision<T>,
     pub owner: AnalyzerBindingOwner,
     pub last_phase: AnalyzerPhase,
 }
@@ -217,7 +217,9 @@ impl FieldAnalyzerBinding {
         restored.validate()?;
         Ok(restored)
     }
+}
 
+impl<T: std::borrow::Borrow<CompiledAnalyzer>> FieldAnalyzerBinding<T> {
     fn validate(&self) -> StorageBackendResult<()> {
         for side in [&self.index, &self.search] {
             if side
@@ -236,8 +238,8 @@ impl FieldAnalyzerBinding {
             AnalyzerPhase::Both => {
                 self.index.name != self.search.name
                     || (self.index.name.is_some()
-                        && self.index.compiled.descriptor().fingerprint()
-                            != self.search.compiled.descriptor().fingerprint())
+                        && self.index.compiled.borrow().descriptor().fingerprint()
+                            != self.search.compiled.borrow().descriptor().fingerprint())
             }
         };
         if invalid_last_assignment {
@@ -248,8 +250,8 @@ impl FieldAnalyzerBinding {
         if self.owner == AnalyzerBindingOwner::Gin
             && (self.index.name.is_none()
                 || self.index.name != self.search.name
-                || self.index.compiled.descriptor().fingerprint()
-                    != self.search.compiled.descriptor().fingerprint()
+                || self.index.compiled.borrow().descriptor().fingerprint()
+                    != self.search.compiled.borrow().descriptor().fingerprint()
                 || self.last_phase != AnalyzerPhase::Both)
         {
             return Err(StorageBackendError::Other(

@@ -8,9 +8,12 @@
 
 use crate::{DeepModel, GatingSpec};
 use std::io::{Read, Write};
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};
+use uqa_core::{
+    image_io::AsyncImageInput,
+    memory::{Budgeted, BudgetedVec, MemoryReservation},
+};
 use uqa_storage::{
-    image_io::{ImageInput, ImageOutput, ImagePreparation, ImageRead, ImageReader},
+    image_io::{ImageOutput, ImagePreparation, ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
@@ -18,8 +21,8 @@ use uqa_storage::{
 mod capture;
 mod layers;
 mod stream;
-pub(crate) use capture::retained_model_bytes;
 pub use capture::ModelImageSnapshot;
+pub(crate) use capture::{retained_model_bytes, ModelRetention};
 #[cfg(test)]
 mod tests;
 
@@ -29,16 +32,16 @@ fn invalid() -> StorageBackendError {
     StorageBackendError::Other("invalid evaluated model image".into())
 }
 
-fn validate(model: &DeepModel, control: &StorageReadControl) -> StorageBackendResult<()> {
+async fn validate(model: &DeepModel, input: &mut AsyncImageInput<'_>) -> StorageBackendResult<()> {
     let mut validation = crate::deep_fusion::ModelValidation::model(&model.layers, model.alpha)
         .map_err(validation_error)?;
     loop {
-        control.check()?;
+        input.checkpoint().await?;
         if validation.advance().map_err(validation_error)? {
             break;
         }
     }
-    control.check()
+    input.checkpoint().await.map_err(Into::into)
 }
 
 fn validation_error(error: crate::MLError) -> StorageBackendError {
@@ -95,28 +98,37 @@ pub fn read_model_image(
     reader: &mut dyn Read,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<DeepModel>> {
-    let mut io = ImageInput { reader, control };
-    if &io.array::<8>()? != MAGIC {
+    uqa_core::image_io::decode_image(
+        reader,
+        control.memory(),
+        control.cancellation(),
+        async |mut input| read_model_image_from(&mut input).await,
+    )
+}
+
+/// Decode and validate through the enclosing native input channel. Scalar bits, UTF-8 fields and fixed numeric windows resume without replay; the private model retains its original payload admission after completion.
+pub async fn read_model_image_from(
+    io: &mut AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<DeepModel>> {
+    if &io.array::<8>().await? != MAGIC {
         return Err(invalid());
     }
-    let mut input = ModelInput {
-        io,
-        memory: control.memory().reserve(size_of::<DeepModel>())?,
-    };
-    let alpha = f64::from_bits(u64::from_le_bytes(input.io.array()?));
-    let gating = match input.io.array::<1>()?[0] {
+    let memory = io.memory.reserve(size_of::<DeepModel>())?;
+    let mut input = ModelInput { io, memory };
+    let alpha = f64::from_bits(u64::from_le_bytes(input.io.array().await?));
+    let gating = match input.io.array::<1>().await?[0] {
         0 => GatingSpec::None,
         1 => GatingSpec::ReLU,
         2 => GatingSpec::Swish,
         _ => return Err(invalid()),
     };
-    let count = input.io.count()?;
-    let mut layers = BudgetedVec::new(control.memory());
+    let count = input.io.count().await?;
+    let mut layers = BudgetedVec::new(input.io.memory);
     layers.reserve(count)?;
     for _ in 0..count {
-        layers.push(layers::read(&mut input)?)?;
+        layers.push(layers::read(&mut input).await?)?;
     }
-    input.io.end()?;
+    input.io.end().await?;
     let (layers, memory) = layers.into_parts();
     input.memory.absorb(memory);
     let model = Budgeted::new(
@@ -127,26 +139,24 @@ pub fn read_model_image(
         },
         input.memory,
     );
-    control.check()?;
-    validate(&model, control)?;
-    control.check()?;
+    validate(&model, input.io).await?;
     Ok(model)
 }
 
-struct ModelInput<'a> {
-    io: ImageInput<'a>,
+struct ModelInput<'a, 'b> {
+    io: &'a mut AsyncImageInput<'b>,
     memory: MemoryReservation,
 }
 
-impl ModelInput<'_> {
-    fn floats(&mut self) -> StorageBackendResult<Vec<f64>> {
-        let count = self.io.count()?;
-        let mut values = BudgetedVec::new(self.io.control.memory());
+impl ModelInput<'_, '_> {
+    async fn floats(&mut self) -> StorageBackendResult<Vec<f64>> {
+        let count = self.io.count().await?;
+        let mut values = BudgetedVec::new(self.io.memory);
         values.reserve(count)?;
         let mut buffer = [0_u8; 4096];
         while values.len() < count {
             let length = (count - values.len()).min(buffer.len() / 8) * 8;
-            self.io.exact(&mut buffer[..length])?;
+            self.io.exact(&mut buffer[..length]).await?;
             for bytes in buffer[..length].chunks_exact(8) {
                 values.push(f64::from_bits(u64::from_le_bytes(
                     bytes.try_into().expect("eight bytes"),
@@ -158,18 +168,18 @@ impl ModelInput<'_> {
         Ok(values)
     }
 
-    fn text(&mut self) -> StorageBackendResult<String> {
-        let (text, memory) = self.io.text()?.into_parts();
+    async fn text(&mut self) -> StorageBackendResult<String> {
+        let (text, memory) = self.io.text().await?.into_parts();
         self.memory.absorb(memory);
         Ok(text)
     }
 
-    fn float(&mut self) -> StorageBackendResult<f64> {
-        Ok(f64::from_bits(u64::from_le_bytes(self.io.array()?)))
+    async fn float(&mut self) -> StorageBackendResult<f64> {
+        Ok(f64::from_bits(u64::from_le_bytes(self.io.array().await?)))
     }
 
-    fn boolean(&mut self) -> StorageBackendResult<bool> {
-        match self.io.array::<1>()?[0] {
+    async fn boolean(&mut self) -> StorageBackendResult<bool> {
+        match self.io.array::<1>().await?[0] {
             0 => Ok(false),
             1 => Ok(true),
             _ => Err(invalid()),

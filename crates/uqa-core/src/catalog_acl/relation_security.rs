@@ -37,7 +37,7 @@ pub struct BoundRelationSecurity {
     /// Explicit null preserves the owner-only default ACL; an absent current field is invalid.
     #[serde(deserialize_with = "Deserialize::deserialize")]
     pub acl: Option<Vec<BoundAclEntry<TablePrivileges>>>,
-    pub column_acls: BTreeMap<String, Vec<BoundAclEntry<TablePrivileges>>>,
+    pub column_acls: OwnedMap<String, Vec<BoundAclEntry<TablePrivileges>>>,
     /// Loaded from independent ACL records, never embedded in a relation definition.
     #[serde(skip)]
     pub acl_revisions: RelationAclRevisions,
@@ -48,7 +48,7 @@ impl BoundRelationSecurity {
         Self {
             role_owner,
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
             acl_revisions: RelationAclRevisions::default(),
         }
     }

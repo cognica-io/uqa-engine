@@ -9,6 +9,8 @@ use crate::{GraphStore, MemoryGraphStore};
 use uqa_core::Vertex;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
+mod input;
+
 fn graph(value: u64) -> Arc<GraphStoreHandle> {
     let mut source = MemoryGraphStore::new();
     source.create_graph("g").unwrap();

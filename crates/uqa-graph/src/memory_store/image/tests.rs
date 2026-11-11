@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod input;
 mod registration;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod repository;

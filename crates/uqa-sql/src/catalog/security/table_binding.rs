@@ -41,11 +41,12 @@ impl BoundTableSecurity {
         }
     }
 
+    /// Adopt the stored authority's original nodes, payloads and node admission without rebuilding the column map.
     pub fn from_row(row: uqa_core::catalog_acl::BoundRelationSecurity) -> Self {
         Self {
             role_owner: row.role_owner,
             acl: row.acl,
-            column_acls: row.column_acls.into_iter().collect(),
+            column_acls: row.column_acls,
             acl_revisions: row.acl_revisions,
         }
     }
@@ -54,11 +55,7 @@ impl BoundTableSecurity {
         uqa_core::catalog_acl::BoundRelationSecurity {
             role_owner: self.role_owner,
             acl: self.acl.clone(),
-            column_acls: self
-                .column_acls
-                .iter()
-                .map(|(column, acl)| (column.clone(), acl.clone()))
-                .collect(),
+            column_acls: self.column_acls.clone(),
             acl_revisions: self.acl_revisions.clone(),
         }
     }

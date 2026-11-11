@@ -9,6 +9,7 @@ use crate::{GraphStore, MemoryGraphStore, PathIndexCatalog};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{Edge, Vertex};
 
+mod input;
 mod lifetime;
 mod repository;
 mod validation;

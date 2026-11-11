@@ -8,11 +8,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Reconstruct resolved analyzers through retained descriptor, dictionary, language-pipeline and executable preparation. Image restoration preserves exact encoded resource ownership, user rules, stop sets and token output without consulting live resolvers or publishing partial cache entries. Enclosing Storage framing and complete Engine restoration remain under implementation.
+- Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
 
-- Retain Korean and Japanese user-rule parsing, stable UTF-16 ordering and lexical construction through input progress. Shared Core heap transitions preserve ordinary allocation-free sorting; user sources, duplicate rules, CSV/comment handling and token observations remain unchanged. Enclosing Storage and Engine restoration remain under implementation.
+- Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.
 
-- Retain common compiled analyzer preparation across input windows, including mapping order, stop/synonym ownership and regex replacement fragments. Original descriptors, canonical settings, token output and cache publication remain unchanged; complete language-resource preparation is integrated into resolved image reconstruction, while enclosing Storage and Engine restoration remain under implementation.
+- Retain persistent catalog text reads on one committed/private snapshot, including model, scoring, analyzer and path definitions. Each transition consumes one record slot, including deletions, and checks encoded key/value limits before owned payload admission. Typed catalog and Engine restore integration remain under implementation.
+
+- Resume native model input, validation and catalog adoption through the original byte/work windows, preserving exact weight bits, layer order, labels and original allocation ownership without retraining. Engine archive integration and public restore remain separate delivery work.
+
+- Resume native graph and materialized-path input, validation and catalog adoption through the original input byte/work windows. Original evaluated values, membership, label identities, materialized pairs and allocation ownership survive source retirement and later mutation. Pending registry labels keep their original allowance through ordering and tag reads, including cancellation and abandonment. Engine archive integration and public restore remain separate delivery work.
+
+- Restore resolved analyzer and field-binding images through the caller's byte and work windows, preserving original descriptors, dictionary bytes, user rules, index/search revisions and allocation ownership. Native named/field catalog publication retains both runtime and encoded roots, and capture images own copied descriptor/artifact bytes independently of imported executable revisions. Completed images use captured resources independently of live analyzer caches. Temporary dictionary-input storage retains its allowance until reconstruction retires the original vector. Public Engine restoration remains under implementation.
 
 - Compile native memory-backup capture adapters and their unit-test consumers under the same platform boundary as the local repository API, preserving strict browser WASM library/test builds and native transaction snapshots.
 
@@ -20,9 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Validate resolved analyzer configurations through retained borrowed fields, preserving exact canonical values and byte-limit diagnostics without complete pipeline copies.
 
-- Retain analyzer descriptor syntax, canonical output, fingerprints, runtime profiles and native configuration construction across input steps. Original configuration images and descriptor values share native field constructors while preserving exact values, schema diagnostics and allocation ownership. Executable preparation is integrated into resolved image reconstruction; enclosing Storage and Engine restoration remain under implementation.
+- Retain analyzer descriptor syntax, canonical output, fingerprints, runtime profiles and native configuration construction across input steps. Original configuration images and descriptor values share native field constructors while preserving exact values, schema diagnostics and allocation ownership. Executable preparation, Storage image input and native catalog publication share the retained reconstruction; public Engine restoration remains under implementation.
 
-- Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; enclosing Storage and Engine restoration remain under implementation.
+- Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; Storage image input and native catalog publication use these constructors; public Engine restoration remains under implementation.
 
 - Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.
 - Validate legacy trigger targets through their exact stored schema/function name when an immutable function identity is absent. Original absent identity fields remain unchanged, and ambiguous or missing handlers reject before activation. Trigger activation consumes one event row even when the stored handler declaration includes `SETOF`.

@@ -10,6 +10,8 @@ use crate::analyzer_image::AnalyzerImageSnapshot;
 use std::collections::BTreeMap;
 use uqa_analysis::{Analyzer, AnalyzerLimits, CompiledAnalyzer, Tokenizer};
 
+mod retained;
+
 fn bindings() -> BTreeMap<(String, String), FieldAnalyzerBinding> {
     let index = uqa_analysis::standard_analyzer("english")
         .compile()

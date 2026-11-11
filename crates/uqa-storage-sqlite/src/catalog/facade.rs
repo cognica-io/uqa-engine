@@ -18,6 +18,24 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn begin_index_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::input::CatalogInput<uqa_storage::CatalogIndexRow>>
+    {
+        self.native_index_input(limits, control)
+    }
+
+    fn begin_text_input(
+        &self,
+        family: uqa_storage::catalog::text_input::CatalogTextFamily,
+        limits: uqa_storage::catalog::text_input::CatalogTextLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::text_input::CatalogTextInput> {
+        self.native_text_input(family, limits, control)
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.conn.transaction_model()
     }

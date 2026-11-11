@@ -23,6 +23,7 @@ pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
+pub mod input;
 mod record_revisions;
 mod relation;
 pub mod relation_acl;
@@ -48,6 +49,7 @@ pub use sequence_values::{
     SequenceValuePosition, SequenceValueReservation,
 };
 mod table;
+pub mod text_input;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
 pub use table::{TableAclEntry, TablePrivileges};
@@ -286,6 +288,31 @@ pub struct SequenceRow {
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Retain one native catalog read boundary without loading its values. Each advance visits one record slot under independent encoded key/value limits. Providers without retained bounded reads reject this capability.
+    fn begin_text_input(
+        &self,
+        _family: text_input::CatalogTextFamily,
+        _limits: text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<text_input::CatalogTextInput> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog text input is not supported".into(),
+        ))
+    }
+
+    /// Retain secondary-index definitions from the same native read boundary. Each row preserves its original encoded columns, parameters and optional semantic definition; later consumers own catalog ordering and reference validation.
+    fn begin_index_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<CatalogIndexRow>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog index input is not supported".into(),
+        ))
+    }
+
     /// Transaction model and database incarnation shared with the paired backend. Wrappers must forward this with the session affinity.
     fn transaction_model(&self) -> crate::StorageTransactionModel {
         crate::StorageTransactionModel::ProviderSerialized

@@ -14,7 +14,7 @@ mod framed;
 mod owned;
 mod reader;
 mod retained;
-pub use framed::{framed_image_reader, FramedImageInput};
+pub use framed::{framed_image_reader, read_framed_image_from, FramedImageInput};
 pub use owned::ImageOwner;
 pub use reader::{ImagePreparation, ImageRead, ImageReader};
 pub use retained::with_retained_control;
@@ -119,12 +119,20 @@ impl ImageInput<'_> {
 }
 
 fn io_error(error: uqa_core::image_io::ImageIoError) -> StorageBackendError {
-    use uqa_core::image_io::ImageIoError;
-    match error {
-        ImageIoError::Invalid => StorageBackendError::Other("invalid owner image stream".into()),
-        ImageIoError::Memory(error) => error.into(),
-        ImageIoError::Cancelled(error) => error.into(),
-        ImageIoError::Io(error) => StorageBackendError::backend("owner image I/O", error),
+    error.into()
+}
+
+impl From<uqa_core::image_io::ImageIoError> for StorageBackendError {
+    fn from(error: uqa_core::image_io::ImageIoError) -> Self {
+        use uqa_core::image_io::ImageIoError;
+        match error {
+            ImageIoError::Invalid => {
+                StorageBackendError::Other("invalid owner image stream".into())
+            }
+            ImageIoError::Memory(error) => error.into(),
+            ImageIoError::Cancelled(error) => error.into(),
+            ImageIoError::Io(error) => StorageBackendError::backend("owner image I/O", error),
+        }
     }
 }
 
@@ -134,6 +142,15 @@ fn value_error(error: uqa_core::value_image::ValueImageError) -> StorageBackendE
         uqa_core::value_image::ValueImageError::Cancelled(error) => error.into(),
         other => StorageBackendError::backend("owner image value", other),
     }
+}
+
+/// Reuse Core's retained value input through the enclosing transport and preserve Storage's value-error boundary. The returned native allocation keeps its original input reservation.
+pub async fn read_value_image_from(
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<uqa_core::Value>> {
+    uqa_core::value_image::ValueImageInput::read_from(input)
+        .await
+        .map_err(value_error)
 }
 
 #[cfg(test)]

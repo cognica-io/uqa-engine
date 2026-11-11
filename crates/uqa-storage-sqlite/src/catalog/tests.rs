@@ -12,6 +12,7 @@ mod foreign_servers;
 mod metadata;
 mod metadata_prefix;
 mod migration;
+mod text_input;
 mod version_migrations;
 mod view_provenance;
 

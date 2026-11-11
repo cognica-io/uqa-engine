@@ -85,6 +85,16 @@ pub(super) fn membership(
     graph: &str,
     add: bool,
 ) -> Result<(), MemoryError> {
+    crate::image_work::inline(membership_with(map, id, graph, add, &mut ()))
+}
+
+pub(super) async fn membership_with<E: From<MemoryError>>(
+    map: &mut NativeMap<u64, NativeSet<String>>,
+    id: u64,
+    graph: &str,
+    add: bool,
+    work: &mut impl crate::image_work::Work<E>,
+) -> Result<(), E> {
     let existing = map.get(&id);
     if !add && existing.is_none() {
         return Ok(());
@@ -94,7 +104,7 @@ pub(super) fn membership(
         .unwrap_or_else(|| NativeSet::new(map.budget()))
         .into_mutation_budget(map.budget());
     if add {
-        names.insert_name(graph)?;
+        names.insert_name_with(graph, work).await?;
     } else {
         names.remove(graph)?;
     }
@@ -108,14 +118,14 @@ pub(super) fn entity_bytes(
     properties: &BTreeMap<String, Value>,
     memory: &MemoryBudget,
 ) -> uqa_storage::StorageBackendResult<usize> {
-    entity_bytes_with_check(label, properties, memory, || Ok(()))
+    crate::image_work::inline(entity_bytes_with(label, properties, memory, &mut ()))
 }
 
-pub(super) fn entity_bytes_with_check(
+pub(super) async fn entity_bytes_with(
     label: &String,
     properties: &BTreeMap<String, Value>,
     memory: &MemoryBudget,
-    mut check: impl FnMut() -> Result<(), uqa_core::QueryCancelled>,
+    work: &mut impl crate::image_work::Work<uqa_storage::StorageBackendError>,
 ) -> uqa_storage::StorageBackendResult<usize> {
     let mut bytes = label
         .capacity()
@@ -127,12 +137,16 @@ pub(super) fn entity_bytes_with_check(
         )
         .ok_or(MemoryError::SizeOverflow)?;
     for (name, value) in properties {
-        check()?;
-        let payload = value.retained_payload_bytes_with_check(memory, &mut check)?;
+        work.checkpoint().await?;
         bytes = bytes
             .checked_add(name.capacity())
-            .and_then(|n| n.checked_add(payload))
             .ok_or(MemoryError::SizeOverflow)?;
+        for payload in value.retained_payload_parts_with_check(memory, || Ok(())) {
+            work.checkpoint().await?;
+            bytes = bytes
+                .checked_add(payload?)
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
     }
     Ok(bytes)
 }
