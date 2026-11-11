@@ -80,7 +80,7 @@ macro_rules! table_sources {
                 Ok(selected)
             }
 
-            #[cfg(test)]
+            #[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
             pub(super) fn assert_unread(&self, cut: &uqa_storage::memory_capture::MemoryCapture) {
                 $(assert!(self.$field.retained(cut).unwrap().is_none(), stringify!($field));)*
             }

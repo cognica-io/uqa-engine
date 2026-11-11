@@ -203,6 +203,7 @@ fn memory_resource_children_keep_original_cancellation_after_registry_and_engine
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_model_capture_and_native_publication_share_unrelated_weights() {
     let engine = Engine::new();
     // Keep registration admission live while checking that later writes do not change the retained payload charge.

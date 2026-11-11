@@ -8,6 +8,7 @@ use super::{sql, Engine, StorageReadControl};
 use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_memory_table_names_and_constraints_capture_original_native_generations() {
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE parent(id integer, PRIMARY KEY(id)); CREATE TABLE saved(id integer, old text, PRIMARY KEY(id), FOREIGN KEY(id) REFERENCES parent(id)); ALTER TABLE saved DROP COLUMN old");
@@ -107,6 +108,7 @@ fn committed_memory_table_names_and_constraints_capture_original_native_generati
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_memory_analyzer_capture_shares_the_original_published_image() {
     use uqa_analysis::{Analyzer, AnalyzerDefinition, Tokenizer};
     let engine = Engine::new();
@@ -153,6 +155,7 @@ fn committed_memory_analyzer_capture_shares_the_original_published_image() {
 }
 
 #[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 fn committed_memory_statistics_capture_preserves_native_distributions_without_copying() {
     let engine = Engine::new();
     sql(&engine, "CREATE TABLE saved(payload text)");
