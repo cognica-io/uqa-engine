@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain common compiled analyzer preparation across input windows, including mapping order, stop/synonym ownership and regex replacement fragments. Original descriptors, canonical settings, token output and cache publication remain unchanged; language resource and enclosing restore integration remain under implementation.
+
 - Compile native memory-backup capture adapters and their unit-test consumers under the same platform boundary as the local repository API, preserving strict browser WASM library/test builds and native transaction snapshots.
 
 - Reuse canonical JSON string workspace and borrow ordered object traversal during dictionary loading, preserving the existing allocation ceilings and insertion-order JSON compatibility.

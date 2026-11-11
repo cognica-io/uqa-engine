@@ -248,7 +248,14 @@ impl AnalyzerDescriptor {
 
     /// Return the resolved configuration for diagnostics or compatibility APIs. Execute a retained compiled handle when exact resource ownership is required.
     pub fn configuration(&self) -> AnalysisResult<Analyzer> {
-        crate::work::inline(crate::configuration::decode(&self.data.pipeline, &mut ()))
+        crate::work::inline(self.configuration_with(&mut ()))
+    }
+
+    pub(crate) async fn configuration_with(
+        &self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<Analyzer> {
+        crate::configuration::decode(&self.data.pipeline, work).await
     }
 
     pub(crate) fn validate_limits(&self, limits: AnalyzerLimits) -> AnalysisResult<()> {

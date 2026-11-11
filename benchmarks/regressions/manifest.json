@@ -2,6 +2,45 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_preparation_retains_configuration_and_stage_work_without_whole_pipeline_copies",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Prepare a resolved multi-megabyte mapping, synonym and stop pipeline through one-poll input windows.",
+      "invariant": "Every fixture poll allocates less than 64 KiB while preserving the original descriptor, canonical configuration and token output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "compiled_preparation_retires_configuration_and_prepared_stages_at_each_boundary",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Abandon, cancel and invalidate compiled preparation at early, middle and late suspension points.",
+      "invariant": "No partial configuration or prepared stage remains owned after terminal failure, and failed input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_replacement_preparation_matches_regex_capture_expansion",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/compiled/tests.rs",
+      "capability": "Retained common analyzer preparation",
+      "workload": "Prepare long Unicode, literal, escaped-dollar, named/numeric capture and malformed replacement inputs through one-poll windows.",
+      "invariant": "Prepared character output matches the independent public regex replacement implementation after the source configuration is retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_column_images_match_independent_physical_attribute_bytes",
