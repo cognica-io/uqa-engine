@@ -20689,7 +20689,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -53841,6 +53841,32 @@
       "capability": "Retained native provenance input",
       "workload": "Read wide/deep manifests, escaped Unicode, arbitrary precision values and malformed prefixes through the existing retained input scheduler.",
       "invariant": "The native grammar matches independent serde JSON acceptance, truncation rejection and the original nesting ceiling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "canonical_json_reuses_string_encoding_workspace_across_native_fields",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/json/output/tests.rs",
+      "capability": "Retained native JSON encoding workspace",
+      "workload": "Encode 4096 native string values through one canonical output continuation.",
+      "invariant": "Exact public JSON bytes use one reusable string workspace; allocation follows output capacity instead of field count.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "canonical_json_borrows_ordered_objects_and_sorts_unordered_members",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/json/output/tests.rs",
+      "capability": "Canonical native object traversal",
+      "workload": "Encode 4096 ordered native properties and the same properties inserted in reverse order.",
+      "invariant": "Ordered input is borrowed without a second key index; both native map configurations retain exactly the canonical bytes.",
       "case_names": [
         ""
       ]

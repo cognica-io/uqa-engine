@@ -14,7 +14,48 @@ use std::collections::{btree_map, BTreeMap};
 enum Frame<'a> {
     Value(&'a Value),
     Array(std::slice::Iter<'a, Value>, bool),
-    Object(btree_map::IntoIter<&'a str, &'a Value>, bool),
+    Object(Object<'a>, bool),
+}
+
+enum Object<'a> {
+    Native(serde_json::map::Iter<'a>),
+    Sorted(btree_map::IntoIter<&'a str, &'a Value>),
+}
+
+impl<'a> Iterator for Object<'a> {
+    type Item = (&'a str, &'a Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Native(values) => values.next().map(|(key, value)| (key.as_str(), value)),
+            Self::Sorted(values) => values.next(),
+        }
+    }
+}
+
+async fn object<'a, E>(
+    values: &'a serde_json::Map<String, Value>,
+    work: &mut impl Work<E>,
+) -> Result<Object<'a>, E> {
+    let mut previous = None;
+    let mut ordered = true;
+    for (index, key) in values.keys().enumerate() {
+        work.records(index).await?;
+        if previous.is_some_and(|previous: &str| previous > key.as_str()) {
+            ordered = false;
+            break;
+        }
+        previous = Some(key.as_str());
+    }
+    if ordered {
+        return Ok(Object::Native(values.iter()));
+    }
+    let mut ordered = BTreeMap::new();
+    for (index, (key, value)) in values.iter().enumerate() {
+        work.records(index).await?;
+        ordered.insert(key.as_str(), value);
+    }
+    Ok(Object::Sorted(ordered.into_iter()))
 }
 
 pub(crate) trait Output<E>: Send {
@@ -34,6 +75,7 @@ pub(crate) async fn write_value<E: From<serde_json::Error>>(
     work: &mut impl Work<E>,
 ) -> Result<(), E> {
     let mut stack = vec![Frame::Value(value)];
+    let mut encoded = Vec::new();
     while let Some(frame) = stack.pop() {
         work.checkpoint().await?;
         match frame {
@@ -44,19 +86,17 @@ pub(crate) async fn write_value<E: From<serde_json::Error>>(
             Frame::Value(Value::Number(value)) => {
                 write_raw(value.as_str(), output, work).await?;
             }
-            Frame::Value(Value::String(value)) => write_string(value, output, work).await?,
+            Frame::Value(Value::String(value)) => {
+                write_string_with_buffer(value, output, work, &mut encoded).await?;
+            }
             Frame::Value(Value::Array(values)) => {
                 output.write_str("[")?;
                 stack.push(Frame::Array(values.iter(), true));
             }
             Frame::Value(Value::Object(values)) => {
-                let mut ordered = BTreeMap::new();
-                for (index, (key, value)) in values.iter().enumerate() {
-                    work.records(index).await?;
-                    ordered.insert(key.as_str(), value);
-                }
+                let values = object(values, work).await?;
                 output.write_str("{")?;
-                stack.push(Frame::Object(ordered.into_iter(), true));
+                stack.push(Frame::Object(values, true));
             }
             Frame::Array(mut values, first) => {
                 if let Some(value) = values.next() {
@@ -74,7 +114,7 @@ pub(crate) async fn write_value<E: From<serde_json::Error>>(
                     if !first {
                         output.write_str(",")?;
                     }
-                    write_string(key, output, work).await?;
+                    write_string_with_buffer(key, output, work, &mut encoded).await?;
                     output.write_str(":")?;
                     stack.push(Frame::Object(values, false));
                     stack.push(Frame::Value(value));
@@ -102,19 +142,19 @@ pub(crate) async fn write_raw<E>(
     Ok(())
 }
 
-pub(crate) async fn write_string<E: From<serde_json::Error>>(
+async fn write_string_with_buffer<E: From<serde_json::Error>>(
     value: &str,
     output: &mut impl Output<E>,
     work: &mut impl Work<E>,
+    encoded: &mut Vec<u8>,
 ) -> Result<(), E> {
     output.write_str("\"")?;
     let mut position = 0;
-    let mut encoded = Vec::new();
     while position < value.len() {
         work.checkpoint().await?;
         let part = fragment(value, position);
         encoded.clear();
-        serde_json::to_writer(&mut encoded, part).map_err(E::from)?;
+        serde_json::to_writer(&mut *encoded, part).map_err(E::from)?;
         output.write_str(
             std::str::from_utf8(&encoded[1..encoded.len() - 1])
                 .expect("the JSON serializer emits valid UTF-8 fragments"),
@@ -124,3 +164,6 @@ pub(crate) async fn write_string<E: From<serde_json::Error>>(
     output.write_str("\"")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
