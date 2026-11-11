@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.
+
 - Decode projected authority JSON with sorted last-value object fields and integer classification, retaining admitted recipient, grantor, column and path allocations without copying discarded values.
 
 - Project stored JSON object fields in sorted last-value order while retaining original value bytes, admitting decoded names and map nodes without building another value tree.

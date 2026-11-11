@@ -7,6 +7,16 @@
 use super::*;
 
 #[test]
+fn redb_catalog_table_input_retains_private_definitions_and_acl_replacements() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("catalog-table-input.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_table_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_catalog_index_input_retains_original_definitions_and_private_membership() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("catalog-index-input.redb")).unwrap();

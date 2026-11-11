@@ -55456,6 +55456,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_preserves_flattened_security_versions_and_original_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_preserves_known_duplicates_and_projected_authority_collisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_keeps_field_error_order_before_later_syntax_and_security",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_retains_exact_buffers_and_skips_discarded_large_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_retires_all_truncations_cancellation_and_partial_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_filters_live_metadata_before_any_value_read",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_input_retires_selection_failures_before_value_access",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_table_input_preserves_original_key_identity_and_validation_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_acl_selection_preserves_original_string_prefix_and_suffix_handling",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/table_input/tests.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_table_input_retains_private_definitions_and_acl_replacements",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained Key/Value table catalog input",
+      "workload": "Compare original flattened table decoding and retained provider input across private rollback, source retirement, selection errors and allocation limits.",
+      "invariant": "Original definitions and ACL records share one view; direct and projected fields keep their stored semantics and unrelated metadata values are not read.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

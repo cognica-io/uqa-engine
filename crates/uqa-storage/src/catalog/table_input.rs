@@ -7,7 +7,9 @@
 //! Physical table definitions and independent ACL replacements retain one catalog view.
 
 use super::{
-    input::{CatalogInput, CatalogInputLimits, CatalogInputStep, CatalogRowDecoder},
+    input::{
+        CatalogInput, CatalogInputLimits, CatalogInputStep, CatalogKeyFilter, CatalogRowDecoder,
+    },
     relation_acl::{decode_key_with_control, RelationAclTuple},
     RelationIdentity, TableSchema,
 };
@@ -85,11 +87,38 @@ impl CatalogTableInput {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::create(read, definitions, acls, None, limits, control)
+    }
+
+    /// Select independent ACL keys before reading their values when the provider's physical prefix also contains unrelated metadata.
+    pub fn new_filtered(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        definitions: (&[u8], CatalogRowDecoder<TableSchema>),
+        acls: (&[u8], CatalogRowDecoder<CatalogTableAcl>),
+        select_acl: CatalogKeyFilter,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::create(read, definitions, acls, Some(select_acl), limits, control)
+    }
+
+    fn create(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        definitions: (&[u8], CatalogRowDecoder<TableSchema>),
+        acls: (&[u8], CatalogRowDecoder<CatalogTableAcl>),
+        select_acl: Option<CatalogKeyFilter>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
         control.check()?;
         let memory = control.memory().reserve(size_of::<Input>())?;
         let definitions =
             CatalogInput::new(read.clone(), definitions.0, definitions.1, limits, control)?;
-        let acls = CatalogInput::new(read, acls.0, acls.1, limits, control)?;
+        let acls = if let Some(select) = select_acl {
+            CatalogInput::new_filtered(read, acls.0, select, acls.1, limits, control)?
+        } else {
+            CatalogInput::new(read, acls.0, acls.1, limits, control)?
+        };
         Ok(Self {
             state: State::Reading(Budgeted::new(
                 Box::new(Input {

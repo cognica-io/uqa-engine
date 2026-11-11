@@ -217,3 +217,84 @@ fn catalog_table_input_retires_both_sources_after_late_error_unwind_and_cancella
         assert_eq!(control.memory().used(), sibling.bytes());
     }
 }
+
+#[test]
+fn catalog_table_input_filters_live_metadata_before_any_value_read() {
+    let source = source("panic");
+    let counts = source.counts.clone();
+    let weak = Arc::downgrade(&source);
+    let control = StorageReadControl::with_limit(65536);
+    let mut input = CatalogTableInput::new_filtered(
+        source,
+        (b"d/", definition),
+        (b"a/", acl),
+        |_, control| {
+            control.check()?;
+            Ok(false)
+        },
+        CatalogInputLimits {
+            maximum_key_bytes: 64,
+            maximum_value_bytes: 64,
+        },
+        &control,
+    )
+    .unwrap();
+    while !matches!(
+        input.advance().unwrap(),
+        CatalogTableInputStep::DefinitionsComplete
+    ) {}
+    let values = counts.values.load(Ordering::SeqCst);
+    assert!(matches!(
+        input.advance().unwrap(),
+        CatalogTableInputStep::Pending
+    ));
+    assert_eq!(counts.values.load(Ordering::SeqCst), values);
+    assert!(weak.upgrade().is_some());
+    assert!(matches!(
+        input.advance().unwrap(),
+        CatalogTableInputStep::Complete
+    ));
+    assert!(weak.upgrade().is_none());
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn catalog_table_input_retires_selection_failures_before_value_access() {
+    fn failure(_: &[u8], _: &StorageReadControl) -> StorageBackendResult<bool> {
+        Err(StorageBackendError::Other("selection failure".into()))
+    }
+    fn unwind(_: &[u8], _: &StorageReadControl) -> StorageBackendResult<bool> {
+        panic!("selection unwind")
+    }
+    for select in [failure as CatalogKeyFilter, unwind] {
+        let source = source("panic");
+        let counts = source.counts.clone();
+        let weak = Arc::downgrade(&source);
+        let control = StorageReadControl::with_limit(65536);
+        let sibling = control.memory().reserve(19).unwrap();
+        let mut input = CatalogTableInput::new_filtered(
+            source,
+            (b"d/", definition),
+            (b"a/", acl),
+            select,
+            CatalogInputLimits {
+                maximum_key_bytes: 64,
+                maximum_value_bytes: 64,
+            },
+            &control,
+        )
+        .unwrap();
+        while !matches!(
+            input.advance().unwrap(),
+            CatalogTableInputStep::DefinitionsComplete
+        ) {}
+        let values = counts.values.load(Ordering::SeqCst);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| input.advance()));
+        assert!(matches!(result, Err(_) | Ok(Err(_))));
+        assert!(weak.upgrade().is_none());
+        assert_eq!(counts.values.load(Ordering::SeqCst), values);
+        assert!(input.advance().is_err());
+        assert_eq!(counts.values.load(Ordering::SeqCst), values);
+        assert_eq!(control.memory().used(), sibling.bytes());
+    }
+}

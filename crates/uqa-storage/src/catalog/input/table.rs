@@ -6,6 +6,9 @@
 
 //! Stored text and vector field declarations retain their original ordered buffers.
 
+mod row;
+pub use row::row;
+
 use crate::{
     read_control::StorageReadControl, StorageBackendError, StorageBackendResult, VectorFieldSchema,
 };
@@ -20,7 +23,7 @@ pub fn field_names(
     bytes: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Vec<String>>> {
-    Input::new(bytes, control).sequence(|input, token| input.text(token))
+    Input::new(bytes, control).sequence(true, |input, token| input.text(token))
 }
 
 /// Decode stored vector field declarations without copying their enclosing JSON or collecting an intermediate value tree. Every destination buffer is admitted before construction.
@@ -28,7 +31,7 @@ pub fn vector_fields(
     bytes: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<Vec<VectorFieldSchema>>> {
-    Input::new(bytes, control).sequence(Input::vector)
+    Input::new(bytes, control).sequence(true, Input::vector)
 }
 
 struct Input<'a, 'c> {
@@ -63,6 +66,7 @@ impl<'a, 'c> Input<'a, 'c> {
 
     fn sequence<T>(
         mut self,
+        require_end: bool,
         mut element: impl FnMut(&mut Self, JsonToken<'a>) -> StorageBackendResult<Budgeted<T>>,
     ) -> StorageBackendResult<Budgeted<Vec<T>>> {
         self.control.check()?;
@@ -82,7 +86,7 @@ impl<'a, 'c> Input<'a, 'c> {
             payloads.absorb(memory);
             values.push(value)?;
         }
-        if self.reader.next_event().map_err(json_error)?.is_some() {
+        if require_end && self.reader.next_event().map_err(json_error)?.is_some() {
             return Err(invalid("trailing table field JSON"));
         }
         self.control.check()?;

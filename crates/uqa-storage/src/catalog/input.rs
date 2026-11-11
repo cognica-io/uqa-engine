@@ -35,6 +35,9 @@ pub enum CatalogInputStep<T> {
 pub type CatalogRowDecoder<T> =
     fn(&[u8], &[u8], &StorageReadControl) -> StorageBackendResult<Option<Budgeted<T>>>;
 
+/// Select a live key before reading its value. The selection preserves original physical key validation and cannot reenter persistence.
+pub type CatalogKeyFilter = fn(&[u8], &StorageReadControl) -> StorageBackendResult<bool>;
+
 pub struct CatalogInput<T> {
     state: State<T>,
 }
@@ -50,6 +53,7 @@ struct Input<T> {
     prefix: BudgetedVec<u8>,
     after: Option<BudgetedVec<u8>>,
     decode: CatalogRowDecoder<T>,
+    select: Option<CatalogKeyFilter>,
     limits: CatalogInputLimits,
     control: StorageReadControl,
 }
@@ -59,6 +63,29 @@ impl<T> CatalogInput<T> {
     pub fn new(
         read: Arc<dyn KeyValueRead + Send + Sync>,
         prefix: &[u8],
+        decode: CatalogRowDecoder<T>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::create(read, prefix, None, decode, limits, control)
+    }
+
+    /// Retain the same bounded stream while rejecting unrelated keys before any value read. Each rejected live key still consumes its one physical slot.
+    pub fn new_filtered(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        prefix: &[u8],
+        select: CatalogKeyFilter,
+        decode: CatalogRowDecoder<T>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::create(read, prefix, Some(select), decode, limits, control)
+    }
+
+    fn create(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        prefix: &[u8],
+        select: Option<CatalogKeyFilter>,
         decode: CatalogRowDecoder<T>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
@@ -79,6 +106,7 @@ impl<T> CatalogInput<T> {
                     prefix: owned_prefix,
                     after: None,
                     decode,
+                    select,
                     limits,
                     control: control.clone(),
                 }),
@@ -134,8 +162,12 @@ impl<T> Input<T> {
         };
         self.after = Some(key);
         let mut row = None;
-        if live {
-            let key = self.after.as_deref().expect("selected record key");
+        let key = self.after.as_deref().expect("selected record key");
+        let selected = live
+            && self
+                .select
+                .map_or(Ok(true), |select| select(key, &self.control))?;
+        if selected {
             self.read.visit_value_bounded(
                 key,
                 self.limits.maximum_value_bytes,
