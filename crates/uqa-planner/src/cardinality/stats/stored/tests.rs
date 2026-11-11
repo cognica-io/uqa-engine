@@ -58,6 +58,8 @@ fn equal(actual: &ColumnStats, expected: &ColumnStats) {
     );
 }
 
+mod retention;
+
 #[test]
 fn stored_distributions_preserve_values_order_and_frequency_bits() {
     let original = CancellationToken::new();
@@ -320,7 +322,7 @@ fn stored_statistics_publication_retains_prefixes_and_both_cancellation_owners()
             invoking.cancel();
         }
         assert!(input.insert(row()).is_err());
-        assert_eq!(memory.used(), retained);
+        assert_eq!(memory.used(), 0);
         assert!(input.finish().is_err());
         assert_eq!(memory.used(), 0);
         assert!(row()

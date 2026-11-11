@@ -84,6 +84,8 @@ The [prepared request transaction owner](../../../crates/uqa-engine/src/transact
 
 Planner's [stored column-statistics input](../../../crates/uqa-planner/src/cardinality/stats/stored.rs) owns durable distribution decoding and the shared limits used by sampled values. Engine lends stored row fields and retains the resulting catalog generation. Ordinary input preserves existing diagnostics and validation order; admitted input reserves decoded values, list buffers and publication nodes before allocation, retaining both the source owner's and invoking reader's cancellation scopes. Oversized legacy values remain omitted rather than truncated, and most-common-value frequencies remain paired with their selected values.
 
+Planner's `StoredColumnStatistics` retains its original controls across calls and privately accumulates one stored row at a time. A failed row closes the input and retires its complete unpublished prefix. Each successful replacement updates the exact native retained footprint; final publication creates one immutable shared header without revisiting prior values. [Retained statistics publication](../../design/backup-image-format.md#retained-stored-statistics-publication) defines the state and footprint invariants.
+
 ## End-to-end pipeline
 
 ```mermaid

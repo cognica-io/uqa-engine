@@ -48,6 +48,8 @@ pub enum StoredColumnStatsError {
     Publication(#[from] SQLError),
     #[error("{0}")]
     Invalid(String),
+    #[error("stored column statistics input is finished")]
+    Finished,
 }
 
 type Result<T> = std::result::Result<T, StoredColumnStatsError>;
@@ -165,35 +167,49 @@ impl StoredColumnStats<'_> {
 }
 
 /// Consume stored rows directly into the native immutable statistics generation. Each call borrows only its current provider row; published values retain their original allowance.
-pub struct StoredColumnStatistics<'a> {
-    columns: Builder<'a>,
-    decoder: Decoder<'a>,
+pub struct StoredColumnStatistics {
+    input: Option<StoredInput>,
 }
 
-impl<'a> StoredColumnStatistics<'a> {
+struct StoredInput {
+    columns: Builder,
+    memory: MemoryBudget,
+    original: CancellationToken,
+    invoking: CancellationToken,
+}
+
+impl StoredColumnStatistics {
     pub fn new(
-        memory: &'a MemoryBudget,
-        original: &'a CancellationToken,
-        invoking: &'a CancellationToken,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
     ) -> Self {
-        let decoder = Decoder::Controlled {
-            memory,
-            original,
-            invoking,
-        };
         Self {
-            columns: Builder::new(decoder.control()),
-            decoder,
+            input: Some(StoredInput {
+                columns: Builder::stored(ProductionControl::new(memory, original, invoking)),
+                memory: memory.clone(),
+                original: original.clone(),
+                invoking: invoking.clone(),
+            }),
         }
     }
 
+    /// Decode and retain one stored row. Any error or unwind retires the complete unpublished prefix and permanently closes this input.
     pub fn insert(&mut self, row: StoredColumnStats<'_>) -> Result<()> {
-        let stats = row.read(self.decoder)?;
-        self.columns.insert(row.column_name, stats)?;
+        let mut input = self.input.take().ok_or(StoredColumnStatsError::Finished)?;
+        let stats = row.read(Decoder::Controlled {
+            memory: &input.memory,
+            original: &input.original,
+            invoking: &input.invoking,
+        })?;
+        input.columns.insert(row.column_name, stats)?;
+        self.input = Some(input);
         Ok(())
     }
 
+    /// Publish the completed immutable generation without revisiting earlier rows. The caller supplies source EOF; failed input cannot publish a prefix.
     pub fn finish(self) -> Result<ColumnStatistics> {
-        Ok(self.columns.finish()?)
+        let input = self.input.ok_or(StoredColumnStatsError::Finished)?;
+        Ok(input.columns.finish()?)
     }
 }

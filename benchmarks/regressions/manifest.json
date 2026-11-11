@@ -57133,6 +57133,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_statistics_failure_closes_and_retires_the_complete_prefix",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests/retention.rs",
+      "capability": "Retained stored statistics publication",
+      "workload": "Insert a valid prefix followed by an invalid count or denied allocation, then attempt another insertion and publication.",
+      "invariant": "Failure immediately retires every prior field and map node, and the terminal input cannot publish a partial generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_statistics_input_retains_controls_beyond_the_constructing_scope",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests/retention.rs",
+      "capability": "Retained stored statistics publication",
+      "workload": "Return the producer from the constructing control scope, insert a row, publish it and cancel its original token.",
+      "invariant": "Retained controls remain valid across calls, and completed native statistics keep their original allowance after cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_statistics_cached_footprint_preserves_replacement_and_capture",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests/retention.rs",
+      "capability": "Retained stored statistics publication",
+      "workload": "Insert and replace names with nested values and differently sized distributions, comparing native capture with the existing full-map builder.",
+      "invariant": "Sorted rows and exact retained capture bytes remain identical through replacement and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_statistics_publication_does_not_rescan_retained_native_values",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests/retention.rs",
+      "capability": "Retained stored statistics publication",
+      "workload": "Finish 32-column and 320-column nested-value populations and compare allocations with the original native traversal.",
+      "invariant": "Stored publication allocates only its shared header while the original traversal constructs per-value cursors.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
