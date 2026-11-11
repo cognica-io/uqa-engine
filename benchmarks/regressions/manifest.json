@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -56909,6 +56909,136 @@
       "capability": "Admitted native constraint identity validation",
       "workload": "Validate an empty complete native declaration with a zero-byte allowance.",
       "invariant": "Empty validation is allocation-free and retains no resource allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_distributions_preserve_values_order_and_frequency_bits",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Decode eleven scalar, numeric and tagged distributions through ordinary and admitted inputs.",
+      "invariant": "Value observations, ordered distributions and exact frequency bits are identical.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_distributions_keep_original_validation_order_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Load rows containing overlapping histogram, MCV, count and bound errors.",
+      "invariant": "Ordinary diagnostics retain their original precedence; controlled failures retire all partial allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "oversized_stored_distributions_skip_bytes_but_validate_each_selected_value",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Load legacy oversized encoded rows and populations, including malformed later values and frequency syntax.",
+      "invariant": "Byte guards skip obsolete payloads before decoding; selected input validates completely before discard.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "omitted_wide_values_retire_their_allowance_and_keep_paired_frequencies",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Decode interleaved accepted and oversized values in histogram and MCV distributions.",
+      "invariant": "Discarded values release their payload allowance; accepted values retain original frequency pairing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_distribution_admission_retires_every_failed_prefix",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Try every allowance below and at the observed construction peak for a distribution with owned strings.",
+      "invariant": "All rejected prefixes release their full allowance; accepted output retains its admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_statistics_publication_retains_prefixes_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Cancel either owner between stored row insertions and retain a completed immutable generation independently.",
+      "invariant": "Failed insertion preserves the prior row; cancellation retires unpublished values and cannot invalidate published snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "empty_stored_statistics_need_no_allocation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Decode an empty distribution and publish an empty statistics generation with a zero-byte allowance.",
+      "invariant": "Empty input and publication allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_array_input_rejects_trailing_and_nested_malformed_values",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Read malformed root arrays, trailing tokens and incomplete nested values.",
+      "invariant": "Both input paths reject malformed distributions and the admitted path releases its entire prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "stored_distribution_depth_matches_the_original_container_boundary",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Decode nested values at the original root-bound and list-element recursion limits.",
+      "invariant": "Admitted input accepts exactly the original serde nesting boundary and retires rejected prefixes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistical_value_sizing_admits_formatting_and_preserves_resource_errors",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/stored/tests.rs",
+      "capability": "Admitted stored column statistics",
+      "workload": "Measure decimal and nested byte formatting with exact original width decisions, zero-byte denial and each incomplete distribution allowance.",
+      "invariant": "Sizing admits temporary formatting, releases its scratch and preserves typed resource failure instead of omitting a value.",
       "case_names": [
         ""
       ]

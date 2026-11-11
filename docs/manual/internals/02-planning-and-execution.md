@@ -82,6 +82,8 @@ Host prepared handles retain their session and original definition identities th
 
 The [prepared request transaction owner](../../../crates/uqa-engine/src/transactions/prepared.rs) encloses initial syntax and retained-definition reads as well as analysis, binding and execution in failure and unwind recovery. Its operation kind selects failed-frame admission from the parsed statement, row-description presence and parameter count. Syntax and identity/count errors retain their native precedence; empty declarations cannot bypass abort handling. Direct registration of existing syntax uses the same owner. FFI retains declared type spellings through its checked allocation control and supplies unresolved native names; SQL resolves builtin and user-defined types inside the request boundary. SQL also owns transaction-exit classification and host arity diagnostics. Execution owns COMMIT/ROLLBACK completion outside a block, after prepared argument conversion, so the batch scheduler cannot skip parameter errors through an early successful return.
 
+Planner's [stored column-statistics input](../../../crates/uqa-planner/src/cardinality/stats/stored.rs) owns durable distribution decoding and the shared limits used by sampled values. Engine lends stored row fields and retains the resulting catalog generation. Ordinary input preserves existing diagnostics and validation order; admitted input reserves decoded values, list buffers and publication nodes before allocation, retaining both the source owner's and invoking reader's cancellation scopes. Oversized legacy values remain omitted rather than truncated, and most-common-value frequencies remain paired with their selected values.
+
 ## End-to-end pipeline
 
 ```mermaid

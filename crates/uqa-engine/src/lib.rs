@@ -152,11 +152,11 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
-    ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
-    InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema,
-    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, RelationIdentity, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,

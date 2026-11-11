@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored column statistics in Planner and retain their original payload allowance through immutable publication. Preserve legacy wide-value omission, paired frequencies, numeric representations and catalog diagnostic order.
+
 - Native constraint identity validation retains temporary object/OID claims under the original allowance and cancellation owners while preserving ordinary validation order and borrowed table syntax.
 - Publish stored table constraints as independent native field owners, retaining their original payload allowances and exact capture footprints through current key-name restoration and publication without revisiting their entries. Failed construction retires every unpublished field.
 

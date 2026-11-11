@@ -9,7 +9,7 @@
 mod cache;
 mod coordinator;
 pub(crate) use coordinator::{shared_statistics, StatisticsCoordinator};
-pub(crate) mod value_size;
+pub(crate) use uqa_planner::stored_column_statistics::limits as value_size;
 mod worker;
 pub(crate) use cache::StatisticsSnapshots;
 
