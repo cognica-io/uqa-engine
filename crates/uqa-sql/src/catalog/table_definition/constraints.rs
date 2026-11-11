@@ -16,7 +16,7 @@ use crate::{
     catalog::{
         relation_attributes::DroppedAttribute,
         relation_oids::RelationCatalogOids,
-        table_metadata::{TableMetadata, TableMetadataValue},
+        table_metadata::{DecodedTableMetadataValue, TableMetadata},
     },
     SQLError,
 };
@@ -172,13 +172,13 @@ impl std::ops::Deref for StoredTableConstraints {
     }
 }
 
-fn metadata<T: TableMetadataValue>(
+fn metadata<T: DecodedTableMetadataValue>(
     value: Budgeted<T>,
     control: &ProductionControl<'_>,
     original: &CancellationToken,
 ) -> Result<TableMetadata<T>, SQLError> {
     control.check()?;
-    let result = TableMetadata::from_admitted(value, original)?;
+    let result = TableMetadata::from_decoded(value, original)?;
     control.check()?;
     Ok(result)
 }

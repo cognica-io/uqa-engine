@@ -45,47 +45,39 @@ fn tagged_conversion_suboperations_check_both_cancellation_owners() {
 
 #[test]
 fn tagged_conversion_retires_active_payloads_when_either_owner_cancels() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Barrier,
-    };
+    use std::{cell::Cell, rc::Rc};
 
     for original_cancelled in [false, true] {
-        let memory = MemoryBudget::new(64 << 20);
-        let map = tagged("bytes", [("hex", Value::Str("ff".repeat(8 << 20)))]);
+        let memory = MemoryBudget::new(64 << 10);
+        let map = tagged("bytes", [("hex", Value::Str("ff".repeat(4096)))]);
         let input = retained_map(map, &memory);
         let before = memory.used();
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
-        let ready = Barrier::new(2);
-        let done = AtomicBool::new(false);
-        std::thread::scope(|scope| {
-            let worker = scope.spawn(|| {
-                ready.wait();
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-                while memory.peak() <= before
-                    && !done.load(Ordering::Acquire)
-                    && std::time::Instant::now() < deadline
-                {
-                    std::thread::yield_now();
-                }
-                assert!(memory.peak() > before, "no replacement allocation observed");
+        let observed = Rc::new(Cell::new(false));
+        let seen = Rc::clone(&observed);
+        let allowance = memory.clone();
+        let cancellation = if original_cancelled {
+            original.clone()
+        } else {
+            invoking.clone()
+        };
+        super::super::allocation::AFTER_VECTOR_ALLOCATION.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
                 assert!(
-                    !done.load(Ordering::Acquire),
-                    "conversion already completed"
+                    allowance.used() > before,
+                    "replacement payload must be live"
                 );
-                if original_cancelled {
-                    original.cancel();
-                } else {
-                    invoking.cancel();
-                }
-            });
-            ready.wait();
-            let result = value_from_tagged_map_scoped(input, &original, &invoking);
-            done.store(true, Ordering::Release);
-            worker.join().unwrap();
-            assert!(matches!(result, Err(ValueRetentionError::Cancelled(_))));
+                seen.set(true);
+                cancellation.cancel();
+            }));
         });
+        let result = value_from_tagged_map_scoped(input, &original, &invoking);
+        assert!(
+            observed.get(),
+            "conversion must reach the replacement allocation"
+        );
+        assert!(matches!(result, Err(ValueRetentionError::Cancelled(_))));
         assert_eq!(memory.used(), 0);
     }
 }

@@ -11,6 +11,11 @@ use crate::{
     ArrayValue, CancellationToken, DecimalValue, Value, ValueRetentionError,
 };
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static AFTER_VECTOR_ALLOCATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 pub(super) struct Workspace<'a> {
     memory: Option<MemoryReservation>,
     cancellation: Option<&'a CancellationToken>,
@@ -70,6 +75,12 @@ impl<'a> Workspace<'a> {
             .checked_mul(size_of::<T>())
             .ok_or(MemoryError::SizeOverflow)?;
         self.reserve(actual.saturating_sub(bytes))?;
+        #[cfg(test)]
+        AFTER_VECTOR_ALLOCATION.with(|hook| {
+            if let Some(callback) = hook.borrow_mut().take() {
+                callback();
+            }
+        });
         Ok(values)
     }
 

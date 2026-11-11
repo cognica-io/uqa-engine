@@ -216,3 +216,70 @@ fn stored_table_key_name_rejection_preserves_the_declaration_and_original_allowa
     drop(stored);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn stored_table_metadata_publication_uses_exact_footprints_without_visiting_fields() {
+    use crate::catalog::table_metadata::count_payload_visits;
+    for count in [32, 320] {
+        let mut text: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        for field in ["dropped_attributes", "foreign_keys", "key_constraints"] {
+            text[field] = serde_json::Value::Array(vec![text[field][0].clone(); count]);
+        }
+        let text = text.to_string();
+        let memory = MemoryBudget::new(16 << 20);
+        let token = CancellationToken::new();
+        let stored =
+            StoredTableConstraints::read_stored_json(&text, &memory, &token, &token).unwrap();
+        let (native, visits) = count_payload_visits(|| stored.into_native().unwrap());
+        assert_eq!(
+            visits, 0,
+            "publication at {count} entries must not traverse fields"
+        );
+        {
+            let reference =
+                StoredTableConstraints::read_stored_json(&text, &memory, &token, &token).unwrap();
+            macro_rules! compare {
+                ($field:ident) => {
+                    compare_metadata_footprint(
+                        &native.$field,
+                        Budgeted::new(
+                            reference.parsed.value.$field,
+                            reference.parsed.memory.$field,
+                        ),
+                        &token,
+                    )
+                };
+            }
+            assert!(compare!(dropped_attributes) > 0);
+            assert!(compare!(foreign_keys) > 0);
+            assert!(compare!(key_constraints) > 0);
+            compare!(row_type_array_name);
+        }
+        drop(native);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+fn compare_metadata_footprint<T: crate::catalog::table_metadata::TableMetadataValue>(
+    native: &TableMetadata<T>,
+    reference: Budgeted<T>,
+    token: &CancellationToken,
+) -> usize {
+    let (reference, visits) = crate::catalog::table_metadata::count_payload_visits(|| {
+        TableMetadata::from_admitted(reference, token).unwrap()
+    });
+    let memory = MemoryBudget::new(16 << 20);
+    let control = ProductionControl::new(&memory, token, token);
+    assert_eq!(
+        native
+            .capture_with_control(&control)
+            .unwrap()
+            .reserved_bytes(),
+        reference
+            .capture_with_control(&control)
+            .unwrap()
+            .reserved_bytes(),
+    );
+    assert_eq!(memory.used(), 0);
+    visits
+}

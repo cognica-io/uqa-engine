@@ -55945,8 +55945,8 @@
       "cases": 1,
       "source": "crates/uqa-core/src/types/value/tagged/controlled_tests/owners.rs",
       "capability": "Active native tag conversion retirement",
-      "workload": "Cancel either owner after observing a real replacement allocation for a large hexadecimal carrier.",
-      "invariant": "Partial replacement and original map payloads retire with their reservations.",
+      "workload": "Cancel either original or invoking token synchronously while the tagged byte conversion replacement allocation is live.",
+      "invariant": "The original and replacement payloads retire before every allowance is returned; cancellation coverage does not depend on thread scheduling.",
       "case_names": [
         ""
       ]
@@ -56821,6 +56821,19 @@
       "capability": "Native stored table constraint publication",
       "workload": "Exact output allocation measurement, denied admission prefixes, both cancellation owners and an oversized current name.",
       "invariant": "Live native payloads retain their original allowance; denial occurs before the large copy and all failures retire the output."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_metadata_publication_uses_exact_footprints_without_visiting_fields",
+      "source": "crates/uqa-sql/src/catalog/table_definition/constraints/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Publish stored metadata at 32 and 320 entries and compare capture charges with independent exhaustive footprint accounting.",
+      "invariant": "Publication makes zero payload visits while retaining exactly the original decoded field allocations and shared headers."
     }
   ]
 }

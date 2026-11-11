@@ -31,6 +31,8 @@ impl<T: Payload> Payload for Option<T> {
 
 impl<T: Payload> Payload for Vec<T> {
     fn payload_bytes(&self) -> Option<usize> {
+        #[cfg(test)]
+        super::PAYLOAD_VISITS.set(super::PAYLOAD_VISITS.get() + 1);
         self.iter().try_fold(
             self.capacity().checked_mul(size_of::<T>())?,
             |bytes, value| bytes.checked_add(value.payload_bytes()?),
