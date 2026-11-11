@@ -43,6 +43,7 @@ macro_rules! catalog_sources {
                 Ok(())
             }
 
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             pub(super) fn keys(&self, control: &uqa_storage::read_control::StorageReadControl) -> StorageBackendResult<uqa_core::memory::Budgeted<CatalogKeys>> {
                 let keys = CatalogKeys { $($field: self.$field.key()?,)+ };
                 let mut bytes = size_of::<CatalogKeys>();
@@ -51,6 +52,7 @@ macro_rules! catalog_sources {
             }
         }
 
+        #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         pub(crate) struct CatalogKeys {
             $(pub(crate) $field: uqa_storage::memory_capture::MemoryCaptureKey<uqa_storage::memory_capture::CapturedMemoryValue<$image>>,)+
         }

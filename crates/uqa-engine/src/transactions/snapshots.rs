@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 mod table;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod capture;
 
 /// Only an original committed boundary owns backup sources; private generations retain undo state alone.

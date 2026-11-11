@@ -25,6 +25,7 @@ pub(crate) struct SnapshotTableSources {
 
 enum MembershipSource {
     Original(MemoryCaptureCell<Membership>),
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     Live(MemoryCaptureKey<CapturedTableMembership>),
 }
 
@@ -32,6 +33,7 @@ impl MembershipSource {
     fn key(&self) -> StorageBackendResult<MemoryCaptureKey<CapturedTableMembership>> {
         match self {
             Self::Original(source) => source.key(),
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             Self::Live(key) => Ok(key.clone()),
         }
     }
@@ -78,6 +80,7 @@ impl SnapshotTableSources {
         Ok(sources)
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn live(
         registry: MemoryCaptureRegistry,
         selection: MemoryCaptureSources,
@@ -93,6 +96,7 @@ impl SnapshotTableSources {
         })
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn capture(
         &self,
         control: &uqa_storage::read_control::StorageReadControl,
@@ -107,11 +111,13 @@ impl SnapshotTableSources {
     }
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) struct SnapshotTableCut {
     pub(crate) cut: uqa_storage::memory_capture::MemoryCapture,
     membership: std::sync::Arc<uqa_core::memory::Budgeted<CapturedTableMembership>>,
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 impl SnapshotTableCut {
     #[cfg(test)]
     pub(crate) fn assert_unread(&self) {

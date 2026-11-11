@@ -23,6 +23,7 @@ use parking_lot::{Mutex, ReentrantMutex, RwLock};
 mod catalog_capture;
 mod catalog_cell;
 mod generation_sources;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
@@ -33,8 +34,11 @@ mod table_metadata;
 pub(crate) use table_metadata::TableMetadataCell;
 mod table_membership;
 pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::CapturedTable;
+pub(crate) use table_membership::PersistentTableRegistrySnapshot;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::SnapshotTableCut;
-pub(crate) use table_membership::{CapturedTable, PersistentTableRegistrySnapshot};
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
@@ -654,6 +658,7 @@ impl StatementGate {
         }
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn owns_current_operation(&self) -> bool {
         let identity = std::ptr::from_ref(self) as usize;
         self.mutex.is_owned_by_current_thread()
