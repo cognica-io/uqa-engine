@@ -8,6 +8,7 @@ use super::*;
 use crate::{DeepLayerSpec, GatingSpec};
 use uqa_storage::StorageBackendError;
 
+mod continuation;
 mod input;
 
 fn model(capacity: usize) -> Arc<DeepModel> {

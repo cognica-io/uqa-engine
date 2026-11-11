@@ -20988,7 +20988,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -54647,6 +54647,71 @@
       "capability": "Retained graph and path image input",
       "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
       "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_retains_current_windows_exact_bits_and_post_eof_validation",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_retires_partial_fields_and_post_eof_candidates",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "model_input_rejects_malformed_truncated_and_unfunded_images_without_publication",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_image/tests/input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "native_model_input_resumes_footprint_and_publication_with_original_name_admission",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/continuation.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "native_model_input_retires_the_entire_candidate_after_eof_interruption",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/tests/continuation.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
       "case_names": [
         ""
       ]
