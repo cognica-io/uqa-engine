@@ -18,8 +18,11 @@ use uqa_core::{
     memory::ProductionControl,
 };
 
+mod comparison;
+pub(crate) use comparison::{bytes_compare, bytes_equal};
+
 mod output;
-pub(crate) use output::write_value;
+pub(crate) use output::{write_raw, write_string, write_value, Output};
 
 pub(crate) fn fragment(text: &str, position: usize) -> &str {
     let mut end = position.saturating_add(4096).min(text.len());
@@ -62,6 +65,7 @@ impl<E: From<serde_json::Error> + From<ImageIoError> + Send> InputError for E {}
 pub(crate) struct Input<'a> {
     reader: JsonReader<'a, 'static>,
     bytes: &'a [u8],
+    pending: Option<JsonToken<'a, &'a [u8]>>,
 }
 
 impl<'a> Input<'a> {
@@ -70,6 +74,7 @@ impl<'a> Input<'a> {
             reader: JsonReader::from_slice_with_control(bytes, &ProductionControl::uncontrolled())
                 .with_depth_limit(127),
             bytes,
+            pending: None,
         }
     }
 
@@ -77,6 +82,9 @@ impl<'a> Input<'a> {
         &mut self,
         work: &mut impl Work<E>,
     ) -> Result<Option<JsonToken<'a, &'a [u8]>>, E> {
+        if let Some(token) = self.pending.take() {
+            return Ok(Some(token));
+        }
         match self
             .reader
             .next_event_with_work(&mut Scheduler(work, std::marker::PhantomData))
@@ -87,6 +95,46 @@ impl<'a> Input<'a> {
                 Err(diagnostic(error, self.bytes, self.reader.syntax_position(), work).await?)
             }
         }
+    }
+
+    pub(crate) async fn peek<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<Option<JsonToken<'a, &'a [u8]>>, E> {
+        if self.pending.is_none() {
+            self.pending = self.next(work).await?;
+        }
+        Ok(self.pending)
+    }
+
+    pub(crate) async fn located<E: InputError>(
+        &self,
+        error: serde_json::Error,
+        work: &mut impl Work<E>,
+    ) -> Result<E, E> {
+        let (position, _) = self.reader.syntax_position();
+        let mut line = 1;
+        let mut column = 0;
+        for part in self.bytes[..position].chunks(4096) {
+            work.checkpoint().await?;
+            for byte in part {
+                if *byte == b'\n' {
+                    line += 1;
+                    column = 0;
+                } else {
+                    column += 1;
+                }
+            }
+        }
+        Ok(serde_json::Error::custom(format!("{error} at line {line} column {column}")).into())
+    }
+
+    pub(crate) async fn string<E: InputError>(
+        &mut self,
+        encoded: &[u8],
+        work: &mut impl Work<E>,
+    ) -> Result<String, E> {
+        string(encoded, work).await
     }
 
     #[cfg(any(feature = "nori", feature = "kuromoji"))]

@@ -142,6 +142,14 @@ pub(crate) async fn write_raw<E>(
     Ok(())
 }
 
+pub(crate) async fn write_string<E: From<serde_json::Error>>(
+    value: &str,
+    output: &mut impl Output<E>,
+    work: &mut impl Work<E>,
+) -> Result<(), E> {
+    write_string_with_buffer(value, output, work, &mut Vec::new()).await
+}
+
 async fn write_string_with_buffer<E: From<serde_json::Error>>(
     value: &str,
     output: &mut impl Output<E>,

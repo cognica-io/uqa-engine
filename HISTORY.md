@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Reuse canonical JSON string workspace and borrow ordered object traversal during dictionary loading, preserving the existing allocation ceilings and insertion-order JSON compatibility.
 
+- Validate resolved analyzer configurations through retained borrowed fields, preserving exact canonical values and byte-limit diagnostics without complete pipeline copies.
+
+- Retain analyzer descriptor syntax, canonical output, fingerprints, runtime profiles and native configuration construction across input steps. Original configuration images and descriptor values share native field constructors while preserving exact values, schema diagnostics and allocation ownership. Executable preparation and enclosing restoration remain under implementation.
+
 - Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; enclosing analyzer restoration remains under implementation.
 
 - Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.

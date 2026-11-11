@@ -18,8 +18,20 @@ use super::{
 use crate::{AnalysisResult, Analyzer, SynonymFileError, TokenFilter};
 
 pub(crate) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> AnalysisResult<()> {
+    crate::work::inline(check_shape(config, limits, &mut ()))?;
+    encode(config, limits.max_descriptor_bytes, false)?;
+    Ok(())
+}
+
+async fn check_shape(
+    config: &Analyzer,
+    limits: AnalyzerLimits,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<()> {
+    work.checkpoint().await?;
     #[cfg(all(feature = "kuromoji", not(feature = "nori")))]
-    for filter in &config.token_filters {
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
             config.unicode_profile.validate_features()?;
         }
@@ -39,7 +51,6 @@ pub(crate) fn check_config(config: &Analyzer, limits: AnalyzerLimits) -> Analysi
         })
         .ok_or_else(|| invalid("stage count overflow"))?;
     check_limit("analyzer stages", count, limits.max_stages)?;
-    encode(config, limits.max_descriptor_bytes, false)?;
     Ok(())
 }
 
@@ -120,14 +131,20 @@ fn synonym_error(path: &std::path::Path, source: std::io::Error) -> SynonymFileE
     }
 }
 
-pub(super) fn restore(value: &Value, limits: AnalyzerLimits) -> AnalysisResult<Analyzer> {
-    let config: Analyzer = serde_json::from_value(value.clone())?;
-    check_config(&config, limits)?;
+pub(super) async fn restore(
+    value: &Value,
+    limits: AnalyzerLimits,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<Analyzer> {
+    let config = crate::configuration::decode(value, work).await?;
+    check_shape(&config, limits, work).await?;
+    crate::configuration::check_encoded_size(&config, limits.max_descriptor_bytes, work).await?;
     #[cfg(feature = "nori")]
-    crate::nori::pipeline::check_resolved(&config)?;
+    crate::nori::pipeline::check_resolved_with(&config, work).await?;
     #[cfg(feature = "kuromoji")]
-    crate::kuromoji::pipeline::check_resolved(&config)?;
-    for filter in &config.token_filters {
+    crate::kuromoji::pipeline::check_resolved_with(&config, work).await?;
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         if matches!(
             filter,
             TokenFilter::Synonym {
@@ -138,12 +155,78 @@ pub(super) fn restore(value: &Value, limits: AnalyzerLimits) -> AnalysisResult<A
             return Err(invalid("resolved synonyms must not contain a file path"));
         }
     }
-    if canonical(value) != snapshot(&config, limits)? {
+    let canonical = canonical_fields(&config, work).await?;
+    if !canonical || !crate::configuration::matches_snapshot(&config, value, work).await? {
         return Err(invalid(
             "pipeline contains unknown properties, unresolved values, or implicit defaults",
         ));
     }
     Ok(config)
+}
+
+async fn canonical_fields(
+    config: &Analyzer,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<bool> {
+    let mut canonical = true;
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
+        match filter {
+            TokenFilter::Stop {
+                language,
+                custom_words,
+            } => {
+                canonical &= language.is_empty() && sorted_words(custom_words, work).await?;
+            }
+            TokenFilter::Synonym { .. } => (),
+            #[cfg(feature = "nori")]
+            TokenFilter::NoriPartOfSpeech(config) => {
+                if let Some(tags) = &config.stop_tags {
+                    for (index, pair) in tags.windows(2).enumerate() {
+                        work.records(index).await?;
+                        canonical &= pair[0].ordinal() < pair[1].ordinal();
+                    }
+                } else {
+                    canonical = false;
+                }
+            }
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiPartOfSpeech(config) => {
+                if let Some(words) = &config.stop_tags {
+                    canonical &= sorted_words(words, work).await?;
+                }
+            }
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiStop(config) => {
+                if let Some(words) = &config.words {
+                    canonical &= sorted_words(words, work).await?;
+                }
+            }
+            #[cfg(feature = "kuromoji")]
+            TokenFilter::KuromojiCompletion(_) => (),
+            #[cfg(feature = "nori")]
+            TokenFilter::NoriReadingForm(_) | TokenFilter::NoriNumber(_) => (),
+            #[cfg(any(feature = "nori", feature = "kuromoji"))]
+            TokenFilter::UnicodeSimpleLowercase(_) => (),
+            _ => filter.validate()?,
+        }
+    }
+    Ok(canonical)
+}
+
+async fn sorted_words(
+    words: &[String],
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<bool> {
+    for (index, pair) in words.windows(2).enumerate() {
+        work.records(index).await?;
+        if crate::json::bytes_compare(pair[0].as_bytes(), pair[1].as_bytes(), work).await?
+            != std::cmp::Ordering::Less
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn config_value(config: &Analyzer) -> AnalysisResult<Value> {
@@ -160,3 +243,6 @@ fn config_value(config: &Analyzer) -> AnalysisResult<Value> {
     }
     Ok(canonical(&value))
 }
+
+#[cfg(test)]
+mod tests;

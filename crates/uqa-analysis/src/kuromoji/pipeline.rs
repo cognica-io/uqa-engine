@@ -137,7 +137,15 @@ fn load(
 }
 
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
-    for filter in &config.token_filters {
+    crate::work::inline(check_resolved_with(config, &mut ()))
+}
+
+pub(crate) async fn check_resolved_with(
+    config: &Analyzer,
+    work: &mut impl crate::work::Work<AnalysisError>,
+) -> AnalysisResult<()> {
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         configuration::check_resolved(filter)?;
     }
     if let Tokenizer::Kuromoji(tokenizer) = &config.tokenizer {
@@ -159,11 +167,12 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
 }
 
 fn exact(dictionary: &str) -> AnalysisResult<()> {
-    let DictionaryRequest::Sha256(hash) = request(dictionary)? else {
+    let Some(hash) = dictionary.strip_prefix("sha256:") else {
         return Err(AnalysisError::Descriptor(
             "resolved Japanese resources require exact artifact hashes",
         ));
     };
+    let hash = hash.parse::<super::ResourceHash>()?;
     if format!("sha256:{hash}") != dictionary {
         return Err(AnalysisError::Descriptor(
             "noncanonical Japanese resource hash",

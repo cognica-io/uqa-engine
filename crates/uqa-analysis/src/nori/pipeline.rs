@@ -194,12 +194,20 @@ pub(crate) fn canonicalize(config: &mut Analyzer) {
 }
 
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
+    crate::work::inline(check_resolved_with(config, &mut ()))
+}
+
+pub(crate) async fn check_resolved_with(
+    config: &Analyzer,
+    work: &mut impl crate::work::Work<AnalysisError>,
+) -> AnalysisResult<()> {
     fn exact(name: &str) -> AnalysisResult<()> {
-        let DictionaryRequest::Sha256(hash) = request(name)? else {
+        let Some(hash) = name.strip_prefix("sha256:") else {
             return Err(AnalysisError::Descriptor(
                 "resolved Korean resources require exact artifact hashes",
             ));
         };
+        let hash = hash.parse::<ResourceHash>()?;
         if exact_name(hash) != name {
             return Err(AnalysisError::Descriptor(
                 "noncanonical Korean resource hash",
@@ -217,7 +225,8 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
     if let Tokenizer::Nori(config) = &config.tokenizer {
         exact(&config.dictionary)?;
     }
-    for filter in &config.token_filters {
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
             if let Some(dictionary) = config.unicode_profile.nori_dictionary() {
                 exact(dictionary)?;
