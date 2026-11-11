@@ -108,10 +108,10 @@ impl Engine {
             ),
             storage_generation: crate::state::CatalogCell::new(source.storage_generation()),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                storage.backend.document_store(name),
+                storage.backend.document_store(name).into(),
             ),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                storage.backend.inverted_index(name, analyzer),
+                storage.backend.inverted_index(name, analyzer).into(),
             ),
             // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(

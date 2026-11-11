@@ -14,14 +14,14 @@ use uqa_storage::{DocumentMetadata, MemoryDocumentStore, StoredDocument};
 
 struct Table {
     columns: Vec<ColumnDef>,
-    documents: RwLock<Box<dyn DocumentStore>>,
+    documents: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
 }
 
 impl crate::query::table_read::TableRead for Table {
     fn column_definitions(&self) -> Vec<ColumnDef> {
         self.columns.clone()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.documents.read()
     }
 
@@ -78,7 +78,7 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
         table_name: "t".into(),
         table: Arc::new(Table {
             columns: definition.columns.clone(),
-            documents: RwLock::new(Box::new(base)),
+            documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(base))),
         }),
         column_definitions: Arc::new(definition.columns).into(),
         columns: columns.clone(),

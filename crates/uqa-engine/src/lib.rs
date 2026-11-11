@@ -581,8 +581,12 @@ struct TableDataSnapshot {
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,
     storage_generation: state::CatalogSnapshot<[u8; 16]>,
-    document_store: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
-    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
     vector_indexes:
         uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
@@ -642,9 +646,12 @@ pub(crate) struct TableState {
     >,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: state::CatalogCell<[u8; 16]>,
-    pub(crate) document_store:
-        uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
-    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    pub(crate) document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
     vector_indexes:
         uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     fts_fields: state::TableMetadataCell<Vec<FieldName>>,

@@ -18,7 +18,12 @@ struct RetainedIndexDocuments<'a>(&'a TableState);
 impl uqa_execution::catalog::index::physical::rebuild::IndexDocuments
     for RetainedIndexDocuments<'_>
 {
-    fn read(&self) -> Box<dyn std::ops::Deref<Target = Box<dyn uqa_storage::DocumentStore>> + '_> {
+    fn read(
+        &self,
+    ) -> Box<
+        dyn std::ops::Deref<Target = uqa_storage::StorageHandle<dyn uqa_storage::DocumentStore>>
+            + '_,
+    > {
         Box::new(self.0.document_store.read())
     }
 }

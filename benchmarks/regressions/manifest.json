@@ -57510,6 +57510,32 @@
       "capability": "Retained persistent storage handles",
       "workload": "Write through admitted redb handles, roll back a later mutation, retire the input and reopen the database.",
       "invariant": "Persisted rows and term frequencies preserve the exact committed state and every original handle allocation retires."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_handles_keep_allowance_until_storage_replacement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/tests/resource_lifetime/storage_handles.rs",
+      "capability": "Engine storage handle ownership",
+      "workload": "Install admitted native document/text handles in SQLite native, KV, legacy and redb Engine tables; cancel input, write through SQL, replace handles and roll back a later write.",
+      "invariant": "The original allowance remains with the installed handles until replacement, then retires while the same table and native SQL operations remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_tables_keep_storage_allowance_after_the_engine_closes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/tests/resource_lifetime/storage_handles.rs",
+      "capability": "Engine storage handle ownership",
+      "workload": "Retain each provider table after its Engine closes, read the original rows and text frequencies, then retire the final table owner.",
+      "invariant": "The original physical handle allowance survives Engine retirement and returns only after the final retained table is destroyed.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

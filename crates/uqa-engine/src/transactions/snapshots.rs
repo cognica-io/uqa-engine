@@ -180,9 +180,9 @@ impl TableDataSnapshot {
                     .map_err(|err| Engine::storage_tx_error("ROLLBACK vector restore", &err))?,
             );
         }
-        *table.document_store.write() = document_store;
+        *table.document_store.write() = document_store.into();
         *table.storage_generation.write() = **self.storage_generation;
-        *table.inverted_index.write() = inverted_index;
+        *table.inverted_index.write() = inverted_index.into();
         table
             .vector_indexes
             .write()

@@ -229,8 +229,8 @@ impl Engine {
             object_id: schema.object_id,
             security: crate::state::TableMetadataCell::new(security),
             storage_generation: CatalogCell::new(schema.storage_generation),
-            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs),
-            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs.into()),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv.into()),
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vectors.into()),
             fts_fields: crate::state::TableMetadataCell::new(schema.fts_fields),
             columns_declared: CatalogCell::new(

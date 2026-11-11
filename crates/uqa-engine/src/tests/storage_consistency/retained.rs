@@ -493,7 +493,7 @@ fn current_private_snapshot_does_not_read_rows_to_reapply_its_own_changes() {
         .require_table("private_rows")
         .unwrap()
         .document_store
-        .write() = Box::new(probe);
+        .write() = uqa_storage::StorageHandle::new(Box::new(probe));
     let snapshot = engine.capture_statement_read_snapshot().unwrap();
     assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(ids.load(std::sync::atomic::Ordering::Relaxed), 0);
@@ -523,7 +523,7 @@ fn catalog_only_cursor_retains_metadata_without_capturing_unscanned_rows() {
     let reads = Arc::clone(&probe.row_reads);
     let ids = Arc::clone(&probe.doc_id_calls);
     let captures = Arc::clone(&probe.snapshot_calls);
-    *table.document_store.write() = Box::new(probe);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(probe));
     let owners = Arc::strong_count(&table);
     engine
         .sql(
@@ -566,7 +566,7 @@ fn changed_schema_snapshot_retains_base_rows_until_the_query_reads_them() {
             &[],
         )
         .unwrap();
-    *base.document_store.write() = Box::new(probe);
+    *base.document_store.write() = uqa_storage::StorageHandle::new(Box::new(probe));
     let selected = engine.detach_query_table(&base, &live, None).unwrap();
     assert_eq!(row_reads.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(id_reads.load(std::sync::atomic::Ordering::Relaxed), 0);
@@ -642,7 +642,10 @@ fn fixed_private_captures_share_rows_without_decoding_or_enumerating_the_source(
     let reads = Arc::clone(&probe.row_reads);
     let ids = Arc::clone(&probe.doc_id_calls);
     let live = engine.require_table("private_capture").unwrap();
-    let original = std::mem::replace(&mut *live.document_store.write(), Box::new(probe));
+    let original = std::mem::replace(
+        &mut *live.document_store.write(),
+        uqa_storage::StorageHandle::new(Box::new(probe)),
+    );
     let first = engine.capture_statement_read_snapshot().unwrap();
     let second = engine.capture_statement_read_snapshot().unwrap();
     let selected = engine.try_query_table("private_capture").unwrap().unwrap();
@@ -772,7 +775,10 @@ fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view()
         let mut probe = PortalSnapshotProbeStore::from_table(&engine, "capture_errors");
         probe.snapshot_error = Some(failure);
         let live = engine.require_table("capture_errors").unwrap();
-        let original = std::mem::replace(&mut *live.document_store.write(), Box::new(probe));
+        let original = std::mem::replace(
+            &mut *live.document_store.write(),
+            uqa_storage::StorageHandle::new(Box::new(probe)),
+        );
         let direct_error = engine
             .detach_query_table(&live, &live, None)
             .err()

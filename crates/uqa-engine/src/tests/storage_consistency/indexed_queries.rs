@@ -38,7 +38,7 @@ fn retrieval_residual_filters_read_only_selected_documents() {
             .unwrap()
             .unwrap()
             .document_store
-            .write() = Box::new(probe);
+            .write() = uqa_storage::StorageHandle::new(Box::new(probe));
         for predicate in [
             format!("kind = 'visible' AND {signal}"),
             format!("{signal} AND kind = 'visible'"),
@@ -102,7 +102,7 @@ fn scalar_index_candidates_do_not_scan_unrelated_rows(#[case] sql: &str) {
             .unwrap()
             .unwrap()
             .document_store
-            .write() = Box::new(probe);
+            .write() = uqa_storage::StorageHandle::new(Box::new(probe));
         for parameter in [3, 999] {
             enumerations.store(0, Ordering::Relaxed);
             fields.store(0, Ordering::Relaxed);
@@ -154,7 +154,7 @@ fn scalar_mutation_index_unions_do_not_scan_unrelated_rows(#[case] sql: &str) {
             .unwrap()
             .unwrap()
             .document_store
-            .write() = Box::new(probe);
+            .write() = uqa_storage::StorageHandle::new(Box::new(probe));
         let result = engine.sql(sql, &[]).unwrap();
         let mut ids = result
             .rows

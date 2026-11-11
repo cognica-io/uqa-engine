@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Keep admitted document and text-index handles in Engine table, snapshot and capture cells. Replacing a physical handle retires its own allocation allowance while retained tables keep their original handles alive.
+
 - Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation.
 
 - Resume stored table-authority validation across bounded work windows while preserving role incarnations, grant-path order and original allocation ownership.

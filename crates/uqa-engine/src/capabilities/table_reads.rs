@@ -14,7 +14,8 @@ impl TableRead for TableState {
     }
     fn read_documents(
         &self,
-    ) -> parking_lot::RwLockReadGuard<'_, Box<dyn uqa_storage::DocumentStore>> {
+    ) -> parking_lot::RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn uqa_storage::DocumentStore>>
+    {
         self.document_store.read()
     }
 

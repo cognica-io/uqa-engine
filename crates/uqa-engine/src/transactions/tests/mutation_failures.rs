@@ -95,11 +95,12 @@ fn direct_text_errors_after_private_mutation_cannot_commit_incomplete_intents() 
                     table.analyzer.read().configuration().clone(),
                 );
                 let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                *table.inverted_index.write() = Box::new(index::CancelAfterMutation {
-                    index: native,
-                    cancellation: engine.runtime.cancellation.clone(),
-                    fired: Arc::clone(&fired),
-                });
+                *table.inverted_index.write() =
+                    uqa_storage::StorageHandle::new(Box::new(index::CancelAfterMutation {
+                        index: native,
+                        cancellation: engine.runtime.cancellation.clone(),
+                        fired: Arc::clone(&fired),
+                    }));
                 let result = apply_text_mutation(&engine, operation);
                 assert!(fired.load(Ordering::Acquire), "{provider}: {operation}");
                 assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));

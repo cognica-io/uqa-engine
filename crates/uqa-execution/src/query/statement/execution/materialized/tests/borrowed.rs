@@ -134,12 +134,12 @@ impl DocumentStore for Documents {
     }
 }
 
-struct Table(RwLock<Box<dyn DocumentStore>>);
+struct Table(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
 impl TableRead for Table {
     fn column_definitions(&self) -> Vec<ColumnDef> {
         Vec::new()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.0.read()
     }
     fn maps_integer_keys(&self) -> bool {
@@ -219,13 +219,15 @@ fn input(
         .unwrap();
     let source = ScoredDocumentSource::new(
         "t",
-        Arc::new(Table(RwLock::new(Box::new(Documents {
-            inner,
-            counts: Arc::clone(&counts),
-            borrow: !matches!(read, ReadMode::Shared),
-            disappear: matches!(read, ReadMode::Lost),
-            fault,
-        })))),
+        Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(Documents {
+                inner,
+                counts: Arc::clone(&counts),
+                borrow: !matches!(read, ReadMode::Shared),
+                disappear: matches!(read, ReadMode::Lost),
+                fault,
+            }),
+        )))),
         ScoredInput::All,
         columns,
         Some("id".into()),

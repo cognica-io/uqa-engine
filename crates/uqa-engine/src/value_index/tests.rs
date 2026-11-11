@@ -175,7 +175,8 @@ fn rebuild_rejects_a_document_missing_from_the_field_projection() {
         .sql("CREATE TABLE projection_gap (id INTEGER PRIMARY KEY)", &[])
         .unwrap();
     let table = engine.try_table("projection_gap").unwrap().unwrap();
-    *table.document_store.write() = Box::new(MissingProjectionStore);
+    *table.document_store.write() =
+        uqa_storage::StorageHandle::new(Box::new(MissingProjectionStore));
     crate::Engine::value_indexes_clear(&table).unwrap();
 
     let error = engine

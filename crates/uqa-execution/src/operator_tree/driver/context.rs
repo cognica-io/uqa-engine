@@ -23,7 +23,8 @@ use uqa_storage::{
     document_store::Document, CatalogIndexRow, DocumentStore, InvertedIndex, StorageBackendResult,
 };
 
-pub type TextIndexRead<'a> = Box<dyn Deref<Target = Box<dyn InvertedIndex>> + 'a>;
+pub type TextIndexRead<'a> =
+    Box<dyn Deref<Target = uqa_storage::StorageHandle<dyn InvertedIndex>> + 'a>;
 pub type VectorIndexRead<'a> =
     Box<dyn Deref<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 

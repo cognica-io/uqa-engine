@@ -162,8 +162,12 @@ impl Engine {
             object_id: metadata.object_id(),
             security: crate::state::TableMetadataCell::new(metadata.security()),
             storage_generation: crate::state::CatalogCell::new(metadata.storage_generation()),
-            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(document_store),
-            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inverted_index),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                document_store.into(),
+            ),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                inverted_index.into(),
+            ),
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vector_indexes),
             fts_fields: crate::state::TableMetadataCell::from_generation(
                 metadata.fts_fields.generation(),

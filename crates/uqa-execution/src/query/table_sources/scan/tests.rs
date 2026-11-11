@@ -101,7 +101,7 @@ impl TableRead for DeclaredTable {
         false
     }
 
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         panic!("constructing metadata must not read documents")
     }
 }
@@ -126,7 +126,7 @@ fn empty_scored_sources_retain_selected_collations_without_reading_values() {
     assert_eq!(schema.column_collation(4), Some(0));
 }
 
-struct DocumentTable(RwLock<Box<dyn DocumentStore>>);
+struct DocumentTable(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
 
 impl TableRead for DocumentTable {
     fn column_definitions(&self) -> Vec<ColumnDef> {
@@ -135,7 +135,7 @@ impl TableRead for DocumentTable {
     fn maps_integer_keys(&self) -> bool {
         false
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.0.read()
     }
 }
@@ -169,7 +169,9 @@ fn document_field_projection_does_not_copy_unrequested_payload() {
         cancellation: uqa_core::CancellationToken::new(),
         serializable: None,
         table_name: "docs".into(),
-        table: Arc::new(DocumentTable(RwLock::new(Box::new(rows)))),
+        table: Arc::new(DocumentTable(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(rows),
+        )))),
         column_definitions: Arc::new(Vec::new()).into(),
         columns: columns.clone(),
         schema: columns,
