@@ -6,6 +6,44 @@
 
 use super::*;
 
+pub(super) fn retirement_source() -> Source {
+    let mut rows = BTreeMap::new();
+    for (index, name) in ["z", "a"].into_iter().enumerate() {
+        let mut table = table(name);
+        let mut security = crate::catalog::BoundRelationSecurity::owner(RoleIdentity::BOOTSTRAP);
+        security.acl = Some(paths(1));
+        for name in ["removed", "replaced"] {
+            security.column_acls.insert(name.into(), paths(1));
+        }
+        table.security = RelationSecurityRow::Bound(security);
+        rows.insert(
+            format!("d/{index}").into_bytes(),
+            serde_json::to_vec(&table).unwrap(),
+        );
+    }
+    let mut source = Source {
+        rows,
+        control: StorageReadControl::with_limit(usize::MAX),
+        reads: AtomicUsize::new(0),
+        panic_acl: false,
+    };
+    // Cross the copy checkpoint while retaining every replacement branch and relation sorting.
+    for (index, (column, acl)) in [
+        (None, None),
+        (Some("removed"), Some(Vec::new())),
+        (Some("replaced"), Some(paths(65))),
+        (Some("added"), Some(paths(1))),
+        (Some("replaced"), Some(paths(1))),
+        (None, Some(Vec::new())),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        add_acl(&mut source, index, "z", column, acl);
+    }
+    source
+}
+
 #[test]
 fn catalog_table_load_checks_duplicate_objects_after_each_original_owner_predicate() {
     fn accept(

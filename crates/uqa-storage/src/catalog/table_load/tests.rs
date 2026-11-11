@@ -255,6 +255,7 @@ fn catalog_table_load_preserves_replacement_order_duplicate_relations_and_exact_
             assert!(input.advance(1).is_err());
         });
         assert_eq!(allocation.bytes_current as usize, control.memory().used());
+        control.cancellation().cancel();
         let output = output.unwrap();
         assert_eq!(output.len(), expected.len());
         for (actual, expected) in output.iter().zip(&expected) {
@@ -271,7 +272,7 @@ fn catalog_table_load_preserves_replacement_order_duplicate_relations_and_exact_
 
 #[test]
 fn catalog_table_load_retires_views_and_payloads_on_every_partial_drop_and_cancellation() {
-    let source = Arc::new(source());
+    let source = Arc::new(predicates::retirement_source());
     let control = StorageReadControl::with_limit(1 << 22);
     let mut input = load(
         source.clone(),
@@ -284,7 +285,7 @@ fn catalog_table_load_retires_views_and_payloads_on_every_partial_drop_and_cance
         steps += 1;
     }
     assert_eq!(control.memory().used(), 0);
-    for stop in 0..steps {
+    for stop in 0..=steps {
         for cancel in [false, true] {
             let control = StorageReadControl::with_limit(1 << 22);
             let mut input = load(
