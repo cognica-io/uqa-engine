@@ -108,7 +108,13 @@ pub fn grant_column_acl(
     grant_option: bool,
 ) {
     let owner = security.role_owner.clone();
-    let acl = security.column_acls.entry(column.to_string()).or_default();
+    if !security.column_acls.contains_key(column) {
+        security.column_acls.insert(column.to_owned(), Vec::new());
+    }
+    let acl = security
+        .column_acls
+        .get_mut(column)
+        .expect("column ACL was inserted");
     for grantee in grantees {
         let position = acl
             .iter()

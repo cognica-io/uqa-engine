@@ -18,7 +18,7 @@ fn save_foreign_table(catalog: &Catalog, name: &str, owner: &str) {
                 uqa_core::catalog_acl::LegacyRelationSecurity {
                     role_owner: owner.into(),
                     acl: None,
-                    column_acls: std::collections::BTreeMap::new(),
+                    column_acls: uqa_core::memory::OwnedMap::new(),
                 },
             ),
             server_name: "memory".into(),
@@ -163,7 +163,7 @@ fn migration_41_preserves_acl_state_when_columns_precede_their_marker() {
         },
         grant_options: uqa_storage::catalog::TablePrivileges::default(),
     }];
-    let column_acls = std::collections::BTreeMap::from([(
+    let column_acls = uqa_core::memory::OwnedMap::from_iter([(
         "id".into(),
         vec![uqa_storage::catalog::TableAclEntry {
             role: "foreign_column_reader".into(),

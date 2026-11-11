@@ -7,6 +7,8 @@
 //! Controlled JSON input for durable role identities and bound relation ACL paths.
 
 mod fields;
+mod legacy;
+pub use legacy::{legacy_column_entries, legacy_entries};
 
 use super::TablePrivileges;
 use crate::{

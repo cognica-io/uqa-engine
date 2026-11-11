@@ -6,7 +6,7 @@
 
 pub mod foreign_tables;
 
-use std::collections::BTreeMap;
+use uqa_core::memory::OwnedMap;
 pub mod acl_command;
 pub mod acl_warning;
 pub mod authority;
@@ -28,7 +28,7 @@ pub use uqa_core::catalog_acl::{AclGrantee, TableAclEntry, TablePrivileges};
 pub struct TableSecurity {
     pub role_owner: String,
     pub acl: Option<Vec<TableAclEntry>>,
-    pub column_acls: BTreeMap<String, Vec<TableAclEntry>>,
+    pub column_acls: OwnedMap<String, Vec<TableAclEntry>>,
 }
 
 impl TableSecurity {
@@ -44,7 +44,7 @@ impl TableSecurity {
         Self {
             role_owner: role_owner.into(),
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
         }
     }
 }

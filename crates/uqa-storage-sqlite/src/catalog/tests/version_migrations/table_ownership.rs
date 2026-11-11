@@ -135,7 +135,7 @@ fn migration_36_preserves_an_acl_column_installed_before_its_version_marker() {
                 uqa_core::catalog_acl::LegacyRelationSecurity {
                     role_owner: "early_owner".into(),
                     acl: Some(acl.clone()),
-                    column_acls: std::collections::BTreeMap::default(),
+                    column_acls: uqa_core::memory::OwnedMap::default(),
                 },
             ),
             object_id: [18; 16],

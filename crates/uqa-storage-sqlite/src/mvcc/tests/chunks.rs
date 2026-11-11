@@ -22,7 +22,7 @@ fn save_view(connection: &ManagedConnection, definition: &str) {
             security: RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
                 role_owner: "uqa".into(),
                 acl: None,
-                column_acls: std::collections::BTreeMap::new(),
+                column_acls: uqa_core::memory::OwnedMap::new(),
             }),
             definition_json: definition.into(),
         })

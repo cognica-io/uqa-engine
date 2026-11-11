@@ -14,6 +14,17 @@ impl<'a> Input<'a, '_, '_> {
         first: JsonToken<'a>,
         names: [&str; N],
         required: [bool; N],
+        field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<()>,
+    ) -> Result<()> {
+        self.fields_with_unknown(first, names, required, false, field)
+    }
+
+    pub(super) fn fields_with_unknown<const N: usize>(
+        &mut self,
+        first: JsonToken<'a>,
+        names: [&str; N],
+        required: [bool; N],
+        deny_unknown: bool,
         mut field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<()>,
     ) -> Result<()> {
         let object = match first {
@@ -36,7 +47,11 @@ impl<'a> Input<'a, '_, '_> {
                     return Err(invalid("expected an authority field name"));
                 };
                 let key = decode_json_string(key, self.memory, self.cancellation)?;
-                names.iter().position(|name| *name == key.as_str())
+                let selected = names.iter().position(|name| *name == key.as_str());
+                if deny_unknown && selected.is_none() {
+                    return Err(invalid(format!("unknown field `{}`", key.as_str())));
+                }
+                selected
             } else {
                 if position == N {
                     return Err(invalid("too many positional authority fields"));

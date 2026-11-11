@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored named ACL paths with pre-admitted recipient, grantor and column buffers. SQL adopts the original named-authority map nodes without allocating replacement nodes; Rust `LegacyRelationSecurity` and `TableSecurity` column ACL constructors now use Core `OwnedMap`, with unchanged serialized data and migration rules.
+
 - Decode independent ACL metadata keys under their original catalog allowance, preserving canonical relation/column spelling and error order without allocating a second serialized key.
 
 - Decode independent relation ACL replacement tuples under the original record memory allowance, retaining their ordered path buffers and preserving stored field and revision validation order.

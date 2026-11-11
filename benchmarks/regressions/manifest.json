@@ -55170,6 +55170,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_preserves_original_recipient_forms_and_defaults",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_column_acl_input_keeps_nodes_names_and_replacement_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_retires_partial_fields_and_denied_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "durable_named_acl_input_preserves_named_security_wire_after_node_adoption",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/legacy/tests.rs",
+      "capability": "Controlled named relation authority input",
+      "workload": "Decode original named ACL forms, tagged PUBLIC and quoted role names, default grant paths and duplicate columns under cancellation and partial quotas.",
+      "invariant": "Original serde observations and ordered path/name allocations survive admitted construction; failed and replaced values retire before their exact original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "named_relation_authority_adoption_keeps_original_nodes_and_path_buffers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/table_binding/tests.rs",
+      "capability": "Original named authority adoption",
+      "workload": "Move an admitted stored named authority into SQL and inspect original column nodes, path buffers and recipient names.",
+      "invariant": "Adoption allocates no replacement nodes or payloads and retains the original allowance until the SQL owner retires.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

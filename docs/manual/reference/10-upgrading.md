@@ -4,7 +4,7 @@ This page records unreleased migration requirements and UQA Engine 0.6.3 and ear
 
 ## Unreleased
 
-Rust code constructing `uqa_core::catalog_acl::BoundRelationSecurity` uses `uqa_core::memory::OwnedMap` for `column_acls`; `Default::default()` and collecting `(name, entries)` pairs initialize the field. SQL adopts this map directly, retaining original nodes and node reservations. Existing serialized relation security remains unchanged and requires no data migration. Legacy name-based relation security retains its existing representation and initial-migration rules.
+Rust code constructing `uqa_core::catalog_acl::BoundRelationSecurity`, `uqa_core::catalog_acl::LegacyRelationSecurity` or SQL `TableSecurity` uses `uqa_core::memory::OwnedMap` for `column_acls`; `Default::default()` and collecting `(name, entries)` pairs initialize the field. SQL adopts stored authority maps directly, retaining original nodes and node reservations. Existing serialized relation security remains unchanged and requires no data migration. Legacy named authority keeps its existing initial-migration rules; secondary sessions and private restoration cannot bind legacy names.
 
 Rust resolvers that exhaustively match Analysis's `DictionaryBytes` must also handle `Retained`, which carries an admitted shared encoded buffer through its last resource owner. `AsRef<[u8]>` continues to expose all variants uniformly. Existing `Static` and `Shared` construction remains unchanged; the [analyzer image contract](../internals/04-analyzer-pipeline.md#analyzer-images) describes restoration and allocation ownership.
 
