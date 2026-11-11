@@ -9,6 +9,9 @@
 use super::DictionaryError;
 pub(crate) use crate::work::inline;
 
+pub(crate) mod ordering;
+pub(crate) mod source;
+
 pub(crate) trait Work: crate::work::Work<DictionaryError> {
     fn utf8_error(
         &self,

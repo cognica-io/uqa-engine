@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_ordering_matches_native_order_and_bounds_comparison_progress",
+      "cases": 1,
+      "source": "crates/uqa-core/src/ordering/tests/retained.rs",
+      "capability": "Retained native ordering",
+      "workload": "Order duplicate-bearing inputs across heap boundaries and one/multiple-poll windows.",
+      "invariant": "Native order matches the independent slice result and each call respects its comparison progress window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_ordering_retires_original_elements_on_cancel_invalid_window_and_abandonment",
+      "cases": 1,
+      "source": "crates/uqa-core/src/ordering/tests/retained.rs",
+      "capability": "Retained native ordering",
+      "workload": "Cancel, invalidate and abandon original admitted values during heap construction and extraction.",
+      "invariant": "Partial order retains the original elements until terminal retirement, which releases their original reservations and work owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_korean_user_preparation_preserves_stable_rules_and_retires_partial_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/nori/user_dictionary/tests.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Parse and order wide Korean user rules with long common prefixes and duplicate source definitions through one-poll windows.",
+      "invariant": "UTF-16 ranks, exact source and first-definition segmentation are preserved; interrupted preparation retires every original borrow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_user_preparation_matches_pinned_csv_and_morphology",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/user_dictionary/tests/retained.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Compile every pinned Japanese user-rule fixture through one-poll windows and compare complete prefix and word observations.",
+      "invariant": "CSV quoting, Unicode comments, segmentation, duplicate rejection and deferred morphology failures match the independent reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "retained_japanese_user_preparation_retires_wide_rules_during_each_construction_pass",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/kuromoji/user_dictionary/tests/retained.rs",
+      "capability": "Retained user dictionary preparation",
+      "workload": "Interrupt wide Japanese source parsing, UTF-16 ordering and native lexical construction at actual retained positions.",
+      "invariant": "Exact source and lexical ranks survive completion; cancellation, invalid windows and abandonment release all partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-analysis",
       "kind": "lib",
       "test": "compiled_preparation_retains_configuration_and_stage_work_without_whole_pipeline_copies",

@@ -6,7 +6,10 @@
 
 //! Fallible in-place ordering with bounded cancellation checks and no scratch allocation.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, future::Future};
+
+mod heap;
+use heap::{HeapOrder, Step};
 
 /// Order a mutable slice without scratch allocation, forwarding cancellation and comparison failures.
 ///
@@ -16,38 +19,41 @@ pub fn sort_by_with_control<T, E>(
     poll: &mut dyn FnMut() -> Result<(), E>,
     mut compare: impl FnMut(&T, &T, &mut dyn FnMut() -> Result<(), E>) -> Result<Ordering, E>,
 ) -> Result<(), E> {
-    fn sift<T, E>(
-        values: &mut [T],
-        mut root: usize,
-        poll: &mut dyn FnMut() -> Result<(), E>,
-        compare: &mut impl FnMut(&T, &T, &mut dyn FnMut() -> Result<(), E>) -> Result<Ordering, E>,
-    ) -> Result<(), E> {
-        while root < values.len() / 2 {
-            poll()?;
-            let mut child = root * 2 + 1;
-            if child + 1 < values.len()
-                && compare(&values[child], &values[child + 1], poll)?.is_lt()
-            {
-                child += 1;
-            }
-            if !compare(&values[root], &values[child], poll)?.is_lt() {
-                break;
-            }
-            values.swap(root, child);
-            root = child;
+    let mut cursor = HeapOrder::new(values.len());
+    let mut order = Ordering::Equal;
+    while let Some(step) = cursor.next(order) {
+        match step {
+            Step::Checkpoint => poll()?,
+            Step::Compare(left, right) => order = compare(&values[left], &values[right], poll)?,
+            Step::Swap(left, right) => values.swap(left, right),
         }
-        Ok(())
     }
-    poll()?;
-    for root in (0..values.len() / 2).rev() {
-        sift(values, root, poll, &mut compare)?;
+    Ok(())
+}
+
+/// Owning work for resumable ordering, including suspension within a long comparison.
+pub trait SortProgress<T, E> {
+    fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;
+    fn compare(&mut self, left: &T, right: &T) -> impl Future<Output = Result<Ordering, E>> + Send;
+}
+
+/// Drive the same allocation-free, unstable ordering through retained progress. A failed comparison or checkpoint preserves the original elements and their allocations, with a possibly incomplete order.
+pub async fn sort_by_with_progress<T, E>(
+    values: &mut [T],
+    progress: &mut impl SortProgress<T, E>,
+) -> Result<(), E> {
+    let mut cursor = HeapOrder::new(values.len());
+    let mut order = Ordering::Equal;
+    while let Some(step) = cursor.next(order) {
+        match step {
+            Step::Checkpoint => progress.checkpoint().await?,
+            Step::Compare(left, right) => {
+                order = progress.compare(&values[left], &values[right]).await?;
+            }
+            Step::Swap(left, right) => values.swap(left, right),
+        }
     }
-    for end in (1..values.len()).rev() {
-        poll()?;
-        values.swap(0, end);
-        sift(&mut values[..end], 0, poll, &mut compare)?;
-    }
-    poll()
+    Ok(())
 }
 
 #[cfg(test)]
