@@ -56730,6 +56730,97 @@
       "capability": "Native stored column publication",
       "workload": "A restored column generation is retained, its input cancelled, and its name changed through ordinary native publication.",
       "invariant": "Schema mutation publishes a distinct generation; old snapshots preserve their original bytes and allowance until the last owner retires."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_field_publication_moves_original_payloads_into_independent_owners",
+      "source": "crates/uqa-sql/src/catalog/table_definition/constraints/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Complete and empty stored declarations with a one-megabyte CHECK literal; native publication and independent field retirement.",
+      "invariant": "Publication allocates only six shared headers, preserves every field and retains original payloads until their final owner retires."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_key_names_move_exact_allowances_without_changing_other_fields",
+      "source": "crates/uqa-sql/src/catalog/table_definition/constraints/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Local and inherited key names grow and shrink under their original field allowance.",
+      "invariant": "Only selected names change; old buffers retire before their exact capacity allowance is returned."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_field_publication_retires_every_denied_header_and_cancellation_owner",
+      "source": "crates/uqa-sql/src/catalog/table_definition/constraints/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Deny each of the six native field headers, then cancel either original input owner before publication.",
+      "invariant": "Every failed publication retires completed and untransferred fields while preserving unrelated reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "test": "stored_table_key_name_rejection_preserves_the_declaration_and_original_allowance",
+      "source": "crates/uqa-sql/src/catalog/table_definition/constraints/tests.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Wrong-budget, uncontrolled, invalid-position and cancelled name replacement.",
+      "invariant": "All rejection precedes mutation and releases only the rejected name; the original declaration and allowance remain intact."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "stored_key_restoration_publishes_original_local_and_inherited_definitions",
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/native.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Current local/inherited key names and legacy empty declarations are restored and published after source retirement.",
+      "invariant": "Complete declarations equal ordinary restoration; native fields remain valid without the source text or name registry."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "stored_key_restoration_retires_partial_names_and_preserves_owner_diagnostics",
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/native.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Wrong table incarnation and late inherited-key missing, absent or redundant identities.",
+      "invariant": "Ordered owner diagnostics match ordinary restoration, and no partially named declaration or reservation escapes."
+    },
+    {
+      "package": "uqa-execution",
+      "test": "stored_key_restoration_admits_exact_payloads_and_checks_both_cancellation_owners",
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/native.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Native stored table constraint publication",
+      "workload": "Exact output allocation measurement, denied admission prefixes, both cancellation owners and an oversized current name.",
+      "invariant": "Live native payloads retain their original allowance; denial occurs before the large copy and all failures retire the output."
     }
   ]
 }

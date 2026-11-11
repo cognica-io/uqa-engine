@@ -14,6 +14,7 @@ use uqa_core::{
 mod input;
 pub use input::KeyConstraintNameInput;
 use uqa_sql::ast::{TableConstraintSet, TableKeyConstraint};
+use uqa_sql::catalog::table_definition::{StoredKeyLocation, StoredTableConstraints};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult, TableSchema};
 
 pub const REGISTRY_VERSION: &str = "sql_index_registry_version";
@@ -153,6 +154,55 @@ impl KeyConstraintNames {
         self.restore_names(schema, constraints, &control)
     }
 
+    /// Keep independently admitted table fields through current-name restoration. The complete unpublished declaration remains available for borrowed semantic validation before native publication.
+    pub fn decode_stored_with_control(
+        &self,
+        schema: &TableSchema,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> StorageBackendResult<StoredTableConstraints> {
+        let text = if schema.constraints_json.is_empty() {
+            "{}"
+        } else {
+            &schema.constraints_json
+        };
+        let mut constraints =
+            StoredTableConstraints::read_stored_json(text, memory, original, invoking)
+                .map_err(input::sql_error)?;
+        let control = ProductionControl::new(memory, original, invoking);
+        if let Some(names) = &self.names {
+            for inherited in [false, true] {
+                let count = if inherited {
+                    constraints
+                        .hierarchy
+                        .partition_inherited_key_constraints
+                        .len()
+                } else {
+                    constraints.key_constraints.len()
+                };
+                for index in 0..count {
+                    let (key, location) = if inherited {
+                        (
+                            &constraints.hierarchy.partition_inherited_key_constraints[index],
+                            StoredKeyLocation::Inherited(index),
+                        )
+                    } else {
+                        (
+                            &constraints.key_constraints[index],
+                            StoredKeyLocation::Declared(index),
+                        )
+                    };
+                    let name = restored_key_name(names, schema, key, &control)?;
+                    constraints
+                        .replace_key_name(location, name)
+                        .map_err(input::sql_error)?;
+                }
+            }
+        }
+        Ok(constraints)
+    }
+
     fn restore_names(
         &self,
         schema: &TableSchema,
@@ -171,12 +221,7 @@ impl KeyConstraintNames {
                 .iter_mut()
                 .chain(&mut constraints.hierarchy.partition_inherited_key_constraints)
             {
-                control.check()?;
-                if key.name.is_some() {
-                    return Err(invalid("stored key name must be owned by its index"));
-                }
-                let name = current_name(names, &schema.relation, schema.object_id, key)?;
-                let (name, owned) = control.copy_text(name)?.into_parts();
+                let (name, owned) = restored_key_name(names, schema, key, control)?.into_parts();
                 key.name = Some(name);
                 memory = control.combine(memory, owned);
             }
@@ -235,6 +280,20 @@ impl KeyConstraintNames {
             serde_json::to_string(constraints).map_err(Into::into)
         }
     }
+}
+
+fn restored_key_name(
+    names: &OwnedMap<[u8; 16], KeyName>,
+    schema: &TableSchema,
+    key: &TableKeyConstraint,
+    control: &ProductionControl<'_>,
+) -> StorageBackendResult<Produced<String>> {
+    control.check()?;
+    if key.name.is_some() {
+        return Err(invalid("stored key name must be owned by its index"));
+    }
+    let name = current_name(names, &schema.relation, schema.object_id, key)?;
+    Ok(control.copy_text(name)?)
 }
 
 /// Validate every owner even when its name is unchanged, and copy only a changed key collection.

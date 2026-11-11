@@ -16,8 +16,10 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod constraints;
 mod image;
 mod stored;
+pub use constraints::{NativeTableConstraints, StoredKeyLocation, StoredTableConstraints};
 
 mod sealed {
     pub trait Definition {}
