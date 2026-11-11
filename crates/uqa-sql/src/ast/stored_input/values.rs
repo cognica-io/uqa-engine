@@ -40,6 +40,10 @@ pub(crate) fn unit<T: DeserializeOwned + Copy>(tag: &str) -> Result<T, InputErro
 }
 
 impl<'a> Input<'a, '_> {
+    pub fn texts(&mut self, token: JsonToken<'a>) -> Result<Produced<Vec<String>>, InputError> {
+        self.array(token, |input, token| input.text(token))
+    }
+
     pub fn optional_text(
         &mut self,
         token: JsonToken<'a>,

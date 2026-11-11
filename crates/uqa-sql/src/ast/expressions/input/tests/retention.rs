@@ -138,10 +138,6 @@ fn stored_schema_input_and_retirement_use_a_small_stack_for_deep_expressions() {
 
 #[test]
 fn stored_schema_input_cancellation_retires_active_input_and_parent_owners() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Barrier,
-    };
     let literal = format!(
         r#"{{"Array":[{CALL},{{"Literal":"{}"}}]}}"#,
         "x".repeat(16 << 20)
@@ -155,32 +151,19 @@ fn stored_schema_input_cancellation_retires_active_input_and_parent_owners() {
             let memory = MemoryBudget::new(64 << 20);
             let original = CancellationToken::new();
             let invoking = CancellationToken::new();
-            let done = AtomicBool::new(false);
-            let ready = Barrier::new(2);
-            std::thread::scope(|scope| {
-                let worker = scope.spawn(|| {
-                    ready.wait();
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-                    while memory.used() < 65536
-                        && !done.load(Ordering::Acquire)
-                        && std::time::Instant::now() < deadline
-                    {
-                        std::thread::yield_now();
-                    }
-                    assert!(memory.used() >= 65536, "no active literal allocation");
-                    assert!(!done.load(Ordering::Acquire));
-                    if original_cancelled {
-                        original.cancel();
-                    } else {
-                        invoking.cancel();
-                    }
-                });
-                ready.wait();
-                let output = Expr::from_stored_schema_json(&text, &memory, &original, &invoking);
-                done.store(true, Ordering::Release);
-                worker.join().unwrap();
-                assert_eq!(output.unwrap_err().sqlstate(), Some("57014"));
-            });
+            let cancel = if original_cancelled {
+                &original
+            } else {
+                &invoking
+            };
+            let output = crate::ast::stored_input::test_control::cancel_after_allocation(
+                &memory,
+                cancel,
+                65536,
+                || Expr::from_stored_schema_json(&text, &memory, &original, &invoking),
+            );
+            assert_eq!(output.unwrap_err().sqlstate(), Some("57014"));
+            assert!(memory.peak() >= 65536);
             assert_eq!(memory.used(), 0);
         }
     }

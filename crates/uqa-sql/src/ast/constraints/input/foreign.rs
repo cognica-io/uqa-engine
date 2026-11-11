@@ -128,7 +128,7 @@ impl<'a> Input<'a, '_> {
         parts.finish(reference)
     }
 
-    fn referenced_partition(
+    pub(super) fn referenced_partition(
         &mut self,
         token: JsonToken<'a>,
     ) -> Result<Produced<ReferencedPartitionConstraint>, InputError> {

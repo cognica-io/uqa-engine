@@ -6,6 +6,9 @@
 
 //! Stored SQL declarations consume one admitted JSON cursor in their original order.
 
+#[cfg(test)]
+pub(crate) mod test_control;
+
 mod error;
 pub(crate) use error::InputError;
 
@@ -80,6 +83,8 @@ impl<'a, 'c> Input<'a, 'c> {
     }
 
     pub fn next(&mut self) -> Result<JsonToken<'a>, InputError> {
+        #[cfg(test)]
+        test_control::observe(&self.control);
         let event = self
             .reader
             .next_event()
@@ -96,6 +101,8 @@ impl<'a, 'c> Input<'a, 'c> {
     }
 
     pub fn end(&mut self) -> Result<(), InputError> {
+        #[cfg(test)]
+        test_control::observe(&self.control);
         if self.reader.next_event().map_err(error)?.is_some() {
             return Err(invalid());
         }

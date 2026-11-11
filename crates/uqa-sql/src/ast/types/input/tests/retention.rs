@@ -8,49 +8,26 @@ use super::*;
 
 #[test]
 fn stored_type_input_cancels_during_original_name_production() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Barrier,
-    };
-
-    let text = tagged(
-        "Named",
-        &serde_json::to_string(&"x".repeat(16 << 20)).unwrap(),
-    );
+    let text = format!(r#"{{"Named":"{}"}}"#, "x".repeat(16 << 20));
     for original_cancelled in [false, true] {
         let memory = MemoryBudget::new(64 << 20);
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
-        let done = AtomicBool::new(false);
-        let ready = Barrier::new(2);
-        std::thread::scope(|scope| {
-            let worker = scope.spawn(|| {
-                ready.wait();
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-                while memory.used() < 4096
-                    && !done.load(Ordering::Acquire)
-                    && std::time::Instant::now() < deadline
-                {
-                    std::thread::yield_now();
-                }
-                assert!(memory.used() >= 4096, "no name allocation observed");
-                assert!(
-                    !done.load(Ordering::Acquire),
-                    "production completed before observation"
-                );
-                if original_cancelled {
-                    original.cancel();
-                } else {
-                    invoking.cancel();
-                }
-            });
-            ready.wait();
-            let control = ProductionControl::new(&memory, &original, &invoking);
-            let output = ColumnType::from_stored_json_with_control(&text, &control);
-            done.store(true, Ordering::Release);
-            worker.join().unwrap();
-            assert_eq!(output.unwrap_err().sqlstate(), Some("57014"));
-        });
+        let cancel = if original_cancelled {
+            &original
+        } else {
+            &invoking
+        };
+        let output = crate::ast::stored_input::test_control::cancel_after_allocation(
+            &memory,
+            cancel,
+            4096,
+            || {
+                let control = ProductionControl::new(&memory, &original, &invoking);
+                ColumnType::from_stored_json_with_control(&text, &control)
+            },
+        );
+        assert_eq!(output.unwrap_err().sqlstate(), Some("57014"));
         assert!(memory.peak() >= 4096);
         assert_eq!(memory.used(), 0);
     }

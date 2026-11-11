@@ -35,7 +35,7 @@ impl<'a> Input<'a, '_> {
         Ok(value)
     }
 
-    fn sequence_provenance(
+    pub(super) fn sequence_provenance(
         &mut self,
         token: JsonToken<'a>,
     ) -> Result<Produced<AutoIncrement>, InputError> {

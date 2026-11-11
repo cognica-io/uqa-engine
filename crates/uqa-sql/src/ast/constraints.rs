@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 mod input;
-pub use input::read_stored_columns_json;
+pub use input::{read_stored_columns_json, read_stored_table_constraints_json};
 
 use super::{
     deserialize_auto_increment, AutoIncrement, ColumnType, Expr, GeneratedColumn, OnCommitAction,

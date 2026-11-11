@@ -8,6 +8,7 @@ use super::*;
 
 mod compatibility;
 mod retention;
+mod tables;
 
 fn compare(text: &str) -> bool {
     let expected = serde_json::from_str::<Vec<ColumnDef>>(text);

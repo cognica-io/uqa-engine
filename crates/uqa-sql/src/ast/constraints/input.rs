@@ -19,8 +19,14 @@ use uqa_core::{
 
 mod columns;
 mod foreign;
+mod foreign_keys;
+mod hierarchy;
+mod partitions;
+mod relation_metadata;
 mod sequence_declarations;
 mod sequences;
+mod table_constraints;
+mod table_entries;
 
 /// Read the existing ordered column JSON with admitted native metadata, scalar schema expressions and value payloads. This preserves declarations; semantic validation belongs to the catalog owner.
 pub fn read_stored_columns_json(
@@ -39,6 +45,25 @@ pub fn read_stored_columns_json(
     let result = input.array(token, |input, token| {
         input.column_definition(token, &values)
     })?;
+    input.end()?;
+    Ok(result)
+}
+
+/// Read stored table constraints and hierarchy without resolving names, evaluating bounds or publishing catalog state.
+pub fn read_stored_table_constraints_json(
+    text: &str,
+    memory: &MemoryBudget,
+    original: &CancellationToken,
+    invoking: &CancellationToken,
+) -> Result<Produced<super::TableConstraintSet>, SQLError> {
+    let values = Values {
+        memory,
+        original,
+        invoking,
+    };
+    let mut input = Input::new(text, values.control());
+    let token = input.next()?;
+    let result = input.table_constraints(token, &values)?;
     input.end()?;
     Ok(result)
 }

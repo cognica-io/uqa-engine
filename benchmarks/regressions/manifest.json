@@ -56340,6 +56340,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_preserve_complete_metadata_and_ordered_families",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables.rs",
+      "capability": "Stored table constraint representation",
+      "workload": "Decode complete checks, foreign and key constraints, dropped attributes, catalog identities, inheritance and partition families.",
+      "invariant": "Native serialization, flags, field identities, duplicate values and vector order match the existing decoder.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_preserve_partition_variants_and_positional_defaults",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables.rs",
+      "capability": "Stored partition representation",
+      "workload": "Decode every partition bound and datum variant together with positional constraint and hierarchy forms.",
+      "invariant": "Original enum tags, required positions and default values remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_reject_query_and_window_nodes_without_execution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables.rs",
+      "capability": "Stored table expression domain",
+      "workload": "Attempt query and window expressions in CHECKs, partition keys, list bounds and range bounds.",
+      "invariant": "Only scalar schema expressions escape input and no SQL or callbacks execute.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_preserve_field_defaults_and_strict_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/compatibility.rs",
+      "capability": "Stored table field compatibility",
+      "workload": "Omit, duplicate, reverse and add unknown fields across every table metadata family.",
+      "invariant": "Original required/default fields and strict versus ignored metadata behavior match native deserialization.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_preserve_nested_depth_and_direct_numeric_rules",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/compatibility.rs",
+      "capability": "Stored table nested input boundaries",
+      "workload": "Compare integer boundaries and negative zero in direct identity provenance and expression payloads, with nested depth limits.",
+      "invariant": "Direct provenance retains its distinct numeric classification and nested input retains its remaining recursion allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_match_native_truncation_and_mutation_rejection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/compatibility.rs",
+      "capability": "Stored table damaged input",
+      "workload": "Truncate every fixture boundary and mutate each byte with seven structural replacements.",
+      "invariant": "Native metadata acceptance and malformed input rejection remain equivalent while partial ownership retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_retain_allocations_and_retire_every_partial_family",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/retention.rs",
+      "capability": "Stored table allocation ownership",
+      "workload": "Measure native live and peak allocations and deny sampled admission boundaries across complete constraints and hierarchy metadata.",
+      "invariant": "Completed metadata retains its native charge and failed candidates release every reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_check_both_owners_before_payload_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/retention.rs",
+      "capability": "Stored table entry admission",
+      "workload": "Cancel each owner before entry and deny a two-megabyte parent name under a small allowance.",
+      "invariant": "Cancellation precedes allocation and denied payload size never becomes an unrestricted allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_cancel_active_parent_and_constraint_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/retention.rs",
+      "capability": "Stored table active cancellation",
+      "workload": "Cancel either owner after a large parent name begins production behind complete constraint metadata.",
+      "invariant": "Both original and invoking cancellation retire active parent input and completed constraint allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_table_constraints_deep_partition_input_and_retirement_use_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/tests/tables/retention.rs",
+      "capability": "Stored partition expression ownership",
+      "workload": "Decode and retire a partition bound with 118 nested expression nodes on a 128 KiB thread stack.",
+      "invariant": "Nested partition input and native retirement preserve the bounded stack contract.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -79,10 +79,6 @@ fn stored_columns_json_checks_both_owners_and_denies_payload_before_allocation()
 
 #[test]
 fn stored_columns_json_cancellation_retires_active_declarations() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Barrier,
-    };
     let text = complete()
         .to_string()
         .replace("한글_column", &"x".repeat(16 << 20));
@@ -90,32 +86,19 @@ fn stored_columns_json_cancellation_retires_active_declarations() {
         let memory = MemoryBudget::new(64 << 20);
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
-        let ready = Barrier::new(2);
-        let done = AtomicBool::new(false);
-        std::thread::scope(|scope| {
-            let worker = scope.spawn(|| {
-                ready.wait();
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-                while memory.used() < 65536
-                    && !done.load(Ordering::Acquire)
-                    && std::time::Instant::now() < deadline
-                {
-                    std::thread::yield_now();
-                }
-                assert!(memory.used() >= 65536, "no active declaration allocation");
-                assert!(!done.load(Ordering::Acquire));
-                if original_cancelled {
-                    original.cancel();
-                } else {
-                    invoking.cancel();
-                }
-            });
-            ready.wait();
-            let result = read_stored_columns_json(&text, &memory, &original, &invoking);
-            done.store(true, Ordering::Release);
-            worker.join().unwrap();
-            assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
-        });
+        let cancel = if original_cancelled {
+            &original
+        } else {
+            &invoking
+        };
+        let output = crate::ast::stored_input::test_control::cancel_after_allocation(
+            &memory,
+            cancel,
+            65536,
+            || read_stored_columns_json(&text, &memory, &original, &invoking),
+        );
+        assert_eq!(output.unwrap_err().sqlstate(), Some("57014"));
+        assert!(memory.peak() >= 65536);
         assert_eq!(memory.used(), 0);
     }
 }
