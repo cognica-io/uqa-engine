@@ -57237,6 +57237,45 @@
       "capability": "Admitted stored table authority validation",
       "workload": "Rename all bound roles, then supply a table grant cycle that can only be reached through a column grant.",
       "invariant": "Bound identity resolution uses current names; column grant closure cannot authorize relation grant paths."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_components_keep_original_buffers_and_independent_field_allowances",
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/components.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table catalog field projection",
+      "workload": "Complete admitted table with separate ACL replacements, field vectors and original serialized declarations.",
+      "invariant": "Projection allocates no replacement payload, preserves every original buffer and releases each field independently under its exact allowance."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_components_retire_the_original_table_at_every_pending_boundary",
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/components.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table catalog field projection",
+      "workload": "One-work-step projection with explicit abandonment and cancellation at every pending position.",
+      "invariant": "Every field visit consumes bounded work; retirement releases both the original table and continuation without exposing a partial result."
+    },
+    {
+      "package": "uqa-storage",
+      "test": "catalog_table_components_reject_an_unrelated_allowance_and_release_both_owners",
+      "source": "crates/uqa-storage/src/catalog/table_load/tests/components.rs",
+      "kind": "lib",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "capability": "Retained table catalog field projection",
+      "workload": "Move a completed table into an input continuation with a different memory allowance.",
+      "invariant": "The owning projection rejects the mismatch and retires all captured payload and continuation allocations."
     }
   ]
 }

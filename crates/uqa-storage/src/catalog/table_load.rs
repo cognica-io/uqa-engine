@@ -7,6 +7,8 @@
 //! Complete table catalogs retain physical input, original predicates and admitted replacements.
 
 mod acl;
+mod components;
+pub use components::CatalogTableComponents;
 mod ordering;
 #[cfg(test)]
 mod tests;
