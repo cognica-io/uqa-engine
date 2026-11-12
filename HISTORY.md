@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Admit stored schema names, tuple identities and bound or named grants through the existing authority grammar, retaining original field/default rules and allocation ownership.
+
 - Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.
 - Retain stored role definitions and membership bindings under their original restore allowance, preserving incarnation identities, tuple revisions and existing declaration formats.
 

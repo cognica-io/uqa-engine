@@ -8,9 +8,9 @@
 
 use super::{invalid, reader, Input, JsonToken, Result};
 use crate::{
-    catalog_acl::{AclGrantee, TableAclEntry, TablePrivileges},
+    catalog_acl::{AclGrantee, TableAclEntry},
     json::decode_json_string,
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, OwnedMap},
+    memory::{Budgeted, MemoryBudget, MemoryError, OwnedMap},
     CancellationToken,
 };
 
@@ -97,37 +97,41 @@ fn acl_bytes(entries: &Vec<TableAclEntry>, cancellation: &CancellationToken) -> 
     Ok(bytes)
 }
 
+pub(super) struct LegacyEntry<P> {
+    pub role: AclGrantee,
+    pub grantor: Option<String>,
+    pub privileges: P,
+    pub grant_options: P,
+}
+
 impl<'a> Input<'a, '_, '_> {
     pub(super) fn legacy_acl(
         &mut self,
         first: JsonToken<'a>,
     ) -> Result<Budgeted<Vec<TableAclEntry>>> {
-        if first != JsonToken::StartArray {
-            return Err(invalid("expected an ACL path array"));
-        }
-        let mut payloads = self.memory.empty_reservation();
-        let mut entries = BudgetedVec::new(self.memory);
-        loop {
-            let token = self.next()?;
-            if token == JsonToken::EndArray {
-                break;
-            }
-            let entry = self.legacy_entry(token)?;
-            entries.reserve(1)?;
-            let (entry, memory) = entry.into_parts();
-            payloads.absorb(memory);
-            entries.push(entry)?;
-        }
-        let (entries, memory) = entries.into_parts();
-        payloads.absorb(memory);
-        Ok(Budgeted::new(entries, payloads))
+        self.acl_with(first, Self::legacy_entry)
     }
 
     fn legacy_entry(&mut self, first: JsonToken<'a>) -> Result<Budgeted<TableAclEntry>> {
+        self.legacy_fields::<super::TablePrivileges>(first)?
+            .try_map(|entry| {
+                Ok(TableAclEntry {
+                    role: entry.role,
+                    grantor: entry.grantor,
+                    privileges: entry.privileges,
+                    grant_options: entry.grant_options,
+                })
+            })
+    }
+
+    pub(super) fn legacy_fields<P: super::PrivilegeInput>(
+        &mut self,
+        first: JsonToken<'a>,
+    ) -> Result<Budgeted<LegacyEntry<P>>> {
         let mut role = None;
         let mut grantor = None;
-        let mut privileges = TablePrivileges::default();
-        let mut grant_options = TablePrivileges::default();
+        let mut privileges = P::default();
+        let mut grant_options = P::default();
         self.fields(
             first,
             ["role", "grantor", "privileges", "grant_options"],
@@ -137,8 +141,8 @@ impl<'a> Input<'a, '_, '_> {
                     0 => role = Some(input.legacy_grantee(value)?),
                     1 if value == JsonToken::Null => (),
                     1 => grantor = Some(input.legacy_name(value)?),
-                    2 => privileges = input.privileges(value)?,
-                    3 => grant_options = input.privileges(value)?,
+                    2 => privileges = P::read(input, value)?,
+                    3 => grant_options = P::read(input, value)?,
                     _ => unreachable!(),
                 }
                 Ok(())
@@ -151,7 +155,7 @@ impl<'a> Input<'a, '_, '_> {
             name
         });
         Ok(Budgeted::new(
-            TableAclEntry {
+            LegacyEntry {
                 role,
                 grantor,
                 privileges,
@@ -219,6 +223,9 @@ impl<'a> Input<'a, '_, '_> {
         }
     }
 }
+
+#[cfg(test)]
+use crate::catalog_acl::TablePrivileges;
 
 #[cfg(test)]
 mod tests;

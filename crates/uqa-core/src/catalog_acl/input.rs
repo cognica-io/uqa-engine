@@ -9,6 +9,7 @@
 mod fields;
 mod legacy;
 pub mod projected;
+pub mod schema;
 pub use legacy::{legacy_column_entries, legacy_entries};
 
 use super::TablePrivileges;
@@ -123,6 +124,16 @@ struct Input<'a, 'c, 'r> {
     range: std::ops::Range<usize>,
 }
 
+trait PrivilegeInput: Default {
+    fn read<'a>(input: &mut Input<'a, '_, '_>, value: JsonToken<'a>) -> Result<Self>;
+}
+
+impl PrivilegeInput for TablePrivileges {
+    fn read<'a>(input: &mut Input<'a, '_, '_>, value: JsonToken<'a>) -> Result<Self> {
+        input.privileges(value)
+    }
+}
+
 impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
     fn new(
         reader: &'r mut JsonReader<'a, 'c>,
@@ -199,26 +210,45 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
     }
 
     fn acl(&mut self, token: JsonToken<'a>) -> Result<Budgeted<Vec<Entry>>> {
+        self.acl_with(token, |input, token| {
+            Ok(Budgeted::new(
+                input.entry(token)?,
+                input.memory.empty_reservation(),
+            ))
+        })
+    }
+
+    fn acl_with<T>(
+        &mut self,
+        token: JsonToken<'a>,
+        mut entry: impl FnMut(&mut Self, JsonToken<'a>) -> Result<Budgeted<T>>,
+    ) -> Result<Budgeted<Vec<T>>> {
         if token != JsonToken::StartArray {
             return Err(invalid("expected an ACL path array"));
         }
+        let mut payloads = self.memory.empty_reservation();
         let mut entries = BudgetedVec::new(self.memory);
         loop {
             let token = self.next()?;
             if token == JsonToken::EndArray {
                 break;
             }
-            entries.push(self.entry(token)?)?;
+            let value = entry(self, token)?;
+            entries.reserve(1)?;
+            let (value, memory) = value.into_parts();
+            payloads.absorb(memory);
+            entries.push(value)?;
         }
         let (entries, memory) = entries.into_parts();
-        Ok(Budgeted::new(entries, memory))
+        payloads.absorb(memory);
+        Ok(Budgeted::new(entries, payloads))
     }
 
-    fn entry(&mut self, token: JsonToken<'a>) -> Result<Entry> {
+    fn entry<P: PrivilegeInput>(&mut self, token: JsonToken<'a>) -> Result<BoundAclEntry<P>> {
         let mut role = None;
         let mut grantor = RoleIdentity::BOOTSTRAP;
-        let mut privileges = TablePrivileges::default();
-        let mut grant_options = TablePrivileges::default();
+        let mut privileges = P::default();
+        let mut grant_options = P::default();
         self.fields(
             token,
             ["role", "grantor", "privileges", "grant_options"],
@@ -228,14 +258,14 @@ impl<'a, 'c, 'r> Input<'a, 'c, 'r> {
                     0 if value == JsonToken::Null => (),
                     0 => role = Some(input.role(value)?),
                     1 => grantor = input.role(value)?,
-                    2 => privileges = input.privileges(value)?,
-                    3 => grant_options = input.privileges(value)?,
+                    2 => privileges = P::read(input, value)?,
+                    3 => grant_options = P::read(input, value)?,
                     _ => unreachable!(),
                 }
                 Ok(())
             },
         )?;
-        Ok(Entry {
+        Ok(BoundAclEntry {
             role,
             grantor,
             privileges,

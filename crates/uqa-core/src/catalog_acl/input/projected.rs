@@ -104,7 +104,7 @@ fn columns<'a, 'c, T>(
     Ok(Budgeted::new(columns, lease))
 }
 
-fn decode<'a, 'c, T>(
+pub(super) fn decode<'a, 'c, T>(
     bytes: &'a [u8],
     memory: &'c MemoryBudget,
     cancellation: &'c CancellationToken,

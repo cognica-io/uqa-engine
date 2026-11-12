@@ -172,6 +172,8 @@ impl SchemaRow {
     }
 }
 
+pub(crate) const DEFAULT_SCHEMA_ROLE_OWNER: &str = "uqa";
+
 fn default_schema_role_owner() -> String {
-    "uqa".into()
+    DEFAULT_SCHEMA_ROLE_OWNER.into()
 }
