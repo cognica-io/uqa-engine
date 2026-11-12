@@ -22,6 +22,7 @@ mod membership;
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryImageImportUnit<'a> {
     pub address: &'a DecodedMemoryImageAddress,
+    /// Declared decoded payload size, independent of how many bytes have been read.
     pub decoded_bytes: u64,
 }
 
@@ -34,6 +35,7 @@ pub struct MemoryImageImportReader<'a> {
     previous: Option<DecodedMemoryImageAddress>,
     current: Option<DecodedMemoryImageAddress>,
     verified_bytes: u64,
+    decoding: bool,
     complete: bool,
 }
 
@@ -58,6 +60,7 @@ impl<'a> MemoryImageImportReader<'a> {
             previous: None,
             current: None,
             verified_bytes: 0,
+            decoding: false,
             complete: false,
         })
     }
@@ -77,6 +80,12 @@ impl<'a> MemoryImageImportReader<'a> {
         })
     }
 
+    /// Payload bytes returned from the selected component, including native decoder reads. This count starts at zero for each component and remains at its payload length while a decoder completes work after EOF; no component is selected after retirement.
+    pub fn current_read_bytes(&self) -> Option<u64> {
+        self.current.as_ref()?;
+        self.reader.as_ref()?.current_read_bytes()
+    }
+
     /// Bytes checked by the whole-object verification pass, independently of payload reads.
     pub fn verified_object_bytes(&self) -> u64 {
         self.reader.as_ref().map_or(
@@ -85,7 +94,7 @@ impl<'a> MemoryImageImportReader<'a> {
         )
     }
 
-    /// Admit one image component or one bounded repository verification step. The header is consumed internally; every returned component must reach verified EOF before the next call. Any failure retires the complete input and its partial decoded names.
+    /// Admit one image component or one bounded repository verification step. The header is consumed internally; a component with an unfinished typed decoder is returned again until explicit completion and verified EOF. Any failure retires the complete input and its partial decoded names.
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<BackupSourceStep> {
         let result = self.advance_inner(maximum_object_bytes);
         if result.is_err() && !self.complete {
@@ -99,6 +108,13 @@ impl<'a> MemoryImageImportReader<'a> {
             return Ok(BackupSourceStep::Complete);
         }
         let reader = self.reader.as_mut().ok_or(BackupError::Finished)?;
+        if self.decoding {
+            self.control.check()?;
+            if maximum == 0 {
+                return Err(BackupError::Invalid("zero object verification window"));
+            }
+            return Ok(BackupSourceStep::Unit);
+        }
         if let Some(current) = self.current.take() {
             self.previous = Some(current);
         }
@@ -139,7 +155,11 @@ impl<'a> MemoryImageImportReader<'a> {
     }
 
     pub fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
-        let result = if self.current.is_some() {
+        let result = if self.decoding {
+            Err(BackupError::Invalid(
+                "native component decoding is incomplete",
+            ))
+        } else if self.current.is_some() {
             self.reader.as_mut().unwrap().read_current(output)
         } else {
             Err(BackupError::Finished)
@@ -155,6 +175,7 @@ impl<'a> MemoryImageImportReader<'a> {
         self.reader = None;
         self.current = None;
         self.previous = None;
+        self.decoding = false;
         if !complete {
             self.header = None;
         }

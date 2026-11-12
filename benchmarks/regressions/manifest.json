@@ -59086,6 +59086,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_codec_steps_retain_the_component_until_explicit_completion",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/import/tests/decode.rs",
+      "capability": "Native catalog input",
+      "workload": "Yield a typed component decoder, including after payload EOF, then complete, fail, cancel, unwind or attempt raw input.",
+      "invariant": "Pending advances retain exactly the same component and archive lease; terminal paths retire all original input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "table_header_input_preserves_wire_fields_across_current_byte_and_poll_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests/input.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Decode an independently specified native table header across varying byte/poll windows, then interrupt original fields on each terminal path.",
+      "invariant": "Wire identities, optional names, UTF-8 fields and opaque analyzer bytes remain exact; no incomplete output or original reservation escapes failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "table_header_input_retires_partial_fields_on_errors_and_abandonment",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/table/tests/input.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Decode an independently specified native table header across varying byte/poll windows, then interrupt original fields on each terminal path.",
+      "invariant": "Wire identities, optional names, UTF-8 fields and opaque analyzer bytes remain exact; no incomplete output or original reservation escapes failure.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

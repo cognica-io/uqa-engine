@@ -37,6 +37,16 @@ impl MemoryImageImportReader<'_> {
         &mut self,
         decode: impl FnOnce(MemoryImageImportUnit<'_>, &mut dyn Read) -> BackupResult<T>,
     ) -> BackupResult<T> {
+        Ok(self
+            .decode_current_step(|unit, reader| decode(unit, reader).map(Some))?
+            .expect("a complete native codec always returns its output"))
+    }
+
+    /// Retain the same admitted component across owning decoder steps. `None` keeps decoding active, including after payload EOF; only `Some` certifies codec completion and verified EOF. `advance` keeps returning the same component while decoding is pending; switching to raw reads retires the input. Errors and unwinding retire the original input exactly as for `decode_current`.
+    pub fn decode_current_step<T>(
+        &mut self,
+        decode: impl FnOnce(MemoryImageImportUnit<'_>, &mut dyn Read) -> BackupResult<Option<T>>,
+    ) -> BackupResult<Option<T>> {
         if self.complete {
             return Err(BackupError::Finished);
         }
@@ -59,19 +69,24 @@ impl MemoryImageImportReader<'_> {
             image: &mut image,
             failure: None,
         };
-        let result = decode(
-            MemoryImageImportUnit {
-                address: &address,
-                decoded_bytes,
-            },
-            &mut input,
-        );
+        let result = (|| {
+            self.control.check()?;
+            decode(
+                MemoryImageImportUnit {
+                    address: &address,
+                    decoded_bytes,
+                },
+                &mut input,
+            )
+        })();
         let result = match input.failure.take() {
             Some(error) => Err(error),
             None => result,
         }
         .and_then(|value| {
-            image.require_current_end()?;
+            if value.is_some() {
+                image.require_current_end()?;
+            }
             Ok(value)
         });
         match result {
@@ -79,6 +94,7 @@ impl MemoryImageImportReader<'_> {
                 self.reader = Some(image);
                 self.current = Some(address);
                 self.header = header;
+                self.decoding = value.is_none();
                 Ok(value)
             }
             Err(error) => {
