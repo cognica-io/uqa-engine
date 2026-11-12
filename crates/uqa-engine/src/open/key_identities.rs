@@ -7,28 +7,13 @@
 //! Whether each table's single integer primary key names its rows' identities, and the one-time check of the tables an earlier version wrote.
 
 use super::{CatalogFacade, Engine, PersistentStorageBackend, StorageBackendResult};
-use uqa_sql::semantics::key_identity::{is_key_document_id, key_document_id};
-use uqa_storage::ValueIndexKey;
-
-/// Present once every table of the database has been checked, by the open that first ran this version, or because no earlier version wrote it.
-const VERIFIED_KEY: &str = "uqa.integer_key_identities.verified.v1";
-
-/// Present for a table that an earlier version left with a row at an identity its key does not name.
-fn indexed_key(object_id: [u8; 16]) -> String {
-    use std::fmt::Write;
-    let mut key = String::from("uqa.integer_key_identities.indexed.v1:");
-    for byte in object_id {
-        write!(key, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    key
-}
-
-/// The single integer primary-key column of a table.
-fn single_integer_key(columns: &[uqa_sql::ast::ColumnDef]) -> Option<&str> {
-    let mut keys = columns.iter().filter(|column| column.primary_key);
-    let key = keys.next()?;
-    (keys.next().is_none() && key.ty.is_integer()).then_some(key.name.as_str())
-}
+use uqa_sql::semantics::key_identity::{
+    is_key_document_id, key_document_id, single_integer_primary_key,
+};
+use uqa_storage::{
+    document_store::identifiers::key_mapping::{self, indexed_key, VERIFIED_KEY},
+    ValueIndexKey,
+};
 
 impl Engine {
     /// Whether a table restored from `catalog` maps its integer key to identities. Until the database has been checked, which an open that may migrate does first, a table with such a key resolves it through the key's index.
@@ -37,15 +22,10 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
         object_id: [u8; 16],
     ) -> StorageBackendResult<bool> {
-        if single_integer_key(columns).is_none() {
+        if single_integer_primary_key(columns).is_none() {
             return Ok(true);
         }
-        if catalog.get_metadata(VERIFIED_KEY)?.is_none() {
-            return Ok(false);
-        }
-        Ok(catalog
-            .get_metadata(&indexed_key(object_id))?
-            .is_none_or(|value| value.is_empty()))
+        key_mapping::load(catalog, object_id)
     }
 
     /// Check, once for a database an earlier version wrote, that each table with a single integer primary key holds every row whose key lies below `KEY_IDENTITY_LIMIT` at the identity equal to its key and no other row below the limit. Earlier versions stored a negative key, or a key next to a sequence column that chose identities, at another identity. A table that holds such a row is recorded and resolves its keys through the key's index from then on; the others map their keys.
@@ -59,7 +39,7 @@ impl Engine {
         }
         for (relation, table) in self.storage.tables.read().iter() {
             let columns = table.columns.snapshot();
-            let Some(key) = single_integer_key(&columns) else {
+            let Some(key) = single_integer_primary_key(&columns) else {
                 continue;
             };
             let name = relation.qualified_name();

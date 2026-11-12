@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve integer-key mapping metadata through bounded reads, keeping original empty/present marker semantics, declared key types and transaction visibility.
+
 - Read stored statistics maintenance and legacy document reservations through bounded metadata input, preserving relation identities, full-width counters, defaults and original cancellation.
 
 - Reconstruct stored analyzer JSON through admitted native fields while preserving defaults, aliases, positional forms and duplicate handling; retire source text before canonical image publication.

@@ -12,6 +12,7 @@ use crate::mvcc::{IdentifierAllocator, IdentifierRequest, ObservedIdentifier};
 use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendResult};
 
 pub mod conformance;
+pub mod key_mapping;
 
 mod stored;
 #[cfg(test)]

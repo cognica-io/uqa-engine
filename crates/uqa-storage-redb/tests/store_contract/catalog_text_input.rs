@@ -7,6 +7,16 @@
 use super::*;
 
 #[test]
+fn redb_integer_key_mapping_preserves_markers_and_retained_controls() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("key-mapping.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_integer_key_mapping_input(
+        &provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_table_metadata_preserves_identity_reservations_and_read_limits() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("table-metadata.redb")).unwrap();

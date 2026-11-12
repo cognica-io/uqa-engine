@@ -58264,6 +58264,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "integer_primary_key_input_preserves_original_column_names_and_declared_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/key_identity/tests.rs",
+      "capability": "Integer primary-key declaration input",
+      "workload": "Inspect ordinary, noninteger, composite and domain keys through original native columns and one-column/domain work windows.",
+      "invariant": "The selected name retains its exact original allocation; bounded scans allocate no scratch and both cancellation owners retire every unfinished continuation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "integer_primary_key_input_bounds_column_and_domain_work_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/key_identity/tests.rs",
+      "capability": "Integer primary-key declaration input",
+      "workload": "Inspect ordinary, noninteger, composite and domain keys through original native columns and one-column/domain work windows.",
+      "invariant": "The selected name retains its exact original allocation; bounded scans allocate no scratch and both cancellation owners retire every unfinished continuation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_integer_key_mapping_preserves_markers_and_retained_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained integer-key mapping",
+      "workload": "Read all absent, empty and nonempty certification/table marker combinations, private changes and rollback; interrupt every pending lookup.",
+      "invariant": "Mapping preserves marker presence and object identity, skips the table record when certification is absent, and enforces record and memory limits without retaining input after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_integer_key_mapping_preserves_markers_and_retained_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained integer-key mapping",
+      "workload": "Read all absent, empty and nonempty certification/table marker combinations, private changes and rollback; interrupt every pending lookup.",
+      "invariant": "Mapping preserves marker presence and object identity, skips the table record when certification is absent, and enforces record and memory limits without retaining input after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_integer_key_mapping_preserves_markers_and_retained_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained integer-key mapping",
+      "workload": "Read all absent, empty and nonempty certification/table marker combinations, private changes and rollback; interrupt every pending lookup.",
+      "invariant": "Mapping preserves marker presence and object identity, skips the table record when certification is absent, and enforces record and memory limits without retaining input after completion.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
