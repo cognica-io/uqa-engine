@@ -11,7 +11,7 @@ use crate::{
     memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryError},
     CancellationToken,
 };
-use std::{future::poll_fn, task::Poll};
+use std::{future::poll_fn, future::Future, task::Poll};
 
 pub struct AsyncImageInput<'a> {
     pub memory: &'a MemoryBudget,
@@ -20,6 +20,38 @@ pub struct AsyncImageInput<'a> {
 }
 
 impl AsyncImageInput<'_> {
+    /// Borrow this exact transport under a native owner's allocation and cancellation scope. Both cancellation owners are checked before every child poll; the exclusive borrow prevents overlapping channel operations. The enclosing future owns the child without another input buffer or heap allocation.
+    pub async fn with_scope<T, E, F>(
+        &mut self,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+        create: F,
+    ) -> Result<T, E>
+    where
+        E: From<ImageIoError>,
+        F: for<'a> AsyncFnOnce(AsyncImageInput<'a>) -> Result<T, E>,
+    {
+        self.cancellation.check().map_err(ImageIoError::from)?;
+        cancellation.check().map_err(ImageIoError::from)?;
+        let input = AsyncImageInput {
+            channel: self.channel,
+            memory,
+            cancellation,
+        };
+        let mut future = std::pin::pin!(create(input));
+        poll_fn(|context| {
+            match self
+                .cancellation
+                .check()
+                .and_then(|()| cancellation.check())
+            {
+                Ok(()) => future.as_mut().poll(context),
+                Err(error) => Poll::Ready(Err(ImageIoError::from(error).into())),
+            }
+        })
+        .await
+    }
+
     /// Yield a unit of codec work without reading bytes. Long metadata or post-input validation loops use this boundary rather than retaining an unbounded poll.
     pub async fn checkpoint(&mut self) -> ImageIoResult<()> {
         self.cancellation.check()?;

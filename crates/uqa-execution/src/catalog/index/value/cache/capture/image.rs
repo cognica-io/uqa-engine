@@ -9,12 +9,13 @@
 use super::{CapturedValueIndex, CapturedValueIndexPolicy, CapturedValues, ValueIndexComparison};
 use std::{io::Read, ops::Bound};
 use uqa_core::{
+    image_io::{decode_image, AsyncImageInput},
     memory::{BudgetedString, MemoryError},
     value_image::{ValueImageError, ValueImageReader},
     DocId,
 };
 use uqa_storage::{
-    image_io::{ImageInput, ImageRead, ImageReader},
+    image_io::{ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
@@ -34,11 +35,20 @@ impl ValueIndexImageMetadata {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
-        let mut input = ImageInput { reader, control };
-        if &input.array::<8>()? != MAGIC {
+        decode_image(
+            reader,
+            control.memory(),
+            control.cancellation(),
+            async |mut input| Self::read_image_from(&mut input).await,
+        )
+    }
+
+    /// Decode the same exact policy metadata on an enclosing native continuation.
+    pub async fn read_image_from(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<Self> {
+        if &input.array::<8>().await? != MAGIC {
             return Err(invalid("unknown evaluated-index metadata image"));
         }
-        let flags = input.array::<4>()?;
+        let flags = input.array::<4>().await?;
         if flags[..3].iter().any(|value| *value > 1) {
             return Err(invalid("invalid evaluated-index eligibility flag"));
         }
@@ -48,10 +58,10 @@ impl ValueIndexImageMetadata {
             2 => ValueIndexComparison::Fallible,
             _ => return Err(invalid("invalid evaluated-index comparison policy")),
         };
-        let len = input.count()?;
-        let field = BudgetedString::from_budgeted(input.text()?);
-        input.end()?;
-        control.check()?;
+        let len = input.count().await?;
+        let field = BudgetedString::from_budgeted(input.text().await?);
+        input.end().await?;
+        input.cancellation.check()?;
         Ok(Self {
             field,
             policy: CapturedValueIndexPolicy {

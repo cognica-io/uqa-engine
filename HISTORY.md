@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve evaluated-index metadata, value ownership and comparison policy through cooperative reconstruction; enforce independent child cancellation before resumed input work.
+
 - Resume evaluated vector reconstruction through native input, validation, spill and DiskANN preparation, preserving existing images, search results and writable capture ownership.
 
 - Reconstruct evaluated text images and historical analyzer bindings through bounded native progress, preserving posting occurrences, counters, writable snapshots and terminal cleanup.

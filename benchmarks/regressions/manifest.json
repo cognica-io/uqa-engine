@@ -58774,6 +58774,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_comparison_policy_preserves_opaque_boundaries_and_short_circuiting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/eligibility/tests.rs",
+      "capability": "Native retained comparison classification",
+      "workload": "Classify nested scalar, typed, record and opaque-map values through one-poll traversal, then interrupt deep traversal.",
+      "invariant": "Classification preserves independent expected policy, opaque boundaries and short circuits without reading or interpreting value bytes; all traversal admission retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_comparison_policy_retires_pending_traversal_on_cancellation_and_denial",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/binary/comparison/eligibility/tests.rs",
+      "capability": "Native retained comparison classification",
+      "workload": "Classify nested scalar, typed, record and opaque-map values through one-poll traversal, then interrupt deep traversal.",
+      "invariant": "Classification preserves independent expected policy, opaque boundaries and short circuits without reading or interpreting value bytes; all traversal admission retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_input_resumes_metadata_and_native_key_conversion_without_replaying_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests/input.rs",
+      "capability": "Resumable evaluated-index metadata and key conversion",
+      "workload": "Decode independent historical-policy metadata and large evaluated values with alternating one/17-byte windows, including post-EOF conversion and interrupted publication.",
+      "invariant": "Original metadata and value bytes survive retained input, later writes and source cancellation; no completed source is reread and failed continuations retire their original owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_input_retires_original_metadata_and_values_on_post_eof_failures",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests/input.rs",
+      "capability": "Resumable evaluated-index metadata and key conversion",
+      "workload": "Decode independent historical-policy metadata and large evaluated values with alternating one/17-byte windows, including post-EOF conversion and interrupted publication.",
+      "invariant": "Original metadata and value bytes survive retained input, later writes and source cancellation; no completed source is reread and failed continuations retire their original owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "borrowed_evaluated_input_preserves_original_and_invoking_cancellation_at_every_boundary",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/value/cache/image/tests/input.rs",
+      "capability": "Independent evaluated input cancellation",
+      "workload": "Cancel original and independently invoking controls at every pending metadata and native value adoption boundary.",
+      "invariant": "The next advance rejects cancelled work and retires both input scopes before any result can publish.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "admitted_key_payloads_resume_without_reads_and_keep_their_original_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/btree_index/image/tests.rs",
+      "capability": "Retained native physical-key adoption",
+      "workload": "Suspend nested key payload accounting without reading bytes; interrupt original admitted owners or complete adoption and mutate independently retained indexes.",
+      "invariant": "The physical key owner retains every original reservation through pending conversion, cancellation, denial and abandonment; successful keys preserve equality membership and later snapshots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "nested_native_input_checks_both_cancellation_owners_before_resumed_child_work",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Nested input cancellation boundary",
+      "workload": "Independently cancel each owner at every pending parent/child work boundary and observe child execution.",
+      "invariant": "Cancelled input never polls the child again; both original continuation and allocation owners retire terminally.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "scoped_native_input_shares_transport_and_keeps_original_payload_admission",
+      "cases": 1,
+      "source": "crates/uqa-core/src/image_io/decode/tests/nested.rs",
+      "capability": "Shared native input scope",
+      "workload": "Decode multibyte text through one-byte and small parent windows with independent original and invoking allocation allowances, then resume the parent suffix.",
+      "invariant": "The child uses the same fixed transport without additional invoking allocation, and its payload retains the original allowance after parent retirement.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

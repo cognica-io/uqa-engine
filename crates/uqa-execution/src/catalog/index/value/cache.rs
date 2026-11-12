@@ -50,6 +50,10 @@ fn value_bytes(value: &Value, control: &StorageReadControl) -> Result<usize, SQL
     let payload = value
         .retained_payload_bytes(control.memory(), control.cancellation())
         .map_err(|error| storage(StorageBackendError::backend("retained key", error)))?;
+    value_bytes_for_payload(payload)
+}
+
+fn value_bytes_for_payload(payload: usize) -> Result<usize, SQLError> {
     // Both the identity map and the search tree may own the value. The allowance also covers their nodes, NULL identities and key headers.
     payload
         .checked_add(std::mem::size_of::<Value>())

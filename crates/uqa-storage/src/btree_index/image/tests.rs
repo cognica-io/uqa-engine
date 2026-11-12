@@ -7,6 +7,79 @@
 use super::*;
 use uqa_core::{memory::ProductionControl, Predicate};
 
+#[test]
+fn admitted_key_payloads_resume_without_reads_and_keep_their_original_owner() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+    struct NoRead;
+    impl std::io::Read for NoRead {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            panic!("native key adoption must not read source bytes")
+        }
+    }
+    let value = Value::List(vec![Value::Str("한글".repeat(1024)); 64]);
+    for failure in ["none", "cancel", "memory", "window", "drop"] {
+        let control = StorageReadControl::with_limit(4 << 20);
+        let index = BTreeIndexImageBuilder::new(field(&control), &control)
+            .unwrap()
+            .add_value(1, key(&Value::Int(1), &control))
+            .unwrap();
+        let key = key(&value, &control);
+        let mut input = ImageDecoder::<_, StorageBackendError>::new(
+            control.memory(),
+            control.cancellation(),
+            |mut reader| async move { index.add_value_from(9, key, &mut reader.input()).await },
+        )
+        .unwrap();
+        for _ in 0..20 {
+            assert!(input
+                .advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps: 1 })
+                .unwrap()
+                .is_none());
+        }
+        let held = (failure == "memory").then(|| {
+            control
+                .memory()
+                .reserve(control.memory().available())
+                .unwrap()
+        });
+        if failure == "cancel" {
+            control.cancellation().cancel();
+        }
+        if failure != "drop" {
+            loop {
+                match input.advance(
+                    &mut NoRead,
+                    ImageDecodeWindow {
+                        bytes: 1,
+                        steps: usize::from(failure != "window"),
+                    },
+                ) {
+                    Ok(None) => (),
+                    Ok(Some(index)) => {
+                        assert_eq!(failure, "none");
+                        let mut index = index.finish().unwrap();
+                        let retained = index.clone();
+                        control.cancellation().cancel();
+                        index.insert(11, value.clone());
+                        assert_eq!(index.equality_ids(&value), [9, 11]);
+                        assert_eq!(retained.equality_ids(&value), [9]);
+                        drop(index);
+                        assert!(control.memory().used() > 0);
+                        drop(retained);
+                        break;
+                    }
+                    Err(_) => {
+                        assert_ne!(failure, "none");
+                        break;
+                    }
+                }
+            }
+        }
+        drop((input, held));
+        assert_eq!(control.memory().used(), 0, "{failure}");
+    }
+}
+
 fn production(control: &StorageReadControl) -> ProductionControl<'_> {
     ProductionControl::new(
         control.memory(),

@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod input;
 use uqa_core::{value_image::write_value_image, Predicate};
 use uqa_storage::image_io::{ImageInput, ImageReader};
 

@@ -7,6 +7,7 @@
 use super::*;
 use crate::catalog::index::value::ValueIndexBuilder;
 use uqa_core::Value;
+use uqa_storage::image_io::ImageInput;
 
 fn bytes(mut reader: ImageReader<'_>) -> Vec<u8> {
     while !reader.prepare(1).unwrap().ready {}
