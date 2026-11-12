@@ -14,6 +14,74 @@ fn name(text: &str, control: &StorageReadControl) -> StorageName {
 }
 
 #[test]
+fn sqlite_vector_catalog_collections_preserve_writes_and_rollback_after_input_retirement() {
+    for mode in ["native", "kv", "legacy"] {
+        let backend = backend(mode);
+        let control = StorageReadControl::with_limit(1 << 20);
+        let fields = uqa_storage::catalog::input::table::vector_fields(
+            br#"[{"field":"embedding","dimensions":2}]"#,
+            &control,
+        )
+        .unwrap();
+        let mut input = uqa_storage::vector_index::PersistentVectorIndexesBuilder::catalog_input(
+            backend.clone(),
+            name("public.notes", &control),
+            fields,
+            &control,
+        )
+        .unwrap();
+        let mut advances = 0;
+        let mut indexes = loop {
+            advances += 1;
+            assert!(advances < 128);
+            if let Some(value) = input
+                .advance(
+                    &mut std::io::empty(),
+                    uqa_core::image_io::ImageDecodeWindow { bytes: 1, steps: 1 },
+                )
+                .unwrap()
+            {
+                break value;
+            }
+        };
+        drop(input);
+        control.cancellation().cancel();
+        indexes
+            .live_mut()
+            .unwrap()
+            .get_mut("embedding")
+            .unwrap()
+            .add(1, vec![1.0, 0.0])
+            .unwrap();
+        backend.begin_transaction().unwrap();
+        indexes
+            .live_mut()
+            .unwrap()
+            .get_mut("embedding")
+            .unwrap()
+            .add(2, vec![0.0, 1.0])
+            .unwrap();
+        backend.rollback_transaction().unwrap();
+        assert_eq!(indexes["embedding"].count().unwrap(), 1, "{mode}");
+        assert!(
+            !indexes["embedding"].contains_document(2).unwrap(),
+            "{mode}"
+        );
+        assert_eq!(
+            indexes["embedding"]
+                .search_knn(&[1.0, 0.0], 1)
+                .unwrap()
+                .entries()[0]
+                .doc_id,
+            1,
+            "{mode}"
+        );
+        drop(indexes);
+        assert_eq!(control.memory().used(), 0, "{mode}");
+    }
+}
+
+#[test]
 fn sqlite_controlled_vector_handles_preserve_native_reads_and_rollback() {
     for mode in ["native", "kv", "legacy"] {
         let backend = backend(mode);

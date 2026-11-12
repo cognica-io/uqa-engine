@@ -12,6 +12,8 @@ use crate::{
 };
 use uqa_core::memory::Budgeted;
 
+mod catalog;
+
 /// Assemble an unpublished writable collection from admitted physical handles. Failed additions consume the whole candidate. Completion preserves original leases, while later mutations use their own controls independently of construction cancellation.
 pub struct PersistentVectorIndexesBuilder {
     indexes: NativeIndexes,
@@ -28,9 +30,18 @@ impl PersistentVectorIndexesBuilder {
 
     /// Adopt a unique original field and its controlled physical owner without copying either allocation.
     pub fn add_index(
+        self,
+        field: Budgeted<String>,
+        index: StorageHandle<dyn VectorIndex>,
+    ) -> StorageBackendResult<Self> {
+        self.insert_index(field, index, true)
+    }
+
+    fn insert_index(
         mut self,
         field: Budgeted<String>,
         index: StorageHandle<dyn VectorIndex>,
+        unique: bool,
     ) -> StorageBackendResult<Self> {
         self.control.check()?;
         if !field.budget().shares_allowance(self.control.memory())
@@ -41,7 +52,7 @@ impl PersistentVectorIndexesBuilder {
         if !index.is_retained_by(self.control.memory()) {
             return Err(invalid("vector handle has no complete input admission"));
         }
-        if self.indexes.contains_key(field.as_str()) {
+        if unique && self.indexes.contains_key(field.as_str()) {
             return Err(invalid(
                 "persistent vector catalog repeats a field registration",
             ));

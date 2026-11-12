@@ -57731,6 +57731,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_catalog_adopts_original_keys_and_preserves_repeated_field_selection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/catalog/tests.rs",
+      "capability": "Persistent vector catalog reconstruction",
+      "workload": "Consume ordered stored vector fields, including repeated names and a wide Unicode field, through one-step input windows.",
+      "invariant": "The map retains original key buffers, matches ordinary final-handle selection and remains writable after input cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_catalog_retires_every_pending_prefix_on_drop_cancel_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/catalog/tests.rs",
+      "capability": "Persistent vector catalog reconstruction",
+      "workload": "Drop or cancel each pending field boundary and deny further physical-name, box or node admission.",
+      "invariant": "The entire unpublished prefix, remaining original field array and provisional physical owners retire without publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_catalog_rejects_foreign_and_short_original_field_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/catalog/tests.rs",
+      "capability": "Persistent vector catalog reconstruction",
+      "workload": "Supply another allowance and missing array or field-payload reservations.",
+      "invariant": "Input rejects malformed ownership without detached payloads, published handles or leaked reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_vector_catalog_collections_preserve_writes_and_rollback_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests/vectors.rs",
+      "capability": "Persistent vector catalog reconstruction",
+      "workload": "Reconstruct canonical field collections on native SQLite, SQLite KV and legacy SQLite, cancel input and exercise writes and rollback.",
+      "invariant": "Completed collections preserve native query and transaction behavior while original input allowances retire with the final owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_vector_catalog_collections_preserve_committed_rows_after_reopen",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/retained_handles/vectors.rs",
+      "capability": "Persistent vector catalog reconstruction",
+      "workload": "Reconstruct a redb vector catalog, cancel input, commit one row, roll back another and reopen the database.",
+      "invariant": "Only the committed physical vector survives reopen; the original collection allowance retires completely.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

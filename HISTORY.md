@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent vector field catalogs through bounded input, retaining original keys and physical owners while preserving repeated-field selection.
+
 - Keep original admitted vector field, map-node and physical-handle owners through writable collection replacement, removal and reinsertion, preserving existing memory captures.
 
 - Retain canonical vector handle names, concrete allocations and shared SQLite cache state under their original reconstruction allowance while preserving subsequent writes and rollback.
