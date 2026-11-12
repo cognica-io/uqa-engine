@@ -76,7 +76,12 @@ fn persistent_role_restore_keeps_the_original_snapshot_and_accepts_later_authori
     let original_members = source.durable.role_memberships.read().clone();
     let control = StorageReadControl::with_limit(32 << 20);
     let mut input = input(&source, &control);
-    assert!(input.advance(1).unwrap().is_none());
+    for _ in 0..65536 {
+        if matches!(input.candidate.as_ref().unwrap().stage, Stage::Roles(_)) {
+            break;
+        }
+        assert!(input.advance(1).unwrap().is_none());
+    }
     assert!(matches!(
         input.candidate.as_ref().unwrap().stage,
         Stage::Roles(_)
@@ -303,4 +308,71 @@ fn persistent_engine_input_abandoning_completed_catalog_releases_its_snapshot(
     drop((session, input));
     assert!(!backend.in_transaction());
     assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn persistent_constraint_restore_rejects_global_collisions_and_releases_the_transaction(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = provider.open(&directory.path().join("constraints"));
+    source.sql("CREATE TABLE first_table(id integer NOT NULL); CREATE TABLE second_table(id integer NOT NULL)", &[]).unwrap();
+    let catalog = source.storage.catalog.as_ref().unwrap();
+    let tables = catalog.load_tables().unwrap();
+    let first: Vec<uqa_sql::ast::ColumnDef> =
+        serde_json::from_str(&tables[0].columns_json).unwrap();
+    let mut second = tables[1].clone();
+    let mut columns: Vec<uqa_sql::ast::ColumnDef> =
+        serde_json::from_str(&second.columns_json).unwrap();
+    columns[0].not_null_identity = first[0].not_null_identity;
+    second.columns_json = serde_json::to_string(&columns).unwrap();
+    catalog.save_table(&second).unwrap();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut input = input(&source, &control);
+    assert!(input.advance(1).unwrap().is_none());
+    assert!(matches!(
+        input.candidate.as_ref().unwrap().stage,
+        Stage::Constraints(_)
+    ));
+    let backend = Arc::clone(
+        input
+            .candidate
+            .as_ref()
+            .unwrap()
+            .session
+            .engine
+            .storage
+            .backend
+            .as_ref()
+            .unwrap(),
+    );
+    let mut failure = None;
+    for _ in 0..65536 {
+        match input.advance(1) {
+            Ok(None) => (),
+            Ok(Some(_)) => panic!("duplicate constraint catalog was accepted"),
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+    assert!(failure
+        .unwrap()
+        .to_string()
+        .contains("duplicate NOT NULL constraint catalog identity"));
+    assert!(!backend.in_transaction());
+    assert!(input.advance(1).is_err());
+    drop(input);
+    assert_eq!(control.memory().used(), 0);
+    catalog.save_table(&tables[1]).unwrap();
+    source
+        .sql(
+            "INSERT INTO first_table VALUES(1); INSERT INTO second_table VALUES(2)",
+            &[],
+        )
+        .unwrap();
 }

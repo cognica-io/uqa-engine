@@ -7,6 +7,8 @@
 //! Foreign tables retain the server they named at creation, including after concurrent deletion or name reuse.
 
 use super::StoredForeignTable;
+mod input;
+pub(crate) use input::check_format_with_control;
 use serde::{Deserialize, Serialize};
 use uqa_sql::{catalog::foreign_server::ForeignServerDefinition, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};

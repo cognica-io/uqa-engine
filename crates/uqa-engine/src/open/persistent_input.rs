@@ -28,6 +28,7 @@ struct Candidate {
 
 enum Stage {
     Metadata,
+    Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput),
     Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput),
     Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput),
     Tables(PersistentTableInput),
@@ -89,7 +90,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Role, schema and table input consume bounded native polls. The remaining metadata, registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema and table input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -108,16 +109,19 @@ impl PersistentEngineInput {
             let catalog = Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog"));
             candidate.stage = match candidate.stage {
                 Stage::Metadata => {
-                    uqa_execution::schema::constraints::restoration::validate_constraint_catalog(
-                        catalog.as_ref(),
-                    )?;
-                    Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
+                    Stage::Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput::new(
+                        catalog, candidate.limits, &self.control,
+                    )?)
+                }
+                Stage::Constraints(mut input) => match input.advance(1)? {
+                    Some(()) => Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
                         catalog,
                         candidate.limits,
                         engine.durable.roles.read().budget(),
                         &self.control,
-                    )?)
-                }
+                    )?),
+                    None => Stage::Constraints(input),
+                },
                 Stage::Roles(mut input) => match input.advance(1)? {
                     Some(values) => {
                         *engine.durable.roles.write() = values.roles;

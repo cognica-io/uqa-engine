@@ -57,12 +57,13 @@ pub fn identities<'a>(
 }
 
 /// Empty declaration slots remain visible to bounded traversal even when they contribute no identity. An existing foreign key with no identity remains a distinct required claim.
-pub(super) enum IdentitySlot {
+pub enum IdentitySlot {
     Empty,
     Required(Option<ConstraintCatalogIdentity>),
 }
 
-pub(super) fn identity_slots<'a>(
+/// Borrow every declaration and derived partition slot in catalog validation order.
+pub fn identity_slots<'a>(
     columns: &'a [ColumnDef],
     keys: &'a [crate::ast::ForeignKey],
 ) -> impl Iterator<Item = IdentitySlot> + 'a {

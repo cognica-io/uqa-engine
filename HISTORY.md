@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate complete persistent constraint catalogs through retained native input, preserving format and physical-row error order, cross-table identity uniqueness and terminal transaction cleanup.
+
 - Observe legacy stored function dispatches, array-slice omissions and range predicates without copying or rewriting declarations during load-only validation. Initial-open migration shares the same selection rules.
 
 - Decode stored foreign declarations under their original restore allowance, preserving current and legacy formats, SQL field semantics, option order and server-reference fences.

@@ -62309,6 +62309,112 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_reference_marker_preserves_json_value_carriers_and_duplicate_semantics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_reference_marker_matches_original_truncations_and_byte_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_reference_marker_bounds_discarded_values_and_retires_rejected_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constraint_catalog_preserves_complete_rows_and_bounds_identity_visits",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/constraints/restoration/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constraint_catalog_preserves_format_and_semantic_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/constraints/restoration/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constraint_catalog_retires_each_cancelled_denied_and_abandoned_prefix",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/constraints/restoration/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constraint_catalog_finishes_physical_acl_input_before_semantic_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/constraints/restoration/input/tests.rs",
+      "capability": "Complete retained constraint-catalog restoration",
+      "workload": "Compare original format and ordered declaration validation, cross-relation identities, controlled allocation and terminal ownership.",
+      "invariant": "Pinned complete physical input precedes semantic validation; admitted native state preserves original outcomes and retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_constraint_restore_rejects_global_collisions_and_releases_the_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Persistent Engine constraint-catalog restoration",
+      "workload": "Reject a cross-table NOT NULL identity collision through the retained Engine stage on native SQLite, SQLite KV and redb, then recover ordinary writes.",
+      "invariant": "Constraint failure consumes the entire candidate and read transaction without publishing a partial Engine.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }
