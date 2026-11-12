@@ -18,7 +18,7 @@ use uqa_core::catalog_sequence::{SequenceAclEntry, SequencePrivileges};
 use super::SequenceSecurity;
 use crate::catalog::roles::role_inherits;
 
-mod invariants;
+pub(super) mod invariants;
 pub use invariants::validate_sequence_security_invariants;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,24 +122,28 @@ fn materialize_acl(security: &mut SequenceSecurity) {
 
 fn grant_option_roles(security: &SequenceSecurity, privilege: AclPrivilege) -> BTreeSet<String> {
     let mut reachable = BTreeSet::from([security.role_owner.clone()]);
-    let Some(acl) = security.acl.as_ref() else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, &security.role_owner))
-            {
-                changed |= reachable.insert(role.to_owned());
-            }
-        }
-        if !changed {
-            return reachable;
-        }
+    crate::catalog::work::inline(super::grant_paths::extend_from(
+        &security.role_owner,
+        security.acl.as_deref(),
+        privilege,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("uncontrolled sequence grant closure");
+    reachable
+}
+
+impl super::grant_paths::Grant for SequenceAclEntry {
+    type Privilege = AclPrivilege;
+    fn recipient(&self) -> Option<&str> {
+        self.role.role_name()
+    }
+    fn grantor<'a>(&'a self, owner: &'a str) -> &'a str {
+        acl_grantor(self, owner)
+    }
+    fn grants_option(&self, privilege: Self::Privilege) -> bool {
+        self.grant_options.intersects(privilege.mask())
     }
 }
 

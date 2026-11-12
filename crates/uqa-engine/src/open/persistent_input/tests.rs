@@ -9,6 +9,7 @@ use crate::tests::providers::Provider;
 use uqa_core::Value;
 
 mod graphs;
+mod sequences;
 mod watermarks;
 
 const LIMITS: CatalogInputLimits = CatalogInputLimits {

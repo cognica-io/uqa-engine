@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Retain persistent sequence definitions and generation values through bounded catalog input on native SQLite, SQLite KV and redb, preserving physical error order, legacy defaults and the selected snapshot.
+- Reconstruct persistent sequence definitions, generation values, bound authority and recorded catalog OIDs through retained input on native SQLite, SQLite KV and redb, preserving validation order, the selected snapshot and subsequent sequence mutations.
 
 - Reconstruct persistent graph catalogs through retained name, native label and identifier input, preserving selected membership, original allocation rules and terminal transaction cleanup without materializing ignored Key/Value payloads.
 

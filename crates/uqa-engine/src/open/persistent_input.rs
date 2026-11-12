@@ -35,6 +35,7 @@ enum Stage {
     Watermarks(crate::hierarchy::watermarks::Input),
     WatermarkPublication(crate::hierarchy::watermarks::Plan),
     Graphs(uqa_graph::GraphCatalogInput),
+    Sequences(uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput),
     Registries,
     Caches,
 }
@@ -93,7 +94,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter and graph input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph and sequence input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -107,97 +108,119 @@ impl PersistentEngineInput {
             ));
         }
         for _ in 0..maximum_steps {
-            self.control.check()?;
-            let engine = candidate.session.engine.as_mut();
-            let catalog = Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog"));
-            candidate.stage = match candidate.stage {
-                Stage::Metadata => {
-                    Stage::Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput::new(
-                        catalog, candidate.limits, &self.control,
-                    )?)
-                }
-                Stage::Constraints(mut input) => match input.advance(1)? {
-                    Some(()) => Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
-                        catalog,
-                        candidate.limits,
-                        engine.durable.roles.read().budget(),
-                        &self.control,
-                    )?),
-                    None => Stage::Constraints(input),
-                },
-                Stage::Roles(mut input) => match input.advance(1)? {
-                    Some(values) => {
-                        *engine.durable.roles.write() = values.roles;
-                        *engine.durable.role_memberships.write() = values.memberships;
-                        Stage::Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput::new(
-                            catalog,
-                            engine.durable.roles.read().clone(),
-                            candidate.limits,
-                            engine.durable.schemas.read().budget(),
-                            &self.control,
-                        )?)
-                    }
-                    None => Stage::Roles(input),
-                },
-                Stage::Schemas(mut input) => match input.advance(1)? {
-                    Some(schemas) => {
-                        *engine.durable.schemas.write() = schemas;
-                        Stage::Tables(PersistentTableInput::from_catalog(
-                            catalog,
-                            Arc::clone(
-                                engine.storage.backend.as_ref().expect("persistent backend"),
-                            ),
-                            engine.durable.roles.read().clone(),
-                            candidate.limits,
-                            &self.control,
-                        )?)
-                    }
-                    None => Stage::Schemas(input),
-                },
-                Stage::Tables(mut input) => match input.advance(1)? {
-                    Some(tables) => {
-                        engine.storage.tables = Arc::new(tables);
-                        Stage::Watermarks(engine.partition_watermark_input(&self.control)?)
-                    }
-                    None => Stage::Tables(input),
-                },
-                Stage::Watermarks(mut input) => match input.advance(1)? {
-                    Some(plan) => Stage::WatermarkPublication(plan),
-                    None => Stage::Watermarks(input),
-                },
-                Stage::WatermarkPublication(mut plan) => match plan.next() {
-                    Some(update) => {
-                        update.publish();
-                        Stage::WatermarkPublication(plan)
-                    }
-                    None => Stage::Graphs(engine.graph_input(candidate.limits, &self.control)?),
-                },
-                Stage::Graphs(mut input) => match input.advance(1)? {
-                    Some(graphs) => {
-                        engine.durable.graphs.restore(&crate::state::CatalogGeneration::new(graphs));
-                        Stage::Registries
-                    }
-                    None => Stage::Graphs(input),
-                },
-                Stage::Registries => {
-                    engine.restore_engine_registries_from_catalog(
-                        catalog.as_ref(),
-                        CatalogRestoreMode::LoadOnly,
-                    )?;
-                    uqa_execution::schema::types::relation_arrays::restoration::validate(
-                        &engine.restored_catalog_read_view(),
-                    )?;
-                    Stage::Caches
-                }
-                Stage::Caches => {
-                    engine.restore_model_caches(catalog.as_ref())?;
-                    self.control.check()?;
-                    return Ok(Some(candidate.session));
-                }
+            candidate = match candidate.advance(&self.control)? {
+                Progress::Pending(candidate) => candidate,
+                Progress::Complete(session) => return Ok(Some(session)),
             };
         }
         self.candidate = Some(candidate);
         Ok(None)
+    }
+}
+
+enum Progress {
+    Pending(Candidate),
+    Complete(PersistentEngineState),
+}
+
+impl Candidate {
+    fn advance(mut self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
+        control.check()?;
+        let engine = self.session.engine.as_mut();
+        let catalog = Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog"));
+        self.stage = match self.stage {
+            Stage::Metadata => {
+                Stage::Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput::new(
+                    catalog, self.limits, control,
+                )?)
+            }
+            Stage::Constraints(mut input) => match input.advance(1)? {
+                Some(()) => Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
+                    catalog,
+                    self.limits,
+                    engine.durable.roles.read().budget(),
+                    control,
+                )?),
+                None => Stage::Constraints(input),
+            },
+            Stage::Roles(mut input) => match input.advance(1)? {
+                Some(values) => {
+                    *engine.durable.roles.write() = values.roles;
+                    *engine.durable.role_memberships.write() = values.memberships;
+                    Stage::Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput::new(
+                        catalog,
+                        engine.durable.roles.read().clone(),
+                        self.limits,
+                        engine.durable.schemas.read().budget(),
+                        control,
+                    )?)
+                }
+                None => Stage::Roles(input),
+            },
+            Stage::Schemas(mut input) => match input.advance(1)? {
+                Some(schemas) => {
+                    *engine.durable.schemas.write() = schemas;
+                    Stage::Tables(PersistentTableInput::from_catalog(
+                        catalog,
+                        Arc::clone(
+                            engine.storage.backend.as_ref().expect("persistent backend"),
+                        ),
+                        engine.durable.roles.read().clone(),
+                        self.limits,
+                        control,
+                    )?)
+                }
+                None => Stage::Schemas(input),
+            },
+            Stage::Tables(mut input) => match input.advance(1)? {
+                Some(tables) => {
+                    engine.storage.tables = Arc::new(tables);
+                    Stage::Watermarks(engine.partition_watermark_input(control)?)
+                }
+                None => Stage::Tables(input),
+            },
+            Stage::Watermarks(mut input) => match input.advance(1)? {
+                Some(plan) => Stage::WatermarkPublication(plan),
+                None => Stage::Watermarks(input),
+            },
+            Stage::WatermarkPublication(mut plan) => match plan.next() {
+                Some(update) => {
+                    update.publish();
+                    Stage::WatermarkPublication(plan)
+                }
+                None => Stage::Graphs(engine.graph_input(self.limits, control)?),
+            },
+            Stage::Graphs(mut input) => match input.advance(1)? {
+                Some(graphs) => {
+                    engine.durable.graphs.restore(&crate::state::CatalogGeneration::new(graphs));
+                    Stage::Sequences(engine.sequence_input(self.limits, control)?)
+                }
+                None => Stage::Graphs(input),
+            },
+            Stage::Sequences(mut input) => match input.advance(1)? {
+                Some(sequences) => {
+                    *engine.durable.sequences.write() = sequences;
+                    Stage::Registries
+                }
+                None => Stage::Sequences(input),
+            },
+            Stage::Registries => {
+                engine.restore_registries_after_sequences(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                )?;
+                uqa_execution::schema::types::relation_arrays::restoration::validate(
+                    &engine.restored_catalog_read_view(),
+                )?;
+                Stage::Caches
+            }
+            Stage::Caches => {
+                engine.restore_model_caches(catalog.as_ref())?;
+                control.check()?;
+                return Ok(Progress::Complete(self.session));
+            }
+        };
+        Ok(Progress::Pending(self))
     }
 }
 

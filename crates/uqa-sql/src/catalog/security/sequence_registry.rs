@@ -68,7 +68,7 @@ impl SequenceSecurities {
         Self(DefinitionRegistry::with_budget(memory))
     }
 
-    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
         Self(self.0.into_mutation_budget(memory))
     }
     pub fn shares_roots(&self, other: &Self) -> bool {
@@ -111,6 +111,18 @@ impl SequenceSecurities {
                 memory,
             ),
         )
+    }
+
+    /// Adopt validated persistent authority and its original field allowances without copying ACL entries.
+    pub fn insert_stored_entry(
+        &mut self,
+        relation: Budgeted<RelationIdentity>,
+        persistence: RelationPersistence,
+        security: Budgeted<BoundSequenceSecurity>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        self.insert_image_entry(relation, persistence, security)
     }
     pub fn contains_key(&self, relation: &RelationIdentity) -> bool {
         self.0.contains_key(relation)

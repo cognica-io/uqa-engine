@@ -46,10 +46,8 @@ pub(super) async fn read(
     }
     input.cancellation.check()?;
     Ok(SequenceCatalog {
-        records: catalog.records.into_mutation_budget(mutations),
         security,
-        catalog_oids: catalog.catalog_oids.into_mutation_budget(mutations),
-        durable_objects: catalog.durable_objects.into_mutation_budget(mutations),
-        temporary_objects: catalog.temporary_objects.into_mutation_budget(mutations),
-    })
+        ..catalog
+    }
+    .into_mutation_budget(mutations))
 }

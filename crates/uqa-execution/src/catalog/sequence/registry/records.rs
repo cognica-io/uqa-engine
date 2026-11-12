@@ -45,7 +45,7 @@ impl SequenceRecords {
             .map(|(key, _)| key)
     }
 
-    /// Move validated private image payloads into the native root without copying names or replacing their original allowance.
+    /// Move validated private payloads into the native root without copying names or replacing their original allowance.
     pub(super) fn insert_image_entry(
         &mut self,
         relation: Budgeted<RelationIdentity>,

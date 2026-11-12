@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -62734,6 +62734,402 @@
       "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_acl_input_preserves_direct_bound_and_named_struct_shapes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode direct bound and named sequence authority in map and positional forms.",
+      "invariant": "Accepted fields, optional ACLs, role identities and privilege masks match the existing representation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_acl_projection_preserves_last_fields_and_original_numeric_classes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Project repeated flattened authority fields and original numeric categories.",
+      "invariant": "Last projected fields and validation of discarded values preserve the original decoder.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_acl_input_rejects_original_malformed_fields_and_truncated_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode malformed authority fields and every truncated prefix.",
+      "invariant": "Invalid fields reject without publishing or retaining a partial ACL.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_acl_input_accounts_for_native_buffers_and_retires_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Measure retained sequence ACL allocations and deny intermediate admissions.",
+      "invariant": "Native capacities are admitted before construction and all failed prefixes release their allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_acl_cancellation_retires_active_paths_and_preserves_completed_output",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Cancel active sequence ACL input and a completed retained projection.",
+      "invariant": "Active paths retire while completed output retains its own original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "sequence_owner_prefix_preserves_fixed_identity_and_dependency_shapes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/sequence/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode optional sequence owners with fixed identities and enum dependency representations.",
+      "invariant": "Owner identities, default dependencies, accepted forms and suffix boundaries remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_definition_input_matches_original_defaults_flattening_and_options",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/row/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Compare retained sequence definitions with ordinary decoding across defaults, options and flattened ACLs.",
+      "invariant": "Every accepted native definition and original field rule is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_definition_input_rejects_original_malformed_prefixes_and_releases_buffers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/row/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode malformed sequence definitions and truncated prefixes under limited memory.",
+      "invariant": "Failure preserves original field order and releases all admitted buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_value_input_checks_every_original_allocation_field",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/row/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode generation values with changes to projected and unused allocation fields.",
+      "invariant": "The complete stored allocation record is validated before returning its position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_input_finishes_physical_definitions_before_values_and_relation_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Trace definition reads, generation lookups and relation ordering.",
+      "invariant": "Every definition precedes every value lookup; complete rows return in original logical order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_input_preserves_definition_and_unused_value_field_error_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Combine invalid later definitions with earlier missing or malformed generation values.",
+      "invariant": "Physical definition errors precede value errors and unused allocation fields remain checked.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_input_retires_partial_rows_when_its_original_read_owner_is_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Cancel the original retained sequence reader during partial construction.",
+      "invariant": "The selected provider and every unpublished row retire together.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "sequence_input_reuses_original_relation_key_validation_before_value_decoding",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/sequence_input/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Read canonical sequence keys and malformed trailing-byte aliases.",
+      "invariant": "Original relation-key rejection precedes value decoding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_sequence_input_preserves_original_cell_validation_and_authority_order",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/sequence_input/row/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Compare native SQLite cell classes, authority and owner dependencies with ordinary row decoding.",
+      "invariant": "Accepted rows and first native conversion errors are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_sequence_input_retains_owned_text_and_releases_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/sequence_input/row/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Decode native SQLite sequence names and ACL fields under denied allocations.",
+      "invariant": "Native buffers retain their original admission and rejected prefixes release it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_sequence_input_preserves_definitions_values_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Retain provider-specific sequence definitions and values across private rollback, later writes, work windows and terminal failures.",
+      "invariant": "The original selected view, row order and generation positions survive; every abandoned prefix releases its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_sequence_input_preserves_definitions_values_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Retain provider-specific sequence definitions and values across private rollback, later writes, work windows and terminal failures.",
+      "invariant": "The original selected view, row order and generation positions survive; every abandoned prefix releases its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_sequence_input_preserves_definitions_values_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Retain provider-specific sequence definitions and values across private rollback, later writes, work windows and terminal failures.",
+      "invariant": "The original selected view, row order and generation positions survive; every abandoned prefix releases its owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_authority_validation_resumes_original_roles_and_grant_closure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/sequence_binding/tests/continuation.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Validate bound roles and grant paths with one, three and sixty-four work steps and competing authority defects.",
+      "invariant": "Smaller windows suspend more often without changing native authority, diagnostics or validation order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_authority_validation_retires_scratch_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/sequence_binding/tests/continuation.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Cancel either owner, drop every pending prefix and deny intermediate authority allocations.",
+      "invariant": "Role projection and grant scratch retire completely on every terminal boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_authority_validation_copies_utf8_role_names_in_bounded_fragments",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/sequence_binding/tests/continuation.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Rename the retained owner to a wide UTF-8 name and compare required polls with short names.",
+      "invariant": "Original role incarnation survives and increased name copying requires additional bounded work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_projection_retains_its_original_name_and_path_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/sequence_binding/tests/continuation.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Measure a completed named authority projection before and after source cancellation.",
+      "invariant": "Live name and path allocations equal their retained admission and remain valid until output retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_sequence_input_preserves_native_state_authority_oids_and_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/persistent/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Restore zero, three and sixty-four sequences across work windows, then exhaust and cancel the input allowance before a native mutation.",
+      "invariant": "State, authority, recorded and historical OIDs match ordinary restoration; future edits use the session allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_sequence_input_preserves_definition_authority_and_oid_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/persistent/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Combine corrupt sequence identities, authority, definitions and later invalid OID metadata.",
+      "invariant": "Original semantic diagnostics and first-error order survive without partial publication or source mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_sequence_input_retires_every_pending_prefix_on_failure_drop_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/persistent/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Retire every pending sequence prefix through cancellation, zero work, drop, unwind and denied memory.",
+      "invariant": "All private records, ACLs, OIDs and buffers release their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_sequence_oid_decimal_input_preserves_native_unsigned_parsing_and_last_key_wins",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/persistent/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Read decimal OIDs, long leading zeroes, invalid signs, overflow and hexadecimal identity aliases.",
+      "invariant": "Unsigned parsing, value-before-identity errors and last-entry-wins metadata match ordinary loading.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_sequence_assembly_adopts_original_name_and_acl_allocations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/registry/persistent/tests.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Transfer an admitted physical row through native authority and sequence construction.",
+      "invariant": "Returned name and ACL pointers equal their original allocations, which remain admitted until retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_sequence_input_keeps_selected_definitions_values_authority_and_live_mutations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/sequences.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Rename and advance a sequence after private restoration starts, then perform authorized values and identity writes after completion.",
+      "invariant": "The selected catalog cut is preserved; subsequent operations observe current committed state under the receiving session.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_sequence_input_retires_native_prefix_and_transaction_on_every_terminal_kind",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/sequences.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Cancel, exhaust memory, use zero work, drop or unwind a partial persistent sequence stage.",
+      "invariant": "Every private root and the read transaction retire without rewriting durable sequences.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_sequence_input_rejects_invalid_recorded_oid_without_publishing_partial_catalog",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/sequences.rs",
+      "capability": "Retained persistent sequence reconstruction",
+      "workload": "Restore valid sequence rows followed by malformed recorded OID metadata.",
+      "invariant": "OID rejection destroys the complete private session and leaves subsequent ordinary operations usable.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     }
   ]

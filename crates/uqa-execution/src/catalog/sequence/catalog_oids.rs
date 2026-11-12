@@ -68,7 +68,7 @@ fn metadata_key(object_id: &[u8; 16]) -> String {
     key
 }
 
-fn decode_object_id(encoded: &str) -> StorageBackendResult<[u8; 16]> {
+pub(super) fn decode_object_id(encoded: &str) -> StorageBackendResult<[u8; 16]> {
     let invalid = || {
         StorageBackendError::Other(format!(
             "sequence catalog OID entry names invalid object identity `{encoded}`"

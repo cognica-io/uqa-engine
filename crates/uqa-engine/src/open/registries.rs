@@ -18,6 +18,14 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_registries_after_sequences(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_sequences(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         *self.durable.graph_catalog_oids.write() =
             uqa_execution::catalog::graph_oids::load(catalog)?;
         self.restore_enums_from_catalog(catalog)?;

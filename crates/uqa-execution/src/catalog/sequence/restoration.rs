@@ -165,6 +165,11 @@ pub fn migrate_sequence_identities(
 pub fn sequence_state_from_row(
     row: SequenceRow,
 ) -> StorageBackendResult<(RelationIdentity, SequenceState)> {
+    let state = sequence_state(&row)?;
+    Ok((row.relation, state))
+}
+
+pub(super) fn sequence_state(row: &SequenceRow) -> StorageBackendResult<SequenceState> {
     if row.increment == 0 {
         return Err(StorageBackendError::Other(format!(
             "corrupt sequence `{}` has zero increment",
@@ -222,7 +227,7 @@ pub fn sequence_state_from_row(
                 row.relation.qualified_name()
             ))
         })?;
-    Ok((row.relation, state))
+    Ok(state)
 }
 /// Initial restoration validates the complete candidate before writing conversions or publishing registries.
 /// The caller retains the complete catalog-open transaction until all other catalogs validate.

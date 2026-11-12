@@ -4,35 +4,28 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Ordinary privilege checks and admitted catalog validation share the same ordered grant closure.
+//! Relation privileges use the shared ordered grant closure without changing their carrier.
 
 use super::{acl_grantor, TableAclEntry, TableAclPrivilege};
-use crate::SQLError;
-use std::collections::BTreeSet;
-use uqa_core::memory::{ProductionControl, ProductionMap};
+use crate::{
+    catalog::{
+        security::grant_paths::{self, Grant, Paths},
+        work::{inline, Work},
+    },
+    SQLError,
+};
+use uqa_core::memory::ProductionControl;
 
-pub(in crate::catalog::security) trait Paths<'a> {
-    fn contains(&self, role: &str) -> bool;
-    fn insert(&mut self, role: &'a str) -> Result<bool, SQLError>;
-}
-
-impl Paths<'_> for BTreeSet<String> {
-    fn contains(&self, role: &str) -> bool {
-        self.contains(role)
+impl Grant for TableAclEntry {
+    type Privilege = TableAclPrivilege;
+    fn recipient(&self) -> Option<&str> {
+        self.role.role_name()
     }
-
-    fn insert(&mut self, role: &str) -> Result<bool, SQLError> {
-        Ok(self.insert(role.to_owned()))
+    fn grantor<'a>(&'a self, owner: &'a str) -> &'a str {
+        acl_grantor(self, owner)
     }
-}
-
-impl<'a> Paths<'a> for ProductionMap<'_, &'a str, ()> {
-    fn contains(&self, role: &str) -> bool {
-        self.get(role).is_some()
-    }
-
-    fn insert(&mut self, role: &'a str) -> Result<bool, SQLError> {
-        Ok(self.insert_copy(role, ())?.is_none())
+    fn grants_option(&self, privilege: Self::Privilege) -> bool {
+        self.grant_options.intersects(privilege.mask())
     }
 }
 
@@ -43,7 +36,7 @@ pub(in crate::catalog::security) fn extend<'a>(
     reachable: &mut impl Paths<'a>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    crate::catalog::work::inline(extend_from(
+    inline(extend_from(
         owner,
         acl,
         privilege,
@@ -59,28 +52,7 @@ pub(in crate::catalog::security) async fn extend_from<'a>(
     privilege: TableAclPrivilege,
     reachable: &mut impl Paths<'a>,
     control: &ProductionControl<'_>,
-    work: &mut impl crate::catalog::work::Work,
+    work: &mut impl Work,
 ) -> Result<(), SQLError> {
-    control.check()?;
-    let Some(acl) = acl else {
-        return Ok(());
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            work.checkpoint().await?;
-            control.check()?;
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, owner))
-            {
-                changed |= reachable.insert(role)?;
-            }
-        }
-        if !changed {
-            return Ok(());
-        }
-    }
+    grant_paths::extend_from(owner, acl, privilege, reachable, control, work).await
 }

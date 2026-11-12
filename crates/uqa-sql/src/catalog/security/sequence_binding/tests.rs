@@ -10,6 +10,7 @@ use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::sequence::{
     grant_acl, role_has_privilege, AclPrivilege, PrivilegeCheck,
 };
+use uqa_core::catalog_acl::AclGrantee;
 
 fn roles() -> RoleDefinitions {
     RoleDefinitions::try_from_iter(
@@ -221,3 +222,5 @@ fn sequence_public_and_named_public_keep_distinct_grants_and_grantors() {
     bound.validate(&roles).unwrap();
     assert_eq!(BoundSequenceSecurity::bind(&named, &roles).unwrap(), bound);
 }
+
+mod continuation;
