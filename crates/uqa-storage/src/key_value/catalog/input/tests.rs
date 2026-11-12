@@ -9,6 +9,48 @@ use crate::key_value::catalog::{decode_catalog_relation_key, relation_key, Store
 use crate::key_value::codec::single_str_key;
 
 #[test]
+fn controlled_graph_presence_requires_the_canonical_key_without_reading_payloads() {
+    use crate::{CatalogFacade, KeyValueStore, MemoryKeyValueStore};
+    use std::sync::Arc;
+    let store = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store.clone());
+    let canonical = single_str_key(super::super::TAG_NAMED_GRAPH, "graph").unwrap();
+    let mut alias = canonical.clone();
+    alias.extend_from_slice(b"alias");
+    store.put(&alias, &[0xff; 2048]).unwrap();
+    assert_eq!(catalog.load_named_graphs().unwrap(), ["graph"]);
+    let control = StorageReadControl::with_limit(4096);
+    let limits = CatalogInputLimits {
+        maximum_key_bytes: 256,
+        maximum_value_bytes: 1,
+    };
+    assert!(!catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .unwrap());
+    store.put(&canonical, &[0xff; 8192]).unwrap();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .unwrap());
+    assert!(!catalog
+        .named_graph_exists_with_control("absent", limits, &control)
+        .unwrap());
+    assert_eq!(control.memory().used(), 0);
+    let occupied = control
+        .memory()
+        .reserve(control.memory().available())
+        .unwrap();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .is_err());
+    drop(occupied);
+    control.cancellation().cancel();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .is_err());
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn key_value_schema_input_preserves_raw_legacy_names_and_original_key_validation() {
     use crate::{CatalogFacade, KeyValueStore, MemoryKeyValueStore};
     use std::sync::Arc;

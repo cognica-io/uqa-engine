@@ -34,6 +34,7 @@ enum Stage {
     Tables(PersistentTableInput),
     Watermarks(crate::hierarchy::watermarks::Input),
     WatermarkPublication(crate::hierarchy::watermarks::Plan),
+    Graphs(uqa_graph::GraphCatalogInput),
     Registries,
     Caches,
 }
@@ -92,7 +93,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table and partition-counter input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter and graph input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -169,10 +170,16 @@ impl PersistentEngineInput {
                         update.publish();
                         Stage::WatermarkPublication(plan)
                     }
-                    None => Stage::Registries,
+                    None => Stage::Graphs(engine.graph_input(candidate.limits, &self.control)?),
+                },
+                Stage::Graphs(mut input) => match input.advance(1)? {
+                    Some(graphs) => {
+                        engine.durable.graphs.restore(&crate::state::CatalogGeneration::new(graphs));
+                        Stage::Registries
+                    }
+                    None => Stage::Graphs(input),
                 },
                 Stage::Registries => {
-                    engine.restore_graphs_from_catalog(catalog.as_ref())?;
                     engine.restore_engine_registries_from_catalog(
                         catalog.as_ref(),
                         CatalogRestoreMode::LoadOnly,

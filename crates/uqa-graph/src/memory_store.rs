@@ -34,8 +34,9 @@ pub use graphid::{
     VERTEX_DEFAULT_LABEL_ID,
 };
 
+pub(crate) use graphid::registry::Registry;
 pub(crate) use graphid::{usize_to_f64_exact, MAX_GRAPHID_LABEL_ID, MAX_GRAPHID_SEQUENCE};
-use labels::NativeLabels;
+pub(crate) use labels::NativeLabels;
 use native::{NativeMap, NativeSet};
 use partition::Partition;
 

@@ -19,6 +19,38 @@ use uqa_core::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn graph_name_exists_with_control(
+        &self,
+        name: &str,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(
+            name.len()
+                .checked_add(5)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+            limits.maximum_key_bytes,
+        )?;
+        let key = crate::key_value::codec::single_str_key_prefix(
+            super::TAG_NAMED_GRAPH,
+            name,
+            name.len(),
+            control.memory(),
+        )?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut present = false;
+            read.visit_keys_after(&key, None, 1, control, &mut |found| {
+                present = found == &*key;
+                Ok(())
+            })?;
+            control.check()?;
+            read.control().check()?;
+            Ok(present)
+        })
+    }
+
     pub(super) fn schema_load(
         &self,
         limits: CatalogInputLimits,

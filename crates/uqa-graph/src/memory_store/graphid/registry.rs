@@ -14,8 +14,10 @@ use crate::age_names::{EDGE_DEFAULT_LABEL_NAME, VERTEX_DEFAULT_LABEL_NAME};
 
 mod wire;
 
-pub(in crate::memory_store) trait Registry {
+pub(crate) trait Registry {
     type Error: Into<GraphStoreError>;
+    fn allocation_id(&self) -> [u8; 16];
+    fn set_allocation_id(&mut self, identity: [u8; 16]);
     fn label(&self, name: &str) -> Option<u32>;
     fn kind(&self, name: &str) -> Option<LabelKind>;
     fn sequence(&self, id: u32) -> Option<u64>;

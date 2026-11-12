@@ -13,7 +13,9 @@ use uqa_storage::{CatalogFacade, PersistentStorageBackend, StorageBackendResult}
 
 mod capture;
 mod input;
+mod persistent;
 pub use capture::CapturedGraphCatalog;
+pub use persistent::GraphCatalogInput;
 
 #[derive(Clone)]
 pub struct GraphCatalog {
@@ -37,6 +39,10 @@ impl GraphCatalog {
 
     pub fn len(&self) -> usize {
         self.graphs.len()
+    }
+
+    pub fn budget(&self) -> &MemoryBudget {
+        self.graphs.budget()
     }
     pub fn is_empty(&self) -> bool {
         self.graphs.is_empty()

@@ -674,6 +674,19 @@ pub trait CatalogFacade: Send + Sync {
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool>;
 
+    /// Test the exact canonical name key without reading its ignored payload. Decoded names from a physical scan do not substitute for canonical presence. The caller retains the enclosing catalog transaction.
+    fn named_graph_exists_with_control(
+        &self,
+        _name: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled graph-name lookup is not supported".into(),
+        ))
+    }
+
     /// Read one entity without loading any other graph payload.
     fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>>;
 

@@ -613,6 +613,15 @@ impl CatalogFacade for KeyValueCatalog {
             .contains_key(&single_str_key(TAG_NAMED_GRAPH, name)?)
     }
 
+    fn named_graph_exists_with_control(
+        &self,
+        name: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.graph_name_exists_with_control(name, limits, control)
+    }
+
     fn save_vertex(
         &self,
         vertex_id: u64,

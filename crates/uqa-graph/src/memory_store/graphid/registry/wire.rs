@@ -17,6 +17,12 @@ impl From<Infallible> for GraphStoreError {
 
 impl Registry for GraphLabelRegistry {
     type Error = Infallible;
+    fn allocation_id(&self) -> [u8; 16] {
+        self.allocation_id
+    }
+    fn set_allocation_id(&mut self, identity: [u8; 16]) {
+        self.allocation_id = identity;
+    }
     fn label(&self, name: &str) -> Option<u32> {
         self.labels.get(name).copied()
     }

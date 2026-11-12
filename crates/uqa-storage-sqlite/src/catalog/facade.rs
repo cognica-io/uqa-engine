@@ -586,6 +586,15 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::named_graph_exists(self, name))
     }
 
+    fn named_graph_exists_with_control(
+        &self,
+        name: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.native_graph_name_exists_with_control(name, limits, control)
+    }
+
     fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
         into_storage_result(Catalog::load_named_graph_snapshot(self, name))
     }

@@ -62614,6 +62614,127 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_graph_labels_match_original_defaults_fields_and_positional_input",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/labels/stored/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Decode stored label JSON through one-step polls and compare its accepted values with the original serde registry, including defaults, map keys and terminal paths.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_graph_labels_preserve_integer_and_numeric_map_key_acceptance",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/labels/stored/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Decode stored label JSON through one-step polls and compare its accepted values with the original serde registry, including defaults, map keys and terminal paths.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_graph_label_continuation_retains_native_roots_and_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/labels/stored/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Decode stored label JSON through one-step polls and compare its accepted values with the original serde registry, including defaults, map keys and terminal paths.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_graph_label_input_retires_partial_roots_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/memory_store/labels/stored/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Decode stored label JSON through one-step polls and compare its accepted values with the original serde registry, including defaults, map keys and terminal paths.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "native_and_wire_registry_restoration_preserve_order_duplicates_and_unused_sequences",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/persistent_store/identifiers/registry/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Restore legacy and explicit graph identities through original autonomous label and sequence watermarks, with duplicate labels, tombstones and overflow.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "registry_label_watermark_overflow_precedes_all_sequence_reads",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/persistent_store/identifiers/registry/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Restore legacy and explicit graph identities through original autonomous label and sequence watermarks, with duplicate labels, tombstones and overflow.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_graph_input_keeps_selected_labels_and_publishes_live_native_handles",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graphs.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Restore graph names and labels in a private persistent Engine transaction, then change the source or terminate partial reconstruction.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_graph_input_retires_partial_labels_and_the_private_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graphs.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Restore graph names and labels in a private persistent Engine transaction, then change the source or terminate partial reconstruction.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_graph_presence_requires_the_canonical_key_without_reading_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Probe exact graph-name presence when only a trailing-byte alias exists, then add an oversized invalid ignored payload.",
+      "invariant": "Original graph identities, field values, read order and private transaction ownership are preserved; denied work retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

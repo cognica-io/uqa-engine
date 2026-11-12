@@ -31,7 +31,8 @@ impl JsonReadWork for RetainedWork<'_, '_> {
     }
 }
 
-pub(crate) async fn read_from(
+/// Construct one exact metadata key through the caller's original work channel, then read its selected value under the same encoded limits and retained allowance.
+pub async fn read_from(
     catalog: &dyn CatalogFacade,
     prefix: &str,
     name: &str,

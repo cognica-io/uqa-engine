@@ -44,6 +44,22 @@ pub fn verify_catalog_graph_name_input(
     let mut expected = source.catalog.load_named_graphs()?;
     expected.sort();
     let control = StorageReadControl::with_limit(1 << 20);
+    for name in [
+        "z",
+        "a_longer",
+        "한글\0graph",
+        "private",
+        "removed",
+        "absent",
+    ] {
+        expect_eq(
+            &source
+                .catalog
+                .named_graph_exists_with_control(name, limits, &control)?,
+            &source.catalog.named_graph_exists(name)?,
+            "canonical graph presence preserves selected private membership",
+        )?;
+    }
     let mut input = source.catalog.begin_graph_name_input(limits, &control)?;
     source.backend.rollback_transaction()?;
     let later = source.backend.open_session()?;

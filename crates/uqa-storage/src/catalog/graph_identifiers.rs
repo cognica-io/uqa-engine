@@ -61,6 +61,30 @@ impl GraphIdentifierNamespace {
         self.key(b'l', GraphEntityKind::Vertex, 0, graph)
     }
 
+    /// Hash the same legacy address through the enclosing retained input's work channel. The physical namespace and resulting identity are unchanged.
+    pub async fn legacy_graph_identity_from(
+        &self,
+        graph: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<[u8; 16]> {
+        let mut digest = Sha256::new();
+        digest.update(self.key(b'g', GraphEntityKind::Vertex, 0, [0; 16]));
+        for bytes in graph.as_bytes().chunks(4096) {
+            input.checkpoint().await?;
+            control.check()?;
+            digest.update(bytes);
+        }
+        input.checkpoint().await?;
+        control.check()?;
+        let mut identity = [0; 16];
+        identity.copy_from_slice(&digest.finalize()[..16]);
+        if identity == [0; 16] {
+            identity[15] = 1;
+        }
+        Ok(identity)
+    }
+
     /// Logical graph entity observations share the physical entity scope and clear generation, independently of named graph membership or table row identities.
     pub fn serializable_entity_object(&self) -> [u8; 16] {
         self.serializable_object(b'r')

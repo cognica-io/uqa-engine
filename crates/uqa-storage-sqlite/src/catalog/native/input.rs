@@ -21,6 +21,36 @@ use uqa_storage::{
 };
 
 impl Catalog {
+    pub(in crate::catalog) fn native_graph_name_exists_with_control(
+        &self,
+        name: &str,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(name.len(), limits.maximum_key_bytes)?;
+        let snapshot = self.conn.native_snapshot()?.ok_or_else(|| {
+            StorageBackendError::Other("controlled graph-name reads require native records".into())
+        })?;
+        let key = NativeRecordIdentity::new(
+            Family::NamedGraphs,
+            NativeRecordOwner::Database(snapshot.database),
+        )
+        .and_then(|identity| identity.encode_key(&[super::text(name)], control))
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        control.check_value_size(key.len(), limits.maximum_key_bytes)?;
+        let read = snapshot.record_read();
+        let mut present = false;
+        read.visit_keys_after(&key, None, 1, control, &mut |found| {
+            present = found == &*key;
+            Ok(())
+        })?;
+        control.check()?;
+        read.control().check()?;
+        Ok(present)
+    }
+
     pub(in crate::catalog) fn native_graph_name_input(
         &self,
         limits: CatalogInputLimits,

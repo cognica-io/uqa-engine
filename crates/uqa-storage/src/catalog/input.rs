@@ -14,7 +14,7 @@ use std::sync::Arc;
 use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec};
 
 pub mod index;
-pub(crate) mod metadata;
+pub mod metadata;
 pub(crate) mod relation_security;
 pub mod statistics;
 pub(crate) mod strings;

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Read physical named-graph catalogs through retained key/row input, preserving private membership and native name decoding while never materializing ignored Key/Value payloads.
+- Reconstruct persistent graph catalogs through retained name, native label and identifier input, preserving selected membership, original allocation rules and terminal transaction cleanup without materializing ignored Key/Value payloads.
 
 - Reconstruct legacy partition counters through retained native hierarchy input, validating the complete hierarchy before private counter publication. Include migrated durable child reservations so reopening SQLite KV or redb cannot restart a shared parent below those reservations.
 
