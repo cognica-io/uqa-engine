@@ -58030,6 +58030,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_preserves_public_values_defaults_and_feature_shapes",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored.rs",
+      "capability": "Stored analyzer native input",
+      "workload": "Compare every common and enabled language configuration shape, missing field and invalid replacement against ordinary raw Serde input.",
+      "invariant": "Accepted configurations and canonical output agree; invalid shapes reject without leaking their original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_preserves_raw_field_order_duplicates_and_ignored_values",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored.rs",
+      "capability": "Stored analyzer JSON semantics",
+      "workload": "Read reordered and escaped keys, known and unknown duplicates, positional forms, aliases, truncated text, ignored surrogate escapes and recursion boundaries.",
+      "invariant": "Raw JSON preserves existing acceptance and field semantics without collapse through an intermediate object tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_preserves_generic_numeric_map_content",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored.rs",
+      "capability": "Stored analyzer tagged numeric content",
+      "workload": "Read signed zero, wide integers, fractional/exponent forms and 16384-digit numeric map payloads through raw tagged content.",
+      "invariant": "Native integer selection and the public generic numeric map representation match ordinary Serde, including exponent spelling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_preserves_korean_default_and_scalar_enum_forms",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored.rs",
+      "capability": "Stored Korean analyzer defaults",
+      "workload": "Read omitted Korean tokenizer/profile defaults and scalar enum object forms.",
+      "invariant": "Native defaults match the public serializer without resolving a dictionary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_preserves_japanese_default_and_scalar_enum_forms",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored.rs",
+      "capability": "Stored Japanese analyzer defaults",
+      "workload": "Read omitted Japanese tokenizer/completion/profile defaults and scalar enum object forms.",
+      "invariant": "Native defaults match the public serializer without resolving a dictionary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_reconstruction_retires_source_before_canonical_publication",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored/lifecycle.rs",
+      "capability": "Stored analyzer owner lifetime",
+      "workload": "Read long Unicode paths and invalid deferred patterns through one-poll windows and separate source/output allowances.",
+      "invariant": "Source text retires before canonical output completes, while captured images and native definitions retain their own reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_reconstruction_releases_all_pending_failures_and_duplicates",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored/lifecycle.rs",
+      "capability": "Stored analyzer failure retirement",
+      "workload": "Cancel, deny available memory, invalidate work windows or abandon reconstruction at every pending boundary with duplicate map values.",
+      "invariant": "Errors are terminal, successful reclaimed-memory completion remains exact and incomplete owners release all original charges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_defaults_keep_admission_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored/lifecycle.rs",
+      "capability": "Stored analyzer default admission",
+      "workload": "Interrupt default Korean/Japanese tokenizer, completion and profile reconstruction at every pending boundary.",
+      "invariant": "Missing string defaults use the original allowance before allocation and no unrelated dictionary strings are created for scalar defaults.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_input_yields_before_wide_map_payload_and_reuses_source_text",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored/lifecycle.rs",
+      "capability": "Stored analyzer bounded reconstruction",
+      "workload": "Read 256 wide Unicode mapping entries from an independent retained source through one-poll windows.",
+      "invariant": "Each reconstruction poll allocates less than 64 KiB, no complete JSON tree is copied and canonical values survive source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_map_replacement_retires_discarded_native_payload_charges",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/stored/lifecycle.rs",
+      "capability": "Stored analyzer duplicate map ownership",
+      "workload": "Replace a 256 KiB native mapping value with a short value under the same stored key.",
+      "invariant": "The later value wins and the completed definition retains less than 4 KiB, with discarded key/value reservations retired.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

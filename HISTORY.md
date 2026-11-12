@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct stored analyzer JSON through admitted native fields while preserving defaults, aliases, positional forms and duplicate handling; retire source text before canonical image publication.
+
 - Publish admitted native analyzer configurations with their original owners and a canonical image, using bounded field/text progress and no complete intermediate JSON tree.
 
 - Read persistent visible document maxima through retained key-only progress, including deleted slots, without collecting document identities or substituting autonomous allocator watermarks.

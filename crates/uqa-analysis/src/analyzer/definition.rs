@@ -129,6 +129,16 @@ impl AnalyzerDefinition {
         Self::publish_image(configuration, bytes, cancellation)
     }
 
+    /// Reconstruct ordinary stored JSON through Analysis's native constructors, preserving defaults, aliases, field order and duplicate-field rejection. The source retires before canonical publication; native configuration and output retain the enclosing allowance. No stage or external resource is resolved.
+    pub async fn from_stored_from(
+        text: Budgeted<String>,
+        mut input: AsyncImageInput<'_>,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let configuration = crate::configuration::decode_stored_from(&text, &mut input).await?;
+        drop(text);
+        Self::from_configuration_from(configuration, input).await
+    }
+
     fn publish_image(
         configuration: Budgeted<Analyzer>,
         bytes: Budgeted<Vec<u8>>,

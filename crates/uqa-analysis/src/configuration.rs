@@ -67,6 +67,8 @@ mod inspection;
 mod morphology;
 mod output;
 pub(crate) use output::encode_from;
+mod stored;
+pub(crate) use stored::decode_from as decode_stored_from;
 mod view;
 pub(crate) use inspection::{check_encoded_size, matches_snapshot};
 mod value;

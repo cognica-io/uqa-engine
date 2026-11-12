@@ -13,6 +13,11 @@ pub(crate) trait Read: Send {
     type Error: Send;
     fn error(&self, error: serde_json::Error) -> Self::Error;
     fn implicit_defaults(&self) -> bool;
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    fn default_text(
+        &mut self,
+        value: &'static str,
+    ) -> impl Future<Output = Result<String, Self::Error>> + Send;
     fn missing(&self, name: &'static str) -> Self::Error;
     #[cfg(any(feature = "nori", feature = "kuromoji"))]
     fn untagged(&self, error: Self::Error, name: &'static str) -> Self::Error;

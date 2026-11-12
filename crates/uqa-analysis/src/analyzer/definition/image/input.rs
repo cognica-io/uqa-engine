@@ -181,6 +181,12 @@ impl Read for Input<'_, '_> {
     fn implicit_defaults(&self) -> bool {
         false
     }
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    async fn default_text(&mut self, value: &'static str) -> Result<String> {
+        let (value, memory) = self.work.copy_text(value).await?.into_parts();
+        self.memory.absorb(memory);
+        Ok(value)
+    }
     fn missing(&self, _: &'static str) -> Self::Error {
         invalid()
     }

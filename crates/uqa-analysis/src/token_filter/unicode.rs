@@ -29,7 +29,7 @@ pub enum UnicodeProfileSource {
 
 impl Default for UnicodeProfileSource {
     fn default() -> Self {
-        Self::LegacyNori("jdk21".into())
+        Self::LegacyNori(Self::DEFAULT_LEGACY_PROFILE.into())
     }
 }
 
@@ -52,6 +52,8 @@ impl From<UnicodeProfile> for UnicodeProfileSource {
 }
 
 impl UnicodeProfileSource {
+    pub(crate) const DEFAULT_LEGACY_PROFILE: &'static str = "jdk21";
+
     #[cfg(not(feature = "nori"))]
     pub(crate) fn validate_features(&self) -> AnalysisResult<()> {
         if matches!(self, Self::LegacyNori(_)) {

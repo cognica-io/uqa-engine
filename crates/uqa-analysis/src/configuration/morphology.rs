@@ -57,7 +57,8 @@ pub(super) const FILTER_TAGS: &[&str] = &[
 pub(super) async fn nori<R: Read>(
     input: &mut R,
 ) -> Result<crate::nori::NoriTokenizerConfig, R::Error> {
-    use crate::nori::{DecompoundMode, NoriTokenizerConfig};
+    use crate::nori::{DecompoundMode, NoriOptions, NoriTokenizerConfig};
+    let defaults = NoriOptions::default();
     let (
         dictionary,
         decompound_mode,
@@ -65,11 +66,11 @@ pub(super) async fn nori<R: Read>(
         discard_punctuation,
         user_dictionary,
     ) = fields!(input, true;
-        dictionary: String => default(NoriTokenizerConfig::default().dictionary),
-        decompound_mode: DecompoundMode => default(NoriTokenizerConfig::default().decompound_mode),
-        output_unknown_unigrams: bool => default(NoriTokenizerConfig::default().output_unknown_unigrams),
-        discard_punctuation: bool => default(NoriTokenizerConfig::default().discard_punctuation),
-        user_dictionary: Option<String> => default(NoriTokenizerConfig::default().user_dictionary),
+        dictionary: String => default(input.default_text(crate::nori::DEFAULT_NORI_DICTIONARY).await?),
+        decompound_mode: DecompoundMode => default(defaults.decompound_mode),
+        output_unknown_unigrams: bool => default(defaults.output_unknown_unigrams),
+        discard_punctuation: bool => default(defaults.discard_punctuation),
+        user_dictionary: Option<String> => default(None),
     );
     Ok(NoriTokenizerConfig {
         dictionary,
@@ -84,7 +85,8 @@ pub(super) async fn nori<R: Read>(
 pub(super) async fn kuromoji<R: Read>(
     input: &mut R,
 ) -> Result<crate::kuromoji::KuromojiTokenizerConfig, R::Error> {
-    use crate::kuromoji::{KuromojiMode, KuromojiTokenizerConfig};
+    use crate::kuromoji::{KuromojiMode, KuromojiOptions, KuromojiTokenizerConfig};
+    let defaults = KuromojiOptions::default();
     let (
         dictionary,
         mode,
@@ -94,13 +96,13 @@ pub(super) async fn kuromoji<R: Read>(
         n_best_cost,
         n_best_examples,
     ) = fields!(input, true;
-        dictionary: String => default(KuromojiTokenizerConfig::default().dictionary),
-        mode: KuromojiMode => default(KuromojiTokenizerConfig::default().mode),
-        discard_punctuation: bool => default(KuromojiTokenizerConfig::default().discard_punctuation),
-        discard_compound_token: bool => default(KuromojiTokenizerConfig::default().discard_compound_token),
-        user_dictionary: Option<String> => default(KuromojiTokenizerConfig::default().user_dictionary),
-        n_best_cost: i32 => default(KuromojiTokenizerConfig::default().n_best_cost),
-        n_best_examples: Option<String> => default(KuromojiTokenizerConfig::default().n_best_examples),
+        dictionary: String => default(input.default_text(crate::kuromoji::DEFAULT_KUROMOJI_DICTIONARY).await?),
+        mode: KuromojiMode => default(defaults.mode),
+        discard_punctuation: bool => default(defaults.discard_punctuation),
+        discard_compound_token: bool => default(defaults.discard_compound_token),
+        user_dictionary: Option<String> => default(None),
+        n_best_cost: i32 => default(defaults.n_best_cost),
+        n_best_examples: Option<String> => default(None),
     );
     Ok(KuromojiTokenizerConfig {
         dictionary,
@@ -134,7 +136,7 @@ pub(super) async fn filter<R: Read>(input: &mut R, tag: &str) -> Result<TokenFil
         }
         #[cfg(any(feature = "nori", feature = "kuromoji"))]
         "unicode_simple_lowercase" => {
-            let (unicode_profile,) = fields!(input, true; unicode_profile: crate::UnicodeProfileSource => default(crate::UnicodeProfileSource::default()));
+            let (unicode_profile,) = fields!(input, true; unicode_profile: crate::UnicodeProfileSource => default(crate::UnicodeProfileSource::LegacyNori(input.default_text(crate::UnicodeProfileSource::DEFAULT_LEGACY_PROFILE).await?)));
             TokenFilter::UnicodeSimpleLowercase(crate::SimpleLowercaseConfig { unicode_profile })
         }
         #[cfg(feature = "kuromoji")]
@@ -163,8 +165,8 @@ pub(super) async fn filter<R: Read>(input: &mut R, tag: &str) -> Result<TokenFil
         #[cfg(feature = "kuromoji")]
         "kuromoji_completion" => {
             let (dictionary, mode) = fields!(input, true;
-                dictionary: String => default(crate::kuromoji::KuromojiCompletionConfig::default().dictionary),
-                mode: crate::kuromoji::CompletionMode => default(crate::kuromoji::KuromojiCompletionConfig::default().mode),
+                dictionary: String => default(input.default_text(crate::kuromoji::DEFAULT_KUROMOJI_DICTIONARY).await?),
+                mode: crate::kuromoji::CompletionMode => default(crate::kuromoji::CompletionMode::default()),
             );
             TokenFilter::KuromojiCompletion(crate::kuromoji::KuromojiCompletionConfig {
                 dictionary,

@@ -159,6 +159,7 @@ fn native_configuration_preserves_public_serde_values_defaults_and_diagnostics()
 
 mod observations;
 mod retained;
+mod stored;
 
 #[test]
 fn native_configuration_preserves_tagged_and_struct_sequence_forms() {
