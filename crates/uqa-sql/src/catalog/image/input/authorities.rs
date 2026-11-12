@@ -6,7 +6,7 @@
 
 //! Native routine and system relation authority is decoded before any catalog publication.
 
-use super::{invalid, Input};
+use super::{invalid, Fields};
 use crate::{
     catalog::{
         security::{
@@ -23,33 +23,33 @@ use uqa_core::{
     CancellationToken, RelationIdentity,
 };
 
-impl Input<'_> {
-    fn revision(&mut self) -> Result<[u8; 16], SQLError> {
-        let revision = self.binary.array()?;
+impl Fields<'_> {
+    async fn revision(&mut self) -> Result<[u8; 16], SQLError> {
+        let revision = self.binary.array().await?;
         if revision == [0; 16] {
             return Err(invalid("authority tuple revision"));
         }
         Ok(revision)
     }
 
-    fn system_acl(&mut self) -> Result<Budgeted<SystemAcl>, SQLError> {
-        let revision = self.revision()?;
-        let (acl, reservation) = self.acl_entries()?.into_parts();
+    async fn system_acl(&mut self) -> Result<Budgeted<SystemAcl>, SQLError> {
+        let revision = self.revision().await?;
+        let (acl, reservation) = self.acl_entries().await?.into_parts();
         Ok(Budgeted::new(SystemAcl { revision, acl }, reservation))
     }
 
-    fn relation_key(
+    async fn relation_key(
         &mut self,
         previous: Option<&RelationIdentity>,
     ) -> Result<(Budgeted<RelationIdentity>, SystemRelation), SQLError> {
-        let schema = self.binary.text()?;
-        let name = self.binary.text()?;
+        let schema = self.binary.text().await?;
+        let name = self.binary.text().await?;
         let relation = SystemRelation::at(&schema, &name)
             .ok_or_else(|| invalid("system relation identity"))?;
         if let Some(previous) = previous {
-            let mut ordering = self.compare_text(&previous.schema, &schema)?;
+            let mut ordering = self.compare_text(&previous.schema, &schema).await?;
             if ordering == Ordering::Equal {
-                ordering = self.compare_text(&previous.name, &name)?;
+                ordering = self.compare_text(&previous.name, &name).await?;
             }
             if ordering != Ordering::Less {
                 return Err(invalid("system relation key order"));
@@ -64,16 +64,16 @@ impl Input<'_> {
         ))
     }
 
-    fn relation_authority(
+    async fn relation_authority(
         &mut self,
         relation: SystemRelation,
     ) -> Result<Budgeted<SystemRelationSecurity>, SQLError> {
-        let count = self.binary.count()?;
+        let count = self.binary.count().await?;
         // Declare the aggregate lease first so partial native values retire before admission.
         let mut reservation = self.binary.memory.empty_reservation();
         let mut value = SystemRelationSecurity::default();
-        if self.flag()? {
-            let (table, table_memory) = self.system_acl()?.into_parts();
+        if self.flag().await? {
+            let (table, table_memory) = self.system_acl().await?.into_parts();
             reservation.absorb(table_memory);
             value.table = Some(table);
         }
@@ -88,14 +88,14 @@ impl Input<'_> {
                 return Err(invalid("system column count"));
             }
             for _ in 0..count {
-                self.binary.cancellation.check()?;
-                let name = self.binary.text()?;
+                self.binary.checkpoint().await?;
+                let name = self.binary.text().await?;
                 if !columns.contains(&name)
                     || value.columns.first_from(Bound::Included(&*name)).is_some()
                 {
                     return Err(invalid("system column identity or order"));
                 }
-                let acl = self.system_acl()?;
+                let acl = self.system_acl().await?;
                 reservation.grow(OwnedMap::<String, SystemAcl>::entry_bytes())?;
                 let (name, name_memory) = name.into_parts();
                 let (acl, acl_memory) = acl.into_parts();
@@ -113,12 +113,32 @@ pub(in super::super) fn builtin_routines(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<BuiltinRoutineSecurities, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::BUILTIN_ROUTINES)?;
-    let mut result = BuiltinRoutineSecurities::with_budget(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let oid = u32::from_le_bytes(input.binary.array()?);
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl BuiltinRoutineSecurities {
+    /// Retain native fields and claims across independent entry, byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(memory, mutations, cancellation)
+    }
+}
+
+impl super::continuation::CatalogEntries for BuiltinRoutineSecurities {
+    type Scratch = ();
+    const MAGIC: [u8; 8] = super::super::BUILTIN_ROUTINES;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), ())
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        (): &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let oid = u32::from_le_bytes(input.binary.array().await?);
         if oid == 0
             || result
                 .last_durable_key()
@@ -126,10 +146,10 @@ pub(in super::super) fn builtin_routines(
         {
             return Err(invalid("builtin routine key order"));
         }
-        let revision = input.revision()?;
-        let (execute_acl, reservation) = input.object_acl()?.into_parts();
+        let revision = input.revision().await?;
+        let (execute_acl, reservation) = input.object_acl().await?.into_parts();
         result.insert_image_entry(
-            Budgeted::new(oid, memory.empty_reservation()),
+            Budgeted::new(oid, input.binary.memory.empty_reservation()),
             Budgeted::new(
                 BuiltinRoutineSecurity {
                     revision,
@@ -138,25 +158,50 @@ pub(in super::super) fn builtin_routines(
                 reservation,
             ),
         )?;
-    }
-    input.binary.end()?;
-    Ok(result)
-}
 
+        Ok(())
+    }
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
+}
 pub(in super::super) fn system_relations(
     reader: &mut dyn Read,
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<SystemRelationSecurities, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::SYSTEM_RELATIONS)?;
-    let mut result = SystemRelationSecurities::with_budget(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let (key, relation) = input.relation_key(result.last_durable_key())?;
-        let security = input.relation_authority(relation)?;
-        result.insert_image_entry(key, security)?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl SystemRelationSecurities {
+    /// Retain native fields and claims across independent entry, byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(memory, mutations, cancellation)
     }
-    input.binary.end()?;
-    Ok(result)
+}
+
+impl super::continuation::CatalogEntries for SystemRelationSecurities {
+    type Scratch = ();
+    const MAGIC: [u8; 8] = super::super::SYSTEM_RELATIONS;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), ())
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        (): &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let (key, relation) = input.relation_key(result.last_durable_key()).await?;
+        let security = input.relation_authority(relation).await?;
+        result.insert_image_entry(key, security)?;
+
+        Ok(())
+    }
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
 }

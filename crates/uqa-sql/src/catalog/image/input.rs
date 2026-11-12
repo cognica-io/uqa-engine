@@ -7,24 +7,23 @@
 //! Admitted field decoding leaves native publication to the owning catalog.
 
 use super::{fields::Privileges, invalid};
-use crate::{
-    ast::ObjectAclEntry,
-    catalog::roles::{identity::RoleBinding, RoleIdentity},
-    SQLError,
-};
+use crate::{ast::ObjectAclEntry, catalog::roles::RoleIdentity, SQLError};
 use std::{cmp::Ordering, io::Read};
 use uqa_core::{
     catalog_role::BoundAclEntry,
-    image_io::ImageInput,
-    memory::{Budgeted, BudgetedVec, MemoryBudget},
+    image_io::{decode_image, AsyncImageInput, ImageInput},
+    memory::{Budgeted, MemoryBudget},
     CancellationToken,
 };
 
 mod authorities;
 mod callbacks;
+mod collections;
 mod column_types;
+mod continuation;
 mod domains;
 mod expressions;
+mod fields;
 mod foreign_servers;
 mod foreign_wrappers;
 mod functions;
@@ -42,7 +41,10 @@ mod tables;
 mod triggers;
 mod types;
 mod views;
+#[cfg(test)]
+pub(super) mod window_tests;
 pub(super) use authorities::{builtin_routines, system_relations};
+pub use continuation::CatalogImageInput;
 pub(super) use domains::domains;
 pub(super) use expressions::expression_image;
 pub(super) use foreign_servers::foreign_servers;
@@ -68,6 +70,11 @@ pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
 pub(super) use views::views;
 
+struct Fields<'a> {
+    binary: AsyncImageInput<'a>,
+    retained_children: &'a mut usize,
+}
+
 struct Input<'a> {
     binary: ImageInput<'a>,
     retained_children: usize,
@@ -87,132 +94,56 @@ impl<'a> Input<'a> {
             },
         }
     }
+    fn fields<T, F>(&mut self, read: F) -> Result<T, SQLError>
+    where
+        F: for<'b> AsyncFnOnce(Fields<'b>) -> Result<T, SQLError>,
+    {
+        let retained_children = &mut self.retained_children;
+        decode_image(
+            self.binary.reader,
+            self.binary.memory,
+            self.binary.cancellation,
+            async |binary| {
+                read(Fields {
+                    binary,
+                    retained_children,
+                })
+                .await
+            },
+        )
+    }
     fn header(&mut self, magic: [u8; 8]) -> Result<usize, SQLError> {
-        if self.binary.array::<8>()? != magic {
-            return Err(invalid("version header"));
-        }
-        Ok(self.binary.count()?)
+        self.fields(async |mut input| input.header(magic).await)
     }
     fn flag(&mut self) -> Result<bool, SQLError> {
-        match self.binary.array::<1>()?[0] {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(invalid("boolean tag")),
-        }
+        self.fields(async |mut input| input.flag().await)
     }
     fn oid(&mut self) -> Result<i64, SQLError> {
-        let oid = i64::from_le_bytes(self.binary.array()?);
-        if oid <= 0 || oid > i64::from(u32::MAX) {
-            return Err(invalid("object identifier"));
-        }
-        Ok(oid)
+        self.fields(async |mut input| input.oid().await)
     }
     fn identity(&mut self) -> Result<RoleIdentity, SQLError> {
-        let identity = RoleIdentity {
-            oid: self.oid()?,
-            object_id: self.binary.array()?,
-        };
-        validate_identity(identity)?;
-        Ok(identity)
-    }
-    fn binding(&mut self) -> Result<Budgeted<RoleBinding>, SQLError> {
-        let name = self.binary.text()?;
-        if name.is_empty() {
-            return Err(invalid("empty role binding name"));
-        }
-        let oid = u32::from_le_bytes(self.binary.array()?);
-        let object_id = self.binary.array()?;
-        validate_identity(RoleIdentity {
-            oid: i64::from(oid),
-            object_id,
-        })?;
-        let (name, memory) = name.into_parts();
-        Ok(Budgeted::new(
-            RoleBinding::new(name, oid, object_id),
-            memory,
-        ))
+        self.fields(async |mut input| input.identity().await)
     }
     fn compare_text(&self, left: &str, right: &str) -> Result<Ordering, SQLError> {
-        for (left, right) in left
-            .as_bytes()
-            .chunks(4096)
-            .zip(right.as_bytes().chunks(4096))
-        {
+        let mut comparison = fields::TextComparison::new(left, right);
+        loop {
             self.binary.cancellation.check()?;
-            let ordering = left.cmp(right);
-            if ordering != Ordering::Equal {
-                return Ok(ordering);
+            if let Some(order) = comparison.advance() {
+                return Ok(order);
             }
         }
-        self.binary.cancellation.check()?;
-        Ok(left.len().cmp(&right.len()))
     }
     fn ordered_name(&mut self, previous: Option<&String>) -> Result<Budgeted<String>, SQLError> {
-        let name = self.binary.text()?;
-        if name.is_empty()
-            || matches!(
-                previous
-                    .map(|key| self.compare_text(key, &name))
-                    .transpose()?,
-                Some(Ordering::Equal | Ordering::Greater)
-            )
-        {
-            return Err(invalid("name order"));
-        }
-        Ok(name)
+        self.fields(async |mut input| input.ordered_name(previous).await)
     }
     fn acl<P: Privileges>(&mut self) -> Result<Budgeted<Option<Vec<BoundAclEntry<P>>>>, SQLError> {
-        let memory = self.binary.memory;
-        if !self.flag()? {
-            return Ok(Budgeted::new(None, memory.empty_reservation()));
-        }
-        let (entries, reservation) = self.acl_entries()?.into_parts();
-        Ok(Budgeted::new(Some(entries), reservation))
+        self.fields(async |mut input| input.acl::<P>().await)
     }
     fn acl_entries<P: Privileges>(&mut self) -> Result<Budgeted<Vec<BoundAclEntry<P>>>, SQLError> {
-        let memory = self.binary.memory;
-        let count = self.binary.count()?;
-        let mut entries = BudgetedVec::new(memory);
-        entries.reserve(count)?;
-        for _ in 0..count {
-            self.binary.cancellation.check()?;
-            let role = if self.flag()? {
-                Some(self.identity()?)
-            } else {
-                None
-            };
-            let grantor = self.identity()?;
-            let [privileges, grant_options] = self.binary.array()?;
-            entries.push(BoundAclEntry {
-                role,
-                grantor,
-                privileges: P::from_bits(privileges).ok_or_else(|| invalid("privilege bits"))?,
-                grant_options: P::from_bits(grant_options)
-                    .ok_or_else(|| invalid("grant-option bits"))?,
-            })?;
-        }
-        let (entries, memory) = entries.into_parts();
-        Ok(Budgeted::new(entries, memory))
+        self.fields(async |mut input| input.acl_entries::<P>().await)
     }
     fn object_acl(&mut self) -> Result<Budgeted<Vec<ObjectAclEntry>>, SQLError> {
-        let count = self.binary.count()?;
-        let mut entries = BudgetedVec::new(self.binary.memory);
-        entries.reserve(count)?;
-        for _ in 0..count {
-            self.binary.cancellation.check()?;
-            let role = if self.flag()? {
-                Some(self.identity()?)
-            } else {
-                None
-            };
-            entries.push(ObjectAclEntry {
-                role,
-                grantor: self.identity()?,
-                grant_option: self.flag()?,
-            })?;
-        }
-        let (entries, reservation) = entries.into_parts();
-        Ok(Budgeted::new(entries, reservation))
+        self.fields(async |mut input| input.object_acl().await)
     }
 }
 

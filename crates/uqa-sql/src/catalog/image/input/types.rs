@@ -6,7 +6,7 @@
 
 //! Native enum and shell reconstruction retains declared identities, label keys and float4 positions.
 
-use super::{invalid, metadata::Identities, Input};
+use super::{invalid, metadata::Identities, Fields};
 use crate::{
     catalog::{
         array_type_names::valid_type_name,
@@ -22,29 +22,33 @@ use uqa_core::{
     CancellationToken, EnumLabelKey, MAX_ENUM_LABEL_KEY_BYTES,
 };
 
-impl Input<'_> {
-    fn enum_label(
+impl Fields<'_> {
+    async fn enum_label(
         &mut self,
         identities: &mut Identities,
     ) -> Result<Budgeted<StoredEnumLabel>, SQLError> {
-        let oid = self.user_oid()?;
+        let oid = self.user_oid().await?;
         identities.oid(oid)?;
-        let (key, mut reservation) = self
+        let key = self
             .binary
-            .bytes_with_limit(MAX_ENUM_LABEL_KEY_BYTES)?
-            .into_parts();
+            .bytes_with_limit(MAX_ENUM_LABEL_KEY_BYTES)
+            .await?;
+        let mut reservation = self.binary.memory.empty_reservation();
         let source_bytes = key.capacity();
         // Compact key construction can allocate before retiring its original vector.
         reservation.grow(key.len())?;
+        let (key, key_memory) = key.into_parts();
+        reservation.absorb(key_memory);
         let key = EnumLabelKey::from_bytes(key).map_err(|_| invalid("enum order key"))?;
         drop(reservation.split(source_bytes));
         let (label, label_memory) = self
             .binary
-            .bytes_with_limit(MAX_ENUM_LABEL_BYTES)?
+            .bytes_with_limit(MAX_ENUM_LABEL_BYTES)
+            .await?
             .into_parts();
         reservation.absorb(label_memory);
         let label = String::from_utf8(label).map_err(|_| invalid("enum label UTF-8"))?;
-        let sort_order = f32::from_bits(u32::from_le_bytes(self.binary.array()?));
+        let sort_order = f32::from_bits(u32::from_le_bytes(self.binary.array().await?));
         if !sort_order.is_finite() {
             return Err(invalid("enum sort position"));
         }
@@ -59,7 +63,7 @@ impl Input<'_> {
         ))
     }
 
-    fn enum_labels(
+    async fn enum_labels(
         &mut self,
         count: usize,
         identities: &mut Identities,
@@ -68,8 +72,8 @@ impl Input<'_> {
         let mut labels = BudgetedVec::<StoredEnumLabel>::new(self.binary.memory);
         labels.reserve(count)?;
         for _ in 0..count {
-            self.binary.cancellation.check()?;
-            let label = self.enum_label(identities)?;
+            self.binary.checkpoint().await?;
+            let label = self.enum_label(identities).await?;
             if labels.last().is_some_and(|previous| {
                 previous.key >= label.key || previous.sort_order >= label.sort_order
             }) {
@@ -82,7 +86,7 @@ impl Input<'_> {
         // Borrow the completed payloads while checking names; no second copy of the label corpus.
         let mut names = BudgetedMap::new(self.binary.memory);
         for label in labels.iter() {
-            self.binary.cancellation.check()?;
+            self.binary.checkpoint().await?;
             if names.insert(label.label.as_str(), ())?.is_some() {
                 return Err(invalid("duplicate enum label"));
             }
@@ -93,30 +97,30 @@ impl Input<'_> {
         Ok(Budgeted::new(labels, reservation))
     }
 
-    fn enum_type(
+    async fn enum_type(
         &mut self,
         key: &str,
         identities: &mut Identities,
     ) -> Result<Budgeted<StoredEnum>, SQLError> {
-        let object_id = self.object_id()?;
+        let object_id = self.object_id().await?;
         identities.object(object_id)?;
-        let oid = self.user_oid()?;
-        let array_oid = self.user_oid()?;
+        let oid = self.user_oid().await?;
+        let array_oid = self.user_oid().await?;
         identities.oid(oid)?;
         identities.oid(array_oid)?;
         let mut reservation = self.binary.memory.empty_reservation();
-        let (array_name, array_memory) = self.binary.text()?.into_parts();
+        let (array_name, array_memory) = self.binary.text().await?.into_parts();
         reservation.absorb(array_memory);
         if !valid_type_name(&array_name) {
             return Err(invalid("enum array name"));
         }
-        let (identity, identity_memory) = self.type_identity(key)?.into_parts();
+        let (identity, identity_memory) = self.type_identity(key).await?.into_parts();
         reservation.absorb(identity_memory);
-        let owner = self.identity()?;
-        let count = self.binary.count()?;
-        let (usage_acl, acl_memory) = self.optional_object_acl()?.into_parts();
+        let owner = self.identity().await?;
+        let count = self.binary.count().await?;
+        let (usage_acl, acl_memory) = self.optional_object_acl().await?.into_parts();
         reservation.absorb(acl_memory);
-        let (labels, labels_memory) = self.enum_labels(count, identities)?.into_parts();
+        let (labels, labels_memory) = self.enum_labels(count, identities).await?.into_parts();
         reservation.absorb(labels_memory);
         Ok(Budgeted::new(
             StoredEnum {
@@ -133,20 +137,20 @@ impl Input<'_> {
         ))
     }
 
-    fn shell(
+    async fn shell(
         &mut self,
         key: &str,
         identities: &mut Identities,
     ) -> Result<Budgeted<StoredShellType>, SQLError> {
-        let object_id = self.object_id()?;
+        let object_id = self.object_id().await?;
         identities.object(object_id)?;
-        let oid = self.user_oid()?;
+        let oid = self.user_oid().await?;
         identities.oid(oid)?;
         let mut reservation = self.binary.memory.empty_reservation();
-        let (identity, identity_memory) = self.type_identity(key)?.into_parts();
+        let (identity, identity_memory) = self.type_identity(key).await?.into_parts();
         reservation.absorb(identity_memory);
-        let owner = self.identity()?;
-        let (usage_acl, acl_memory) = self.optional_object_acl()?.into_parts();
+        let owner = self.identity().await?;
+        let (usage_acl, acl_memory) = self.optional_object_acl().await?.into_parts();
         reservation.absorb(acl_memory);
         Ok(Budgeted::new(
             StoredShellType {
@@ -166,18 +170,18 @@ pub(in super::super) fn enums(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<TypeDefinitions<StoredEnum>, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::ENUMS)?;
-    let mut result = TypeDefinitions::with_budget(memory);
-    let mut identities = Identities::new(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let key = input.ordered_name(result.last_durable_key())?;
-        let value = input.enum_type(&key, &mut identities)?;
-        result.insert_image_entry(key, value)?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl TypeDefinitions<StoredEnum> {
+    /// Retain native entries and identity claims between calls; future mutations use the destination allowance.
+    pub fn image_input(
+        input: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(input, mutations, cancellation)
     }
-    input.binary.end()?;
-    Ok(result)
 }
 
 pub(in super::super) fn shells(
@@ -185,16 +189,60 @@ pub(in super::super) fn shells(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<TypeDefinitions<StoredShellType>, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::SHELLS)?;
-    let mut result = TypeDefinitions::with_budget(memory);
-    let mut identities = Identities::new(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let key = input.ordered_name(result.last_durable_key())?;
-        let value = input.shell(&key, &mut identities)?;
-        result.insert_image_entry(key, value)?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl TypeDefinitions<StoredShellType> {
+    /// Retain native entries and identity claims between calls; future mutations use the destination allowance.
+    pub fn image_input(
+        input: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(input, mutations, cancellation)
     }
-    input.binary.end()?;
-    Ok(result)
+}
+
+impl super::continuation::CatalogEntries for TypeDefinitions<StoredEnum> {
+    type Scratch = Identities;
+    const MAGIC: [u8; 8] = super::super::ENUMS;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), Identities::new(memory))
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        scratch: &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let identities = scratch;
+        let key = input.ordered_name(result.last_durable_key()).await?;
+        let value = input.enum_type(&key, identities).await?;
+        result.insert_image_entry(key, value)?;
+        Ok(())
+    }
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
+}
+
+impl super::continuation::CatalogEntries for TypeDefinitions<StoredShellType> {
+    type Scratch = Identities;
+    const MAGIC: [u8; 8] = super::super::SHELLS;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), Identities::new(memory))
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        scratch: &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let identities = scratch;
+        let key = input.ordered_name(result.last_durable_key()).await?;
+        let value = input.shell(&key, identities).await?;
+        result.insert_image_entry(key, value)?;
+        Ok(())
+    }
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
 }

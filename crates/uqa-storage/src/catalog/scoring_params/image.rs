@@ -8,12 +8,15 @@
 
 use super::{CapturedScoringParameters, ScoringParameters};
 use crate::{
-    image_io::{ImageInput, ImageRead, ImageReader},
+    image_io::{ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
 use std::{cmp::Ordering, io::Read, ops::Bound};
-use uqa_core::memory::Budgeted;
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::{Budgeted, MemoryBudget},
+};
 
 const MAGIC: [u8; 8] = *b"UQASCP01";
 
@@ -21,23 +24,23 @@ fn invalid() -> StorageBackendError {
     StorageBackendError::Other("invalid scoring parameter image".into())
 }
 
-fn compare(
+async fn compare(
     left: &str,
     right: &str,
-    control: &StorageReadControl,
+    input: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<Ordering> {
     for (left, right) in left
         .as_bytes()
         .chunks(4096)
         .zip(right.as_bytes().chunks(4096))
     {
-        control.check()?;
+        input.checkpoint().await?;
         let order = left.cmp(right);
         if order != Ordering::Equal {
             return Ok(order);
         }
     }
-    control.check()?;
+    input.cancellation.check()?;
     Ok(left.len().cmp(&right.len()))
 }
 
@@ -47,21 +50,45 @@ impl ScoringParameters {
         reader: &mut dyn Read,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let mut input = ImageInput { reader, control };
-        if input.array::<8>()? != MAGIC {
+        decode_image(
+            reader,
+            control.memory(),
+            control.cancellation(),
+            async |input| Self::decode(input, control.memory()).await,
+        )
+    }
+
+    /// Retain opaque keys and values across independent source-byte and continuation-poll windows, preserving their input allowance for later destination mutation.
+    pub fn image_input(
+        control: &StorageReadControl,
+        mutations: &MemoryBudget,
+    ) -> StorageBackendResult<ImageDecoder<Self, StorageBackendError>> {
+        let mutations = mutations.clone();
+        Ok(ImageDecoder::new(
+            control.memory(),
+            control.cancellation(),
+            |mut reader| async move { Self::decode(reader.input(), &mutations).await },
+        )?)
+    }
+
+    async fn decode(
+        mut input: AsyncImageInput<'_>,
+        mutations: &MemoryBudget,
+    ) -> StorageBackendResult<Self> {
+        if input.array::<8>().await? != MAGIC {
             return Err(invalid());
         }
-        let count = input.count()?;
-        let mut result = Self::new(control.memory());
+        let count = input.count().await?;
+        let mut result = Self::new(input.memory);
         for _ in 0..count {
-            control.check()?;
-            let name = input.text()?;
+            input.checkpoint().await?;
+            let name = input.text().await?;
             if let Some((previous, _)) = result.values.last_before::<str>(Bound::Unbounded) {
-                if compare(previous, &name, control)? != Ordering::Less {
+                if compare(previous, &name, &mut input).await? != Ordering::Less {
                     return Err(invalid());
                 }
             }
-            let encoded = input.text()?;
+            let encoded = input.text().await?;
             let (name, mut memory) = name.into_parts();
             let (encoded, encoded_memory) = encoded.into_parts();
             memory.absorb(encoded_memory);
@@ -69,8 +96,8 @@ impl ScoringParameters {
             let bytes = encoded.reserved_bytes();
             result.values.insert(name, encoded, bytes)?;
         }
-        input.end()?;
-        Ok(result)
+        input.end().await?;
+        Ok(result.into_mutation_budget(mutations))
     }
 }
 

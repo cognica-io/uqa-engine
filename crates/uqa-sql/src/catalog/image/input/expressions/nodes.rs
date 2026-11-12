@@ -6,61 +6,99 @@
 
 //! Headers construct native metadata and admit empty destinations before children arrive.
 
-use super::{boxed, invalid, payload, Expr, Input, MemoryReservation, SQLError};
+use super::{boxed, invalid, payload, Expr, Fields, MemoryReservation, SQLError};
 use crate::ast::{BinaryOp, FunctionCallSyntax, InternalColumnRef, OrderBy};
 
-impl Input<'_> {
-    pub(super) fn expression_node(
+impl Fields<'_> {
+    pub(super) async fn expression_node(
         &mut self,
         memory: &mut MemoryReservation,
-    ) -> Result<Expr, SQLError> {
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
         self.binary.cancellation.check()?;
-        let tag = self.binary.array::<1>()?[0];
-        self.expression_tag(tag, memory)
+        let tag = self.binary.array::<1>().await?[0];
+        self.expression_tag(tag, memory, value).await
     }
 
-    #[expect(clippy::too_many_lines, reason = "exhaustive stored scalar wire tags")]
-    pub(in super::super) fn expression_tag(
+    pub(in super::super) async fn expression_tag(
         &mut self,
         tag: u8,
         memory: &mut MemoryReservation,
-    ) -> Result<Expr, SQLError> {
-        Ok(match tag {
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        match tag {
+            0..=5 | 8 => self.scalar_reference(tag, memory, value).await,
+            6 => {
+                *value = Expr::Literal(payload(self.scalar_value().await?, memory));
+                Ok(())
+            }
+            7 => self.typed_literal(memory, value).await,
+            9 => self.scalar_function(memory, value).await,
+            10..=12 | 16 | 17 => self.scalar_collection(tag, memory, value).await,
+            13..=15 | 18..=22 => self.scalar_operator(tag, memory, value).await,
+            23 => self.retained_literal(memory, value).await,
+            _ => Err(invalid("stored scalar node tag")),
+        }
+    }
+
+    async fn scalar_reference(
+        &mut self,
+        tag: u8,
+        memory: &mut MemoryReservation,
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        *value = match tag {
             0 => Expr::Star,
-            1 => Expr::QualifiedStar(payload(self.binary.text()?, memory).into()),
+            1 => Expr::QualifiedStar(payload(self.binary.text().await?, memory).into()),
             2 => Expr::Default,
-            3 => Expr::Column(payload(self.binary.text()?, memory).into()),
+            3 => Expr::Column(payload(self.binary.text().await?, memory).into()),
             4 => Expr::QualifiedColumn {
-                qualifier: payload(self.binary.text()?, memory),
-                column: payload(self.binary.text()?, memory).into(),
+                qualifier: payload(self.binary.text().await?, memory),
+                column: payload(self.binary.text().await?, memory).into(),
             },
             5 => Expr::InternalColumn(InternalColumnRef::from_raw(
-                u64::from_le_bytes(self.binary.array()?),
-                u32::from_le_bytes(self.binary.array()?),
+                u64::from_le_bytes(self.binary.array().await?),
+                u32::from_le_bytes(self.binary.array().await?),
             )),
-            6 => Expr::Literal(payload(self.scalar_value()?, memory)),
-            7 => {
-                let ty = payload(self.binary.text()?, memory);
-                let collation_oid = self.optional_number()?;
-                let source = self.flag()?;
-                let value = payload(self.scalar_value()?, memory);
-                let composite_source = if source {
-                    Some(boxed(self.composite_source(memory)?, memory)?)
-                } else {
-                    None
-                };
-                Expr::TypedLiteral {
-                    value,
-                    ty,
-                    collation_oid,
-                    composite_source,
-                }
-            }
-            8 => Expr::Param(self.binary.count()?),
-            9 => self.scalar_function(memory)?,
+            8 => Expr::Param(self.binary.count().await?),
+            _ => unreachable!("stored reference tag"),
+        };
+        Ok(())
+    }
+
+    async fn typed_literal(
+        &mut self,
+        memory: &mut MemoryReservation,
+        output: &mut Expr,
+    ) -> Result<(), SQLError> {
+        let ty = payload(self.binary.text().await?, memory);
+        let collation_oid = self.optional_number().await?;
+        let source = self.flag().await?;
+        let value = payload(self.scalar_value().await?, memory);
+        let composite_source = if source {
+            Some(boxed(self.composite_source(memory).await?, memory)?)
+        } else {
+            None
+        };
+        *output = Expr::TypedLiteral {
+            value,
+            ty,
+            collation_oid,
+            composite_source,
+        };
+        Ok(())
+    }
+
+    async fn scalar_collection(
+        &mut self,
+        tag: u8,
+        memory: &mut MemoryReservation,
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        *value = match tag {
             10 | 11 | 16 | 17 => {
-                let count = self.binary.count()?;
-                let values = self.scalar_slots(count, memory)?;
+                let count = self.binary.count().await?;
+                let values = self.scalar_slots(count, memory).await?;
                 match tag {
                     10 => Expr::Array(values),
                     11 => Expr::Row(values),
@@ -69,15 +107,30 @@ impl Input<'_> {
                 }
             }
             12 => {
-                let count = self.binary.count()?;
-                let binding = self.scalar_row_binding(memory)?;
+                let count = self.binary.count().await?;
+                let binding = self.scalar_row_binding(memory).await?;
                 Expr::CompositeRow {
-                    items: self.scalar_slots(count, memory)?,
+                    items: self.scalar_slots(count, memory).await?,
                     binding,
                 }
             }
+            _ => unreachable!("stored collection tag"),
+        };
+        Ok(())
+    }
+
+    async fn scalar_operator(
+        &mut self,
+        tag: u8,
+        memory: &mut MemoryReservation,
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        if tag == 21 {
+            return self.scalar_case(memory, value).await;
+        }
+        *value = match tag {
             13 => {
-                let op = match self.binary.array::<1>()?[0] {
+                let op = match self.binary.array::<1>().await?[0] {
                     0 => BinaryOp::Equal,
                     1 => BinaryOp::NotEqual,
                     2 => BinaryOp::Less,
@@ -99,7 +152,7 @@ impl Input<'_> {
             14 => Expr::UnaryMinus(boxed(Expr::Star, memory)?),
             15 => Expr::Not(boxed(Expr::Star, memory)?),
             18 => Expr::IsNull {
-                negated: self.flag()?,
+                negated: self.flag().await?,
                 expr: boxed(Expr::Star, memory)?,
             },
             19 => Expr::Between {
@@ -108,83 +161,99 @@ impl Input<'_> {
                 high: boxed(Expr::Star, memory)?,
             },
             20 => {
-                let negated = self.flag()?;
-                let count = self.binary.count()?;
+                let negated = self.flag().await?;
+                let count = self.binary.count().await?;
                 Expr::InList {
                     negated,
                     expr: boxed(Expr::Star, memory)?,
-                    list: self.scalar_slots(count, memory)?,
-                }
-            }
-            21 => {
-                let base = self
-                    .flag()?
-                    .then(|| boxed(Expr::Star, memory))
-                    .transpose()?;
-                let count = self.binary.count()?;
-                let else_branch = self
-                    .flag()?
-                    .then(|| boxed(Expr::Star, memory))
-                    .transpose()?;
-                Expr::Case {
-                    base,
-                    when: self.items(count, memory, |_, _| Ok((Expr::Star, Expr::Star)))?,
-                    else_branch,
+                    list: self.scalar_slots(count, memory).await?,
                 }
             }
             22 => {
-                let implicit = self.flag()?;
-                let ty = payload(self.binary.text()?, memory);
+                let implicit = self.flag().await?;
+                let ty = payload(self.binary.text().await?, memory);
                 Expr::Cast {
                     implicit,
                     ty,
                     expr: boxed(Expr::Star, memory)?,
                 }
             }
-            23 => self.retained_literal(memory)?,
-            _ => return Err(invalid("stored scalar node tag")),
-        })
+            _ => unreachable!("stored operator tag"),
+        };
+        Ok(())
     }
 
-    fn scalar_function(&mut self, memory: &mut MemoryReservation) -> Result<Expr, SQLError> {
-        let name = payload(self.binary.text()?, memory);
-        let bound = self.flag()?;
-        let distinct = self.flag()?;
-        let order_syntax = match self.binary.array::<1>()?[0] {
+    async fn scalar_case(
+        &mut self,
+        memory: &mut MemoryReservation,
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        let base = self
+            .flag()
+            .await?
+            .then(|| boxed(Expr::Star, memory))
+            .transpose()?;
+        let count = self.binary.count().await?;
+        let else_branch = self
+            .flag()
+            .await?
+            .then(|| boxed(Expr::Star, memory))
+            .transpose()?;
+        *value = Expr::Case {
+            base,
+            when: self
+                .slots(count, memory, || (Expr::Star, Expr::Star))
+                .await?,
+            else_branch,
+        };
+        Ok(())
+    }
+
+    async fn scalar_function(
+        &mut self,
+        memory: &mut MemoryReservation,
+        value: &mut Expr,
+    ) -> Result<(), SQLError> {
+        let name = payload(self.binary.text().await?, memory);
+        let bound = self.flag().await?;
+        let distinct = self.flag().await?;
+        let order_syntax = match self.binary.array::<1>().await?[0] {
             0 => FunctionCallSyntax::Legacy,
             1 => FunctionCallSyntax::Ordinary,
             2 => FunctionCallSyntax::WithinGroup,
             3 => FunctionCallSyntax::Extract,
             _ => return Err(invalid("function call syntax tag")),
         };
-        let args = self.binary.count()?;
-        let orders = self.binary.count()?;
+        let args = self.binary.count().await?;
+        let orders = self.binary.count().await?;
         let filter = self
-            .flag()?
+            .flag()
+            .await?
             .then(|| boxed(Expr::Star, memory))
             .transpose()?;
         let binding = if bound {
-            if self.header(super::super::super::FUNCTION_BINDING)? != 1 {
+            if self.header(super::super::super::FUNCTION_BINDING).await? != 1 {
                 return Err(invalid("nested function binding count"));
             }
-            Some(payload(self.function_binding()?, memory))
+            Some(payload(self.function_binding().await?, memory))
         } else {
             None
         };
-        Ok(Expr::Func {
+        *value = Expr::Func {
             name,
             binding,
             distinct,
             order_syntax,
             filter,
-            args: self.scalar_slots(args, memory)?,
-            order_by: self.items(orders, memory, |_, _| {
-                Ok(OrderBy {
+            args: self.scalar_slots(args, memory).await?,
+            order_by: self
+                .slots(orders, memory, || OrderBy {
                     expr: Expr::Star,
                     descending: false,
                     nulls: None,
                 })
-            })?,
-        })
+                .await?,
+        };
+        Ok(())
     }
 }

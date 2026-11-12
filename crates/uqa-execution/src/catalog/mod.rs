@@ -18,6 +18,8 @@ pub mod enum_type;
 pub mod foreign;
 pub mod hierarchy;
 pub mod identity;
+#[cfg(test)]
+mod image_input_tests;
 pub mod image_validation;
 pub mod range_type;
 pub mod security;

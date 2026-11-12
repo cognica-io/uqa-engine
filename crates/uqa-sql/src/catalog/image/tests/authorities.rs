@@ -15,6 +15,7 @@ use crate::{
 use uqa_core::{catalog_acl::TablePrivileges, memory::OwnedMap, RelationIdentity};
 
 mod validation;
+mod windows;
 
 fn routine_fixture() -> BuiltinRoutineSecurities {
     let mut routines = BuiltinRoutineSecurities::new();

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Resume native catalog metadata, authority, sequence, expression, trigger, index, comment and scoring input within retained byte/work windows, preserving existing encodings and terminal cleanup.
+
 - Retain private native SQLite, SQLite KV and redb restore destinations through logical validation, preserving original cancellation, exact-request recovery and later published writes.
 
 - Keep a verified archive component selected until native reconstruction explicitly completes, and decode table lifecycle metadata through the same bounded input grammar.

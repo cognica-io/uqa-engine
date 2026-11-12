@@ -6,7 +6,7 @@
 
 //! Role definitions preserve native keys, tuple revisions and explicit attribute bits.
 
-use super::{invalid, validate_identity, Input};
+use super::{invalid, validate_identity, Fields};
 use crate::{
     ast::RoleAttribute,
     catalog::roles::{RoleDefinition, RoleDefinitions, RoleIdentity},
@@ -23,37 +23,61 @@ pub(in super::super) fn roles(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<RoleDefinitions, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::ROLES)?;
-    let mut result = RoleDefinitions::with_budget(memory);
-    let mut oids = BudgetedMap::new(memory);
-    let mut identities = BudgetedMap::new(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let key = input.ordered_name(result.last_durable_key())?;
-        let oid = input.oid()?;
-        let object_id = input.binary.array()?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl RoleDefinitions {
+    /// Retain native entries and identity claims between calls; future mutations use the destination allowance.
+    pub fn image_input(
+        input: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(input, mutations, cancellation)
+    }
+}
+
+impl super::continuation::CatalogEntries for RoleDefinitions {
+    type Scratch = (BudgetedMap<i64, ()>, BudgetedMap<[u8; 16], ()>);
+    const MAGIC: [u8; 8] = super::super::ROLES;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (
+            Self::with_budget(memory),
+            (BudgetedMap::new(memory), BudgetedMap::new(memory)),
+        )
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        scratch: &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let (oids, identities) = scratch;
+        let key = input.ordered_name(result.last_durable_key()).await?;
+        let oid = input.oid().await?;
+        let object_id = input.binary.array().await?;
         validate_identity(RoleIdentity { oid, object_id })?;
-        let revision = u64::from_le_bytes(input.binary.array()?);
+        let revision = u64::from_le_bytes(input.binary.array().await?);
         if revision == 0 {
             return Err(invalid("role revision"));
         }
-        let name = input.binary.text()?;
-        if input.compare_text(&name, &key)? != Ordering::Equal {
+        let name = input.binary.text().await?;
+        if input.compare_text(&name, &key).await? != Ordering::Equal {
             return Err(invalid("role definition key"));
         }
-        let [bits] = input.binary.array()?;
+        let [bits] = input.binary.array().await?;
         if bits & !127 != 0 {
             return Err(invalid("role attribute bits"));
         }
-        let connection_limit = i32::from_le_bytes(input.binary.array()?);
+        let connection_limit = i32::from_le_bytes(input.binary.array().await?);
         if connection_limit < -1 {
             return Err(invalid("connection limit"));
         }
         if oids.insert(oid, ())?.is_some() || identities.insert(object_id, ())?.is_some() {
             return Err(invalid("duplicate role identity"));
         }
-        let attribute_memory = memory
+        let attribute_memory = input
+            .binary
+            .memory
             .reserve(bits.count_ones() as usize * OwnedSet::<RoleAttribute>::entry_bytes())?;
         let mut attributes = OwnedSet::new();
         for attribute in [
@@ -85,7 +109,9 @@ pub(in super::super) fn roles(
                 reservation,
             ),
         )?;
+        Ok(())
     }
-    input.binary.end()?;
-    Ok(result)
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
 }

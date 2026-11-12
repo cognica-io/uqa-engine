@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod validation;
+mod windows;
 mod wire;
 
 fn callback() -> ForeignWrapperFunction {

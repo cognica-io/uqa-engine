@@ -47,6 +47,7 @@ pub use input::{
     read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
     read_table_hierarchy_image, read_table_hierarchy_image_with_footprint, read_table_keys_image,
     CapturedExpressionPlan, CapturedPlan, CapturedQuery, CapturedScalar, CapturedStatement,
+    CatalogImageInput,
 };
 pub use reader::CatalogImageReader;
 use reader::Entries;

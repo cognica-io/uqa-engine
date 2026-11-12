@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod windows;
+
 #[test]
 fn decoded_scoring_payloads_keep_input_ownership_after_destination_replacement() {
     let input = StorageReadControl::with_limit(65536);

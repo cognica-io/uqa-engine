@@ -59314,6 +59314,513 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_input_limits_each_call_and_preserves_original_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Decode one complete role per call, compare exact independent entry boundaries and mutate after exhausting and cancelling the original input.",
+      "invariant": "Each call consumes only its requested entry count; completed native values and future mutation allowances preserve independent ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_input_retires_partial_state_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Resume role input with zero limits, cancellation, quota failure, truncation, trailing bytes, duplicate identities and unwinding.",
+      "invariant": "Every terminal path releases original partial entries and scratch immediately and prevents decoder reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_input_retains_cross_entry_claims_and_exact_acl_images",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Decode native schema ACLs one entry at a time and compare the exact captured image.",
+      "invariant": "The registry appears only after the expected number of entry steps, retains ACL tuples and releases all original allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_and_shell_inputs_resume_native_identity_claims_without_rebinding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Resume two-entry enum and shell images with original type identities, label positions and authority.",
+      "invariant": "Each first step stops at the independently encoded first-entry boundary and completed output preserves the original bytes and ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_and_range_inputs_resume_native_attributes_and_name_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Resume two-entry composite and range images with original attributes, array names and multirange identities.",
+      "invariant": "One-entry calls retain exact positions and produce identical native images without leaking original allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_input_rejects_name_collisions_from_previous_calls",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Decode a later range whose multirange array reuses an earlier range family name.",
+      "invariant": "Retained name claims reject the cross-call collision and immediately release original input and scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_input_bounds_bytes_and_polls_inside_large_utf8_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode multi-fragment UTF-8 role names using independent 1/17/4096-byte and 7/1/3-poll windows.",
+      "invariant": "Every call obeys both ceilings and exact original catalog bytes survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_input_bounds_bytes_and_polls_through_native_acl_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode absent, empty and populated schema ACLs with independent byte/poll windows.",
+      "invariant": "Per-call source bytes and read attempts remain bounded while original grants and owners survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_byte_input_retires_partial_fields_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Stop inside an admitted role name, then reject zero entry/byte/poll limits, cancellation, quota failure, short/trailing input and unwinding.",
+      "invariant": "Terminal paths immediately retire partial fields and claims; a retained decoder cannot read again.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_entry_and_byte_windows_share_one_retained_stream_position",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Switch from an incomplete role field to entry-only calls on the same input.",
+      "invariant": "The next entry boundary and complete image are exact, without replaying input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_input_bounds_bytes_and_polls_through_label_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/continuation.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode enum identities, label keys and positions under independent byte/poll windows.",
+      "invariant": "Original label bytes, sort positions and ownership survive every yield.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shell_input_bounds_bytes_and_polls_through_identity_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/continuation.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode shell identities and authority under independent byte/poll windows.",
+      "invariant": "Native shell metadata and original reservations survive without rebinding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "composite_input_bounds_bytes_and_polls_through_attribute_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/continuation.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode composite attributes, physical types and authority under independent byte/poll windows.",
+      "invariant": "Exact attribute metadata and allocation ownership survive incomplete fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_input_bounds_bytes_and_polls_through_subtypes_and_name_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/structured_types/continuation.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode multiple ranges, multiranges and type descriptors under independent byte/poll windows.",
+      "invariant": "Cross-entry name claims and exact native definitions survive every yield.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_input_bounds_native_bindings_and_retires_original_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows/security.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode renamed membership bindings and split UTF-8 with independent byte/poll windows and every terminal path.",
+      "invariant": "Captured role incarnations and option bits survive; each call obeys its limits and terminal input releases original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_input_bounds_native_acl_and_retires_original_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows/security.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode a 257-entry database ACL using 1/17/4096-byte windows and exercise cancellation, quota, framing, unwind and drop.",
+      "invariant": "The singleton authority remains unpublished until complete; native grant order and original allocation retirement are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "synchronous_empty_catalog_input_needs_no_continuation_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/byte_windows/security.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Read literal empty role, membership and sequence-authority frames with zero available memory and count allocations.",
+      "invariant": "Synchronous catalog input uses its original stack driver without allocating a retained continuation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_authority_input_bounds_acl_fields_and_retires_partial_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode builtin routine grants under independent byte/poll limits and retire incomplete catalogs on every terminal path.",
+      "invariant": "Native ACL values and exact images survive while source reads stay within each current call window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "system_authority_input_bounds_columns_and_retires_partial_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/authorities/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode table and column ACLs, revisions and absent/empty grants through small source and poll windows.",
+      "invariant": "Exact native authority and original owners survive yields; invalid or retired input cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_server_input_bounds_options_and_retires_partial_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode large UTF-8 server options, stored option order and wrapper identity using bounded source windows.",
+      "invariant": "Exact native server images survive and every terminal path releases its partial fields and identity claims.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "graph_oid_input_bounds_label_fields_and_retires_identity_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode native graph and label OID fields through 1/17/4096-byte windows with independent poll limits.",
+      "invariant": "Every label identity survives exactly; failed or cancelled input retires all original claims.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "foreign_wrapper_input_bounds_callback_fields_and_retires_partial_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/metadata/foreign_wrappers/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode native wrapper invocation, composite and assignment callback bindings plus multi-fragment UTF-8 options.",
+      "invariant": "Bound callback payloads preserve exact native images without callback execution and retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "sequence_authority_input_bounds_acl_fields_and_retires_partial_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/sequences/windows.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Decode a native sequence authority with 257 grants through independently limited source bytes and continuation polls.",
+      "invariant": "Original grants and exact authority bytes survive yields; terminal input retires its original owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_input_bounds_both_images_and_retains_native_mutation_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/windows.rs",
+      "capability": "Native sequence input",
+      "workload": "Read metadata and authority for four native sequences with large UTF-8 names through separate current-call windows.",
+      "invariant": "Both ordered inputs obey byte/poll limits and retain exact native records, independent destination mutations and original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_input_retires_both_phases_on_failure_unwind_and_wrong_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/windows.rs",
+      "capability": "Native sequence input",
+      "workload": "Interrupt each sequence input phase through zero limits, cancellation, quota, short/trailing input, unwind, drop and invalid phase order.",
+      "invariant": "The owning input state machine retires the entire unpublished candidate and rejects further reads without caller recovery.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_membership_validation_yields_without_source_reads_and_retires_on_cancel",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/sequence/image/tests/windows.rs",
+      "capability": "Native sequence input",
+      "workload": "Finish both native images, then validate one membership checkpoint per call with a reader that rejects any access.",
+      "invariant": "Pairing yields without replaying source bytes; cancellation releases both original images before any catalog publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_input_bounds_fields_and_key_copies_and_preserves_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/index/registry/image/tests/windows.rs",
+      "capability": "Native index image continuation",
+      "workload": "Decode large UTF-8 schema/index names and opaque definitions through independent byte/poll windows, retain a snapshot across replacement/removal, and inject every terminal input failure.",
+      "invariant": "Original bytes and retained field pointers survive independent later mutation; each source call respects its limits and failure retires partial fields and key copies.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_comment_input_bounds_utf8_validation_and_preserves_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/image/tests/windows.rs",
+      "capability": "Native comment image continuation",
+      "workload": "Decode large UTF-8 descriptions and column addresses through independent byte/poll windows, then replace/remove comments and inject every terminal input failure.",
+      "invariant": "Exact original addresses, text and retained pointers survive independent mutation; current input limits hold and terminal paths release all original admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_input_bounds_opaque_fields_and_preserves_native_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests/windows.rs",
+      "capability": "Native scoring image continuation",
+      "workload": "Decode empty and large UTF-8 opaque keys/values containing NUL through one-byte and independent poll windows; mutate after exhausting and cancelling the input allowance.",
+      "invariant": "Original byte encodings and retained field pointers survive; later mutation uses its independent allowance and final retirement releases both owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_input_retires_partial_fields_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/image/tests/windows.rs",
+      "capability": "Native scoring input retirement",
+      "workload": "Reject zero byte/poll windows, cancellation, denied allocation, truncation, trailing input and unwinding, and drop an incomplete UTF-8 value.",
+      "invariant": "Every terminal path consumes its original continuation and partial fields without retained admission or source reads on later reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_input_bounds_partial_utf8_metadata_and_ordered_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/windows.rs",
+      "capability": "Native stored-expression continuation",
+      "workload": "Decode mixed-width text, evaluated values, composite descriptors, ordered function children and CASE branches through independent byte/poll windows.",
+      "invariant": "Every current byte/read-attempt bound holds and exact native encodings survive completion, source cancellation and exhausted input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_input_retires_partial_metadata_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/windows.rs",
+      "capability": "Stored-expression input retirement",
+      "workload": "Reject zero windows, cancellation, denied admission, truncation, trailing bytes and unwinding, and drop incomplete native syntax.",
+      "invariant": "Every terminal transition retires the original continuation and all admitted partial fields; later reentry performs no source read.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_input_preserves_retained_literals_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/windows.rs",
+      "capability": "Retained native literal input",
+      "workload": "Decode large evaluated UTF-8 values with original declaration/type/collation metadata, then retain the literal after the enclosing expression and input token retire.",
+      "invariant": "The retained literal keeps its original payload allowance and exact value independently; final owner retirement releases all input admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_input_resumes_and_retires_deep_trees_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/windows.rs",
+      "capability": "Constant-stack expression input",
+      "workload": "Decode and retire 10000 nested binary expressions on a 128 KiB thread stack with one poll per call, then drop a partial deep tree.",
+      "invariant": "The iterative native parent stack preserves exact wire bytes and retires every partial or complete owner without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "function_binding_input_bounds_original_dispatch_and_deferred_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/tests/functions/windows.rs",
+      "capability": "Native function-binding continuation",
+      "workload": "Decode selected dispatch, invocation/value bindings and large UTF-8 deferred function/operator diagnostics through independent byte/poll windows and terminal failures.",
+      "invariant": "Original metadata is preserved without resolving or invoking a function; limits, output ownership and complete failure retirement hold.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_input_bounds_nested_expressions_and_preserves_original_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/domains/windows.rs",
+      "capability": "Native domain continuation",
+      "workload": "Decode large domain defaults and CHECK declarations with one-byte and independent poll windows, mutate under an independent allowance, and inject terminal failures.",
+      "invariant": "Native declarations and retained predecessors keep exact bytes and original ownership; future edits use the destination allowance and partial input retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_input_keeps_constraint_identity_claims_across_entry_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/expressions/tests/domains/windows.rs",
+      "capability": "Cross-entry domain identity validation",
+      "workload": "Complete one domain entry, then read a distinct domain reusing its constraint identity.",
+      "invariant": "The entry boundary is exact, the retained identity claims reject the duplicate and terminal reentry reads no bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_input_bounds_native_conditions_and_preserves_nested_mutation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/windows.rs",
+      "capability": "Native trigger continuation",
+      "workload": "Decode large UTF-8 arguments and WHEN expressions through byte/poll windows, replace a trigger after input exhaustion/cancellation, and inject terminal failures.",
+      "invariant": "Both relation and trigger registries fund later edits independently; exact original declarations, retained generations and failure retirement remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "trigger_input_keeps_identity_claims_across_partial_relation_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/triggers/tests/windows.rs",
+      "capability": "Cross-relation trigger identity validation",
+      "workload": "Decode distinct relation memberships that reuse one trigger identity through single-byte windows.",
+      "invariant": "Identity claims survive relation boundaries, reject the second declaration and release every original partial owner before later reentry.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

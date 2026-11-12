@@ -22,6 +22,8 @@ Capture-specific Engine test modules and helpers now use the same native-platfor
 
 ### Progress by scope
 
+The bounded catalog-continuation candidate integrates native metadata, authority, sequence, expression, trigger, index, comment and scoring inputs after the destination-lifecycle unit. Prepared memory Engine assembly is retained separately until the remaining stored-query/routine and table-metadata continuations are integrated. Existing 24-catalog and ten-table-field results describe the earlier local implementation; they do not qualify this delivery candidate. All 324 owning-crate cases pass (247 SQL, 65 Execution and 12 Storage), including all 39 new selectors, together with strict library/test Clippy and all nine repository policies. The 9,006 unchanged Rust/Cargo/manifest inputs have SHA-256 `3cb138f125f6b33591ce9a428ea67d3a111876a4a23e8dc4d340dc8bcd9b237e`; the case set has SHA-256 `b971b89cb6f736f3c6662a13df99afbbbeb56325907ebb09552dd2a4c19a9a42`. Automatic final-source qualification and delivery remain open.
+
 | Scope | Complete | Remaining |
 | --- | --- | --- |
 | All live checkboxes, including parent and child items | 87 of 100 | 13 unchecked: five original requirements and eight child items |

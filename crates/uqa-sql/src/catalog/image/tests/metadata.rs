@@ -19,10 +19,12 @@ use crate::{
 };
 use uqa_core::{memory::Produced, EnumLabelKey, RelationIdentity};
 
+mod continuation;
 mod foreign_wrappers;
 mod retention;
 mod structured_types;
 mod validation;
+mod windows;
 mod wire;
 
 trait ImageDefinition: StoredDefinition {

@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::{domain::StoredDomain, type_definitions::TypeDefinitions};
 use uqa_core::catalog_role::RoleIdentity;
 
+mod windows;
+
 fn text(bytes: &mut Vec<u8>, value: &str) {
     bytes.extend((value.len() as u64).to_le_bytes());
     bytes.extend(value.as_bytes());

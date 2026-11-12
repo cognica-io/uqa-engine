@@ -7,7 +7,7 @@
 //! Native type decoding admits payload and box layouts before construction; unary chains need no recursive decoder or traversal workspace.
 
 use super::super::column_types::TypeTag;
-use super::{invalid, Input};
+use super::{invalid, Fields, Input};
 use crate::{
     ast::{
         ColumnType, CompositeTypeReference, EnumTypeReference, IntervalFields, RangeAlignment,
@@ -17,30 +17,30 @@ use crate::{
 };
 use uqa_core::memory::{Budgeted, MemoryReservation};
 
-impl Input<'_> {
-    fn type_text(&mut self, reservation: &mut MemoryReservation) -> Result<String, SQLError> {
-        let (text, memory) = self.binary.text()?.into_parts();
+impl Fields<'_> {
+    async fn type_text(&mut self, reservation: &mut MemoryReservation) -> Result<String, SQLError> {
+        let (text, memory) = self.binary.text().await?.into_parts();
         reservation.absorb(memory);
         if text.is_empty() || text.contains('\0') {
             return Err(invalid("column type name"));
         }
         Ok(text)
     }
-    pub(super) fn optional_number(&mut self) -> Result<Option<u32>, SQLError> {
-        if self.flag()? {
-            Ok(Some(u32::from_le_bytes(self.binary.array()?)))
+    pub(super) async fn optional_number(&mut self) -> Result<Option<u32>, SQLError> {
+        if self.flag().await? {
+            Ok(Some(u32::from_le_bytes(self.binary.array().await?)))
         } else {
             Ok(None)
         }
     }
-    pub(super) fn column_type(&mut self) -> Result<Budgeted<ColumnType>, SQLError> {
+    pub(super) async fn column_type(&mut self) -> Result<Budgeted<ColumnType>, SQLError> {
         let mut reservation = self.binary.memory.empty_reservation();
         let mut value = ColumnType::Void;
         let mut target = &mut value;
         loop {
             self.binary.cancellation.check()?;
-            let tag = TypeTag::decode(self.binary.array::<1>()?[0])?;
-            *target = self.type_node(tag, &mut reservation)?;
+            let tag = TypeTag::decode(self.binary.array::<1>().await?[0])?;
+            *target = self.type_node(tag, &mut reservation).await?;
             match target {
                 ColumnType::Array(next) | ColumnType::Domain { base: next, .. } => target = next,
                 _ => return Ok(Budgeted::new(value, reservation)),
@@ -51,7 +51,7 @@ impl Input<'_> {
         clippy::too_many_lines,
         reason = "exhaustive versioned reconstruction keeps each native payload and admission explicit"
     )]
-    fn type_node(
+    async fn type_node(
         &mut self,
         tag: TypeTag,
         reservation: &mut MemoryReservation,
@@ -96,28 +96,30 @@ impl Input<'_> {
             TypeTag::TimestampTz => ColumnType::TimestampTz,
             TypeTag::Interval => ColumnType::Interval,
             TypeTag::Named => return Err(invalid("unresolved stored column type")),
-            TypeTag::Varchar => ColumnType::Varchar(self.optional_number()?),
-            TypeTag::Bit => ColumnType::Bit(self.optional_number()?),
-            TypeTag::VarBit => ColumnType::VarBit(self.optional_number()?),
-            TypeTag::Character => ColumnType::Character(u32::from_le_bytes(self.binary.array()?)),
+            TypeTag::Varchar => ColumnType::Varchar(self.optional_number().await?),
+            TypeTag::Bit => ColumnType::Bit(self.optional_number().await?),
+            TypeTag::VarBit => ColumnType::VarBit(self.optional_number().await?),
+            TypeTag::Character => {
+                ColumnType::Character(u32::from_le_bytes(self.binary.array().await?))
+            }
             TypeTag::TimePrecision => {
-                ColumnType::TimePrecision(u32::from_le_bytes(self.binary.array()?))
+                ColumnType::TimePrecision(u32::from_le_bytes(self.binary.array().await?))
             }
             TypeTag::TimeTzPrecision => {
-                ColumnType::TimeTzPrecision(u32::from_le_bytes(self.binary.array()?))
+                ColumnType::TimeTzPrecision(u32::from_le_bytes(self.binary.array().await?))
             }
             TypeTag::TimestampPrecision => {
-                ColumnType::TimestampPrecision(u32::from_le_bytes(self.binary.array()?))
+                ColumnType::TimestampPrecision(u32::from_le_bytes(self.binary.array().await?))
             }
             TypeTag::TimestampTzPrecision => {
-                ColumnType::TimestampTzPrecision(u32::from_le_bytes(self.binary.array()?))
+                ColumnType::TimestampTzPrecision(u32::from_le_bytes(self.binary.array().await?))
             }
-            TypeTag::Vector => ColumnType::Vector(u32::from_le_bytes(self.binary.array()?)),
-            TypeTag::Tensor => ColumnType::Tensor(u32::from_le_bytes(self.binary.array()?)),
+            TypeTag::Vector => ColumnType::Vector(u32::from_le_bytes(self.binary.array().await?)),
+            TypeTag::Tensor => ColumnType::Tensor(u32::from_le_bytes(self.binary.array().await?)),
             TypeTag::Numeric => ColumnType::Numeric {
-                precision: self.optional_number()?,
-                scale: if self.flag()? {
-                    Some(i32::from_le_bytes(self.binary.array()?))
+                precision: self.optional_number().await?,
+                scale: if self.flag().await? {
+                    Some(i32::from_le_bytes(self.binary.array().await?))
                 } else {
                     None
                 },
@@ -128,13 +130,13 @@ impl Input<'_> {
             }
             TypeTag::IntervalWithFields => ColumnType::IntervalWithFields {
                 fields: IntervalFields::from_modifier_mask(i64::from(u16::from_le_bytes(
-                    self.binary.array()?,
+                    self.binary.array().await?,
                 )))
                 .ok_or_else(|| invalid("interval field mask"))?,
-                precision: self.optional_number()?,
+                precision: self.optional_number().await?,
             },
             TypeTag::Range | TypeTag::Multirange => {
-                let subtype = match self.binary.array::<1>()?[0] {
+                let subtype = match self.binary.array::<1>().await?[0] {
                     0 => RangeSubtype::Integer,
                     1 => RangeSubtype::BigInteger,
                     2 => RangeSubtype::Numeric,
@@ -151,11 +153,11 @@ impl Input<'_> {
             }
             TypeTag::DeclaredRange | TypeTag::DeclaredMultirange => {
                 let reference = RangeTypeReference {
-                    schema: self.type_text(reservation)?,
-                    name: self.type_text(reservation)?,
-                    oid: self.catalog_oid()?,
-                    array_oid: self.catalog_oid()?,
-                    alignment: match self.binary.array::<1>()?[0] {
+                    schema: self.type_text(reservation).await?,
+                    name: self.type_text(reservation).await?,
+                    oid: self.catalog_oid().await?,
+                    array_oid: self.catalog_oid().await?,
+                    alignment: match self.binary.array::<1>().await?[0] {
                         0 => RangeAlignment::Integer,
                         1 => RangeAlignment::Double,
                         _ => return Err(invalid("range alignment")),
@@ -168,11 +170,11 @@ impl Input<'_> {
                 }
             }
             TypeTag::Domain => {
-                let schema = self.type_text(reservation)?;
-                let name = self.type_text(reservation)?;
-                let oid = self.catalog_oid()?;
-                let array_oid = self.optional_oid()?;
-                let collation_oid = self.optional_number()?;
+                let schema = self.type_text(reservation).await?;
+                let name = self.type_text(reservation).await?;
+                let oid = self.catalog_oid().await?;
+                let array_oid = self.optional_oid().await?;
+                let collation_oid = self.optional_number().await?;
                 reservation.grow(size_of::<ColumnType>())?;
                 ColumnType::Domain {
                     schema,
@@ -184,18 +186,27 @@ impl Input<'_> {
                 }
             }
             TypeTag::Enum => ColumnType::Enum(EnumTypeReference {
-                schema: self.type_text(reservation)?,
-                name: self.type_text(reservation)?,
-                oid: self.catalog_oid()?,
-                array_oid: self.catalog_oid()?,
+                schema: self.type_text(reservation).await?,
+                name: self.type_text(reservation).await?,
+                oid: self.catalog_oid().await?,
+                array_oid: self.catalog_oid().await?,
             }),
             TypeTag::Composite => ColumnType::Composite(CompositeTypeReference {
-                schema: self.type_text(reservation)?,
-                name: self.type_text(reservation)?,
-                oid: self.catalog_oid()?,
-                array_oid: self.catalog_oid()?,
-                relation_oid: self.catalog_oid()?,
+                schema: self.type_text(reservation).await?,
+                name: self.type_text(reservation).await?,
+                oid: self.catalog_oid().await?,
+                array_oid: self.catalog_oid().await?,
+                relation_oid: self.catalog_oid().await?,
             }),
         })
+    }
+}
+
+impl Input<'_> {
+    pub(super) fn optional_number(&mut self) -> Result<Option<u32>, SQLError> {
+        self.fields(async |mut input| input.optional_number().await)
+    }
+    pub(super) fn column_type(&mut self) -> Result<Budgeted<ColumnType>, SQLError> {
+        self.fields(async |mut input| input.column_type().await)
     }
 }

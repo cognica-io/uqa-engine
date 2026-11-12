@@ -25,6 +25,8 @@ use uqa_core::{
 };
 
 mod authorities;
+pub(super) mod byte_windows;
+mod continuation;
 mod functions;
 mod metadata;
 mod native;

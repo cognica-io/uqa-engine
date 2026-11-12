@@ -9,8 +9,8 @@
 use super::{CapturedCatalogIndexes, CatalogIndexes};
 use std::{cmp::Ordering, io::Read, ops::Bound};
 use uqa_core::{
-    image_io::ImageInput,
-    memory::{Budgeted, MemoryBudget, MemoryReservation, ProductionControl},
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::{Budgeted, MemoryBudget, MemoryReservation},
     CancellationToken, RelationIdentity,
 };
 use uqa_sql::SQLError;
@@ -31,18 +31,18 @@ fn invalid(message: &'static str) -> SQLError {
     }
 }
 
-fn text(
-    input: &mut ImageInput<'_>,
+async fn text(
+    input: &mut AsyncImageInput<'_>,
     memory: &mut MemoryReservation,
     identifier: bool,
 ) -> Result<String, SQLError> {
-    let value = input.text()?;
+    let value = input.text().await?;
     if identifier {
         if value.is_empty() {
             return Err(invalid("empty identifier"));
         }
         for chunk in value.as_bytes().chunks(4096) {
-            input.cancellation.check()?;
+            input.checkpoint().await?;
             if chunk.contains(&0) {
                 return Err(invalid("identifier contains NUL"));
             }
@@ -53,23 +53,23 @@ fn text(
     Ok(value)
 }
 
-fn compare(
+async fn compare(
     left: &str,
     right: &str,
-    cancellation: &CancellationToken,
+    input: &mut AsyncImageInput<'_>,
 ) -> Result<Ordering, SQLError> {
     for (left, right) in left
         .as_bytes()
         .chunks(4096)
         .zip(right.as_bytes().chunks(4096))
     {
-        cancellation.check()?;
+        input.checkpoint().await?;
         let order = left.cmp(right);
         if order != Ordering::Equal {
             return Ok(order);
         }
     }
-    cancellation.check()?;
+    input.cancellation.check()?;
     Ok(left.len().cmp(&right.len()))
 }
 
@@ -90,28 +90,45 @@ impl CatalogIndexes {
         mutations: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
-        let mut input = ImageInput {
-            reader,
+        decode_image(reader, memory, cancellation, async |input| {
+            Self::decode(input, mutations).await
+        })
+    }
+
+    /// Retain exact native fields, ordered identities and independent key copies across byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+        let mutations = mutations.clone();
+        Ok(ImageDecoder::new(
             memory,
             cancellation,
-        };
-        if input.array::<8>()? != MAGIC {
+            |mut reader| async move { Self::decode(reader.input(), &mutations).await },
+        )?)
+    }
+
+    async fn decode(
+        mut input: AsyncImageInput<'_>,
+        mutations: &MemoryBudget,
+    ) -> Result<Self, SQLError> {
+        if input.array::<8>().await? != MAGIC {
             return Err(invalid("version header"));
         }
-        let count = input.count()?;
-        let mut result = Self::with_budget(memory);
-        let control = ProductionControl::new(memory, cancellation, cancellation);
+        let count = input.count().await?;
+        let mut result = Self::with_budget(input.memory);
         for _ in 0..count {
-            cancellation.check()?;
-            let mut lease = memory.empty_reservation();
+            input.checkpoint().await?;
+            let mut lease = input.memory.empty_reservation();
             let relation = RelationIdentity {
-                schema: text(&mut input, &mut lease, true)?,
-                name: text(&mut input, &mut lease, true)?,
+                schema: text(&mut input, &mut lease, true).await?,
+                name: text(&mut input, &mut lease, true).await?,
             };
             if let Some((previous, _)) = result.durable.last_before(Bound::Unbounded) {
-                let mut order = compare(&previous.schema, &relation.schema, cancellation)?;
+                let mut order = compare(&previous.schema, &relation.schema, &mut input).await?;
                 if order == Ordering::Equal {
-                    order = compare(&previous.name, &relation.name, cancellation)?;
+                    order = compare(&previous.name, &relation.name, &mut input).await?;
                 }
                 if order != Ordering::Less {
                     return Err(invalid("record order"));
@@ -119,28 +136,28 @@ impl CatalogIndexes {
             }
             let mut row = CatalogIndexRow {
                 relation,
-                index_type: text(&mut input, &mut lease, true)?,
-                table_name: text(&mut input, &mut lease, true)?,
-                columns_json: text(&mut input, &mut lease, false)?,
-                parameters_json: text(&mut input, &mut lease, false)?,
+                index_type: text(&mut input, &mut lease, true).await?,
+                table_name: text(&mut input, &mut lease, true).await?,
+                columns_json: text(&mut input, &mut lease, false).await?,
+                parameters_json: text(&mut input, &mut lease, false).await?,
                 definition_json: None,
             };
-            row.definition_json = match input.array::<1>()?[0] {
+            row.definition_json = match input.array::<1>().await?[0] {
                 0 => None,
-                1 => Some(text(&mut input, &mut lease, false)?),
+                1 => Some(text(&mut input, &mut lease, false).await?),
                 _ => return Err(invalid("definition presence tag")),
             };
-            let (schema, schema_memory) = control.copy_text(&row.relation.schema)?.into_parts();
-            let (name, name_memory) = control.copy_text(&row.relation.name)?.into_parts();
-            lease.absorb(schema_memory.expect("admitted index key"));
-            lease.absorb(name_memory.expect("admitted index key"));
+            let (schema, schema_memory) = input.copy_text(&row.relation.schema).await?.into_parts();
+            lease.absorb(schema_memory);
+            let (name, name_memory) = input.copy_text(&row.relation.name).await?.into_parts();
+            lease.absorb(name_memory);
             let row = Budgeted::new(row, lease);
             let bytes = row.reserved_bytes();
             result
                 .durable
                 .insert(RelationIdentity { schema, name }, row, bytes)?;
         }
-        input.end()?;
+        input.end().await?;
         result.durable = result.durable.into_mutation_budget(mutations);
         result.temporary = result.temporary.into_mutation_budget(mutations);
         Ok(result)

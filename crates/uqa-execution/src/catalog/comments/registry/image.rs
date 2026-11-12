@@ -8,7 +8,11 @@
 
 use super::{CapturedComments, CommentAddress, CommentRegistry};
 use std::io::Read;
-use uqa_core::{image_io::ImageInput, memory::MemoryBudget, CancellationToken};
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::MemoryBudget,
+    CancellationToken,
+};
 use uqa_sql::SQLError;
 use uqa_storage::{
     image_io::{ImageRead, ImageReader},
@@ -46,33 +50,51 @@ impl CommentRegistry {
         mutations: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
-        let mut input = ImageInput {
-            reader,
+        decode_image(reader, memory, cancellation, async |input| {
+            Self::decode(input, mutations).await
+        })
+    }
+
+    /// Retain native addresses, partial descriptions and their original allocation owners across independent byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+        let mutations = mutations.clone();
+        Ok(ImageDecoder::new(
             memory,
             cancellation,
-        };
-        if input.array::<8>()? != MAGIC {
+            |mut reader| async move { Self::decode(reader.input(), &mutations).await },
+        )?)
+    }
+
+    async fn decode(
+        mut input: AsyncImageInput<'_>,
+        mutations: &MemoryBudget,
+    ) -> Result<Self, SQLError> {
+        if input.array::<8>().await? != MAGIC {
             return Err(invalid("version header"));
         }
-        let count = input.count()?;
-        let mut registry = Self::with_budget(memory);
+        let count = input.count().await?;
+        let mut registry = Self::with_budget(input.memory);
         let mut previous = None;
         for _ in 0..count {
-            cancellation.check()?;
+            input.checkpoint().await?;
             let address = CommentAddress {
-                object_id: u32::from_le_bytes(input.array()?),
-                sub_id: i32::from_le_bytes(input.array()?),
-                class_id: u32::from_le_bytes(input.array()?),
+                object_id: u32::from_le_bytes(input.array().await?),
+                sub_id: i32::from_le_bytes(input.array().await?),
+                class_id: u32::from_le_bytes(input.array().await?),
             };
             if !valid_address(address) || previous.is_some_and(|key| key >= address) {
                 return Err(invalid("object address or record order"));
             }
-            let text = input.text()?;
+            let text = input.text().await?;
             if text.is_empty() {
                 return Err(invalid("empty description"));
             }
             for chunk in text.as_bytes().chunks(4096) {
-                cancellation.check()?;
+                input.checkpoint().await?;
                 if chunk.contains(&0) {
                     return Err(invalid("description contains NUL"));
                 }
@@ -81,7 +103,7 @@ impl CommentRegistry {
             registry.durable.insert(address, text, bytes)?;
             previous = Some(address);
         }
-        input.end()?;
+        input.end().await?;
         registry.durable = registry.durable.into_mutation_budget(mutations);
         registry.temporary = registry.temporary.into_mutation_budget(mutations);
         Ok(registry)
