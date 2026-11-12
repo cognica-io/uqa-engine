@@ -6,6 +6,9 @@
 
 //! Controlled native authority cells preserve storage-class selection and original field order.
 
+mod sequence;
+pub(in crate::catalog) use sequence::read as sequence;
+
 use super::{
     decode_identity, optional_text, BoundRelationSecurity, LegacyRelationSecurity, Result,
     SQLiteError,

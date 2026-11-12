@@ -21,11 +21,11 @@ pub(in crate::catalog) fn concrete_sequence_options(sequence: &SequenceRow) -> S
     }
 }
 
-fn decode_sequence_owner(
+pub(in crate::catalog) fn decode_sequence_owner(
     relation: &RelationIdentity,
-    table_object_id: Option<Vec<u8>>,
-    column_object_id: Option<Vec<u8>>,
-    dependency: Option<String>,
+    table_object_id: Option<&[u8]>,
+    column_object_id: Option<&[u8]>,
+    dependency: Option<&str>,
 ) -> Result<Option<SequenceOwner>> {
     let (table_object_id, column_object_id, dependency) =
         match (table_object_id, column_object_id, dependency) {
@@ -38,21 +38,21 @@ fn decode_sequence_owner(
                 )))
             }
         };
-    let table_object_id: [u8; 16] = table_object_id.try_into().map_err(|value: Vec<u8>| {
+    let table_object_id: [u8; 16] = table_object_id.try_into().map_err(|_| {
         SQLiteError::StorageBackend(format!(
             "corrupt sequence `{}` owner table identity has {} bytes",
             relation.qualified_name(),
-            value.len()
+            table_object_id.len()
         ))
     })?;
-    let column_object_id: [u8; 16] = column_object_id.try_into().map_err(|value: Vec<u8>| {
+    let column_object_id: [u8; 16] = column_object_id.try_into().map_err(|_| {
         SQLiteError::StorageBackend(format!(
             "corrupt sequence `{}` owner column identity has {} bytes",
             relation.qualified_name(),
-            value.len()
+            column_object_id.len()
         ))
     })?;
-    let dependency = match dependency.as_str() {
+    let dependency = match dependency {
         "a" => SequenceOwnerDependency::Automatic,
         "i" => SequenceOwnerDependency::Internal,
         other => {
@@ -117,12 +117,12 @@ pub(super) fn read_raw_sequence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
     })
 }
 
-pub(super) fn decode_sequence_identity(
+pub(in crate::catalog) fn decode_sequence_identity(
     relation: &RelationIdentity,
     label: &str,
-    value: Vec<u8>,
+    value: &[u8],
 ) -> Result<[u8; 16]> {
-    value.try_into().map_err(|value: Vec<u8>| {
+    value.try_into().map_err(|_| {
         SQLiteError::StorageBackend(format!(
             "corrupt sequence `{}` {label} has {} bytes",
             relation.qualified_name(),
@@ -140,15 +140,15 @@ pub(super) fn decode_raw_sequence_row(raw: RawSequenceRow) -> Result<SequenceRow
         )?,
         owner: decode_sequence_owner(
             &relation,
-            raw.owner_table_object_id,
-            raw.owner_column_object_id,
-            raw.owner_dependency,
+            raw.owner_table_object_id.as_deref(),
+            raw.owner_column_object_id.as_deref(),
+            raw.owner_dependency.as_deref(),
         )?,
-        object_id: decode_sequence_identity(&relation, "object identity", raw.object_id)?,
+        object_id: decode_sequence_identity(&relation, "object identity", &raw.object_id)?,
         definition_generation: decode_sequence_identity(
             &relation,
             "definition generation",
-            raw.definition_generation,
+            &raw.definition_generation,
         )?,
         relation,
         start: raw.start,

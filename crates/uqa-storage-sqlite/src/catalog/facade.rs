@@ -365,6 +365,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_schema_rows(self))
     }
 
+    fn begin_sequence_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::sequence_load::CatalogSequenceLoad> {
+        self.native_sequence_load(limits, control)
+    }
+
     fn begin_schema_load(
         &self,
         limits: uqa_storage::catalog::input::CatalogInputLimits,

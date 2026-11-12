@@ -21,6 +21,8 @@ pub use backup_validation::verify_backup_validation_continuation;
 mod catalog_graph_names;
 mod catalog_index_input;
 pub use catalog_graph_names::verify_catalog_graph_name_input;
+mod catalog_sequence_input;
+pub use catalog_sequence_input::verify_catalog_sequence_input;
 mod catalog_schema_input;
 pub use catalog_schema_input::verify_catalog_schema_input;
 mod catalog_statistics_input;

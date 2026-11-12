@@ -6,7 +6,11 @@
 
 //! Schema privileges share role, recipient and allocation rules with other catalog authority.
 
-use super::{invalid, projected, reader, Input, JsonToken, Result};
+use super::{
+    invalid,
+    paths::{decode, optional},
+    projected, Input, JsonToken, Result,
+};
 use crate::{
     catalog_role::BoundAclEntry,
     catalog_schema::{
@@ -155,34 +159,6 @@ fn take<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> T {
     value
 }
 
-fn decode<'a, 'c, T>(
-    bytes: &'a [u8],
-    memory: &'c MemoryBudget,
-    cancellation: &'c CancellationToken,
-    operation: impl for<'r> FnOnce(&mut Input<'a, 'c, 'r>, JsonToken<'a>) -> Result<T>,
-) -> Result<T> {
-    let mut tokens = reader(bytes, memory, cancellation);
-    let mut input = Input::new(&mut tokens, memory, cancellation);
-    let first = input.next()?;
-    let value = operation(&mut input, first)?;
-    input.end()?;
-    Ok(value)
-}
-
-fn optional<'a, 'c, 'r, T>(
-    input: &mut Input<'a, 'c, 'r>,
-    first: JsonToken<'a>,
-    entry: impl FnMut(&mut Input<'a, 'c, 'r>, JsonToken<'a>) -> Result<Budgeted<T>>,
-) -> Result<Budgeted<Option<Vec<T>>>> {
-    if first == JsonToken::Null {
-        Ok(Budgeted::new(None, input.memory.empty_reservation()))
-    } else {
-        input
-            .acl_with(first, entry)?
-            .try_map(|values| Ok(Some(values)))
-    }
-}
-
 fn bound<'a>(
     input: &mut Input<'a, '_, '_>,
     first: JsonToken<'a>,
@@ -265,5 +241,7 @@ impl<'a> Input<'a, '_, '_> {
     }
 }
 
+#[cfg(test)]
+use super::reader;
 #[cfg(test)]
 mod tests;

@@ -207,3 +207,21 @@ fn sqlite_key_value_catalog_statistics_input_retains_original_values_and_private
     )
     .unwrap();
 }
+
+#[test]
+fn sqlite_native_sequence_input_preserves_definitions_values_order_and_retirement() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_sequence_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_sequence_input_preserves_definitions_values_order_and_retirement() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_sequence_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}

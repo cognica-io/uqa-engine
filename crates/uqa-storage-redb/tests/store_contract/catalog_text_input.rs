@@ -106,3 +106,13 @@ fn redb_catalog_statistics_input_retains_original_values_and_private_membership(
     )
     .unwrap();
 }
+
+#[test]
+fn redb_sequence_input_preserves_definitions_values_order_and_retirement() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("sequence-input.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_sequence_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}

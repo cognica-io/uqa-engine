@@ -58,6 +58,7 @@ mod records;
 mod relation_acl;
 mod relations;
 mod schema_table;
+mod sequence_input;
 mod sequences;
 mod statistics_input;
 mod table_data;
@@ -373,6 +374,14 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>> {
         self.load_schema_rows_impl()
+    }
+
+    fn begin_sequence_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::sequence_load::CatalogSequenceLoad> {
+        self.sequence_load(limits, control)
     }
 
     fn begin_schema_load(

@@ -8,8 +8,10 @@
 
 mod fields;
 mod legacy;
+mod paths;
 pub mod projected;
 pub mod schema;
+pub mod sequence;
 pub use legacy::{legacy_column_entries, legacy_entries};
 
 use super::TablePrivileges;

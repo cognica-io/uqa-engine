@@ -17,6 +17,7 @@ mod input;
 mod record_revisions;
 mod relation_acl;
 mod relations;
+mod sequence_input;
 mod sequences;
 mod stats;
 mod table_input;

@@ -116,8 +116,20 @@ fn stored_position(
         ))?
         .map(|encoded| decode_value::<StoredSequenceValue>(&encoded))
         .transpose()?;
-    match (record, stored.legacy_value()) {
-        (Some(record), None) => Ok(record.position()),
+    resolve_position(
+        relation,
+        record.map(|record| record.position()),
+        stored.legacy_value(),
+    )
+}
+
+pub(super) fn resolve_position(
+    relation: &RelationIdentity,
+    record: Option<SequenceValuePosition>,
+    legacy: Option<SequenceValuePosition>,
+) -> StorageBackendResult<SequenceValuePosition> {
+    match (record, legacy) {
+        (Some(record), None) => Ok(record),
         (None, Some(legacy)) => Ok(legacy),
         (Some(_), Some(_)) => Err(StorageBackendError::Other(format!(
             "sequence `{}` has a definition written by an earlier release after its value record was created",

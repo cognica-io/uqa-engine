@@ -58,6 +58,19 @@ pub(crate) fn fields_prefix<const N: usize>(
     Ok(result)
 }
 
+/// Decode typed prefix fields while retaining the caller's enclosing JSON stream.
+pub(crate) fn fields_prefix_with<'a, T: Default, const N: usize>(
+    bytes: &'a [u8],
+    names: [(&'static str, bool); N],
+    control: &StorageReadControl,
+    decode: impl FnMut(usize, JsonToken<'a>) -> StorageBackendResult<T>,
+) -> StorageBackendResult<([T; N], usize)> {
+    control.check()?;
+    let mut reader = JsonReader::from_slice(bytes, control.memory(), control.cancellation())
+        .with_ignored_string_escapes();
+    read_fields(&mut reader, names, control, decode)
+}
+
 fn read_fields<'a, T: Default, const N: usize>(
     reader: &mut JsonReader<'a, '_>,
     names: [(&'static str, bool); N],
@@ -134,7 +147,7 @@ fn string_field(
     }
 }
 
-pub(super) fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
+pub(crate) fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
     reader
         .next_event()
         .map_err(json_error)?
