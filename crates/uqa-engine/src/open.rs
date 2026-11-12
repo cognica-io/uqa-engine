@@ -5,12 +5,12 @@
 //
 
 use super::{
-    initial_random_state, Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, DeepModel,
-    DurableCatalogState, Engine, EpochCoordinator, FieldName, ManagedConnection, Path,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession, QueryRuntime,
-    RuntimeExtensions, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError,
-    SQLiteStorageProvider, SessionContext, StorageBackendError, StorageBackendResult,
-    StorageContext, TableSchema, TableState, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
+    initial_random_state, Analyzer, Arc, BTreeMap, CatalogFacade, DeepModel, DurableCatalogState,
+    Engine, EpochCoordinator, FieldName, ManagedConnection, Path, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, QueryRuntime, RuntimeExtensions,
+    SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider,
+    SessionContext, StorageBackendError, StorageBackendResult, StorageContext, TableSchema,
+    TableState, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
 };
 
 mod authenticated_session;

@@ -317,6 +317,7 @@ impl Engine {
         )
         .map_err(|error| StorageBackendError::backend("CREATE TABLE array type", error))?;
         let table = TableState {
+            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
             security: TableMetadataCell::new(BoundTableSecurity::owner(owner.identity())),
@@ -349,7 +350,7 @@ impl Engine {
             row_type_array_name: crate::state::TableMetadataCell::new(Some(row_type_array_name)),
             dropped_attributes: crate::state::TableMetadataCell::new(Vec::new()),
         };
-        let table_arc = self.storage.table_state(table)?;
+        let table_arc = self.storage.table_state(table, None)?;
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(name, &table_arc)?;
         }

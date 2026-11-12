@@ -70,11 +70,13 @@ impl<T: TableMetadataValue> TableMetadataCell<T> {
     pub(crate) fn capture_source(
         self,
         registry: &MemoryCaptureRegistry,
+        control: Option<&uqa_storage::read_control::StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        Ok(Self(CatalogCell::capture_source(
+        Ok(Self(CatalogCell::capture_source_with_control(
             self.0.snapshot(),
-            Some(registry),
+            registry,
             TableMetadata::capture_with_control,
+            control,
         )?))
     }
 }
@@ -88,11 +90,13 @@ impl
     pub(crate) fn capture_source(
         self,
         registry: &MemoryCaptureRegistry,
+        control: Option<&uqa_storage::read_control::StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        Ok(Self(CatalogCell::capture_source(
+        Ok(Self(CatalogCell::capture_source_with_control(
             self.0.snapshot(),
-            Some(registry),
-            |value, control| value.capture_security(control),
+            registry,
+            |value, production| value.capture_security(production),
+            control,
         )?))
     }
 }

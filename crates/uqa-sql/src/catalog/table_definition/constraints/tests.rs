@@ -51,6 +51,11 @@ fn snapshot(value: &NativeTableConstraints) -> TableConstraintSet {
 fn stored_table_field_publication_moves_original_payloads_into_independent_owners() {
     for text in [fixture(), "{}".into(), "[]".into()] {
         let expected: TableConstraintSet = serde_json::from_str(&text).unwrap();
+        let ordinary = NativeTableConstraints::new(expected.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(snapshot(&ordinary)).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
         let token = CancellationToken::new();
         let probe = MemoryBudget::new(8 << 20);
         let raw =

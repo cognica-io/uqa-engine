@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Assemble native table state without copying retained definitions or physical handles; keep state, catalog and capture-source headers under their own allocation lifetimes through snapshots and later writes.
+
 - Preserve integer-key mapping metadata through bounded reads, keeping original empty/present marker semantics, declared key types and transaction visibility.
 
 - Read stored statistics maintenance and legacy document reservations through bounded metadata input, preserving relation identities, full-width counters, defaults and original cancellation.

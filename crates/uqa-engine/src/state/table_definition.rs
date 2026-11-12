@@ -38,11 +38,13 @@ impl<T: TableDefinitionValue> TableDefinitionCell<T> {
     pub(crate) fn capture_source(
         self,
         registry: &MemoryCaptureRegistry,
+        control: Option<&uqa_storage::read_control::StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        Ok(Self(CatalogCell::capture_source(
+        Ok(Self(CatalogCell::capture_source_with_control(
             self.0.snapshot(),
-            Some(registry),
+            registry,
             TableDefinition::capture_with_control,
+            control,
         )?))
     }
 

@@ -58329,6 +58329,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_assembly_keeps_payloads_and_snapshot_headers_after_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_assembly/tests.rs",
+      "capability": "Native table state assembly",
+      "workload": "Assemble a table retaining a 1 MiB evaluated column, preserve scalar and definition snapshots, exhaust and cancel construction, mutate the table and retire its parent.",
+      "invariant": "Assembly allocates only fixed headers; original definitions remain shared, subsequent writes use their own context and the last retained snapshot releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_assembly_retires_every_denied_header_and_cancelled_candidate",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_assembly/tests.rs",
+      "capability": "Native table state assembly",
+      "workload": "Deny each successive state/catalog header, then complete with the exact required allowance and cancel a separate complete input.",
+      "invariant": "Every rejection consumes all unpublished native fields and returns their allowance; exact admission succeeds without population copying.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_assembly_preserves_explicit_and_inferred_column_declarations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_assembly/tests.rs",
+      "capability": "Native table state assembly",
+      "workload": "Assemble empty and nonempty definitions with absent, false and true declaration markers.",
+      "invariant": "The explicit marker wins; absent markers use the original column population and statistics flags, identities and maintenance values survive unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_capture_registration_retains_headers_and_original_generations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_assembly/tests/capture.rs",
+      "capability": "Native table state assembly",
+      "workload": "Register admitted native metadata, exhaust and cancel input, capture a generation and replace it before retiring the table.",
+      "invariant": "Each registered source owns its header; capture uses its independent controls and retains the original SQL payload until the final reader retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "native_table_capture_registration_retires_every_rejected_source_prefix",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_assembly/tests/capture.rs",
+      "capability": "Native table state assembly",
+      "workload": "Deny each successive metadata registration and cancel an unpublished table before registration.",
+      "invariant": "No rejected table or registered prefix escapes; all original headers and payload reservations retire together.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

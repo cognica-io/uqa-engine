@@ -7,11 +7,9 @@
 //! Initial table catalog migration and persistent table hydration.
 
 use super::{
-    Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, Engine, FieldName,
-    PersistentStorageBackend, StorageBackendError, StorageBackendResult, TableSchema, TableState,
-    VectorIndex,
+    Analyzer, Arc, BTreeMap, CatalogFacade, Engine, FieldName, PersistentStorageBackend,
+    StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorIndex,
 };
-use crate::state::CatalogCell;
 use crate::statistics::MaintenanceState;
 use crate::{VectorIndexOpenMode, VectorIndexSpec};
 use uqa_execution::schema::indexes::constraint_names::KeyConstraintNames;
@@ -224,44 +222,33 @@ impl Engine {
             persisted_next_id,
         );
         let maps_integer_keys = Self::restored_key_mapping(catalog, &columns, schema.object_id)?;
-        Ok(Arc::new(TableState {
-            lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
+        let contents = crate::state::TableContents {
             object_id: schema.object_id,
-            security: crate::state::TableMetadataCell::new(security),
-            storage_generation: CatalogCell::new(schema.storage_generation),
-            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs.into()),
-            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv.into()),
-            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vectors.into()),
-            fts_fields: crate::state::TableMetadataCell::new(schema.fts_fields),
-            columns_declared: CatalogCell::new(
-                constraints.columns_declared.unwrap_or(!columns.is_empty()),
-            ),
-            columns: crate::state::TableDefinitionCell::new(&columns)?,
-            next_id: CatalogCell::new(next_id),
-            maps_integer_keys: CatalogCell::new(maps_integer_keys),
-            analyzer: CatalogCell::new(uqa_analysis::AnalyzerDefinition::new(analyzer)),
-            column_stats: CatalogCell::new(column_stats.into()),
-            column_stats_loaded: CatalogCell::new(true),
-            column_stats_dirty: CatalogCell::new(column_stats_dirty),
-            statistics_maintenance: CatalogCell::new(MaintenanceState::default()),
-            table_checks: crate::state::TableDefinitionCell::new(&constraints.checks)?,
-            foreign_keys: crate::state::TableMetadataCell::new(constraints.foreign_keys),
-            key_constraints: crate::state::TableMetadataCell::new(constraints.key_constraints),
-            hierarchy: crate::state::TableDefinitionCell::new(&constraints.hierarchy)?,
-            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                uqa_execution::catalog::index::value::ValueIndexes::default(),
-            ),
-            doc_count_cache: std::sync::atomic::AtomicU64::new(0),
-            doc_count_dirty: AtomicBool::new(true),
-            persistence: constraints.persistence,
-            on_commit: constraints.on_commit,
-            catalog_oids: constraints.catalog_oids,
-            row_type_array_name: crate::state::TableMetadataCell::new(
-                constraints.row_type_array_name,
-            ),
-            dropped_attributes: crate::state::TableMetadataCell::new(
-                constraints.dropped_attributes,
-            ),
-        }))
+            storage_generation: schema.storage_generation,
+            security: uqa_sql::catalog::table_metadata::TableMetadata::new(security),
+            documents: docs.into(),
+            text: inv.into(),
+            vectors: vectors.into(),
+            values: uqa_execution::catalog::index::value::ValueIndexes::default(),
+            fts_fields: uqa_sql::catalog::table_metadata::TableMetadata::new(schema.fts_fields),
+            columns: uqa_sql::catalog::table_definition::TableDefinition::new(&columns)
+                .map_err(table_publication_error)?,
+            constraints: uqa_sql::catalog::table_definition::NativeTableConstraints::new(
+                constraints,
+            )
+            .map_err(table_publication_error)?,
+            analyzer: uqa_analysis::AnalyzerDefinition::new(analyzer),
+            next_id,
+            maps_integer_keys,
+            statistics: column_stats.into(),
+            statistics_loaded: true,
+            statistics_dirty: column_stats_dirty,
+            maintenance: MaintenanceState::default(),
+        };
+        Ok(Arc::new(contents.into_state(None)?))
     }
+}
+
+fn table_publication_error(error: uqa_sql::SQLError) -> StorageBackendError {
+    StorageBackendError::backend("table definition publication", error)
 }

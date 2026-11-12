@@ -706,6 +706,8 @@ pub(crate) struct TableState {
     row_type_array_name: state::TableMetadataCell<Option<String>>,
     dropped_attributes:
         state::TableMetadataCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    /// The state header retires after its fields; independently shared generations keep their own admission after this table is dropped.
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl TableState {
