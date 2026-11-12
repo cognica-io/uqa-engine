@@ -6,13 +6,9 @@
 
 //! Declared ranges retain four type identities and the selected support objects independently of their current names.
 
-use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, ObjectAclEntry, RangeAlignment, RangeTypeReference};
 use crate::expr::RangeValueDescriptor;
 
@@ -134,88 +130,12 @@ impl StoredRange {
     }
 }
 
-/// Check persisted structure and authority before exposing a generation. Declaration binding separately resolves the subtype, class, collation and support signatures against the complete catalog.
-pub fn validate_range_registry(
-    registry: &impl super::type_definitions::TypeDefinitionView<StoredRange>,
-    roles: &RoleDefinitions,
-) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    let mut names = BTreeSet::new();
-    for (name, definition) in registry.iter() {
-        for identity in [definition.object_id, definition.multirange.object_id] {
-            if identity == [0; 16] || !identities.insert(identity) {
-                return Err(format!("invalid or duplicate range identity for `{name}`"));
-            }
-        }
-        for oid in definition.type_oids() {
-            if oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(oid) {
-                return Err(format!("invalid or duplicate range OID {oid} for `{name}`"));
-            }
-        }
-        if definition.identity.qualified_name() != *name {
-            return Err(format!("inconsistent range name for `{name}`"));
-        }
-        for (identity, array_name) in [
-            (&definition.identity, &definition.array_name),
-            (
-                &definition.multirange.identity,
-                &definition.multirange.array_name,
-            ),
-        ] {
-            if identity.schema.is_empty()
-                || !super::array_type_names::valid_type_name(&identity.name)
-                || !super::array_type_names::valid_type_name(array_name)
-                || !names.insert((&identity.schema, &identity.name))
-                || !names.insert((&identity.schema, array_name))
-            {
-                return Err(format!("invalid or duplicate range type name for `{name}`"));
-            }
-        }
-        if !definition.owner.is_valid() || definition.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "range `{name}` references missing role incarnation {}",
-                definition.owner.oid
-            ));
-        }
-        if !resolved_subtype(&definition.subtype)
-            || definition.subtype_operator_class == 0
-            || definition.canonical_oid == Some(0)
-            || definition.subtype_difference_oid == Some(0)
-        {
-            return Err(format!("invalid range support identity for `{name}`"));
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn resolved_subtype(mut ty: &ColumnType) -> bool {
-    loop {
-        match ty {
-            ColumnType::Named(_) => return false,
-            ColumnType::Array(element) => {
-                // Every consecutive array node has the same element-derived OID.
-                let mut element = element.as_ref();
-                while let ColumnType::Array(inner) = element {
-                    element = inner;
-                }
-                if matches!(element, ColumnType::Named(_))
-                    || super::type_metadata::pg_type_array_oid(element) == 0
-                {
-                    return false;
-                }
-                ty = element;
-            }
-            ColumnType::Domain { oid, base, .. } => {
-                if *oid == 0 {
-                    return false;
-                }
-                ty = base;
-            }
-            _ => return super::type_metadata::pg_type_oid(ty) != 0,
-        }
-    }
-}
+mod validation;
+pub(super) use validation::resolved_subtype;
+pub use validation::{
+    validate_range_registry, validate_range_registry_from_input,
+    validate_range_registry_with_control,
+};
 
 #[cfg(test)]
 mod tests;

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Restore persistent enum and shell catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot.
+- Restore persistent enum, shell, range and composite catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot. Restore object comments in their original position between range and composite definitions, retaining admitted text and independent future mutation ownership.
 
 - Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.
 - Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation. Share ordered identity, OID, label and owner validation between ordinary loading and retained input, with admitted scratch and terminal cleanup. Move decoded buffers into immutable type roots without copying, preserving captured predecessors and independent later mutation allowances.

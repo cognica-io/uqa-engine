@@ -6,6 +6,7 @@
 
 use super::super::shell_type::StoredShellType;
 use super::*;
+mod structured_validation;
 use uqa_core::{
     catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken, RelationIdentity,
 };

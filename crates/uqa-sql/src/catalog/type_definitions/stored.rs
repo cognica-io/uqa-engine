@@ -12,7 +12,9 @@ use crate::{
         ObjectAclEntry,
     },
     catalog::{
+        composite_type::StoredComposite,
         enum_type::{StoredEnum, StoredEnumLabel},
+        range_type::StoredRange,
         shell_type::StoredShellType,
     },
     SQLError,
@@ -44,6 +46,11 @@ macro_rules! stored {
 
 stored!(StoredEnum, stored_enum);
 stored!(StoredShellType, stored_shell);
+stored!(StoredRange, stored_range);
+stored!(StoredComposite, stored_composite);
+
+mod composite;
+mod range;
 
 impl<'a> Input<'a, '_> {
     fn stored_enum(&mut self, first: JsonToken<'a>) -> Result<Produced<StoredEnum>, InputError> {

@@ -13,6 +13,7 @@ use uqa_sql::catalog::{
 };
 
 mod ordering;
+mod structured;
 
 const LIMITS: CatalogInputLimits = CatalogInputLimits {
     maximum_key_bytes: 4096,

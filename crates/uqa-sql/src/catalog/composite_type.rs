@@ -8,13 +8,9 @@
 //!
 //! Attributes keep their `pg_attribute.attnum`. A dropped attribute stays in the definition with its number, as `PostgreSQL` keeps an `attisdropped` row, so later attributes keep their numbers and the number is never reused.
 
-use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, CompositeTypeReference, ObjectAclEntry};
 use crate::expr::composites::{CompositeAttribute, CompositeTypeDescriptor};
 
@@ -141,58 +137,8 @@ impl<Owner> StoredComposite<Owner> {
     }
 }
 
-/// Check the definitions restored or published as one registry: identities and OIDs are unique, names agree with their keys, attribute numbers ascend and live names are distinct, and owners exist.
-pub fn validate_composite_registry(
-    registry: &impl super::type_definitions::TypeDefinitionView<StoredComposite>,
-    roles: &RoleDefinitions,
-) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for (name, definition) in registry.iter() {
-        if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
-            return Err(format!(
-                "invalid or duplicate composite identity for `{name}`"
-            ));
-        }
-        for oid in [
-            definition.oid,
-            definition.array_oid,
-            definition.relation_oid,
-        ] {
-            if oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(oid) {
-                return Err(format!(
-                    "invalid or duplicate composite OID {oid} for `{name}`"
-                ));
-            }
-        }
-        if definition.identity.schema.is_empty()
-            || definition.identity.name.is_empty()
-            || definition.identity.qualified_name() != *name
-            || !super::array_type_names::valid_type_name(&definition.array_name)
-        {
-            return Err(format!("inconsistent composite name for `{name}`"));
-        }
-        let mut names = BTreeSet::new();
-        if definition
-            .attributes
-            .windows(2)
-            .any(|pair| pair[0].number >= pair[1].number)
-            || definition
-                .attributes
-                .first()
-                .is_some_and(|attribute| attribute.number < 1)
-            || definition
-                .live_attributes()
-                .any(|attribute| !names.insert(attribute.name.as_str()))
-        {
-            return Err(format!("invalid composite attributes for `{name}`"));
-        }
-        if !definition.owner.is_valid() || definition.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "composite `{name}` references missing role incarnation {}",
-                definition.owner.oid
-            ));
-        }
-    }
-    Ok(())
-}
+mod validation;
+pub use validation::{
+    validate_composite_registry, validate_composite_registry_from_input,
+    validate_composite_registry_with_control,
+};

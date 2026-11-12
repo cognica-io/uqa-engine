@@ -98,7 +98,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum and shell input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment and composite input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -231,7 +231,7 @@ impl PersistentEngineState {
         catalog: &dyn uqa_storage::CatalogFacade,
     ) -> StorageBackendResult<()> {
         self.engine
-            .restore_registries_after_shells(catalog, CatalogRestoreMode::LoadOnly)?;
+            .restore_registries_after_composites(catalog, CatalogRestoreMode::LoadOnly)?;
         uqa_execution::schema::types::relation_arrays::restoration::validate(
             &self.engine.restored_catalog_read_view(),
         )

@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -63619,6 +63619,231 @@
       "invariant": "Expected claim ownership follows completed canonical name order, and exact claim equality precedes duplicate OID semantics.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_range_input_preserves_optional_support_and_multirange_identity_shapes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/structured.rs",
+      "capability": "Stored range and composite fields",
+      "workload": "Named and positional fields, optional support, nested types, numeric boundaries and allocation cancellation.",
+      "invariant": "Native decoding matches the public stored declaration decoder and retires all failed prefixes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_composite_input_preserves_attribute_positions_defaults_and_closed_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/structured.rs",
+      "capability": "Stored range and composite fields",
+      "workload": "Named and positional fields, optional support, nested types, numeric boundaries and allocation cancellation.",
+      "invariant": "Native decoding matches the public stored declaration decoder and retires all failed prefixes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_structured_type_input_retains_numeric_and_nested_type_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/structured.rs",
+      "capability": "Stored range and composite fields",
+      "workload": "Named and positional fields, optional support, nested types, numeric boundaries and allocation cancellation.",
+      "invariant": "Native decoding matches the public stored declaration decoder and retires all failed prefixes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_structured_type_input_admits_owned_buffers_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/structured.rs",
+      "capability": "Stored range and composite fields",
+      "workload": "Named and positional fields, optional support, nested types, numeric boundaries and allocation cancellation.",
+      "invariant": "Native decoding matches the public stored declaration decoder and retires all failed prefixes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_validation_preserves_original_competing_predicate_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests/structured_validation.rs",
+      "capability": "Structured type validation",
+      "workload": "Competing identity, name, attribute and owner failures, deeply nested subtype input and retained work windows.",
+      "invariant": "Original predicate order and all terminal ownership paths are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "structured_type_validation_resumes_native_roots_and_retires_every_terminal_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests/structured_validation.rs",
+      "capability": "Structured type validation",
+      "workload": "Competing identity, name, attribute and owner failures, deeply nested subtype input and retained work windows.",
+      "invariant": "Original predicate order and all terminal ownership paths are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_validation_yields_inside_original_nested_subtype_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/tests/structured_validation.rs",
+      "capability": "Structured type validation",
+      "workload": "Competing identity, name, attribute and owner failures, deeply nested subtype input and retained work windows.",
+      "invariant": "Original predicate order and all terminal ownership paths are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_range_input_preserves_native_roots_claims_and_future_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/structured.rs",
+      "capability": "Persistent structured type input",
+      "workload": "Complete range and composite definitions, OID claims, retained predecessors and future mutation allowances.",
+      "invariant": "Roots match ordinary restoration; malformed and terminal inputs publish no prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_composite_input_preserves_native_roots_claims_and_future_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/structured.rs",
+      "capability": "Persistent structured type input",
+      "workload": "Complete range and composite definitions, OID claims, retained predecessors and future mutation allowances.",
+      "invariant": "Roots match ordinary restoration; malformed and terminal inputs publish no prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_structured_type_input_retires_physical_and_native_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/structured.rs",
+      "capability": "Persistent structured type input",
+      "workload": "Complete range and composite definitions, OID claims, retained predecessors and future mutation allowances.",
+      "invariant": "Roots match ordinary restoration; malformed and terminal inputs publish no prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_structured_type_input_preserves_marker_claim_and_semantic_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/structured.rs",
+      "capability": "Persistent structured type input",
+      "workload": "Complete range and composite definitions, OID claims, retained predecessors and future mutation allowances.",
+      "invariant": "Roots match ordinary restoration; malformed and terminal inputs publish no prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_comment_addresses_preserve_canonical_signed_and_unsigned_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/persistent/tests.rs",
+      "capability": "Persistent comment input",
+      "workload": "Canonical address limits, large descriptions, physical-before-semantic ordering and terminal input ownership.",
+      "invariant": "Original comment values and diagnostics are preserved with admitted native text and independent future mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_comment_input_preserves_native_text_and_future_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/persistent/tests.rs",
+      "capability": "Persistent comment input",
+      "workload": "Canonical address limits, large descriptions, physical-before-semantic ordering and terminal input ownership.",
+      "invariant": "Original comment values and diagnostics are preserved with admitted native text and independent future mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_comment_input_retires_physical_rows_and_native_roots_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/persistent/tests.rs",
+      "capability": "Persistent comment input",
+      "workload": "Canonical address limits, large descriptions, physical-before-semantic ordering and terminal input ownership.",
+      "invariant": "Original comment values and diagnostics are preserved with admitted native text and independent future mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_comment_input_completes_physical_input_before_address_and_text_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/comments/registry/persistent/tests.rs",
+      "capability": "Persistent comment input",
+      "workload": "Canonical address limits, large descriptions, physical-before-semantic ordering and terminal input ownership.",
+      "invariant": "Original comment values and diagnostics are preserved with admitted native text and independent future mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_structured_types_keep_selected_roots_and_later_sql_mutation_ownership",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types/structured.rs",
+      "capability": "Persistent Engine structured type restoration",
+      "workload": "Native SQLite, SQLite Key/Value and redb reconstruction with interleaved peer commits, later SQL changes and terminal private sessions.",
+      "invariant": "Selected native generations survive peer commits; every terminal path retires the private transaction and later mutations use session allowances.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_structured_types_retire_private_roots_and_selected_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types/structured.rs",
+      "capability": "Persistent Engine structured type restoration",
+      "workload": "Native SQLite, SQLite Key/Value and redb reconstruction with interleaved peer commits, later SQL changes and terminal private sessions.",
+      "invariant": "Selected native generations survive peer commits; every terminal path retires the private transaction and later mutations use session allowances.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     }
   ]

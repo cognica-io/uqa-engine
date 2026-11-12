@@ -7,16 +7,36 @@
 use super::*;
 use std::fmt::Write;
 
-fn selected(input: &PersistentEngineInput, shell: bool) -> bool {
-    match &input.candidate.as_ref().unwrap().stage {
-        Stage::Types(PersistentTypeInput::Enums(_)) => !shell,
-        Stage::Types(PersistentTypeInput::Shells(_)) => shell,
-        _ => false,
-    }
+mod structured;
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Enum,
+    Shell,
+    Range,
+    Comment,
+    Composite,
 }
-fn reach_types(input: &mut PersistentEngineInput, shell: bool) {
+
+fn selected(input: &PersistentEngineInput, kind: Kind) -> bool {
+    matches!(
+        (&input.candidate.as_ref().unwrap().stage, kind),
+        (Stage::Types(PersistentTypeInput::Enums(_)), Kind::Enum)
+            | (Stage::Types(PersistentTypeInput::Shells(_)), Kind::Shell)
+            | (Stage::Types(PersistentTypeInput::Ranges(_)), Kind::Range)
+            | (
+                Stage::Types(PersistentTypeInput::Comments(_)),
+                Kind::Comment
+            )
+            | (
+                Stage::Types(PersistentTypeInput::Composites(_)),
+                Kind::Composite
+            )
+    )
+}
+fn reach_types(input: &mut PersistentEngineInput, kind: Kind) {
     for _ in 0..65536 {
-        if selected(input, shell) {
+        if selected(input, kind) {
             return;
         }
         assert!(input.advance(1).unwrap().is_none());
@@ -38,7 +58,7 @@ fn persistent_type_input_keeps_selected_roots_and_later_sql_mutation_ownership(
     let shells = serde_json::to_value(&*source.durable.shells.read()).unwrap();
     let control = StorageReadControl::with_limit(32 << 20);
     let mut input = input(&source, &control);
-    reach_types(&mut input, false);
+    reach_types(&mut input, Kind::Enum);
     assert!(input.advance(16).unwrap().is_none());
     source
         .sql(
@@ -91,12 +111,12 @@ fn persistent_type_input_keeps_selected_roots_and_later_sql_mutation_ownership(
     assert_eq!(control.memory().used(), 0);
 }
 
-fn terminate(source: &Engine, shell: bool, terminal: &str) {
+fn terminate(source: &Engine, kind: Kind, terminal: &str) {
     let control = StorageReadControl::with_limit(32 << 20);
     let mut input = input(source, &control);
-    reach_types(&mut input, shell);
+    reach_types(&mut input, kind);
     assert!(input.advance(64).unwrap().is_none());
-    assert!(selected(&input, shell));
+    assert!(selected(&input, kind));
     let backend = Arc::clone(
         input
             .candidate
@@ -164,9 +184,9 @@ fn persistent_type_input_retires_both_private_roots_and_the_selected_transaction
     source.sql(&statements, &[]).unwrap();
     let catalog = source.storage.catalog.as_ref().unwrap();
     let original = catalog.metadata_with_prefix("uqa.sql.").unwrap();
-    for shell in [false, true] {
+    for kind in [Kind::Enum, Kind::Shell] {
         for terminal in ["cancel", "zero", "memory", "drop", "unwind"] {
-            terminate(&source, shell, terminal);
+            terminate(&source, kind, terminal);
         }
     }
     assert_eq!(catalog.metadata_with_prefix("uqa.sql.").unwrap(), original);

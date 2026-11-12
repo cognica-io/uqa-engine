@@ -18,6 +18,8 @@ use uqa_core::{
 use uqa_sql::{ast::RelationPersistence, SQLError};
 
 mod image;
+mod persistent;
+pub use persistent::CommentCatalogInput;
 
 #[derive(Clone)]
 pub struct CommentRegistry {
@@ -45,6 +47,12 @@ impl CommentRegistry {
 
     pub fn budget(&self) -> &MemoryBudget {
         self.durable.budget()
+    }
+
+    fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.durable = self.durable.into_mutation_budget(memory);
+        self.temporary = self.temporary.into_mutation_budget(memory);
+        self
     }
 
     pub fn len(&self) -> usize {

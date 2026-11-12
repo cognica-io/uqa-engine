@@ -104,9 +104,7 @@ impl CommentRegistry {
             previous = Some(address);
         }
         input.end().await?;
-        registry.durable = registry.durable.into_mutation_budget(mutations);
-        registry.temporary = registry.temporary.into_mutation_budget(mutations);
-        Ok(registry)
+        Ok(registry.into_mutation_budget(mutations))
     }
 }
 

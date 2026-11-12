@@ -26,7 +26,7 @@ fn failure<T: Fixture>(
     error
 }
 
-fn malformed<T: Fixture>() {
+pub(super) fn malformed<T: Fixture>() {
     for corruption in [
         "missing marker",
         "marker",

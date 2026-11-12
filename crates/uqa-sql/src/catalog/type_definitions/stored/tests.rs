@@ -277,3 +277,4 @@ fn stored_type_input_cancels_both_original_owners_after_native_admission() {
 }
 
 mod adoption;
+mod structured;

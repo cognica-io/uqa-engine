@@ -100,5 +100,18 @@ pub fn publish(
     Ok(())
 }
 
+/// Retain complete physical records and claims before publishing the validated native generation.
+pub type RangeCatalogInput = super::type_records::input::TypeCatalogInput<StoredRange>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<RangeCatalogInput> {
+    super::type_records::input::new(&FORMAT, catalog, roles, limits, mutations, control)
+}
+
 #[cfg(test)]
 mod tests;

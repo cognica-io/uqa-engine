@@ -51,6 +51,14 @@ impl Engine {
             uqa_execution::catalog::comments::restore(catalog, &self.durable.comments.read())?;
         *self.durable.comments.write() = comments;
         self.restore_composites_from_catalog(catalog)?;
+        self.restore_registries_after_composites(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_composites(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(

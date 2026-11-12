@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The private session retains complete enum and shell generations in ordinary restoration order.
+//! The private session retains complete type and comment generations in ordinary restoration order.
 
 use super::Engine;
 use std::sync::Arc;
-use uqa_execution::catalog::{enum_type, shell_type};
+use uqa_execution::catalog::{comments, composite_type, enum_type, range_type, shell_type};
 use uqa_storage::{
     catalog::input::CatalogInputLimits, read_control::StorageReadControl, StorageBackendResult,
 };
@@ -16,6 +16,9 @@ use uqa_storage::{
 pub(super) enum PersistentTypeInput {
     Enums(enum_type::EnumCatalogInput),
     Shells(shell_type::ShellCatalogInput),
+    Ranges(range_type::RangeCatalogInput),
+    Comments(comments::CommentCatalogInput),
+    Composites(composite_type::CompositeCatalogInput),
 }
 
 impl PersistentTypeInput {
@@ -57,10 +60,70 @@ impl PersistentTypeInput {
             Self::Shells(mut input) => match input.advance(1)? {
                 Some(shells) => {
                     *engine.durable.shells.write() = shells;
-                    Ok(None)
+                    Ok(Some(Self::ranges(engine, limits, control)?))
                 }
                 None => Ok(Some(Self::Shells(input))),
             },
+            Self::Ranges(mut input) => match input.advance(1)? {
+                Some(ranges) => {
+                    *engine.durable.ranges.write() = ranges;
+                    Ok(Some(Self::comments(engine, limits, control)?))
+                }
+                None => Ok(Some(Self::Ranges(input))),
+            },
+            Self::Comments(mut input) => match input.advance(1)? {
+                Some(comments) => {
+                    *engine.durable.comments.write() = comments;
+                    Ok(Some(Self::composites(engine, limits, control)?))
+                }
+                None => Ok(Some(Self::Comments(input))),
+            },
+            Self::Composites(mut input) => match input.advance(1)? {
+                Some(composites) => {
+                    *engine.durable.composites.write() = composites;
+                    Ok(None)
+                }
+                None => Ok(Some(Self::Composites(input))),
+            },
         }
+    }
+
+    fn ranges(
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self::Ranges(range_type::begin_input(
+            Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
+            engine.durable.roles.read().clone(),
+            limits,
+            engine.durable.ranges.read().budget(),
+            control,
+        )?))
+    }
+    fn comments(
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self::Comments(comments::CommentCatalogInput::new(
+            Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
+            limits,
+            engine.durable.comments.read().budget(),
+            control,
+        )?))
+    }
+    fn composites(
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self::Composites(composite_type::begin_input(
+            Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
+            engine.durable.roles.read().clone(),
+            limits,
+            engine.durable.composites.read().budget(),
+            control,
+        )?))
     }
 }
