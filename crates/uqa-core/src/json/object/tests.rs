@@ -137,3 +137,5 @@ fn json_object_projection_retires_truncation_cancelled_and_denied_names_without_
     ));
     assert_eq!(memory.used(), 0);
 }
+
+mod resumable;

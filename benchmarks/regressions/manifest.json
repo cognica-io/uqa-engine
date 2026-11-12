@@ -63382,6 +63382,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_object_projection_preserves_duplicate_fields_borrowed_ranges_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests/resumable.rs",
+      "capability": "Retained JSON object projection",
+      "workload": "retained object projection preserves duplicate fields borrowed ranges and work windows.",
+      "invariant": "Original last-value fields and borrowed ranges survive positive work windows; all grammar and terminal failures retire admitted names and nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_object_projection_validates_overwritten_values_depth_and_every_truncated_prefix",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests/resumable.rs",
+      "capability": "Retained JSON object projection",
+      "workload": "retained object projection validates overwritten values depth and every truncated prefix.",
+      "invariant": "Original last-value fields and borrowed ranges survive positive work windows; all grammar and terminal failures retire admitted names and nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_object_projection_retires_admitted_prefixes_on_each_terminal_boundary",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/object/tests/resumable.rs",
+      "capability": "Retained JSON object projection",
+      "workload": "retained object projection retires admitted prefixes on each terminal boundary.",
+      "invariant": "Original last-value fields and borrowed ranges survive positive work windows; all grammar and terminal failures retire admitted names and nodes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
