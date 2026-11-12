@@ -11,7 +11,7 @@ use crate::{
     StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::memory::{Budgeted, BudgetedVec};
+use uqa_core::memory::{Budgeted, BudgetedString, BudgetedVec};
 
 pub mod index;
 pub(crate) mod metadata;
@@ -49,6 +49,13 @@ pub type CatalogRowDecoder<T> =
 
 /// Select a live key before reading its value. The selection preserves original physical key validation and cannot reenter persistence.
 pub type CatalogKeyFilter = fn(&[u8], &StorageReadControl) -> StorageBackendResult<bool>;
+pub type CatalogKeyPrefixFilter =
+    fn(&[u8], &str, &StorageReadControl) -> StorageBackendResult<bool>;
+
+struct KeyPrefix {
+    prefix: BudgetedString,
+    select: CatalogKeyPrefixFilter,
+}
 
 pub struct CatalogInput<T> {
     state: State<T>,
@@ -66,6 +73,7 @@ struct Input<T> {
     after: Option<BudgetedVec<u8>>,
     decode: CatalogRowDecoder<T>,
     select: Option<CatalogKeyFilter>,
+    key_prefix: Option<KeyPrefix>,
     limits: CatalogInputLimits,
     control: StorageReadControl,
 }
@@ -106,6 +114,29 @@ impl<T> CatalogInput<T> {
         Self::create(read, prefix, Some(select), decode, limits, control)
     }
 
+    /// Filter a decoded key prefix before reading a value. The original provider order and one-slot polling are retained, and the prefix allocation belongs to the cursor's original allowance.
+    pub fn new_prefix_filtered(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        prefix: &[u8],
+        selection: (&str, CatalogKeyPrefixFilter),
+        decode: CatalogRowDecoder<T>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check_value_size(selection.0.len(), limits.maximum_key_bytes)?;
+        let mut selected = BudgetedString::new(control.memory());
+        selected.push_str(selection.0)?;
+        let mut input = Self::create(read, prefix, None, decode, limits, control)?;
+        let State::Reading(value) = &mut input.state else {
+            unreachable!("new catalog cursor");
+        };
+        value.as_mut().key_prefix = Some(KeyPrefix {
+            prefix: selected,
+            select: selection.1,
+        });
+        Ok(input)
+    }
+
     fn create(
         read: Arc<dyn KeyValueRead + Send + Sync>,
         prefix: &[u8],
@@ -129,6 +160,7 @@ impl<T> CatalogInput<T> {
                     after: None,
                     decode,
                     select,
+                    key_prefix: None,
                     limits,
                     control: control.clone(),
                 }),
@@ -188,7 +220,10 @@ impl<T> Input<T> {
         let selected = live
             && self
                 .select
-                .map_or(Ok(true), |select| select(key, &self.control))?;
+                .map_or(Ok(true), |select| select(key, &self.control))?
+            && self.key_prefix.as_ref().map_or(Ok(true), |filter| {
+                (filter.select)(key, &filter.prefix, &self.control)
+            })?;
         if selected {
             self.read.visit_value_bounded(
                 key,

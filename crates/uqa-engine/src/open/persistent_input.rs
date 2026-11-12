@@ -28,6 +28,8 @@ struct Candidate {
 
 enum Stage {
     Metadata,
+    Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput),
+    Schemas,
     Tables(PersistentTableInput),
     Registries,
     Caches,
@@ -87,7 +89,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Table input consumes bounded native polls. The remaining metadata, registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Role and table input consume bounded native polls. The remaining metadata, registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -109,7 +111,22 @@ impl PersistentEngineInput {
                     uqa_execution::schema::constraints::restoration::validate_constraint_catalog(
                         catalog.as_ref(),
                     )?;
-                    engine.restore_roles_from_metadata(catalog.as_ref(), false)?;
+                    Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
+                        catalog,
+                        candidate.limits,
+                        engine.durable.roles.read().budget(),
+                        &self.control,
+                    )?)
+                }
+                Stage::Roles(mut input) => match input.advance(1)? {
+                    Some(values) => {
+                        *engine.durable.roles.write() = values.roles;
+                        *engine.durable.role_memberships.write() = values.memberships;
+                        Stage::Schemas
+                    }
+                    None => Stage::Roles(input),
+                },
+                Stage::Schemas => {
                     engine.restore_schemas_from_catalog(
                         catalog.as_ref(),
                         CatalogRestoreMode::LoadOnly,

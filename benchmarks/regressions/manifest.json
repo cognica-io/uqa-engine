@@ -54892,8 +54892,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
       "capability": "Retained persistent catalog text input",
-      "workload": "Capture all six native SQLite catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
-      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "workload": "Capture all six native SQLite catalog text families beside private insertion, replacement and deletion; roll back and commit later writes. Select literal-prefix metadata with Unicode, NUL and wildcard characters after source retirement, excluding unrelated oversized values.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view. Selected metadata preserves native provider order and the original private snapshot; excluded values are never materialized.",
       "case_names": [
         ""
       ]
@@ -54905,8 +54905,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
       "capability": "Retained persistent catalog text input",
-      "workload": "Capture all six SQLite Key/Value catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
-      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "workload": "Capture all six SQLite Key/Value catalog text families beside private insertion, replacement and deletion; roll back and commit later writes. Select literal-prefix metadata with Unicode, NUL and wildcard characters after source retirement, excluding unrelated oversized values.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view. Selected metadata preserves native provider order and the original private snapshot; excluded values are never materialized.",
       "case_names": [
         ""
       ]
@@ -54918,8 +54918,8 @@
       "cases": 1,
       "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
       "capability": "Retained persistent catalog text input",
-      "workload": "Capture all six redb catalog text families beside private insertion, replacement and deletion; roll back and commit later writes.",
-      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view.",
+      "workload": "Capture all six redb catalog text families beside private insertion, replacement and deletion; roll back and commit later writes. Select literal-prefix metadata with Unicode, NUL and wildcard characters after source retirement, excluding unrelated oversized values.",
+      "invariant": "Original text and private membership survive source retirement, absent descriptors stay absent, tombstones consume a window and completion releases the view. Selected metadata preserves native provider order and the original private snapshot; excluded values are never materialized.",
       "case_names": [
         ""
       ]
@@ -61303,6 +61303,268 @@
       "invariant": "Set semantics preserve one native attribute without a growing duplicate buffer or retained workspace.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_validation_advances_one_original_definition_and_retires_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_validation_preserves_key_oid_incarnation_and_revision_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_validation_keeps_deleted_endpoints_and_resolves_renamed_grantors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_validation_preserves_bound_identity_grantor_oid_and_key_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "role_validation_cancellation_retires_both_traversals_and_preserves_native_roots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_validation_accounts_for_every_live_node_and_retires_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_iterator_unwind_retires_original_scratch_and_terminates_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/validation/tests.rs",
+      "capability": "Ordered role restoration validation",
+      "workload": "Validate original keys, OIDs, incarnations, membership grantors and revisions under one-entry advances, cancellation and denied allocations.",
+      "invariant": "Original error precedence and bound identities remain unchanged; scratch retires on failure, unwind and completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_publication_keeps_native_buffers_and_independent_future_mutations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/input/tests.rs",
+      "capability": "Native role restoration ownership",
+      "workload": "Publish stored role and membership buffers without copying; exhaust and cancel the input allowance before later native mutations.",
+      "invariant": "Private catalog entries retain original buffers, and completed destinations use independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_bootstrap_selection_tracks_replaced_keys_and_original_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/input/tests.rs",
+      "capability": "Native role restoration ownership",
+      "workload": "Publish stored role and membership buffers without copying; exhaust and cancel the input allowance before later native mutations.",
+      "invariant": "Private catalog entries retain original buffers, and completed destinations use independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_role_validation_retains_the_selected_root_and_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/input/tests.rs",
+      "capability": "Native role restoration ownership",
+      "workload": "Publish stored role and membership buffers without copying; exhaust and cancel the input allowance before later native mutations.",
+      "invariant": "Private catalog entries retain original buffers, and completed destinations use independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_membership_input_publishes_original_names_without_rebinding_or_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/input/tests.rs",
+      "capability": "Native role restoration ownership",
+      "workload": "Publish stored role and membership buffers without copying; exhaust and cancel the input allowance before later native mutations.",
+      "invariant": "Private catalog entries retain original buffers, and completed destinations use independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_membership_failure_retires_partially_published_native_entries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/restoration/input/tests.rs",
+      "capability": "Native role restoration ownership",
+      "workload": "Publish stored role and membership buffers without copying; exhaust and cancel the input allowance before later native mutations.",
+      "invariant": "Private catalog entries retain original buffers, and completed destinations use independent future mutation admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_role_input_matches_current_catalog_and_bounds_native_population_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/input/tests.rs",
+      "capability": "Persistent role catalog input",
+      "workload": "Restore current SQLite KV role records, original OID claims and memberships one provider slot or native check at a time.",
+      "invariant": "Complete validation precedes publication; malformed, cancelled and denied input leaves persisted records unchanged and retires private roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_role_input_preserves_definition_claim_identity_and_membership_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/input/tests.rs",
+      "capability": "Persistent role catalog input",
+      "workload": "Restore current SQLite KV role records, original OID claims and memberships one provider slot or native check at a time.",
+      "invariant": "Complete validation precedes publication; malformed, cancelled and denied input leaves persisted records unchanged and retires private roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_role_input_rejects_noncurrent_markers_without_performing_migration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/input/tests.rs",
+      "capability": "Persistent role catalog input",
+      "workload": "Restore current SQLite KV role records, original OID claims and memberships one provider slot or native check at a time.",
+      "invariant": "Complete validation precedes publication; malformed, cancelled and denied input leaves persisted records unchanged and retires private roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_role_input_failure_retires_original_rows_private_roots_and_continuation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/input/tests.rs",
+      "capability": "Persistent role catalog input",
+      "workload": "Restore current SQLite KV role records, original OID claims and memberships one provider slot or native check at a time.",
+      "invariant": "Complete validation precedes publication; malformed, cancelled and denied input leaves persisted records unchanged and retires private roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_role_input_validates_all_membership_record_fields_before_grantor_resolution",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/roles/persistence/input/tests.rs",
+      "capability": "Persistent role catalog input",
+      "workload": "Restore current SQLite KV role records, original OID claims and memberships one provider slot or native check at a time.",
+      "invariant": "Complete validation precedes publication; malformed, cancelled and denied input leaves persisted records unchanged and retires private roots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_prefix_input_rejects_unselected_values_before_reads_and_bounds_each_key",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Bounded metadata prefix input",
+      "workload": "Select one admitted literal prefix across tombstones, malformed oversized unrelated values, cancellation, quota failure and unwinding.",
+      "invariant": "Each advance inspects one key and reads only a selected value; retained selection and provider ownership retire at the same terminal boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "metadata_prefix_input_retires_selection_and_original_view_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests.rs",
+      "capability": "Bounded metadata prefix input",
+      "workload": "Select one admitted literal prefix across tombstones, malformed oversized unrelated values, cancellation, quota failure and unwinding.",
+      "invariant": "Each advance inspects one key and reads only a selected value; retained selection and provider ownership retire at the same terminal boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_role_restore_keeps_the_original_snapshot_and_accepts_later_authority_changes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Persistent Engine role restoration",
+      "workload": "Rename a granted role through a peer after restore pins its original snapshot; finish restoration, exhaust and cancel original admission, then exercise inherited SELECT and later role grants.",
+      "invariant": "Native SQLite, SQLite KV and redb preserve the originally selected authority and later refresh/mutate through ordinary session ownership.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     }
   ]

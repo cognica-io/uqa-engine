@@ -18,6 +18,32 @@ use crate::{
 use uqa_core::memory::{Budgeted, BudgetedString, MemoryError};
 
 impl KeyValueCatalog {
+    pub(super) fn metadata_input(
+        &self,
+        prefix: &str,
+        limits: CatalogTextLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogTextInput> {
+        control.check()?;
+        limits.validate()?;
+        if !self.store.transaction_model().is_versioned() {
+            return Err(crate::StorageBackendError::Other(
+                "retained catalog input requires a versioned read owner".into(),
+            ));
+        }
+        let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            read.retain(&[&[TAG_METADATA]])
+        })?;
+        CatalogTextInput::new_prefix_filtered(
+            read,
+            &[TAG_METADATA],
+            (prefix, select_metadata),
+            decode_metadata,
+            limits,
+            control,
+        )
+    }
+
     pub(super) fn metadata_with_control(
         &self,
         name: &str,
@@ -83,6 +109,15 @@ impl KeyValueCatalog {
             control,
         )
     }
+}
+
+fn select_metadata(
+    key: &[u8],
+    prefix: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<bool> {
+    control.check()?;
+    Ok(super::schema_table::metadata_key(key)?.starts_with(prefix))
 }
 
 fn decode_metadata(

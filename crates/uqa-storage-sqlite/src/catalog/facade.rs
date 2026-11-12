@@ -58,6 +58,15 @@ impl CatalogFacade for Catalog {
         self.native_text_input(family, limits, control)
     }
 
+    fn begin_metadata_input(
+        &self,
+        prefix: &str,
+        limits: uqa_storage::catalog::text_input::CatalogTextLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::text_input::CatalogTextInput> {
+        self.native_metadata_input(prefix, limits, control)
+    }
+
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
         self.conn.transaction_model()
     }

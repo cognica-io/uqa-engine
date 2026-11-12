@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.
 - Retain stored role definitions and membership bindings under their original restore allowance, preserving incarnation identities, tuple revisions and existing declaration formats.
 
 - Expose Engine/uqa-api restore, recovery and cancellation entry points and connect native SQLite, SQLite KV and redb restore jobs to retained table input and private catalog validation, with exact-request recovery and shared runtime activation. Complete bounded registry loading and restore qualification remain in progress.

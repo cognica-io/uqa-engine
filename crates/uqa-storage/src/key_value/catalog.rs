@@ -120,6 +120,15 @@ impl CatalogFacade for KeyValueCatalog {
         self.text_input(family, limits, control)
     }
 
+    fn begin_metadata_input(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::text_input::CatalogTextInput> {
+        self.metadata_input(prefix, limits, control)
+    }
+
     fn record_revisions(
         &self,
         records: &[crate::catalog::CatalogRecordRef<'_>],

@@ -295,6 +295,19 @@ pub trait CatalogFacade: Send + Sync {
         ))
     }
 
+    /// Retain literal-prefix metadata in original provider order. Reject unrelated keys before materializing their values; each inspected physical slot remains bounded by the cursor window.
+    fn begin_metadata_input(
+        &self,
+        _prefix: &str,
+        _limits: text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<text_input::CatalogTextInput> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained metadata prefix input is not supported".into(),
+        ))
+    }
+
     /// Retain secondary-index definitions from the same native read boundary. Each row preserves its original encoded columns, parameters and optional semantic definition; later consumers own catalog ordering and reference validation.
     fn begin_index_input(
         &self,

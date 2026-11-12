@@ -14,7 +14,7 @@ use serde::Deserialize;
 use uqa_sql::catalog::roles::RoleDefinitions;
 
 pub(super) const ROLE_PREFIX: &str = "uqa.sql.role.v1:";
-const OID_PREFIX: &str = "uqa.sql.role_oid.v1:";
+pub(super) const OID_PREFIX: &str = "uqa.sql.role_oid.v1:";
 const FORMAT: &str = r#"{"role_catalog_format":3}"#;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,24 @@ pub(super) enum RoleRecordFormat {
 #[serde(deny_unknown_fields)]
 struct RecordFormat {
     role_catalog_format: u32,
+}
+
+pub(super) fn require_current_marker(json: Option<&str>) -> StorageBackendResult<()> {
+    let Some(json) = json else {
+        return Err(StorageBackendError::Other(
+            "role metadata requires initial-open record migration".into(),
+        ));
+    };
+    let format: RecordFormat = serde_json::from_str(json)?;
+    match format.role_catalog_format {
+        3 => Ok(()),
+        1 | 2 => Err(StorageBackendError::Other(
+            "role metadata requires initial-open record migration".into(),
+        )),
+        version => Err(StorageBackendError::Other(format!(
+            "unsupported role catalog format {version}"
+        ))),
+    }
 }
 
 #[derive(Deserialize)]

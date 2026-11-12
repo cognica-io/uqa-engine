@@ -20,6 +20,28 @@ use uqa_storage::{
 };
 
 impl Catalog {
+    pub(in crate::catalog) fn native_metadata_input(
+        &self,
+        name_prefix: &str,
+        limits: CatalogTextLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogTextInput> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(name_prefix.len(), limits.maximum_key_bytes)?;
+        let snapshot = self.conn.native_snapshot()?.ok_or_else(|| {
+            StorageBackendError::Other("retained catalog input requires native records".into())
+        })?;
+        let prefix = NativeRecordIdentity::new(
+            Family::Metadata,
+            NativeRecordOwner::Database(snapshot.database),
+        )
+        .and_then(|identity| identity.encode_text_prefix(name_prefix.as_bytes(), control))
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        let read = snapshot.record_read().retain(&[&prefix])?;
+        CatalogTextInput::new(read, &prefix, decode, limits, control)
+    }
+
     pub(in crate::catalog) fn native_metadata_with_control(
         &self,
         name: &str,

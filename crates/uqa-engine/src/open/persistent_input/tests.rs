@@ -13,6 +13,58 @@ const LIMITS: CatalogInputLimits = CatalogInputLimits {
     maximum_value_bytes: 1 << 20,
 };
 
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn persistent_role_restore_keeps_the_original_snapshot_and_accepts_later_authority_changes(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = provider.open(&directory.path().join("roles"));
+    source.sql("CREATE ROLE reader; CREATE ROLE team; GRANT team TO reader; CREATE TABLE items(id integer); INSERT INTO items VALUES(7); GRANT SELECT ON items TO team", &[]).unwrap();
+    let original_roles = source.durable.roles.read().clone();
+    let original_members = source.durable.role_memberships.read().clone();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut input = input(&source, &control);
+    assert!(input.advance(1).unwrap().is_none());
+    assert!(matches!(
+        input.candidate.as_ref().unwrap().stage,
+        Stage::Roles(_)
+    ));
+    assert!(input.advance(3).unwrap().is_none());
+    source
+        .sql("ALTER ROLE team RENAME TO team_later", &[])
+        .unwrap();
+    let session = finish(&mut input);
+    assert_eq!(*session.engine().durable.roles.read(), original_roles);
+    assert_eq!(
+        *session.engine().durable.role_memberships.read(),
+        original_members
+    );
+    let restored = session.finish().unwrap();
+    let occupied = control
+        .memory()
+        .reserve(control.memory().available())
+        .unwrap();
+    control.cancellation().cancel();
+    restored.sql("SET ROLE reader", &[]).unwrap();
+    assert_eq!(
+        restored.sql("SELECT id FROM items", &[]).unwrap().rows[0]["id"],
+        Value::Int(7)
+    );
+    restored
+        .sql(
+            "RESET ROLE; CREATE ROLE another; GRANT team_later TO another",
+            &[],
+        )
+        .unwrap();
+    drop((restored, input, source, original_roles, original_members));
+    assert_eq!(control.memory().used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn input(source: &Engine, control: &StorageReadControl) -> PersistentEngineInput {
     PersistentEngineInput::new(
         Arc::clone(source.storage.provider.as_ref().unwrap()),
