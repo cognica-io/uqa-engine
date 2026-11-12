@@ -5,6 +5,7 @@
 //
 
 use super::CatalogTable;
+use crate::catalog::ordering::compare_names as compare;
 use crate::{StorageBackendError, StorageBackendResult};
 use std::cmp::Ordering;
 use uqa_core::{
@@ -31,25 +32,6 @@ impl SortProgress<CatalogTable, StorageBackendError> for Progress<'_, '_> {
             Ok(order)
         }
     }
-}
-
-async fn compare(
-    left: &str,
-    right: &str,
-    progress: &mut AsyncImageInput<'_>,
-) -> StorageBackendResult<Ordering> {
-    for (left, right) in left
-        .as_bytes()
-        .chunks(4096)
-        .zip(right.as_bytes().chunks(4096))
-    {
-        progress.checkpoint().await?;
-        let order = left.cmp(right);
-        if order != Ordering::Equal {
-            return Ok(order);
-        }
-    }
-    Ok(left.len().cmp(&right.len()))
 }
 
 pub(super) async fn sort(

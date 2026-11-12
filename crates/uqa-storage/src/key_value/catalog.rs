@@ -366,6 +366,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_schema_rows_impl()
     }
 
+    fn begin_schema_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::schema::load::CatalogSchemaLoad> {
+        self.schema_load(limits, control)
+    }
+
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
         self.save_table_impl(schema)
     }

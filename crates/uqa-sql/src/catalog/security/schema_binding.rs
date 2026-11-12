@@ -155,15 +155,51 @@ impl BoundSchemaSecurity {
     }
 
     pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
+        self.validate_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map_err(|error| match error {
+                crate::SQLError::Internal(message) => message,
+                error => error.to_string(),
+            })
+    }
+
+    pub fn validate_with_control(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), crate::SQLError> {
+        crate::catalog::work::inline(self.validate_from(roles, control, &mut ()))
+    }
+
+    pub async fn validate_from_input(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<(), crate::SQLError> {
+        self.validate_from(roles, control, input).await
+    }
+
+    async fn validate_from(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<(), crate::SQLError> {
+        use super::role_bindings::role_definition_from;
+        control.check()?;
         if self.tuple.is_some_and(|tuple| !tuple.is_valid()) {
-            return Err("invalid schema catalog tuple identity".into());
+            return Err(crate::SQLError::Internal(
+                "invalid schema catalog tuple identity".into(),
+            ));
         }
-        role_name(roles, self.role_owner, "schema")?;
+        role_definition_from(roles, self.role_owner, "schema", control, work).await?;
         for entry in self.acl.iter().flatten() {
+            work.checkpoint().await?;
+            control.check()?;
             if let Some(grantee) = entry.role {
-                role_name(roles, grantee, "schema")?;
+                role_definition_from(roles, grantee, "schema", control, work).await?;
             }
-            role_name(roles, entry.grantor, "schema")?;
+            role_definition_from(roles, entry.grantor, "schema", control, work).await?;
         }
         Ok(())
     }

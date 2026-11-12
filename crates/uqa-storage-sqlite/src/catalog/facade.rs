@@ -357,6 +357,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_schema_rows(self))
     }
 
+    fn begin_schema_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::schema::load::CatalogSchemaLoad> {
+        self.native_schema_load(limits, control)
+    }
+
     fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
         into_storage_result(self.native_named_record_has_private_changes(
             crate::mvcc::native::NativeRecordFamily::Schemas,

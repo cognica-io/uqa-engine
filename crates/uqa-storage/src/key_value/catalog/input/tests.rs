@@ -8,6 +8,48 @@ use super::*;
 use crate::key_value::catalog::{decode_catalog_relation_key, relation_key, StoredCatalogIndex};
 use crate::key_value::codec::single_str_key;
 
+#[test]
+fn key_value_schema_input_preserves_raw_legacy_names_and_original_key_validation() {
+    use crate::{CatalogFacade, KeyValueStore, MemoryKeyValueStore};
+    use std::sync::Arc;
+    for name in ["", "public", "한글\0schema"] {
+        for trailing in [false, true] {
+            let mut key = single_str_key(super::super::TAG_SCHEMA, name).unwrap();
+            if trailing {
+                key.extend_from_slice(b"trailing");
+            }
+            for bytes in [
+                name.as_bytes().to_vec(),
+                serde_json::to_vec(&crate::SchemaRow::bootstrap(name)).unwrap(),
+                serde_json::to_vec(&crate::SchemaRow::legacy("different")).unwrap(),
+                b"{".to_vec(),
+            ] {
+                let store = Arc::new(MemoryKeyValueStore::new());
+                store.put(&key, &bytes).unwrap();
+                let catalog = KeyValueCatalog::new(store);
+                let control = StorageReadControl::with_limit(1 << 20);
+                match (
+                    catalog.load_schema_rows(),
+                    decode_schema(&key, &bytes, &control),
+                ) {
+                    (Ok(expected), Ok(Some(actual))) => assert_eq!(*actual, expected[0]),
+                    (Err(expected), Err(actual)) => {
+                        assert_eq!(
+                            std::mem::discriminant(&expected),
+                            std::mem::discriminant(&actual)
+                        );
+                        if matches!(expected, StorageBackendError::Other(_)) {
+                            assert_eq!(actual.to_string(), expected.to_string());
+                        }
+                    }
+                    (expected, actual) => panic!("{name:?}: {expected:?} / {actual:?}"),
+                }
+                assert_eq!(control.memory().used(), 0);
+            }
+        }
+    }
+}
+
 fn equal(left: &CatalogIndexRow, right: &CatalogIndexRow) {
     assert_eq!(left.relation, right.relation);
     assert_eq!(left.index_type, right.index_type);

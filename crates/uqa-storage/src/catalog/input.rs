@@ -79,6 +79,14 @@ struct Input<T> {
 }
 
 impl<T> CatalogInput<T> {
+    pub(crate) fn shares_context(&self, control: &StorageReadControl) -> bool {
+        match &self.state {
+            State::Reading(input) => input.control.shares_context(control),
+            State::Complete => true,
+            State::Failed => false,
+        }
+    }
+
     /// Complete an absent catalog owner without retaining a provider view or allocating a cursor.
     pub fn empty(
         limits: CatalogInputLimits,

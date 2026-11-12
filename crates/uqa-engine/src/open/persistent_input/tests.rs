@@ -17,6 +17,55 @@ const LIMITS: CatalogInputLimits = CatalogInputLimits {
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn persistent_schema_restore_keeps_selected_authority_and_accepts_later_namespace_changes(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = provider.open(&directory.path().join("schemas"));
+    source.sql("CREATE ROLE reader; CREATE SCHEMA selected; CREATE TABLE selected.items(id integer); INSERT INTO selected.items VALUES(7); GRANT USAGE ON SCHEMA selected TO reader; GRANT SELECT ON selected.items TO reader", &[]).unwrap();
+    let original = source.durable.schemas.read().clone();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut input = input(&source, &control);
+    let mut reached = false;
+    for _ in 0..65536 {
+        assert!(input.advance(1).unwrap().is_none());
+        if matches!(input.candidate.as_ref().unwrap().stage, Stage::Schemas(_)) {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached);
+    assert!(input.advance(3).unwrap().is_none());
+    source
+        .sql("ALTER SCHEMA selected RENAME TO later", &[])
+        .unwrap();
+    let session = finish(&mut input);
+    assert_eq!(*session.engine().durable.schemas.read(), original);
+    let restored = session.finish().unwrap();
+    let occupied = control
+        .memory()
+        .reserve(control.memory().available())
+        .unwrap();
+    control.cancellation().cancel();
+    restored.sql("SET ROLE reader", &[]).unwrap();
+    assert_eq!(
+        restored
+            .sql("SELECT id FROM later.items", &[])
+            .unwrap()
+            .rows[0]["id"],
+        Value::Int(7)
+    );
+    restored.sql("RESET ROLE; CREATE SCHEMA another; GRANT USAGE ON SCHEMA another TO reader; REVOKE USAGE ON SCHEMA later FROM reader", &[]).unwrap();
+    drop((restored, input, source, original));
+    assert_eq!(control.memory().used(), occupied.bytes());
+    drop(occupied);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn persistent_role_restore_keeps_the_original_snapshot_and_accepts_later_authority_changes(
     #[case] provider: Provider,
 ) {

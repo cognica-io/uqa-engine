@@ -148,14 +148,14 @@ impl SchemaRow {
         let acl = (name == "public").then(|| {
             vec![
                 SchemaAclEntry {
-                    role: "uqa".into(),
-                    grantor: Some("uqa".into()),
+                    role: DEFAULT_SCHEMA_ROLE_OWNER.into(),
+                    grantor: Some(DEFAULT_SCHEMA_ROLE_OWNER.into()),
                     privileges: SchemaPrivileges::ALL,
                     grant_options: SchemaPrivileges::default(),
                 },
                 SchemaAclEntry {
                     role: crate::catalog_acl::AclGrantee::Public,
-                    grantor: Some("uqa".into()),
+                    grantor: Some(DEFAULT_SCHEMA_ROLE_OWNER.into()),
                     privileges: SchemaPrivileges {
                         usage: true,
                         create: false,
@@ -169,6 +169,23 @@ impl SchemaRow {
             role_owner: default_schema_role_owner(),
             acl,
         }
+    }
+
+    /// Admit the original legacy constructor's fixed owner/grant layout before allocation. The name is copied once through the ordinary controlled string producer; semantic name validation remains with the catalog owner.
+    pub fn legacy_with_control(
+        name: &str,
+        control: &crate::memory::ProductionControl<'_>,
+    ) -> Result<crate::memory::Produced<Self>, crate::ValueRetentionError> {
+        let fixed = DEFAULT_SCHEMA_ROLE_OWNER.len()
+            + if name == "public" {
+                2 * size_of::<SchemaAclEntry>() + 3 * DEFAULT_SCHEMA_ROLE_OWNER.len()
+            } else {
+                0
+            };
+        let fixed = control.reserve(fixed)?;
+        let (name, memory) = control.copy_text(name)?.into_parts();
+        let memory = control.combine(fixed, memory);
+        control.finish(Self::legacy(name), memory)
     }
 }
 

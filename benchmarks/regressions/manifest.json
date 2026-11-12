@@ -61683,6 +61683,255 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "legacy_schema_construction_admits_original_defaults_before_allocating",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/input/schema/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare empty, public, ordinary and large Unicode legacy names with the original constructor; measure allocations and deny one byte below the peak and either cancelled owner.",
+      "invariant": "Original legacy owner/grants match and every native allocation is admitted before production.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_schema_restore_keeps_selected_authority_and_accepts_later_namespace_changes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Rename a schema through a peer during private restoration; compare selected authority, exhaust/cancel input allowance and exercise ordinary later queries and grants.",
+      "invariant": "Native SQLite, SQLite KV and redb retain the pinned snapshot and subsequently refresh and mutate through the ordinary session boundary.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_schema_input_matches_original_restoration_and_bounds_native_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/namespaces/restoration/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare zero, eight and 128 schemas with ordinary restoration, bound native polls and mutate completed roots after original admission is occupied and cancelled.",
+      "invariant": "Original authority and records are unchanged; complete roots accept later mutations with their destination allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_schema_input_preserves_name_authority_identity_and_migration_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/namespaces/restoration/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Combine invalid names, legacy records, missing owners/recipients/grantors, missing or repeated identities and a missing built-in marker.",
+      "invariant": "The first original validation error and read-only migration rejection are preserved without metadata writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_schema_input_retires_every_unpublished_prefix_on_cancel_zero_drop_and_unwind",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/namespaces/restoration/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Stop at every unpublished native poll and cancel, request zero work, drop or unwind the owner.",
+      "invariant": "Every private row, registry and identity buffer retires on its owning terminal boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_schema_input_retires_each_denied_allocation_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/namespaces/restoration/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Sample admission limits from zero through the successful peak minus one.",
+      "invariant": "Denied restoration publishes no schema root and releases every admitted allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_schema_fields_move_to_native_roots_without_copying_or_changing_mutation_budget",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema_registry/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Transfer original name and ACL pointers into the native registry, then occupy and cancel input admission before later edits.",
+      "invariant": "Native payloads are adopted without copying and later mutation uses its independent destination allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_schema_input_preserves_private_rows_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Retain private schema replacement/insertion/deletion, roll back and commit later writes, then retire the source; exercise cancellation, limits, zero work and unwinding.",
+      "invariant": "redb preserves the original stable name order and private membership without inheriting later provider changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_schema_input_preserves_original_owner_classes_acl_shapes_and_tuple_formats",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare text, old/current bound owner formats, malformed storage classes, null/empty ACLs and duplicate recipients with the original native decoder.",
+      "invariant": "Native field selection, tuple/authority values and diagnostic classes remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_schema_input_admits_original_name_owner_and_acl_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/role_security/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Measure large native names and owner strings with ACLs, preserve completed output after cancellation and deny prefixes through peak-minus-one.",
+      "invariant": "Native schema payload allocations remain charged and denied production retires all fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_schema_input_preserves_private_rows_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Retain private schema replacement/insertion/deletion, roll back and commit later writes, then retire the source; exercise cancellation, limits, zero work and unwinding.",
+      "invariant": "Native SQLite preserves selected physical order and complete values, then releases every input owner on each terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_schema_input_preserves_private_rows_order_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Retain private schema replacement/insertion/deletion, roll back and commit later writes, then retire the source; exercise cancellation, limits, zero work and unwinding.",
+      "invariant": "SQLite KV preserves the original stable name order and private membership without inheriting later provider changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "schema_envelope_input_matches_original_format_selection_and_projected_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare current and legacy envelopes, marker types, duplicates, invalid tuple fields and strict discarded values with original serde input.",
+      "invariant": "Format discrimination precedes typed fields and retains original acceptance, identities and authority.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "schema_envelope_input_rejects_original_truncations_and_malformed_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare every truncated prefix and byte mutation of current and legacy records.",
+      "invariant": "Original malformed-input rejection and complete field retirement are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "schema_envelope_input_accounts_for_native_fields_and_retires_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Measure current and legacy schema allocations; cancel after completion and deny sampled allowances through peak-minus-one.",
+      "invariant": "Completed native fields own exact retained bytes and failed input releases all partial allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_schema_input_preserves_physical_order_and_stable_duplicate_name_order",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/load/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Drain one-slot input with duplicate names in physical and name order and count physical visits per poll.",
+      "invariant": "Stable name ordering, original physical order, bounded visits and provider retirement match the ordinary boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_schema_input_rejects_late_physical_corruption_without_exposing_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/load/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Place malformed physical input after complete earlier records.",
+      "invariant": "Complete decoding precedes publication and late corruption retires every unpublished row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_schema_input_rejects_changed_memory_or_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/schema/load/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Invoke the loader with a changed memory allowance or cancellation owner.",
+      "invariant": "The source cannot be moved to a different control and rejected ownership releases its original cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_schema_input_preserves_raw_legacy_names_and_original_key_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/input/tests.rs",
+      "capability": "Retained persistent schema restoration",
+      "workload": "Compare empty/public/Unicode raw legacy values, bound JSON, key/name mismatches and retained trailing-key behavior with the ordinary catalog reader.",
+      "invariant": "Original legacy defaults, key semantics, decoder acceptance and diagnostics remain unchanged.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

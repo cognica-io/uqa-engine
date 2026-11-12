@@ -29,7 +29,7 @@ struct Candidate {
 enum Stage {
     Metadata,
     Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput),
-    Schemas,
+    Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput),
     Tables(PersistentTableInput),
     Registries,
     Caches,
@@ -89,7 +89,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Role and table input consume bounded native polls. The remaining metadata, registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Role, schema and table input consume bounded native polls. The remaining metadata, registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -122,23 +122,31 @@ impl PersistentEngineInput {
                     Some(values) => {
                         *engine.durable.roles.write() = values.roles;
                         *engine.durable.role_memberships.write() = values.memberships;
-                        Stage::Schemas
+                        Stage::Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput::new(
+                            catalog,
+                            engine.durable.roles.read().clone(),
+                            candidate.limits,
+                            engine.durable.schemas.read().budget(),
+                            &self.control,
+                        )?)
                     }
                     None => Stage::Roles(input),
                 },
-                Stage::Schemas => {
-                    engine.restore_schemas_from_catalog(
-                        catalog.as_ref(),
-                        CatalogRestoreMode::LoadOnly,
-                    )?;
-                    Stage::Tables(PersistentTableInput::from_catalog(
-                        catalog,
-                        Arc::clone(engine.storage.backend.as_ref().expect("persistent backend")),
-                        engine.durable.roles.read().clone(),
-                        candidate.limits,
-                        &self.control,
-                    )?)
-                }
+                Stage::Schemas(mut input) => match input.advance(1)? {
+                    Some(schemas) => {
+                        *engine.durable.schemas.write() = schemas;
+                        Stage::Tables(PersistentTableInput::from_catalog(
+                            catalog,
+                            Arc::clone(
+                                engine.storage.backend.as_ref().expect("persistent backend"),
+                            ),
+                            engine.durable.roles.read().clone(),
+                            candidate.limits,
+                            &self.control,
+                        )?)
+                    }
+                    None => Stage::Schemas(input),
+                },
                 Stage::Tables(mut input) => match input.advance(1)? {
                     Some(tables) => {
                         engine.storage.tables = Arc::new(tables);

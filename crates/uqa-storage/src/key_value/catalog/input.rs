@@ -19,6 +19,19 @@ use uqa_core::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn schema_load(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::schema::load::CatalogSchemaLoad> {
+        use crate::catalog::schema::load::{CatalogSchemaLoad, CatalogSchemaOrder};
+        CatalogSchemaLoad::new(
+            self.row_input(&[super::TAG_SCHEMA], decode_schema, limits, control)?,
+            CatalogSchemaOrder::Name,
+            control,
+        )
+    }
+
     pub(super) fn row_input<T>(
         &self,
         prefix: &[u8],
@@ -45,6 +58,37 @@ impl KeyValueCatalog {
     ) -> StorageBackendResult<CatalogInput<CatalogIndexRow>> {
         self.row_input(&[TAG_CATALOG_INDEX], decode_index, limits, control)
     }
+}
+
+fn decode_schema(
+    key: &[u8],
+    value: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<crate::SchemaRow>>> {
+    let mut offset = 1;
+    let name = read_str_ref(key, &mut offset)?;
+    let row = if value == name.as_bytes() {
+        uqa_core::catalog_schema::SchemaRow::legacy_with_control(
+            name,
+            &ProductionControl::new(
+                control.memory(),
+                control.cancellation(),
+                control.cancellation(),
+            ),
+        )?
+        .into_budgeted()
+        .expect("admitted legacy schema")
+        .try_map(|row| Ok::<_, StorageBackendError>(crate::SchemaRow::Legacy(row)))?
+    } else {
+        crate::catalog::schema::input::row(value, control)?
+    };
+    if row.name() != name {
+        return Err(StorageBackendError::Other(format!(
+            "schema catalog key `{name}` disagrees with stored name `{}`",
+            row.name()
+        )));
+    }
+    Ok(Some(row))
 }
 
 fn decode_index(

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent schema catalogs through bounded provider input and shared authority validation, preserving original ordering, snapshot identities and subsequent writable grants. Cancellation deferral checks use the existing inline lock instead of allocating a platform mutex on their first call.
+
 - Admit stored schema names, tuple identities and bound or named grants through the existing authority grammar, retaining original field/default rules and allocation ownership.
 
 - Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.

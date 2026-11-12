@@ -9,6 +9,45 @@ use std::collections::BTreeMap;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn stored_schema_fields_move_to_native_roots_without_copying_or_changing_mutation_budget() {
+    let mut original = uqa_core::catalog_schema::BoundSchemaRow::bootstrap("public");
+    original.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity::initial(2200));
+    let encoded = serde_json::to_vec(&original).unwrap();
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let row = uqa_core::catalog_acl::input::schema::projected_bound_row(&encoded, &memory, &token)
+        .unwrap();
+    let name = row.name.as_ptr();
+    let acl = row.acl.as_ref().unwrap().as_ptr();
+    let (name_owner, security) = BoundSchemaSecurity::from_budgeted_row(row);
+    assert_eq!(name_owner.as_ptr(), name);
+    assert_eq!(security.acl.as_ref().unwrap().as_ptr(), acl);
+    let mut registry = SchemaRegistry::with_budget(&memory);
+    registry
+        .insert_stored_entry(name_owner, security, &control)
+        .unwrap();
+    assert_eq!(registry.keys().next().unwrap().as_ptr(), name);
+    assert_eq!(registry["public"].acl.as_ref().unwrap().as_ptr(), acl);
+    assert_eq!(registry["public"].row("public"), original);
+    let mutations = MemoryBudget::new(1 << 20);
+    let mut registry = registry.into_mutation_budget(&mutations);
+    let occupied = memory.reserve(memory.available()).unwrap();
+    token.cancel();
+    registry
+        .edit("public", |security| {
+            security.acl = None;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    assert!(registry["public"].acl.is_none());
+    drop(registry);
+    assert_eq!(mutations.used(), 0);
+    assert_eq!(memory.used(), occupied.bytes());
+}
+
+#[test]
 fn schema_roots_capture_without_enumeration_or_temporary_authority_retention() {
     for count in [1, 64, 4096] {
         let mut source = SchemaRegistry::new();

@@ -288,3 +288,60 @@ fn schema_acl_cancellation_retires_active_paths_and_preserves_completed_output()
     drop(completed);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn legacy_schema_construction_admits_original_defaults_before_allocating() {
+    use crate::{catalog_schema::SchemaRow, memory::ProductionControl};
+    for name in [
+        String::new(),
+        "public".into(),
+        "ordinary".into(),
+        "한글".repeat(4096),
+    ] {
+        let expected = SchemaRow::legacy(name.clone());
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &invoking);
+        let mut output = None;
+        let allocations = allocation_counter::measure(|| {
+            output = Some(SchemaRow::legacy_with_control(&name, &control).unwrap());
+        });
+        assert_eq!(**output.as_ref().unwrap(), expected);
+        assert_eq!(
+            usize::try_from(allocations.bytes_current).unwrap(),
+            memory.used()
+        );
+        assert_eq!(
+            usize::try_from(allocations.bytes_max).unwrap(),
+            memory.peak()
+        );
+        let required = memory.peak();
+        drop(output);
+        assert_eq!(memory.used(), 0);
+        let denied = MemoryBudget::new(required - 1);
+        assert!(SchemaRow::legacy_with_control(
+            &name,
+            &ProductionControl::new(&denied, &token, &invoking)
+        )
+        .is_err());
+        assert_eq!(denied.used(), 0);
+        for original in [true, false] {
+            let token = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            if original {
+                token.cancel();
+            } else {
+                invoking.cancel();
+            }
+            let allocations = allocation_counter::measure(|| {
+                assert!(SchemaRow::legacy_with_control(
+                    &name,
+                    &ProductionControl::new(&memory, &token, &invoking)
+                )
+                .is_err());
+            });
+            assert_eq!(allocations.bytes_total, 0);
+        }
+    }
+}
