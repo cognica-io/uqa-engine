@@ -31,7 +31,7 @@ fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     .unwrap()
 }
 
-fn encode(index: &dyn InvertedIndex, id: u64) -> Option<Vec<u8>> {
+pub(in crate::inverted_index) fn encode(index: &dyn InvertedIndex, id: u64) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     let written = index
         .write_image_document(id, &mut bytes, &StorageReadControl::with_limit(0))

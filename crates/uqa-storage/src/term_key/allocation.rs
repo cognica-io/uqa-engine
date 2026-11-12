@@ -7,7 +7,12 @@
 //! Encoded posting keys retain their buffers through query preparation and provider reads.
 
 use super::TokenTermKey;
+use crate::{
+    image_io::work::{inline, Work},
+    StorageBackendResult,
+};
 use uqa_analysis::TokenTerm;
+use uqa_core::image_io::AsyncImageInput;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError};
 
 impl TokenTermKey {
@@ -69,13 +74,30 @@ impl TokenTermKey {
     pub fn clone_budgeted<E: From<MemoryError>>(
         &self,
         budget: &MemoryBudget,
+        poll: impl FnMut() -> Result<(), E>,
+    ) -> Result<Budgeted<Self>, E> {
+        inline(self.clone_with(budget, poll, &mut ()))
+    }
+
+    pub(crate) async fn clone_budgeted_from(
+        &self,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Budgeted<Self>> {
+        self.clone_with(input.memory, || Ok(()), input).await
+    }
+
+    async fn clone_with<E: From<MemoryError>>(
+        &self,
+        budget: &MemoryBudget,
         mut poll: impl FnMut() -> Result<(), E>,
+        work: &mut impl Work<E>,
     ) -> Result<Budgeted<Self>, E> {
         poll()?;
         let mut bytes = BudgetedVec::new(budget);
         bytes.reserve(self.0.len())?;
         for (index, byte) in self.0.iter().copied().enumerate() {
             if index % 1024 == 0 {
+                work.checkpoint().await?;
                 poll()?;
             }
             bytes.push(byte)?;
@@ -91,8 +113,26 @@ impl TokenTermKey {
         other: &Self,
         poll: &mut dyn FnMut() -> Result<(), E>,
     ) -> Result<std::cmp::Ordering, E> {
+        inline(self.compare_with(other, poll, &mut ()))
+    }
+
+    pub(crate) async fn cmp_from(
+        &self,
+        other: &Self,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<std::cmp::Ordering> {
+        self.compare_with(other, || Ok(()), input).await
+    }
+
+    async fn compare_with<E>(
+        &self,
+        other: &Self,
+        mut poll: impl FnMut() -> Result<(), E>,
+        work: &mut impl Work<E>,
+    ) -> Result<std::cmp::Ordering, E> {
         poll()?;
         for (left, right) in self.0.chunks(1024).zip(other.0.chunks(1024)) {
+            work.checkpoint().await?;
             poll()?;
             let order = left.cmp(right);
             if !order.is_eq() {

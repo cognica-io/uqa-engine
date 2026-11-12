@@ -14,6 +14,7 @@ mod framed;
 mod owned;
 mod reader;
 mod retained;
+pub(crate) mod work;
 pub use framed::{framed_image_reader, read_framed_image_from, FramedImageInput};
 pub use owned::ImageOwner;
 pub use reader::{ImagePreparation, ImageRead, ImageReader};

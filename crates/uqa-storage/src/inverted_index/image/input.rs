@@ -9,15 +9,13 @@
 use super::{
     invalid, DocId, StagedMemoryDocument, StorageBackendResult, StorageReadControl, MAGIC,
 };
-use crate::image_io::ImageInput as Input;
 use crate::{
-    inverted_index::{
-        retained::copy_name, FieldName, IndexedFieldMetadata, MemoryPosting, PostingKey,
-    },
+    inverted_index::{FieldName, IndexedFieldMetadata, MemoryPosting, PostingKey},
     TokenTermKey,
 };
 use std::ops::Bound;
 use uqa_analysis::TokenLengthPolicy;
+use uqa_core::image_io::{decode_image, AsyncImageInput as Input};
 use uqa_core::{
     memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryError, MemoryReservation, OwnedMap},
     TokenOccurrence, TokenOffsets,
@@ -28,29 +26,40 @@ pub(super) fn read(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<StagedMemoryDocument>> {
-    control.check()?;
-    let mut input = Input { reader, control };
-    if &input.array::<8>()? != MAGIC {
+    decode_image(
+        reader,
+        control.memory(),
+        control.cancellation(),
+        async |mut input| read_from(id, &mut input).await,
+    )
+}
+
+pub(in crate::inverted_index) async fn read_from(
+    id: DocId,
+    input: &mut Input<'_>,
+) -> StorageBackendResult<Budgeted<StagedMemoryDocument>> {
+    input.cancellation.check()?;
+    if &input.array::<8>().await? != MAGIC {
         return Err(invalid());
     }
-    let count = input.count()?;
+    let count = input.count().await?;
     if count == 0 {
         return Err(invalid());
     }
     let mut staged = Staging {
         fields: OwnedMap::new(),
-        terms: BudgetedVec::new(control.memory()),
-        postings: BudgetedVec::new(control.memory()),
-        payload: control.memory().reserve(
+        terms: BudgetedVec::new(input.memory),
+        postings: BudgetedVec::new(input.memory),
+        payload: input.memory.reserve(
             count
                 .checked_mul(OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes())
                 .ok_or(MemoryError::SizeOverflow)?,
         )?,
     };
     for _ in 0..count {
-        staged.field(id, &mut input)?;
+        staged.field(id, input).await?;
     }
-    input.end()?;
+    input.end().await?;
     let (terms, memory) = staged.terms.into_parts();
     staged.payload.absorb(memory);
     let (postings, memory) = staged.postings.into_parts();
@@ -73,10 +82,9 @@ struct Staging {
 }
 
 impl Staging {
-    fn field(&mut self, id: DocId, input: &mut Input<'_>) -> StorageBackendResult<()> {
-        let (name, memory) = input.bytes()?.into_parts();
+    async fn field(&mut self, id: DocId, input: &mut Input<'_>) -> StorageBackendResult<()> {
+        let (name, memory) = input.text().await?.into_parts();
         self.payload.absorb(memory);
-        let name = String::from_utf8(name).map_err(|_| invalid())?;
         if self
             .fields
             .first_from(Bound::Included(name.as_str()))
@@ -84,33 +92,30 @@ impl Staging {
         {
             return Err(invalid());
         }
-        let metadata = IndexedFieldMetadata::from_bytes(&input.array::<84>()?)?;
-        let term_count = input.count()?;
+        let metadata = IndexedFieldMetadata::from_bytes(&input.array::<84>().await?)?;
+        let term_count = input.count().await?;
         self.terms.reserve(term_count)?;
         self.postings.reserve(term_count)?;
-        let mut positions = BudgetedMap::new(input.control.memory());
+        let mut positions = BudgetedMap::new(input.memory);
         let mut emitted = 0_u64;
-        for _ in 0..term_count {
-            let (bytes, memory) = input.bytes()?.into_parts();
+        for ordinal in 0..term_count {
+            let (bytes, memory) = input.bytes().await?.into_parts();
             self.payload.absorb(memory);
-            let term = TokenTermKey::from_bytes(bytes)?;
-            if let Some((previous_field, previous_term)) = self.terms.last() {
-                if previous_field == &name
-                    && !previous_term
-                        .cmp_with_control(&term, &mut || input.control.check())?
-                        .is_lt()
-                {
+            let term = TokenTermKey::from_bytes_from(bytes, input).await?;
+            if ordinal != 0 {
+                let (_, previous_term) = self.terms.last().expect("previous term in this field");
+                if !previous_term.cmp_from(&term, input).await?.is_lt() {
                     return Err(invalid());
                 }
             }
-            let count = input.count()?;
+            let count = input.count().await?;
             if count == 0 {
                 return Err(invalid());
             }
-            let mut occurrences = BudgetedVec::new(input.control.memory());
+            let mut occurrences = BudgetedVec::new(input.memory);
             occurrences.reserve(count)?;
             for _ in 0..count {
-                let occurrence = read_occurrence(input)?;
+                let occurrence = read_occurrence(input).await?;
                 if occurrences
                     .last()
                     .is_some_and(|previous: &TokenOccurrence| {
@@ -133,15 +138,20 @@ impl Staging {
             }
             let (occurrences, memory) = occurrences.into_parts();
             self.payload.absorb(memory);
-            let reverse_name = copy_name(&name, &mut self.payload, input.control)?;
-            let (reverse_term, memory) = term
-                .clone_budgeted(input.control.memory(), || input.control.check())?
-                .into_parts();
+            let (reverse_name, memory) = input.copy_text(&name).await?.into_parts();
+            self.payload.absorb(memory);
+            let (reverse_term, memory) = term.clone_budgeted_from(input).await?.into_parts();
             self.payload.absorb(memory);
             self.terms.push((reverse_name, reverse_term))?;
-            let forward_name = copy_name(&name, &mut self.payload, input.control)?;
-            self.postings
-                .push(((forward_name, term), MemoryPosting::new(id, occurrences)))?;
+            let (forward_name, memory) = input.copy_text(&name).await?.into_parts();
+            self.payload.absorb(memory);
+            self.postings.push((
+                (forward_name, term),
+                MemoryPosting {
+                    doc_id: id,
+                    occurrences,
+                },
+            ))?;
         }
         let length = match metadata.length_policy {
             TokenLengthPolicy::EmittedTokens => emitted,
@@ -157,16 +167,16 @@ impl Staging {
     }
 }
 
-fn read_occurrence(input: &mut Input<'_>) -> StorageBackendResult<TokenOccurrence> {
-    let position = u32::from_le_bytes(input.array()?);
-    let position_length = u32::from_le_bytes(input.array()?);
-    let offsets = match input.array::<1>()?[0] {
+async fn read_occurrence(input: &mut Input<'_>) -> StorageBackendResult<TokenOccurrence> {
+    let position = u32::from_le_bytes(input.array().await?);
+    let position_length = u32::from_le_bytes(input.array().await?);
+    let offsets = match input.array::<1>().await?[0] {
         0 => None,
         1 => Some(TokenOffsets {
-            start_utf8: u64::from_le_bytes(input.array()?),
-            end_utf8: u64::from_le_bytes(input.array()?),
-            start_utf16: u64::from_le_bytes(input.array()?),
-            end_utf16: u64::from_le_bytes(input.array()?),
+            start_utf8: u64::from_le_bytes(input.array().await?),
+            end_utf8: u64::from_le_bytes(input.array().await?),
+            start_utf16: u64::from_le_bytes(input.array().await?),
+            end_utf16: u64::from_le_bytes(input.array().await?),
         }),
         _ => return Err(invalid()),
     };

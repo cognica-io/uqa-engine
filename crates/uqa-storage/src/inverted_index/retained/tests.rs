@@ -4,12 +4,30 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::super::{MemoryFieldCounters, MemoryReplacementPlan};
 use super::*;
 use crate::inverted_index::{AnalyzerPhase, MemoryPosting, PostingKey};
 use crate::TokenTermKey;
 use std::collections::BTreeMap;
-use uqa_core::memory::OwnedMap;
+use uqa_core::memory::{MemoryError, OwnedMap};
+
+impl RetainedInvertedIndexBuilder {
+    fn plan(
+        &self,
+        id: DocId,
+        fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
+    ) -> StorageBackendResult<Budgeted<MemoryReplacementPlan>> {
+        uqa_core::image_io::decode_image(
+            &mut std::io::empty(),
+            self.control.memory(),
+            self.control.cancellation(),
+            async |mut input| self.plan_from(id, fields, &mut input).await,
+        )
+    }
+}
 use uqa_core::{memory::MemoryBudget, TokenOccurrence};
+
+mod input;
 
 fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     RetainedInvertedIndexBuilder::new(
@@ -437,7 +455,14 @@ fn complete_node_admission_precedes_document_publication() {
     )
     .unwrap();
     let plan = index.plan(2, &staged.fields).unwrap();
-    let charge = charge::new_document(&index.index.state, &staged, &plan, &control).unwrap();
+    let charge = crate::image_io::work::inline(charge::new_document_from(
+        &index.index.state,
+        &staged,
+        &plan,
+        &control,
+        &mut (),
+    ))
+    .unwrap();
     let expected = OwnedMap::<DocId, super::super::MemoryDocument>::entry_bytes()
         + 2 * OwnedMap::<DocId, MemoryPosting>::entry_bytes()
         + OwnedMap::<PostingKey, OwnedMap<DocId, MemoryPosting>>::entry_bytes()

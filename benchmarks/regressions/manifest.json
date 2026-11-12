@@ -58540,6 +58540,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_term_continuations_preserve_unicode_validation_original_buffers_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/term_key/input/tests.rs",
+      "capability": "Canonical token input continuation",
+      "workload": "Validate long scalar and raw UTF-16 term keys against independent Unicode rules, preserving the original buffer through one-poll validation and cancellation.",
+      "invariant": "Native and retained validation accept the same canonical bytes without rereading a source or changing their allocation owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_text_input_keeps_current_windows_exact_corpus_charges_and_writable_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/retained/tests/input.rs",
+      "capability": "Resumable evaluated-text corpus input",
+      "workload": "Restore long UTF-8 fields and terms and independent raw-UTF-16 occurrence fixtures with changing byte limits; interrupt every post-EOF publication poll and exercise late admission and malformed input.",
+      "invariant": "Exact postings, revisions, corpus charges and cached snapshot sizes survive completion and later mutation; failures retire the entire unpublished corpus before its original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_text_input_retires_partial_native_publication_at_every_post_eof_poll",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/retained/tests/input.rs",
+      "capability": "Resumable evaluated-text corpus input",
+      "workload": "Restore long UTF-8 fields and terms and independent raw-UTF-16 occurrence fixtures with changing byte limits; interrupt every post-EOF publication poll and exercise late admission and malformed input.",
+      "invariant": "Exact postings, revisions, corpus charges and cached snapshot sizes survive completion and later mutation; failures retire the entire unpublished corpus before its original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_text_input_rejects_malformed_units_and_late_admission_without_retaining_a_corpus",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/retained/tests/input.rs",
+      "capability": "Resumable evaluated-text corpus input",
+      "workload": "Restore long UTF-8 fields and terms and independent raw-UTF-16 occurrence fixtures with changing byte limits; interrupt every post-EOF publication poll and exercise late admission and malformed input.",
+      "invariant": "Exact postings, revisions, corpus charges and cached snapshot sizes survive completion and later mutation; failures retire the entire unpublished corpus before its original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_population_resumes_names_and_preserves_exact_historical_revisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/tests/input.rs",
+      "capability": "Historical field population",
+      "workload": "Populate twelve long Unicode and NUL field names with distinct index/search revisions under one-poll windows.",
+      "invariant": "Exact revision identities and ordinary native charges survive input retirement and independent later assignments.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_population_retires_partial_names_and_revisions_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/tests/input.rs",
+      "capability": "Field population retirement",
+      "workload": "Interrupt field population by cancellation, denied memory, invalid windows and drop.",
+      "invariant": "Partial native names, field maps and both original revision owners retire without publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_population_checks_both_cancellation_owners_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/bindings/tests/input.rs",
+      "capability": "Retained analyzer field input",
+      "workload": "Cancel original and independent invoking controls at every pending boundary while copying two long multibyte field names and historical analyzer references.",
+      "invariant": "The next advance fails terminally and retires partial names and bindings without resolving the lazy default.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

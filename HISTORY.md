@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct evaluated text images and historical analyzer bindings through bounded native progress, preserving posting occurrences, counters, writable snapshots and terminal cleanup.
+
 - Reconstruct native document images through bounded input and conversion progress, preserving tuple boundaries, shared field layouts and both cancellation owners through post-input work.
 
 - Retain original table lookup names and map nodes through native registry publication, snapshots and runtime replacement; admit lookup/source nodes before binding capture updates and keep later mutation budgets independent of construction.

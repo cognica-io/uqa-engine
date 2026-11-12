@@ -15,6 +15,7 @@ use crate::read_control::StorageReadControl;
 use uqa_core::memory::Budgeted;
 
 mod input;
+pub(super) use input::read_from;
 mod output;
 mod stream;
 #[cfg(test)]
