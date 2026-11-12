@@ -8,6 +8,7 @@ use super::*;
 use uqa_sql::catalog::index::{IndexCatalogIdentity, IndexDefinition, IndexRelationships};
 use uqa_storage::CatalogIndexRow;
 
+mod catalog;
 mod native;
 mod retention;
 

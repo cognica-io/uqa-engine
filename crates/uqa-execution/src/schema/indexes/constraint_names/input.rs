@@ -29,6 +29,44 @@ struct Input {
     invoking: CancellationToken,
 }
 
+impl KeyConstraintNames {
+    /// Load the version and original index rows through bounded provider reads. Legacy catalogs skip index enumeration; complete stored definitions still precede current-name selection. The caller retains the surrounding catalog transaction.
+    pub async fn load_from(
+        catalog: &dyn uqa_storage::CatalogFacade,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+        reader: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        reader.checkpoint().await?;
+        let version =
+            catalog.get_metadata_with_control(super::REGISTRY_VERSION, limits, control)?;
+        let mut input = KeyConstraintNameInput::new(
+            version.as_ref().map(|version| version.as_str()),
+            control.memory(),
+            control.cancellation(),
+            reader.cancellation,
+        )?;
+        drop(version);
+        let State::Reading(state) = &input.state else {
+            unreachable!("new key-name input")
+        };
+        if state.names.names.is_some() {
+            let mut rows = catalog.begin_index_input(limits, control)?;
+            loop {
+                control.check()?;
+                reader.checkpoint().await?;
+                match rows.advance()? {
+                    uqa_storage::catalog::input::CatalogInputStep::Pending => (),
+                    uqa_storage::catalog::input::CatalogInputStep::Row(row) => input.push(&row)?,
+                    uqa_storage::catalog::input::CatalogInputStep::Complete => break,
+                }
+            }
+        }
+        input.finish()
+    }
+}
+
 impl KeyConstraintNameInput {
     /// Retain the original controls without enumerating indexes. The caller supplies version and rows from its same retained catalog view; legacy versions do not inspect index definitions.
     pub fn new(

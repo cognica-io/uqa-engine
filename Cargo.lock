@@ -4010,6 +4010,7 @@ dependencies = [
  "uqa-scoring",
  "uqa-sql",
  "uqa-storage",
+ "uqa-storage-sqlite",
  "windows-sys 0.61.2",
 ]
 

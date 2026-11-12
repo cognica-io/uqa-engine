@@ -265,5 +265,22 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Registry loading and ordinary opening share the same model-cache semantics.
+    pub(super) fn restore_model_caches(
+        &self,
+        catalog: &dyn uqa_storage::CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        for (name, json) in catalog.load_models()? {
+            let model = super::Arc::new(serde_json::from_str::<super::DeepModel>(&json)?);
+            self.durable.models.write().insert(name, model)?;
+        }
+        for (name, json) in catalog.load_all_scoring_params()? {
+            self.durable.scoring_params.write().insert(name, json)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests;

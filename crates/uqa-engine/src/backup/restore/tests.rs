@@ -100,7 +100,7 @@ fn memory_restore_job_activates_full_and_incremental_images_after_source_retirem
         let control = StorageReadControl::with_limit(32 << 20);
         let mut job = begin(&repository, root, &control);
         drop(source);
-        assert_eq!(job.root(), root);
+        assert_eq!(job.root(), Some(root));
         assert!(matches!(job.publish(), Err(BackupError::Finished)));
         assert_eq!(job.phase(), RestorePhase::Reading);
         prepare(&mut job);
@@ -298,3 +298,5 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
         .is_err());
     assert_eq!(denied.memory().used(), 0);
 }
+
+mod persistent;

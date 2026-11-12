@@ -497,15 +497,6 @@ pub(super) enum RuntimeParameterValue {
 }
 
 impl SessionContext {
-    pub(super) fn new(random_state: super::SessionRandomState) -> Self {
-        Self::with_retention(
-            random_state,
-            uqa_core::memory::MemoryBudget::new(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
-        )
-    }
-
     pub(super) fn with_retention(
         random_state: super::SessionRandomState,
         query_retention: uqa_core::memory::MemoryBudget,

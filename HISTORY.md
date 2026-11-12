@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Connect native SQLite, SQLite KV and redb restore jobs to retained table input and private catalog validation, with exact-request recovery and shared runtime activation. Complete bounded registry loading and restore qualification remain in progress.
+
 - Reconstruct memory backup catalogs, resources and evaluated table data into the ordinary Engine state, retaining original allocation ownership through validation, publication, later writes and repeated backup. Complete restore qualification remains in progress.
 
 - Preserve stored query, routine, rule, scalar and table definitions across native input windows, including paired foreign-table metadata and authority, without SQL replay or rebinding.

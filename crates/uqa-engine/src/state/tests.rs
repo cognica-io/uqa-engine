@@ -11,7 +11,12 @@ use super::{EpochCoordinator, SessionContext};
 
 #[test]
 fn session_state_readers_never_observe_a_torn_pair() {
-    let session = Arc::new(SessionContext::new(crate::random_state_from_seed(1)));
+    let session = Arc::new(SessionContext::with_retention(
+        crate::random_state_from_seed(1),
+        uqa_core::memory::MemoryBudget::new(
+            uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+        ),
+    ));
     {
         let mut state = session.state.write();
         state.search_path = vec!["0".to_string()];

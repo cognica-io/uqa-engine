@@ -60926,6 +60926,254 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_hydration_preserves_native_state_and_runtime_writes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/table_input/tests.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Hydrate the complete stored table catalog on native SQLite, SQLite KV and redb; compare native state, cancel and exhaust construction, then rename, write and roll back a nested drop.",
+      "invariant": "Original definitions, statistics and identity mappings enter the ordinary writable state while later transactions use independent controls.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_hydration_preserves_dirty_statistics_short_circuit",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/table_input/tests.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Load a table with malformed maintenance metadata before and after stored statistics exist on all persistent providers.",
+      "invariant": "Missing statistics with declared columns skip maintenance decoding; otherwise malformed metadata fails and retires the complete candidate.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_hydration_retires_every_pending_prefix_and_input",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/table_input/tests.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Abandon and cancel the complete table catalog and hydration continuation at every pending boundary.",
+      "invariant": "No partial table registry escapes; all input, native field and provider-view owners retire and cancelled inputs cannot resume.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_hydration_rejects_wrong_or_exhausted_input_allowances",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/open/table_input/tests.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Pass prepared declarations from an unrelated allowance, then exhaust a live catalog reconstruction.",
+      "invariant": "Admission rejects foreign owners and allocation failures retire the candidate with the original memory diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_table_hydration_keeps_legacy_reservations_and_mapping_markers",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/table_input/tests.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Load ordinary and legacy counter columns with full-width reservation text and empty, nonempty or absent key-mapping markers on all persistent providers.",
+      "invariant": "Only legacy columns read the reservation, the full exhaustion sentinel survives, and marker presence selects the original mapping without catalog writes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_key_name_catalog_preserves_version_selection_and_current_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/catalog.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Read original version and index definitions through a real SQLite KV catalog, comparing ordinary and retained current-name restoration.",
+      "invariant": "Legacy versions skip malformed index definitions; current versions restore the exact key identities and names and reject unknown versions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_key_name_catalog_retires_each_pending_owner_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/constraint_names/tests/input/catalog.rs",
+      "capability": "Retained persistent table reconstruction",
+      "workload": "Abandon the catalog continuation or cancel either owner at every pending boundary.",
+      "invariant": "Original index-name allocations and the provider view retire together, without publishing a prefix or replaying source rows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_restore_publishes_full_and_standalone_incremental_images",
+      "cases": 18,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Restore full and standalone incremental images after source and ancestor deletion on all persistent providers and SQLite file modes.",
+      "invariant": "Fresh identity, native values, sequences, rollback and later writes survive publication, source removal and repeated completion.",
+      "case_names": [
+        "case_1_native_plain::incremental_1_false",
+        "case_1_native_plain::incremental_2_true",
+        "case_2_native_encrypted::incremental_1_false",
+        "case_2_native_encrypted::incremental_2_true",
+        "case_3_native_compressed::incremental_1_false",
+        "case_3_native_compressed::incremental_2_true",
+        "case_4_native_compressed_encrypted::incremental_1_false",
+        "case_4_native_compressed_encrypted::incremental_2_true",
+        "case_5_kv_plain::incremental_1_false",
+        "case_5_kv_plain::incremental_2_true",
+        "case_6_kv_encrypted::incremental_1_false",
+        "case_6_kv_encrypted::incremental_2_true",
+        "case_7_kv_compressed::incremental_1_false",
+        "case_7_kv_compressed::incremental_2_true",
+        "case_8_kv_compressed_encrypted::incremental_1_false",
+        "case_8_kv_compressed_encrypted::incremental_2_true",
+        "case_9_redb::incremental_1_false",
+        "case_9_redb::incremental_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_restore_recovers_private_completion_and_retires_failed_or_cancelled_input",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Recover private physical/prepared images and cancel active or failed jobs on all persistent providers.",
+      "invariant": "Handles close before publication; failures retire original admission and durable cancellation survives a cancelled token.",
+      "case_names": [
+        "case_1_native::outcome_1___validating__",
+        "case_1_native::outcome_2___prepared__",
+        "case_1_native::outcome_3___cancel__",
+        "case_1_native::outcome_4___failure__",
+        "case_2_kv::outcome_1___validating__",
+        "case_2_kv::outcome_2___prepared__",
+        "case_2_kv::outcome_3___cancel__",
+        "case_2_kv::outcome_4___failure__",
+        "case_3_redb::outcome_1___validating__",
+        "case_3_redb::outcome_2___prepared__",
+        "case_3_redb::outcome_3___cancel__",
+        "case_3_redb::outcome_4___failure__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_restore_rejects_a_real_archive_with_a_missing_view_relation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Capture and restore an actual persistent archive whose stored view dependency is missing.",
+      "invariant": "Logical rejection precedes publication and immediately retires input owners; durable cancellation resolves the failed request.",
+      "case_names": [
+        "case_1_native",
+        "case_2_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_restore_admission_applies_authority_transaction_and_target_exclusivity",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Attempt begin/resume/cancel without authority or inside a failed transaction, and attempt replacement of an existing target.",
+      "invariant": "Ordinary admission preserves 42501 and 25P02 and leaves an existing target and the workspace unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_restore_honors_each_calls_object_verification_window",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Restore actual native SQLite, SQLite KV and redb images with caller-selected whole-object verification windows after source retirement.",
+      "invariant": "Completed verification requires enough bounded calls for the independently measured object bytes; the restored value and original owner retirement remain exact.",
+      "case_names": [
+        "case_1_native",
+        "case_2_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_engine_input_retains_one_snapshot_through_catalog_validation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Persistent Engine restore lifetime",
+      "workload": "Commit new table and document rows through a peer after persistent input pins its snapshot. Read tables one poll at a time, validate namespaces, close the snapshot and query the newer commit.",
+      "invariant": "The private registry and document handles retain the original revision; finished sessions refresh later commits without mixing source generations.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_engine_input_retires_transaction_and_prefix_on_terminal_failure",
+      "cases": 12,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Persistent Engine restore lifetime",
+      "workload": "Interrupt pending SQLite native, SQLite KV and redb catalog input by cancellation, exhausted memory, a zero work window or abandonment.",
+      "invariant": "Each terminal transition drops the unpublished registry and read transaction, returns all allowances and admits subsequent source writes.",
+      "case_names": [
+        "case_1_sqlite_native::outcome_1___cancel__",
+        "case_1_sqlite_native::outcome_2___memory__",
+        "case_1_sqlite_native::outcome_3___zero__",
+        "case_1_sqlite_native::outcome_4___drop__",
+        "case_2_sqlite_kv::outcome_1___cancel__",
+        "case_2_sqlite_kv::outcome_2___memory__",
+        "case_2_sqlite_kv::outcome_3___zero__",
+        "case_2_sqlite_kv::outcome_4___drop__",
+        "case_3_redb::outcome_1___cancel__",
+        "case_3_redb::outcome_2___memory__",
+        "case_3_redb::outcome_3___zero__",
+        "case_3_redb::outcome_4___drop__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_engine_input_abandoning_completed_catalog_releases_its_snapshot",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests.rs",
+      "capability": "Persistent Engine restore lifetime",
+      "workload": "Complete all catalog input, cancel its original control and abandon the retained private Engine before publication.",
+      "invariant": "The completed private owner still owns its snapshot and retires it together with every admitted native table field.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }
