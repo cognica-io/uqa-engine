@@ -36797,7 +36797,7 @@
         "case_4_redb"
       ],
       "capability": "Native view mutation authorization",
-      "workload": "All mutation authorization adapters with large unused stored definitions and scalar-query arenas; PostgreSQL 18.4 column-privilege outputs, denied commands and durable reopen.",
+      "workload": "All mutation authorization adapters borrow large stored definitions and scalar-query arenas from an admitted transaction snapshot after an independent statistics commit; the original allocation ceiling, small allowances and both cancellations remain enforced.",
       "invariant": "All four providers avoid payload copies, reject owned scratch at the original allowance, preserve cancellation/recovery and match PostgreSQL rows and SQLSTATEs."
     },
     {
