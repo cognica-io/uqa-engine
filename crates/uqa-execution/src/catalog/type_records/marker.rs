@@ -15,7 +15,7 @@ use uqa_core::{
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-mod protocol;
+pub(crate) mod protocol;
 #[cfg(test)]
 mod tests;
 mod value;

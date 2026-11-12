@@ -14,12 +14,12 @@ use uqa_core::memory::ProductionControl;
 use uqa_storage::StorageBackendResult;
 
 #[derive(Clone, Copy)]
-pub(super) struct Keys {
+pub(crate) struct Keys {
     pub number: &'static str,
     pub raw: &'static str,
 }
 
-pub(super) fn keys(control: &ProductionControl<'_>) -> StorageBackendResult<Keys> {
+pub(crate) fn keys(control: &ProductionControl<'_>) -> StorageBackendResult<Keys> {
     control.check()?;
     // The fixed scalar probe owns only its small numeric spelling; no source-dependent allocation occurs here.
     let _scratch = control.reserve(128)?;

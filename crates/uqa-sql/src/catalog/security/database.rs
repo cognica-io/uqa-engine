@@ -18,6 +18,7 @@ use crate::SQLError;
 use crate::catalog::roles::role_inherits;
 
 pub mod binding;
+pub mod stored;
 pub use binding::BoundDatabaseSecurity;
 mod authority;
 pub use authority::{CapturedDatabaseAuthority, DatabaseAuthority};

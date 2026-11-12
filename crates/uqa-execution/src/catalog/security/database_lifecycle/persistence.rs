@@ -6,7 +6,6 @@
 
 //! Versioned database security stores bound role references and converts legacy names once.
 
-use serde::{Deserialize, Serialize};
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::database::{
     binding::BoundDatabaseSecurity, DatabaseAuthority, DatabaseSecurity,
@@ -15,12 +14,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::DATABASE_SECURITY_METADATA_KEY;
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredDatabaseSecurity<T> {
-    database_security_format: u32,
-    security: T,
-}
+use uqa_sql::catalog::security::database::stored::StoredSecurity as StoredDatabaseSecurity;
 
 pub(super) fn encode(
     security: &BoundDatabaseSecurity,

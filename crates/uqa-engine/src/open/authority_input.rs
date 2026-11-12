@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_execution::{
     catalog::{
         domain::DomainRestoreState, security::builtin_routines::input::BuiltinRoutineCatalogInput,
+        security::database_lifecycle::input::DatabaseCatalogInput,
     },
     routines::restoration::PendingSQLFunctionRestore,
 };
@@ -25,7 +26,10 @@ pub(super) struct RestoredAuthorities {
 
 pub(super) enum PersistentAuthorityInput {
     System(DomainRestoreState),
-    Database(DomainRestoreState),
+    Database {
+        input: DatabaseCatalogInput,
+        domains: DomainRestoreState,
+    },
     Routines(DomainRestoreState),
     Builtins {
         input: BuiltinRoutineCatalogInput,
@@ -60,12 +64,24 @@ impl PersistentAuthorityInput {
                         &engine.durable.roles.read(),
                         false,
                     )?;
-                Self::Database(domains)
+                Self::Database {
+                    input: DatabaseCatalogInput::new(
+                        Arc::clone(catalog),
+                        engine.durable.roles.read().clone(),
+                        limits,
+                        engine.durable.database_security.read().budget(),
+                        control,
+                    )?,
+                    domains,
+                }
             }
-            Self::Database(domains) => {
-                engine.restore_database_security_from_metadata(catalog.as_ref(), false)?;
-                Self::Routines(domains)
-            }
+            Self::Database { mut input, domains } => match input.advance(1)? {
+                Some(value) => {
+                    *engine.durable.database_security.write() = value;
+                    Self::Routines(domains)
+                }
+                None => Self::Database { input, domains },
+            },
             Self::Routines(domains) => {
                 let routines = engine.install_sql_function_restore_placeholders(
                     catalog.as_ref(),

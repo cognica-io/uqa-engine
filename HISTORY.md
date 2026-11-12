@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent database authority through admitted generic JSON field projection and the existing owner/ACL validation order. Preserve sorted last-value fields and installed numeric/raw scalar representations, and transfer native ACL buffers into the private Engine before routine restoration.
+
 - Restore current built-in routine ACL records through retained physical input and shared native field/authority validation, transferring decoded buffers into the private Engine generation at its original position after routine placeholders. Preserve the selected transaction and independent later mutation allowance.
 
 - Share ordinary and retained authority validation, preserving database endpoint order and built-in routine tuple, grant-path and role checks while allowing traversal to stop at work, memory and cancellation boundaries.

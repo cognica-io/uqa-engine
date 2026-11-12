@@ -33,6 +33,14 @@ impl<'a> JsonObjectProjection<'a> {
         inline(Self::read_with_work(bytes, &control, &mut ()))
     }
 
+    /// Project one physically bounded object with both production cancellation owners. The supplied control must carry an allocation allowance for the retained field names.
+    pub fn read_with_control(
+        bytes: &'a [u8],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, JsonReadError> {
+        inline(Self::read_with_work(bytes, control, &mut ()))
+    }
+
     /// Project the same object through the enclosing work channel. Both cancellation owners remain active; keys retain the supplied allowance and values continue to borrow the original bytes.
     pub async fn read_from(
         bytes: &'a [u8],
