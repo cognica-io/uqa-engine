@@ -18,6 +18,8 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod input;
+
 fn role(name: &str, oid: i64, incarnation: u8) -> RoleDefinition {
     RoleDefinition {
         name: name.into(),

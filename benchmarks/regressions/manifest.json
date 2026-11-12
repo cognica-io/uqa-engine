@@ -64101,6 +64101,45 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_input_preserves_role_visits_without_copying_names_or_paths",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/binding/tests/input.rs",
+      "capability": "Retained database authority validation",
+      "workload": "Original owner and ordered grantee/grantor lookups, selected role incarnations, independent work windows and both cancellation owners.",
+      "invariant": "Shared native validation preserves first-error order without allocating names, ACL paths or scratch; terminal paths release retained owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_input_preserves_owner_grantee_and_grantor_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/binding/tests/input.rs",
+      "capability": "Retained database authority validation",
+      "workload": "Original owner and ordered grantee/grantor lookups, selected role incarnations, independent work windows and both cancellation owners.",
+      "invariant": "Shared native validation preserves first-error order without allocating names, ACL paths or scratch; terminal paths release retained owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "database_authority_input_retires_both_cancellation_and_abandoned_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/database/binding/tests/input.rs",
+      "capability": "Retained database authority validation",
+      "workload": "Original owner and ordered grantee/grantor lookups, selected role incarnations, independent work windows and both cancellation owners.",
+      "invariant": "Shared native validation preserves first-error order without allocating names, ACL paths or scratch; terminal paths release retained owners.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

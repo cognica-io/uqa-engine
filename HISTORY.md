@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share ordinary and retained database authority validation, preserving owner and ACL endpoint error order while allowing role traversal to stop at work and cancellation boundaries.
+
 - Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.
 
 - Restore persistent domain definitions and exact OID claims through retained input, preserving marker precedence, native defaults and CHECK expressions, owner and constraint validation, private snapshots and later writable mutations. Keep the original delayed cross-catalog constraint validation before publication.
