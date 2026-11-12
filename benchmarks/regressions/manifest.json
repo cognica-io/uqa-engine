@@ -62270,6 +62270,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_dispatch_observation_shares_name_binding_and_array_migration_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/restoration/tests.rs",
+      "capability": "Read-only stored dispatch restoration validation",
+      "workload": "Compare migration selection for original bindings, slice ranks, range predicates and all column/CHECK positions under zero allocation allowance.",
+      "invariant": "Borrowed observation agrees with the original migration predicate, allocates no payload and preserves declarations and cancellation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_dispatch_observation_shares_range_predicate_selection_without_expansion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/restoration/tests.rs",
+      "capability": "Read-only stored dispatch restoration validation",
+      "workload": "Compare migration selection for original bindings, slice ranks, range predicates and all column/CHECK positions under zero allocation allowance.",
+      "invariant": "Borrowed observation agrees with the original migration predicate, allocates no payload and preserves declarations and cancellation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_dispatch_observation_checks_both_owners_without_mutating_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/restoration/tests.rs",
+      "capability": "Read-only stored dispatch restoration validation",
+      "workload": "Compare migration selection for original bindings, slice ranks, range predicates and all column/CHECK positions under zero allocation allowance.",
+      "invariant": "Borrowed observation agrees with the original migration predicate, allocates no payload and preserves declarations and cancellation ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

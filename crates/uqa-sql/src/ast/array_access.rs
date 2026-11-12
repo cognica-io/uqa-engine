@@ -76,29 +76,13 @@ impl ArrayAccess {
             _ => return None,
         };
         Some((|| {
-            let count = arguments
-                .checked_sub(1)
-                .filter(|count| *count > 0)
-                .ok_or_else(|| SQLError::Internal("array access has no index".into()))?;
-            if slice && !count.is_multiple_of(2) {
-                return Err(SQLError::Internal(
-                    "array slice has an incomplete bound pair".into(),
-                ));
-            }
-            let dimensions = if slice { count / 2 } else { count };
+            let dimensions = index_dimensions(arguments, slice)
+                .map_err(|message| SQLError::Internal(message.into()))?;
             let bounds = if slice {
                 let bounds = if let FunctionDispatch::ArraySlicesWithBounds(bounds) = dispatch {
                     bounds
                 } else {
-                    let mut bounds = ArraySliceBounds::default();
-                    for dimension in 0..dimensions.min(MAX_ARRAY_SUBSCRIPT_DIMENSIONS) {
-                        bounds.omit(
-                            dimension,
-                            is_bare_null(1 + dimension * 2),
-                            is_bare_null(2 + dimension * 2),
-                        );
-                    }
-                    bounds
+                    omitted_slice_bounds(dimensions, is_bare_null)
                 };
                 Some(bounds)
             } else {
@@ -106,6 +90,16 @@ impl ArrayAccess {
             };
             Ok(Self { dimensions, bounds })
         })())
+    }
+
+    pub(crate) fn legacy_slice_bounds(
+        arguments: usize,
+        is_bare_null: impl Fn(usize) -> bool,
+    ) -> Option<ArraySliceBounds> {
+        Some(omitted_slice_bounds(
+            index_dimensions(arguments, true).ok()?,
+            is_bare_null,
+        ))
     }
 
     pub fn validate_dimensions(self) -> Result<(), SQLError> {
@@ -150,4 +144,30 @@ impl ArrayAccess {
             })
             .filter(move |position| !self.is_omitted(*position))
     }
+}
+
+fn index_dimensions(arguments: usize, slice: bool) -> Result<usize, &'static str> {
+    let count = arguments
+        .checked_sub(1)
+        .filter(|count| *count > 0)
+        .ok_or("array access has no index")?;
+    if slice && !count.is_multiple_of(2) {
+        return Err("array slice has an incomplete bound pair");
+    }
+    Ok(if slice { count / 2 } else { count })
+}
+
+fn omitted_slice_bounds(
+    dimensions: usize,
+    is_bare_null: impl Fn(usize) -> bool,
+) -> ArraySliceBounds {
+    let mut bounds = ArraySliceBounds::default();
+    for dimension in 0..dimensions.min(MAX_ARRAY_SUBSCRIPT_DIMENSIONS) {
+        bounds.omit(
+            dimension,
+            is_bare_null(1 + dimension * 2),
+            is_bare_null(2 + dimension * 2),
+        );
+    }
+    bounds
 }

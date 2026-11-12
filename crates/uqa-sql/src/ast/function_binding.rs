@@ -580,23 +580,23 @@ impl FunctionBinding {
         arguments: usize,
         is_bare_null: impl Fn(usize) -> bool,
     ) -> bool {
-        let Some(binding) = binding
-            .as_mut()
-            .filter(|binding| binding.dispatch == Some(FunctionDispatch::ArraySlices))
+        let Some(bounds) =
+            Self::legacy_array_slice_bounds(binding.as_ref(), arguments, is_bare_null)
         else {
             return false;
         };
-        let Some(Ok(access)) = super::ArrayAccess::from_dispatch(
-            FunctionDispatch::ArraySlices,
-            arguments,
-            is_bare_null,
-        ) else {
-            return false;
-        };
-        binding.dispatch = Some(FunctionDispatch::ArraySlicesWithBounds(
-            access.slice_bounds().expect("slice bounds"),
-        ));
+        let binding = binding.as_mut().expect("selected legacy slice binding");
+        binding.dispatch = Some(FunctionDispatch::ArraySlicesWithBounds(bounds));
         true
+    }
+
+    pub(crate) fn legacy_array_slice_bounds(
+        binding: Option<&Self>,
+        arguments: usize,
+        is_bare_null: impl Fn(usize) -> bool,
+    ) -> Option<super::ArraySliceBounds> {
+        binding.filter(|binding| binding.dispatch == Some(FunctionDispatch::ArraySlices))?;
+        super::ArrayAccess::legacy_slice_bounds(arguments, is_bare_null)
     }
 
     /// Construct the identity marker used when `PostgreSQL` parses a polymorphic syntax expression instead of an ordinary function call.
@@ -673,13 +673,8 @@ impl FunctionBinding {
         display_name: &mut String,
         binding: &mut Option<Self>,
     ) -> bool {
-        if binding
-            .as_ref()
-            .is_some_and(|binding| binding.dispatch.is_some() || !binding.builtin)
-        {
-            return false;
-        }
-        let Some(dispatch) = FunctionDispatch::from_legacy_serialized_name(display_name) else {
+        let Some(dispatch) = Self::legacy_serialized_dispatch(display_name, binding.as_ref())
+        else {
             return false;
         };
         if let Some(binding) = binding {
@@ -691,6 +686,17 @@ impl FunctionBinding {
             *binding = Some(upgraded);
         }
         true
+    }
+
+    pub(crate) fn legacy_serialized_dispatch(
+        display_name: &str,
+        binding: Option<&Self>,
+    ) -> Option<FunctionDispatch> {
+        if binding.is_some_and(|binding| binding.dispatch.is_some() || !binding.builtin) {
+            None
+        } else {
+            FunctionDispatch::from_legacy_serialized_name(display_name)
+        }
     }
 
     /// The input collation a collation-dependent built-in runs with: the retained selection, or the database default collation when none was recorded.
