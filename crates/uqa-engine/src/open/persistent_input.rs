@@ -6,7 +6,9 @@
 
 //! A private restore session retains its transaction until complete catalog validation.
 
-use super::{table_input::PersistentTableInput, CatalogRestoreMode, Engine};
+use super::{
+    table_input::PersistentTableInput, type_input::PersistentTypeInput, CatalogRestoreMode, Engine,
+};
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_storage::{
@@ -37,6 +39,7 @@ enum Stage {
     Graphs(uqa_graph::GraphCatalogInput),
     Sequences(uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput),
     GraphOids(uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput),
+    Types(PersistentTypeInput),
     Registries,
     Caches,
 }
@@ -95,7 +98,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence and graph OID input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum and shell input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -200,18 +203,16 @@ impl Candidate {
             Stage::GraphOids(mut input) => match input.advance(1)? {
                 Some(oids) => {
                     *engine.durable.graph_catalog_oids.write() = oids;
-                    Stage::Registries
+                    Stage::Types(PersistentTypeInput::new(engine, self.limits, control)?)
                 }
                 None => Stage::GraphOids(input),
             },
+            Stage::Types(input) => match input.advance(engine, self.limits, control)? {
+                Some(input) => Stage::Types(input),
+                None => Stage::Registries,
+            },
             Stage::Registries => {
-                engine.restore_registries_after_graph_oids(
-                    catalog.as_ref(),
-                    CatalogRestoreMode::LoadOnly,
-                )?;
-                uqa_execution::schema::types::relation_arrays::restoration::validate(
-                    &engine.restored_catalog_read_view(),
-                )?;
+                self.session.restore_remaining_registries(catalog.as_ref())?;
                 Stage::Caches
             }
             Stage::Caches => {
@@ -225,6 +226,17 @@ impl Candidate {
 }
 
 impl PersistentEngineState {
+    fn restore_remaining_registries(
+        &self,
+        catalog: &dyn uqa_storage::CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        self.engine
+            .restore_registries_after_shells(catalog, CatalogRestoreMode::LoadOnly)?;
+        uqa_execution::schema::types::relation_arrays::restoration::validate(
+            &self.engine.restored_catalog_read_view(),
+        )
+    }
+
     pub(crate) fn engine(&self) -> &Engine {
         &self.engine
     }

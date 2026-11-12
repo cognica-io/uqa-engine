@@ -63447,6 +63447,179 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_markers_preserve_generic_scalar_duplicate_and_overwritten_value_semantics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests.rs",
+      "capability": "Stored type format markers",
+      "workload": "Original generic scalar conversion, duplicate fields and overwritten invalid values; work windows and terminal ownership.",
+      "invariant": "The retained marker has the same acceptance and semantic error as the public map decoder, with bounded discarded-value memory and complete lease retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_markers_validate_truncation_depth_and_all_discarded_tokens",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests.rs",
+      "capability": "Stored type format markers",
+      "workload": "Original generic scalar conversion, duplicate fields and overwritten invalid values; work windows and terminal ownership.",
+      "invariant": "The retained marker has the same acceptance and semantic error as the public map decoder, with bounded discarded-value memory and complete lease retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_markers_bound_discarded_value_memory_and_resume_original_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests.rs",
+      "capability": "Stored type format markers",
+      "workload": "Original generic scalar conversion, duplicate fields and overwritten invalid values; work windows and terminal ownership.",
+      "invariant": "The retained marker has the same acceptance and semantic error as the public map decoder, with bounded discarded-value memory and complete lease retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_markers_retire_original_and_invoking_cancellation_and_partial_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests.rs",
+      "capability": "Stored type format markers",
+      "workload": "Original generic scalar conversion, duplicate fields and overwritten invalid values; work windows and terminal ownership.",
+      "invariant": "The retained marker has the same acceptance and semantic error as the public map decoder, with bounded discarded-value memory and complete lease retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_enum_input_preserves_native_roots_claims_and_future_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests.rs",
+      "capability": "Persistent type catalog input",
+      "workload": "Enum and shell physical records, claims, complete native roots and later mutation allowances.",
+      "invariant": "Native roots match ordinary restoration and remain mutable after original cancellation; terminal paths retire every unpublished definition and claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_shell_input_preserves_native_roots_claims_and_future_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests.rs",
+      "capability": "Persistent type catalog input",
+      "workload": "Enum and shell physical records, claims, complete native roots and later mutation allowances.",
+      "invariant": "Native roots match ordinary restoration and remain mutable after original cancellation; terminal paths retire every unpublished definition and claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_enum_input_retires_physical_definition_and_claim_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests.rs",
+      "capability": "Persistent type catalog input",
+      "workload": "Enum and shell physical records, claims, complete native roots and later mutation allowances.",
+      "invariant": "Native roots match ordinary restoration and remain mutable after original cancellation; terminal paths retire every unpublished definition and claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_shell_input_retires_physical_definition_and_claim_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests.rs",
+      "capability": "Persistent type catalog input",
+      "workload": "Enum and shell physical records, claims, complete native roots and later mutation allowances.",
+      "invariant": "Native roots match ordinary restoration and remain mutable after original cancellation; terminal paths retire every unpublished definition and claim.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_type_input_preserves_marker_claim_and_complete_semantic_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/ordering.rs",
+      "capability": "Persistent type catalog validation",
+      "workload": "Malformed markers, noncanonical and conflicting claims, physical limits and complete semantic error order.",
+      "invariant": "Complete physical families precede markers and definitions; exact claim equality precedes native type validation with original failure precedence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_type_input_finishes_both_physical_families_before_marker_and_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/ordering.rs",
+      "capability": "Persistent type catalog validation",
+      "workload": "Malformed markers, noncanonical and conflicting claims, physical limits and complete semantic error order.",
+      "invariant": "Complete physical families precede markers and definitions; exact claim equality precedes native type validation with original failure precedence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_type_input_keeps_selected_roots_and_later_sql_mutation_ownership",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types.rs",
+      "capability": "Persistent Engine type restoration",
+      "workload": "Native SQLite, SQLite Key/Value and redb sessions restore enum and shell roots while a peer commits; cancellation, exhaustion, abandonment and corruption retire private sessions.",
+      "invariant": "The selected transaction and original roots survive interleaving; later SQL mutations use live allowances and all terminal paths release the private transaction without publication.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_type_input_retires_both_private_roots_and_the_selected_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types.rs",
+      "capability": "Persistent Engine type restoration",
+      "workload": "Native SQLite, SQLite Key/Value and redb sessions restore enum and shell roots while a peer commits; cancellation, exhaustion, abandonment and corruption retire private sessions.",
+      "invariant": "The selected transaction and original roots survive interleaving; later SQL mutations use live allowances and all terminal paths release the private transaction without publication.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_type_claims_use_complete_canonical_name_order_before_duplicate_oid_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/input/tests/ordering.rs",
+      "capability": "Persistent type catalog validation",
+      "workload": "Completed definitions collide on a label/type OID while the physical claim selects each competing name.",
+      "invariant": "Expected claim ownership follows completed canonical name order, and exact claim equality precedes duplicate OID semantics.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

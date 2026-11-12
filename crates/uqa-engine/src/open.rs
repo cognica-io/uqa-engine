@@ -29,6 +29,8 @@ mod statistics;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod table_input;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod type_input;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use persistent_input::PersistentEngineInput;
 mod table_restore;
 mod value_restoration;

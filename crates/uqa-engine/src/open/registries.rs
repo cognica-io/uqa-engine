@@ -38,6 +38,14 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
+        self.restore_registries_after_shells(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_shells(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         self.restore_ranges_from_catalog(catalog)?;
         let comments =
             uqa_execution::catalog::comments::restore(catalog, &self.durable.comments.read())?;

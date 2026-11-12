@@ -12,6 +12,9 @@ use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::type_definitions::{StoredTypeDefinition, TypeDefinitions};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+pub(crate) mod input;
+mod marker;
+
 /// The metadata keys and format marker of one type form's catalog.
 pub(crate) struct TypeRecordFormat {
     /// The type form in diagnostics, such as `enum`.
@@ -85,19 +88,7 @@ impl TypeRecordFormat {
     }
 
     fn check_marker(&self, marker: &str) -> StorageBackendResult<()> {
-        let marker: serde_json::Map<String, serde_json::Value> = serde_json::from_str(marker)?;
-        let version = match (marker.len(), marker.get(self.format_field)) {
-            (1, Some(serde_json::Value::Number(version))) => version.as_u64(),
-            _ => None,
-        }
-        .ok_or_else(|| Self::corrupt(format!("malformed {} catalog format marker", self.label)))?;
-        if version != self.version {
-            return Err(Self::corrupt(format!(
-                "unsupported {} catalog format {version}",
-                self.label
-            )));
-        }
-        Ok(())
+        self::marker::check(self, marker)
     }
 
     /// Read every definition and check that the claims name exactly the OIDs the definitions own.
