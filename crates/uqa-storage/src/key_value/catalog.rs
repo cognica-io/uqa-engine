@@ -290,6 +290,15 @@ impl CatalogFacade for KeyValueCatalog {
         self.get_metadata_impl(key)
     }
 
+    fn get_metadata_with_control(
+        &self,
+        key: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.metadata_with_control(key, limits, control)
+    }
+
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         self.metadata_has_private_changes_impl(key)
     }

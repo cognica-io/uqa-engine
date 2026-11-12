@@ -54,7 +54,7 @@ pub mod table_load;
 pub mod text_input;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
-pub use table::{TableAclEntry, TablePrivileges};
+pub use table::{TableAclEntry, TablePrivileges, TableSchema, VectorFieldSchema};
 
 /// A borrowed metadata record on one catalog read boundary. Callbacks must not reenter persistence.
 pub type MetadataReadVisitor<'a> = dyn FnMut(&str, &str) -> StorageBackendResult<()> + 'a;
@@ -79,38 +79,6 @@ impl RelationKind {
             Self::Index => "index",
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableSchema {
-    pub relation: RelationIdentity,
-    #[serde(flatten)]
-    pub security: RelationSecurityRow,
-    /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
-    #[serde(default)]
-    pub object_id: [u8; 16],
-    /// Stable physical-storage identity. `CREATE TABLE` and `TRUNCATE` allocate a new value, while schema-only alterations and renames preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
-    #[serde(default)]
-    pub storage_generation: [u8; 16],
-    pub analyzer_json: String,
-    pub fts_fields: Vec<String>,
-    pub vector_fields: Vec<VectorFieldSchema>,
-    /// Serialized `Vec<uqa_sql::ast::ColumnDef>` capturing the schema
-    /// columns (name, type, `auto_increment`, flags). Empty for
-    /// tables created by the legacy code path before column tracking
-    /// existed.
-    #[serde(default)]
-    pub columns_json: String,
-    /// Serialized `uqa_sql::ast::TableConstraintSet`. Empty for catalogs
-    /// created before durable table constraints were introduced.
-    #[serde(default)]
-    pub constraints_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorFieldSchema {
-    pub field: String,
-    pub dimensions: u32,
 }
 
 /// One row from graph-edge persistence, represented as a typed struct so the
@@ -391,6 +359,18 @@ pub trait CatalogFacade: Send + Sync {
     /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
     fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    /// Read one exact metadata record on the catalog's current committed/private view. Encoded key/value limits precede provider payload materialization; the returned text retains its original allocation allowance. Unsupported providers reject the operation without falling back to an unbounded owned read.
+    fn get_metadata_with_control(
+        &self,
+        _key: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled metadata reads are not supported".into(),
+        ))
+    }
     /// Visit matching metadata records on one catalog snapshot without collecting their payloads. The prefix is literal, including NUL and wildcard characters. Providers retain their original read allowance and cancellation; an error stops the scan before the next record. The callback must not reenter persistence and owns any retained output. Unsupported providers must reject this operation instead of materializing all records.
     fn visit_metadata_with_prefix(
         &self,

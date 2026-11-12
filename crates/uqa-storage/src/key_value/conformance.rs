@@ -25,8 +25,10 @@ pub use catalog_table_input::{verify_catalog_table_input, verify_catalog_table_l
 pub use catalog_text_input::verify_catalog_text_input;
 mod foreign_servers;
 pub use catalog_revisions::verify_catalog_record_revisions;
+mod metadata_input;
 mod metadata_reads;
 pub use foreign_servers::{verify_foreign_server_reopen, verify_foreign_server_rows};
+pub use metadata_input::verify_controlled_metadata_reads;
 pub use metadata_reads::verify_catalog_metadata_visits;
 mod fixed_catalog_reads;
 pub use fixed_catalog_reads::verify_catalog_read_boundaries;

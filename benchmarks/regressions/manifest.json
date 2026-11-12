@@ -57796,6 +57796,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_metadata_reads_preserve_private_text_and_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Controlled exact metadata input",
+      "workload": "Read exact UTF-8 metadata beside oversized neighbors, private replacements and deletions, then roll back and retire the source.",
+      "invariant": "Original bytes, empty/absent distinctions and private membership survive; key/value limits, cancellation and memory admission release all scratch while returned text retains its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_metadata_reads_preserve_private_text_and_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Controlled exact metadata input",
+      "workload": "Read exact UTF-8 metadata beside oversized neighbors, private replacements and deletions, then roll back and retire the source.",
+      "invariant": "Original bytes, empty/absent distinctions and private membership survive; key/value limits, cancellation and memory admission release all scratch while returned text retains its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_metadata_reads_preserve_private_text_and_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Controlled exact metadata input",
+      "workload": "Read exact UTF-8 metadata beside oversized neighbors, private replacements and deletions, then roll back and retire the source.",
+      "invariant": "Original bytes, empty/absent distinctions and private membership survive; key/value limits, cancellation and memory admission release all scratch while returned text retains its original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

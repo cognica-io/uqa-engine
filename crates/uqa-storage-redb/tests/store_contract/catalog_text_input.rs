@@ -7,6 +7,16 @@
 use super::*;
 
 #[test]
+fn redb_metadata_reads_preserve_private_text_and_original_allowance() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("metadata-input.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_controlled_metadata_reads(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_catalog_table_load_assembles_original_private_definitions_and_replacements() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("catalog-table-load.redb")).unwrap();

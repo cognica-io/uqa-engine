@@ -215,6 +215,15 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
+    fn get_metadata_with_control(
+        &self,
+        key: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.native_metadata_with_control(key, limits, control)
+    }
+
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         into_storage_result(self.native_metadata_has_private_changes(key))
     }

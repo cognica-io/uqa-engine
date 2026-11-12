@@ -25,7 +25,8 @@ pub struct CatalogInputLimits {
 }
 
 impl CatalogInputLimits {
-    fn validate(self) -> StorageBackendResult<()> {
+    /// Reject an empty physical record window before opening its provider boundary.
+    pub fn validate(self) -> StorageBackendResult<()> {
         if self.maximum_key_bytes == 0 || self.maximum_value_bytes == 0 {
             return Err(invalid("zero catalog record limit"));
         }
