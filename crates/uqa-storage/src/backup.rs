@@ -48,7 +48,7 @@ pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use memory::{
     memory_image_namespace, memory_table_metadata_reader, read_memory_image_address,
     read_memory_table_metadata, DecodedMemoryImageAddress, DecodedMemoryTableMetadata,
-    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageHeader, MemoryImageKey,
+    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageHeader, MemoryImageKey, MemoryImageName,
     MemoryRelationIdentities, MemoryTableMetadata, MemoryTableProperties, MemoryTableStatistics,
     MemoryTableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
     MEMORY_IMAGE_TABLE_METADATA_COUNT,

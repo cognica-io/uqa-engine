@@ -26,6 +26,91 @@ fn table_key(suffix: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn selected_image_names_share_original_bytes_and_retire_failed_header_admission() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let expected = "é\0field".repeat(8192);
+    let mut original = BudgetedString::new(control.memory());
+    original.push_str(&expected).unwrap();
+    let pointer = original.as_ptr();
+    let (value, memory) = original.into_parts();
+    let name = MemoryImageName::from_budgeted(Budgeted::new(value, memory)).unwrap();
+    let mut independent = BudgetedString::new(control.memory());
+    independent.push_str(&expected).unwrap();
+    let (text, admission) = independent.into_parts();
+    let independent = MemoryImageName::from_budgeted(Budgeted::new(text, admission)).unwrap();
+    assert_eq!(name, independent);
+    assert_eq!(name, name.clone());
+    drop(independent);
+    let retained = control.memory().used();
+    let copies = (0..128).map(|_| name.clone()).collect::<Vec<_>>();
+    assert_eq!(control.memory().used(), retained);
+    drop(name);
+    control.cancellation().cancel();
+    for name in &copies {
+        assert_eq!(name.as_ptr(), pointer);
+        assert_eq!(&**name, expected);
+    }
+    drop(copies);
+    assert_eq!(control.memory().used(), 0);
+
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut original = BudgetedString::new(control.memory());
+    original.push_str(&expected).unwrap();
+    let held = control
+        .memory()
+        .reserve(control.memory().available())
+        .unwrap();
+    let (value, memory) = original.into_parts();
+    assert!(MemoryImageName::from_budgeted(Budgeted::new(value, memory)).is_err());
+    assert_eq!(control.memory().used(), held.bytes());
+    drop(held);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn decoded_resource_names_survive_address_retirement_without_copying() {
+    let control = StorageReadControl::with_limit(4096);
+    let decoded = read_memory_image_address(address(4, b"\x01a\0\xffb\0\0"), &control).unwrap();
+    let DecodedMemoryImageAddress::Resource { kind: 1, name } = &decoded else {
+        panic!("resource identity");
+    };
+    let pointer = name.as_ptr();
+    let retained = control.memory().used();
+    let selected = name.clone();
+    assert_eq!(control.memory().used(), retained);
+    drop(decoded);
+    control.cancellation().cancel();
+    assert_eq!(selected.as_ptr(), pointer);
+    assert_eq!(&*selected, "a\0b");
+    assert_eq!(control.memory().used(), retained);
+    drop(selected);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn decoded_field_names_retain_original_admission_after_address_retirement() {
+    let control = StorageReadControl::with_limit(4096);
+    let decoded =
+        read_memory_image_address(address(3, b"a\0\xffb\0\0\xc3\xa9\0\0"), &control).unwrap();
+    let DecodedMemoryImageAddress::FieldAnalyzer { table, field } = &decoded else {
+        panic!("field identity");
+    };
+    let pointers = (table.as_ptr(), field.as_ptr());
+    let retained = control.memory().used();
+    let selected = (table.clone(), field.clone());
+    assert_eq!(control.memory().used(), retained);
+    drop(decoded);
+    control.cancellation().cancel();
+    assert_eq!((selected.0.as_ptr(), selected.1.as_ptr()), pointers);
+    assert_eq!((&*selected.0, &*selected.1), ("a\0b", "é"));
+    assert_eq!(control.memory().used(), retained);
+    drop(selected.0);
+    assert!(control.memory().used() > 0 && control.memory().used() < retained);
+    drop(selected.1);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn memory_address_decode_preserves_independent_wire_identities() {
     let control = StorageReadControl::with_limit(4096);
     assert!(matches!(
@@ -186,7 +271,10 @@ fn memory_address_decode_owns_admitted_names_and_releases_partial_input() {
     drop(key);
     assert_eq!(kind, 4);
     assert_eq!(&*name, "é\0".repeat(2048));
-    assert_eq!(control.memory().used(), name.capacity());
+    assert_eq!(
+        control.memory().used(),
+        name.0.capacity() + size_of::<Budgeted<String>>()
+    );
     drop(name);
     assert_eq!(control.memory().used(), 0);
 

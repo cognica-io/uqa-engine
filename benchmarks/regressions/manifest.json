@@ -58878,6 +58878,214 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_document_input_rejects_address_changes_and_incomplete_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Resumable document image input and adoption",
+      "workload": "Advance document components with changing windows and reject switched identities, switched component kinds and premature completion.",
+      "invariant": "Only a complete native document advances the table; failed transitions consume the complete unpublished data owner and later mutations preserve retained input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_document_input_retains_each_calls_window_and_original_data",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Resumable document image input and adoption",
+      "workload": "Advance document components with changing windows and reject switched identities, switched component kinds and premature completion.",
+      "invariant": "Only a complete native document advances the table; failed transitions consume the complete unpublished data owner and later mutations preserve retained input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_evaluated_input_rejects_address_changes_and_incomplete_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Selected evaluated-index input ownership",
+      "workload": "Suspend index definitions and values, reject changed names, identities, components and premature completion, then mutate a completed index with a retained reader.",
+      "invariant": "Each current call bounds source input; only a complete selected component advances the table and failed candidates retire every preceding owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_evaluated_input_preserves_each_calls_window_and_retained_values",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Selected evaluated-index input ownership",
+      "workload": "Suspend index definitions and values, reject changed names, identities, components and premature completion, then mutate a completed index with a retained reader.",
+      "invariant": "Each current call bounds source input; only a complete selected component advances the table and failed candidates retire every preceding owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_text_input_rejects_address_changes_and_incomplete_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Selected evaluated-text input ownership",
+      "workload": "Suspend text components, reject changed addresses and premature publication, then resume exact images and mutate a destination with retained readers.",
+      "invariant": "The selected text identity and current byte/poll limits remain authoritative until complete native publication; failed tables retire every preceding owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_text_input_keeps_current_windows_posting_images_and_later_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/input.rs",
+      "capability": "Selected evaluated-text input ownership",
+      "workload": "Suspend text components, reject changed addresses and premature publication, then resume exact images and mutate a destination with retained readers.",
+      "invariant": "The selected text identity and current byte/poll limits remain authoritative until complete native publication; failed tables retire every preceding owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_vector_input_preserves_current_windows_all_index_kinds_and_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/vector_input.rs",
+      "capability": "Selected vector input identity",
+      "workload": "Suspend every vector kind inside a table, reject changed fields and components, finish with exact native bytes and mutate independently of input cancellation.",
+      "invariant": "Selected addresses remain authoritative until complete input; changed selections and premature completion retire the entire unpublished table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_vector_input_rejects_changed_selection_and_retires_incomplete_tables",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/vector_input.rs",
+      "capability": "Selected vector input identity",
+      "workload": "Suspend every vector kind inside a table, reject changed fields and components, finish with exact native bytes and mutate independently of input cancellation.",
+      "invariant": "Selected addresses remain authoritative until complete input; changed selections and premature completion retire the entire unpublished table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "selected_image_names_share_original_bytes_and_retire_failed_header_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Retained image address names",
+      "workload": "Share long Unicode and embedded-NUL names through independent selected address owners and reject shared-header admission with no remaining allowance.",
+      "invariant": "Selection retains the exact original buffer in constant work; failed admission and final retirement release its original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "vector_field_admission_and_registration_resume_without_source_replay",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/vector_input.rs",
+      "capability": "Native vector field registration windows",
+      "workload": "Read a vector with a long Unicode and embedded-NUL field using one-poll windows through initial name admission and source registration after EOF.",
+      "invariant": "Both name copies retain progress in the same channel, EOF is consumed once and the completed native index preserves its exact image after input cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unfinished_vector_name_and_source_registration_retire_the_entire_table",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/vector_input.rs",
+      "capability": "Private vector source admission retirement",
+      "workload": "Drop, cancel or exhaust admission while initial field copying or native source registration remains incomplete.",
+      "invariant": "An incomplete field never publishes a table; each failure retires all private document, text, vector, name and registry ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_value_input_resumes_name_admission_and_empty_or_last_value_registration",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/value_registration.rs",
+      "capability": "Named evaluated-index registration windows",
+      "workload": "Read empty and two-value indexes with long Unicode and embedded-NUL names through alternating byte windows and one-poll continuations.",
+      "invariant": "Initial name copying and final source registration yield before input and after one EOF; exact images, retained native sources and later writes preserve original ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "unfinished_value_name_and_registration_retire_the_whole_table",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/value_registration.rs",
+      "capability": "Incomplete named-index retirement",
+      "workload": "Drop, cancel, deny memory, reject an invalid window, change the address or finish the table during initial name copying or empty/last-value registration.",
+      "invariant": "Every terminal path consumes the complete unpublished table and releases all original reservations without rereading EOF.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_index_membership_rejects_missing_excess_and_repeated_definitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/table_image/tests/value_registration.rs",
+      "capability": "Exact named-index population",
+      "workload": "Provide incomplete populations, a premature successor, a repeated empty definition, an excess value or trailing value bytes.",
+      "invariant": "The collection state machine rejects incomplete or reopened index membership and retires all prior table owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_resource_names_survive_address_retirement_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode an independent resource address, retain its original name after the address retires, and cancel the original input scope.",
+      "invariant": "Sharing the selected resource name copies no payload and keeps its original buffer and shared-header admission until the last owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "decoded_field_names_retain_original_admission_after_address_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/memory/address/input/tests.rs",
+      "capability": "Shared field image selection",
+      "workload": "Clone independently decoded table and field names, retire the address and cancel the original input control.",
+      "invariant": "Selection preserves both original byte addresses and admission until each last owner retires.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

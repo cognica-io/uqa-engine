@@ -12,9 +12,40 @@ use crate::{
     StorageBackendResult,
 };
 use uqa_core::{
-    memory::{Budgeted, BudgetedString, BudgetedVec},
+    memory::{Budgeted, BudgetedString, BudgetedVec, MemoryError},
     DocId,
 };
+
+/// An immutable decoded name. Clones retain the original buffer and admitted shared header without copying its bytes.
+#[derive(Clone, Debug)]
+pub struct MemoryImageName(std::sync::Arc<Budgeted<String>>);
+
+impl MemoryImageName {
+    pub fn from_budgeted(value: Budgeted<String>) -> Result<Self, MemoryError> {
+        Ok(Self(value.into_shared()?))
+    }
+}
+
+impl PartialEq for MemoryImageName {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0) || self.0.as_str() == other.0.as_str()
+    }
+}
+
+impl Eq for MemoryImageName {}
+
+impl std::ops::Deref for MemoryImageName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl AsRef<str> for MemoryImageName {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
 
 /// A decoded address in memory mapping version 1. Component owners interpret catalog slots, resource kinds and metadata slots; decoding alone does not certify complete membership.
 #[derive(Debug)]
@@ -22,12 +53,12 @@ pub enum DecodedMemoryImageAddress {
     Header,
     Catalog(u16),
     FieldAnalyzer {
-        table: BudgetedString,
-        field: BudgetedString,
+        table: MemoryImageName,
+        field: MemoryImageName,
     },
     Resource {
         kind: u8,
-        name: BudgetedString,
+        name: MemoryImageName,
     },
     Table {
         schema: BudgetedString,
@@ -43,9 +74,9 @@ pub enum DecodedMemoryTableUnit {
     Metadata(u8),
     Document(DocId),
     Text(DocId),
-    Vector(BudgetedString),
+    Vector(MemoryImageName),
     ValueIndex {
-        name: BudgetedString,
+        name: MemoryImageName,
         document: Option<DocId>,
     },
 }
@@ -70,14 +101,14 @@ pub fn read_memory_image_address(
         }
         family if family == MemoryImageFamily::FieldAnalyzer as u16 => {
             DecodedMemoryImageAddress::FieldAnalyzer {
-                table: input.text()?,
-                field: input.text()?,
+                table: input.name()?,
+                field: input.name()?,
             }
         }
         family if family == MemoryImageFamily::Resource as u16 => {
             DecodedMemoryImageAddress::Resource {
                 kind: input.byte()?,
-                name: input.text()?,
+                name: input.name()?,
             }
         }
         family if family == MemoryImageFamily::Table as u16 => DecodedMemoryImageAddress::Table {
@@ -146,9 +177,9 @@ impl Input<'_> {
             0 => DecodedMemoryTableUnit::Metadata(self.byte()?),
             1 => DecodedMemoryTableUnit::Document(u64::from_be_bytes(self.array()?)),
             2 => DecodedMemoryTableUnit::Text(u64::from_be_bytes(self.array()?)),
-            3 => DecodedMemoryTableUnit::Vector(self.text()?),
+            3 => DecodedMemoryTableUnit::Vector(self.name()?),
             4 => {
-                let name = self.text()?;
+                let name = self.name()?;
                 let document = match self.byte()? {
                     0 => None,
                     1 => Some(u64::from_be_bytes(self.array()?)),
@@ -158,6 +189,13 @@ impl Input<'_> {
             }
             _ => return Err(invalid()),
         })
+    }
+
+    fn name(&mut self) -> StorageBackendResult<MemoryImageName> {
+        let (value, memory) = self.text()?.into_parts();
+        Ok(MemoryImageName::from_budgeted(Budgeted::new(
+            value, memory,
+        ))?)
     }
 }
 

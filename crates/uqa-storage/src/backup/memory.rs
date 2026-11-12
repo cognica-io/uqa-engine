@@ -13,7 +13,7 @@ mod import;
 mod table;
 pub use address::{
     memory_image_namespace, read_memory_image_address, DecodedMemoryImageAddress,
-    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageKey, MemoryTableUnit,
+    DecodedMemoryTableUnit, MemoryImageFamily, MemoryImageKey, MemoryImageName, MemoryTableUnit,
 };
 pub use header::MemoryImageHeader;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
