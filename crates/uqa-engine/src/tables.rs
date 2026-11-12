@@ -533,7 +533,7 @@ impl Engine {
                 let mut indexes = vectors.live_mut()?;
                 indexes.remove(&field)?;
                 if let Some(old) = old {
-                    indexes.insert(field, old)?;
+                    indexes.insert_handle(field, old)?;
                 }
                 return Err(err);
             }

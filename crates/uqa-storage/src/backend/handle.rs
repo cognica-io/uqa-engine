@@ -7,7 +7,7 @@
 //! A writable native handle retires its boxed allocation before returning its allowance.
 
 use std::ops::{Deref, DerefMut};
-use uqa_core::memory::Budgeted;
+use uqa_core::memory::{Budgeted, MemoryBudget};
 
 /// A native boxed storage object with optional original allocation ownership. Mutable access exposes the object, so replacing the entire handle also retires its original box reservation.
 pub struct StorageHandle<T: ?Sized>(Owner<T>);
@@ -20,6 +20,17 @@ enum Owner<T: ?Sized> {
 impl<T: ?Sized> StorageHandle<T> {
     pub fn new(value: Box<T>) -> Self {
         Self(Owner::Native(value))
+    }
+
+    /// Construction admission must retain the complete concrete box under the original allowance.
+    pub(crate) fn is_retained_by(&self, memory: &MemoryBudget) -> bool {
+        match &self.0 {
+            Owner::Native(_) => false,
+            Owner::Admitted(value) => {
+                value.budget().shares_allowance(memory)
+                    && value.reserved_bytes() >= size_of_val(&***value)
+            }
+        }
     }
 }
 

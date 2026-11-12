@@ -15,6 +15,7 @@ use uqa_core::{
 use super::VectorIndex;
 use crate::{
     read_control::StorageReadControl, ReadOnlySnapshot, StorageBackendError, StorageBackendResult,
+    StorageHandle,
 };
 
 mod capture;
@@ -22,10 +23,12 @@ pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut, VectorSourcePubli
 mod image;
 mod native;
 pub use image::MemoryVectorIndexesBuilder;
+mod persistent;
+pub use persistent::PersistentVectorIndexesBuilder;
 
 type LiveIndexes = BTreeMap<FieldName, Box<dyn VectorIndex>>;
-type NativeIndexes = OwnedMap<FieldName, Box<dyn VectorIndex>>;
-type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>>>;
+type NativeIndexes = OwnedMap<FieldName, StorageHandle<dyn VectorIndex>>;
+type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, StorageHandle<dyn VectorIndex>>>>;
 
 /// A table's vector registrations. Retained collections own controlled ordered-map nodes and share their names, index handles and original allowance with nested captures. Live mutation requires an explicit fallible borrow; a retained collection never converts itself to an uncharged writable map.
 pub struct VectorIndexes(Contents);
@@ -50,7 +53,10 @@ impl Default for VectorIndexes {
 impl From<LiveIndexes> for VectorIndexes {
     fn from(indexes: LiveIndexes) -> Self {
         Self(Contents::Live {
-            indexes: indexes.into_iter().collect(),
+            indexes: indexes
+                .into_iter()
+                .map(|(field, index)| (field, index.into()))
+                .collect(),
             capture: None,
         })
     }
@@ -79,7 +85,7 @@ impl VectorIndexes {
                 indexes.as_ref().and_then(|indexes| indexes.get(field))
             }
         };
-        index.map(Box::as_ref)
+        index.map(StorageHandle::as_ref)
     }
 
     pub fn contains_key<Q: Ord + ?Sized>(&self, field: &Q) -> bool
@@ -155,7 +161,9 @@ where
     }
 }
 
-pub struct VectorIndexesIter<'a>(Option<BudgetedMapIter<'a, FieldName, Box<dyn VectorIndex>>>);
+pub struct VectorIndexesIter<'a>(
+    Option<BudgetedMapIter<'a, FieldName, StorageHandle<dyn VectorIndex>>>,
+);
 
 impl<'a> Iterator for VectorIndexesIter<'a> {
     type Item = (&'a FieldName, &'a (dyn VectorIndex + 'static));
@@ -235,7 +243,7 @@ impl VectorIndexSource for VectorIndexes {
 
 /// Assemble reconstructed vector indexes without opaque standard-map nodes. Every node, copied name, boxed adapter and shared owner is reserved before allocation.
 pub struct RetainedVectorIndexesBuilder {
-    indexes: BudgetedMap<FieldName, Box<dyn VectorIndex>>,
+    indexes: BudgetedMap<FieldName, StorageHandle<dyn VectorIndex>>,
     control: StorageReadControl,
 }
 
@@ -279,7 +287,7 @@ impl RetainedVectorIndexesBuilder {
         let index = ReadOnlySnapshot::from_budgeted(Budgeted::new(index, memory))?;
         let index: Box<dyn VectorIndex> = Box::new(index);
         self.control.check()?;
-        self.indexes.insert(field, index)?;
+        self.indexes.insert(field, index.into())?;
         Ok(())
     }
 

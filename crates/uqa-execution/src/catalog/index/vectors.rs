@@ -9,7 +9,8 @@
 use uqa_sql::ast::ColumnType;
 use uqa_storage::{
     vector_index::{DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexSpec},
-    CatalogIndexRow, DocumentStore, StorageBackendError, StorageBackendResult, VectorIndex,
+    CatalogIndexRow, DocumentStore, StorageBackendError, StorageBackendResult, StorageHandle,
+    VectorIndex,
 };
 
 pub fn is_vector_method(method: &str) -> bool {
@@ -57,7 +58,7 @@ pub fn field_index<'a>(
 /// The column rename keeps a catalog-bound generation and its canonical origins together; other physical methods use their existing rebuild path.
 pub struct ColumnVectorRename {
     pub dimensions: u32,
-    pub retained: Option<Box<dyn VectorIndex>>,
+    pub retained: Option<StorageHandle<dyn VectorIndex>>,
 }
 
 pub fn detach_for_column_rename(

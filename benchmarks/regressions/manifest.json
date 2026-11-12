@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -57663,6 +57663,71 @@
       "capability": "Persistent canonical vector handle ownership",
       "workload": "Retain native/legacy SQLite vector snapshots, cancel construction and retire the original concrete handle.",
       "invariant": "Only the original concrete box allowance retires first; shared names and cache header retain their original allowances until the final snapshot is destroyed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_collection_preserves_original_fields_and_independent_handle_leases",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/tests.rs",
+      "capability": "Writable vector collection ownership",
+      "workload": "Adopt original keys and physical handles, cancel and exhaust input, then replace, remove and reinsert owners.",
+      "invariant": "Original key addresses and exact node/name/handle allowances survive independent replacement and retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_collection_failure_retires_the_complete_unpublished_candidate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/tests.rs",
+      "capability": "Writable vector collection ownership",
+      "workload": "Reject duplicate fields, foreign or incomplete key/box owners, cancellation and denied map-node admission after a completed prefix.",
+      "invariant": "Every rejection preserves its typed error and retires the entire unpublished collection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_vector_collection_completion_preserves_cancellation_and_empty_writability",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/persistent/tests.rs",
+      "capability": "Writable vector collection ownership",
+      "workload": "Finish an empty collection at zero allowance and cancel before finishing empty or populated candidates.",
+      "invariant": "Completion rejects cancellation; completed empty collections remain writable without using the retired input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_handle_reinsertion_preserves_original_and_later_memory_cuts",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests/handles.rs",
+      "capability": "Writable vector collection ownership",
+      "workload": "Remove, mutate and rename exact, IVF, HNSW and DiskANN handles across two memory captures.",
+      "invariant": "Both captures retain their exact original membership and image while the reinserted handle accepts later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_handle_publication_rejects_uncaptured_and_foreign_sources_atomically",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/tests/handles.rs",
+      "capability": "Writable vector collection ownership",
+      "workload": "Replace an existing memory registration with uncaptured and foreign-domain handles.",
+      "invariant": "Rejected publication leaves the original source and dimensions unchanged.",
       "case_names": [
         ""
       ]

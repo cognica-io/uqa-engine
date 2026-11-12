@@ -48,7 +48,7 @@ impl MemoryVectorIndexesBuilder {
             index.into_memory_capture_with_control(&self.capture.registry, &self.control)?;
         self.control.check()?;
         let capture = self.capture.with_index(&field, index.as_ref())?;
-        self.indexes.insert_admitted_key(field, index)?;
+        self.indexes.insert_admitted_key(field, index.into())?;
         self.capture = capture;
         self.control.check()?;
         Ok(self)
