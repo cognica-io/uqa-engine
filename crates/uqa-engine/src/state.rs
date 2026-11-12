@@ -41,6 +41,7 @@ pub(crate) use table_membership::CapturedTable;
 pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::SnapshotTableCut;
+pub(crate) use table_membership::TableRegistryMap;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;

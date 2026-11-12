@@ -7,7 +7,7 @@
 //! Durable table-hierarchy lookup and mutation.
 
 use super::{Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult};
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 
 impl Engine {
     /// Read hierarchy metadata from an already-loaded relation without synchronizing catalogs or consulting a transaction snapshot. Trigger catalog restoration uses this path while the transaction state mutex is already held.
@@ -95,30 +95,29 @@ impl Engine {
             uqa_sql::catalog::resolution::candidates::relation_lookup_candidates_with_control(
                 self, table, control,
             )?;
-        let scan =
-            |tables: &std::collections::BTreeMap<RelationIdentity, Arc<super::TableState>>| {
-                let root = candidates
-                    .iter()
-                    .find(|candidate| tables.contains_key(*candidate))
-                    .ok_or_else(|| match control.copy_text(table) {
-                        Ok(name) => SQLError::UnknownTable(name.into_parts().0),
-                        Err(error) => error.into(),
-                    })?;
-                uqa_execution::catalog::hierarchy::hierarchy_scan_entries_with_control(
-                    root,
-                    include_descendants,
-                    || tables.iter(),
-                    |state, parent| {
-                        state
-                            .hierarchy
-                            .read()
-                            .parents
-                            .iter()
-                            .any(|candidate| candidate == parent)
-                    },
-                    control,
-                )
-            };
+        let scan = |tables: &crate::state::TableRegistryMap| {
+            let root = candidates
+                .iter()
+                .find(|candidate| tables.contains_key(*candidate))
+                .ok_or_else(|| match control.copy_text(table) {
+                    Ok(name) => SQLError::UnknownTable(name.into_parts().0),
+                    Err(error) => error.into(),
+                })?;
+            uqa_execution::catalog::hierarchy::hierarchy_scan_entries_with_control(
+                root,
+                include_descendants,
+                || tables.iter(),
+                |state, parent| {
+                    state
+                        .hierarchy
+                        .read()
+                        .parents
+                        .iter()
+                        .any(|candidate| candidate == parent)
+                },
+                control,
+            )
+        };
         match &self.query_table_snapshots {
             Some(tables) => scan(tables),
             None => scan(&self.storage.tables.read()),

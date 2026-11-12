@@ -57,7 +57,7 @@ impl SnapshotTableSources {
         tables: &BTreeMap<RelationIdentity, TableDataSnapshot>,
     ) -> StorageBackendResult<Self> {
         let owner = MemoryBudget::new(usize::MAX);
-        let membership = registry.cell(Membership::new())?;
+        let membership = registry.cell(Membership::new(&owner))?;
         let mut selection = registry.sources(&owner);
         for (name, table) in tables {
             if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {

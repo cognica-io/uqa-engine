@@ -58394,6 +58394,87 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_key_producers_observe_node_admission_and_preserve_replacement_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Retained native table membership",
+      "workload": "Produce a value after exact key/node admission, then replace it from an exhausted independent allowance.",
+      "invariant": "Node admission precedes production; replacement preserves the original key pointer and lease while retiring the incoming duplicate key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "admitted_key_producer_failures_and_unwinding_preserve_the_original_map",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/admission.rs",
+      "capability": "Retained native table membership",
+      "workload": "Deny a node before its callback, then fail and unwind producers for new and existing keys.",
+      "invariant": "The callback is never invoked before admission, provisional owners retire and original entries remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_registry_preserves_lookup_names_and_remains_writable_after_input_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/table_membership/input/tests.rs",
+      "capability": "Retained native table membership",
+      "workload": "Adopt table membership on all four storage providers, retain the original map, exhaust and cancel input, then rename, insert and roll back a nested drop.",
+      "invariant": "Original names and their allowances remain with the saved map; ordinary mutations and undo use independent runtime ownership.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_registry_rejects_invalid_identity_or_control_and_retires_its_prefix",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/input/tests.rs",
+      "capability": "Retained native table membership",
+      "workload": "Reject duplicate, foreign, incomplete, empty and temporary identities plus cancellation and exhausted admission after a retained prefix.",
+      "invariant": "Failure consumes the complete unpublished lookup and source membership, returning all original and foreign reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_registry_completion_failure_retires_native_and_registered_roots",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/input/tests.rs",
+      "capability": "Retained native table membership",
+      "workload": "Finish private persistent and memory membership with exhausted or cancelled controls.",
+      "invariant": "No partially registered root escapes; all lookup, name and membership owners retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "admitted_registry_captures_original_membership_after_construction_is_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_membership/input/tests.rs",
+      "capability": "Retained native table membership",
+      "workload": "Capture restored memory membership after construction cancellation and exhaustion, rename and append data, then close the live engine.",
+      "invariant": "The retained cut preserves the original table and row; final capture retirement returns both original input and capture allowances.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

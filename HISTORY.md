@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain original table lookup names and map nodes through native registry publication, snapshots and runtime replacement; admit lookup/source nodes before binding capture updates and keep later mutation budgets independent of construction.
+
 - Assemble native table state without copying retained definitions or physical handles; keep state, catalog and capture-source headers under their own allocation lifetimes through snapshots and later writes.
 
 - Preserve integer-key mapping metadata through bounded reads, keeping original empty/present marker semantics, declared key types and transaction visibility.

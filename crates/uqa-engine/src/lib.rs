@@ -217,7 +217,7 @@ pub use uqa_storage::FtsIndexStat;
 pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
-type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
+type SessionPortalTableSnapshots = Arc<crate::state::TableRegistryMap>;
 type SessionPortalViewSnapshots = RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots =
     RetainedValue<uqa_sql::routines::registry::RoutineRegistry>;
