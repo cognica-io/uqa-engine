@@ -162,3 +162,5 @@ fn native_statistics_maintenance_output_failure_and_cancellation_are_terminal() 
             .is_err()
     );
 }
+
+mod windows;

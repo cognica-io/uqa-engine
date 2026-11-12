@@ -13,14 +13,14 @@ use super::{
 };
 use uqa_core::{memory::ProductionControl, RelationName, RelationReference};
 
-pub(super) struct TableRegistryInput {
+pub(crate) struct TableRegistryInput {
     live: Tables,
     memory: Option<MemoryTables>,
     control: StorageReadControl,
 }
 
 impl TableRegistryInput {
-    pub(super) fn new(
+    pub(crate) fn new(
         registry: Option<&MemoryCaptureRegistry>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
@@ -41,7 +41,7 @@ impl TableRegistryInput {
     }
 
     /// One table's decoded identity enters the ordinary registry used by lookup, undo and capture. Failure consumes every previously reconstructed entry. Persistent membership needs no memory-capture registration.
-    pub(super) fn add_table(
+    pub(crate) fn add_table(
         mut self,
         name: Budgeted<RelationIdentity>,
         table: Arc<TableState>,
@@ -91,7 +91,7 @@ impl TableRegistryInput {
         Ok(self)
     }
 
-    pub(super) fn finish(self) -> StorageBackendResult<TableRegistry> {
+    pub(crate) fn finish(self) -> StorageBackendResult<TableRegistry> {
         self.control.check()?;
         let header = self.control.memory().reserve(size_of::<TableRegistry>())?;
         let live = RetainedValue::with_budget(self.live, self.control.memory())?;

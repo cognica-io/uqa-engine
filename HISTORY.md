@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct memory backup catalogs, resources and evaluated table data into the ordinary Engine state, retaining original allocation ownership through validation, publication, later writes and repeated backup. Complete restore qualification remains in progress.
+
 - Preserve stored query, routine, rule, scalar and table definitions across native input windows, including paired foreign-table metadata and authority, without SQL replay or rebinding.
 
 - Resume native catalog metadata, authority, sequence, expression, trigger, index, comment and scoring input within retained byte/work windows, preserving existing encodings and terminal cleanup.

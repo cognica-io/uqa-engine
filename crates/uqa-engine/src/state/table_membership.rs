@@ -34,7 +34,7 @@ mod sources;
 pub(crate) use sources::CapturedTable;
 use sources::TableSources;
 mod input;
-use input::TableRegistryInput;
+pub(crate) use input::TableRegistryInput;
 mod snapshot;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use snapshot::SnapshotTableCut;

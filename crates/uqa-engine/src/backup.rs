@@ -7,6 +7,9 @@
 //! Authorized, independently retained backup jobs over the installed provider.
 
 mod memory;
+mod restore;
+mod validation;
+pub use restore::{RestoreDestination, RestoreJob, RestoreOptions, RestorePhase, RestoredEngine};
 
 use crate::{Engine, SQLError};
 use std::sync::Arc;

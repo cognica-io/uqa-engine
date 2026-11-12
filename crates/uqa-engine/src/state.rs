@@ -41,6 +41,8 @@ pub(crate) use table_membership::CapturedTable;
 pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::SnapshotTableCut;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::TableRegistryInput;
 pub(crate) use table_membership::TableRegistryMap;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
@@ -113,17 +115,6 @@ impl StorageContext {
         }
     }
 
-    pub(super) fn memory_cell<T: uqa_storage::memory_capture::MemoryCaptureSource>(
-        &self,
-        value: T,
-        persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureCell<T>> {
-        match self.table_capture_registry(persistence) {
-            Some(registry) => registry.cell(value),
-            None => Ok(uqa_storage::memory_capture::MemoryCaptureCell::new(value)),
-        }
-    }
-
     pub(super) fn table_capture_registry(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
@@ -136,29 +127,26 @@ impl StorageContext {
     pub(super) fn memory_vector_indexes(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<
-        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
-    > {
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>
+    {
         let indexes = self.table_capture_registry(persistence).map_or_else(
             uqa_storage::vector_index::VectorIndexes::default,
             uqa_storage::vector_index::VectorIndexes::memory,
         );
-        self.memory_cell(indexes, persistence)
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
     }
 
     pub(super) fn memory_value_indexes(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<
-        uqa_storage::memory_capture::MemoryCaptureCell<
-            uqa_execution::catalog::index::value::ValueIndexes,
-        >,
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
     > {
         use uqa_execution::catalog::index::value::ValueIndexes;
         let indexes = self
             .table_capture_registry(persistence)
             .map_or_else(ValueIndexes::default, ValueIndexes::memory);
-        self.memory_cell(indexes, persistence)
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
     }
 }
 

@@ -14,6 +14,10 @@ fn source_headers(table: &TableState) -> Vec<usize> {
         };
     }
     sizes!(
+        document_store,
+        inverted_index,
+        vector_indexes,
+        value_indexes,
         columns,
         table_checks,
         hierarchy,

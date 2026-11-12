@@ -60198,6 +60198,734 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "ordered_catalog_input_preserves_all_native_images_without_sql_replay",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/catalogs/tests.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_input_rejects_missing_and_out_of_order_components_before_completion",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/catalogs/tests.rs",
+      "capability": "Ordered native catalog input",
+      "workload": "Decode ordered native catalog components, retire source readers, mutate the destination and reject incomplete or inconsistent continuations.",
+      "invariant": "Metadata and authority pair exactly, native observations retain their original admission, and incomplete catalogs cannot escape.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_native_state_after_source_retirement_and_runtime_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Complete private memory image assembly",
+      "workload": "Read an actual repository backup after source retirement, compare every native component and ACL, preserve enum/domain/composite declarations, enforce restored privileges, execute later writes and inject cancellation or exhausted input admission.",
+      "invariant": "Original catalogs, authority, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_input_failure_retires_all_prior_native_owners_and_repository_lease",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Complete private memory image assembly",
+      "workload": "Read an actual repository backup after source retirement, compare every native component, execute later writes and inject cancellation or exhausted input admission.",
+      "invariant": "Original catalogs, resources and table data survive without replay; input failure retires the complete candidate and lease, while runtime writes use destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "reconstructed_table_keeps_native_rows_definitions_and_new_writes_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "rejected_table_input_retires_partial_native_components_and_never_publishes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_registration_failure_retires_complete_input_and_keeps_the_destination_private",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "reconstructed_table_uses_original_field_revisions_and_live_publication_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests.rs",
+      "capability": "Writable native table reconstruction",
+      "workload": "Assemble decoded definitions and evaluated document, text, vector and named value owners; retain readers across later writes, rollback and input failure.",
+      "invariant": "Native values and historical bindings are preserved without reanalysis, while original allocation owners survive every retained reader and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_and_replaced_authority_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Private image authority rejection",
+      "workload": "Read actual verified archives with a deleted or replaced table owner after source retirement.",
+      "invariant": "Malformed authority cannot escape the unpublished runtime and all decoded allocations retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_user_type_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Private image type rejection",
+      "workload": "Read a real verified archive whose table retains a removed enum after its source Engine is retired.",
+      "invariant": "A missing native type rejects the unpublished runtime and releases every original decoded allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_stored_plan_relations_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Publish actual view/routine archives whose referenced table was removed, retire the source and reconstruct privately.",
+      "invariant": "Both missing relation images reject before exposure and release all original allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_hierarchy_parents_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Native database dependency validation",
+      "workload": "Read actual repository archives after source retirement and reject missing table-parent or sequence dependencies before private activation.",
+      "invariant": "Every failed private runtime retires its original native allowances; no incomplete candidate activates.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_sequence_dependencies_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests.rs",
+      "capability": "Native database dependency validation",
+      "workload": "Read actual repository archives after source retirement and reject missing table-parent or sequence dependencies before private activation.",
+      "invariant": "Every failed private runtime retires its original native allowances; no incomplete candidate activates.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_concrete_routines_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/routines.rs",
+      "capability": "Private native routine closure",
+      "workload": "Restore actual archives with missing routine definitions referenced by ten column, domain, scalar/table-function view, routine or rewrite-rule declarations.",
+      "invariant": "A verified archive with a missing concrete function cannot return a private Engine and every decoded owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_trigger_routines_before_private_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/routines.rs",
+      "capability": "Private native trigger closure",
+      "workload": "Restore an actual archive whose retained trigger refers to an omitted function identity.",
+      "invariant": "The trigger function is checked before private activation without invoking the trigger and all input reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_retains_renamed_routines_and_lazy_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/routines.rs",
+      "capability": "Native routine restoration observations",
+      "workload": "Retire the source Engine, restore a renamed routine and lazy unresolved body, compare native images, then execute defaults and views.",
+      "invariant": "Immutable routine selection survives rename and source retirement; later writes and reads preserve results and deferred errors remain deferred.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_catalog_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/namespaces.rs",
+      "capability": "Private native namespace closure",
+      "workload": "Remove the schema of twelve independently declared object shapes before archiving, retire the source and reconstruct each archive.",
+      "invariant": "Every missing declaration namespace rejects before private activation and all original input reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_quoted_catalog_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/namespaces.rs",
+      "capability": "Native quoted namespace restoration",
+      "workload": "Restore a schema containing a dot and escaped quote with a table, bound routine and view after retiring the source.",
+      "invariant": "Native image bytes and selected identities remain unchanged; later writes and stored-query reads retain their results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_cross_catalog_name_collisions",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/namespaces.rs",
+      "capability": "Private native cross-catalog name closure",
+      "workload": "Archive conflicting view/table, enum-array/row-type and index/table names before retiring the source.",
+      "invariant": "All three malformed images reject before private activation and release original input owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_separate_namespaces_and_displaced_array_names",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/namespaces.rs",
+      "capability": "Native namespace restoration observations",
+      "workload": "Restore scalar/index name reuse and displaced composite/table array names, compare exact images and perform later reads and writes.",
+      "invariant": "Legal catalog name reuse and captured array names remain unchanged after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_index_tables",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/indexes.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Publish an archive containing an index whose table is absent, retire the source and decode the complete image.",
+      "invariant": "A missing index table rejects private activation and all original input reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_broken_index_constraint_identities",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/indexes.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Restore six archives with replaced table/constraint/index identities, changed key columns, orphan parents or missing enforcing indexes.",
+      "invariant": "Every malformed ownership relationship rejects before private activation and releases input owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_renamed_constraint_and_partition_indexes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/indexes.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Restore exact images after index/table/schema renames with foreign keys and partition indexes, then perform valid and conflicting writes.",
+      "invariant": "Original images and key enforcement survive source retirement, subsequent writes and failed statements.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_foreign_key_tables",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/constraints.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Publish and decode an actual archive after removing its referenced table and index.",
+      "invariant": "Private Engine activation rejects the missing target and retires the candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_broken_constraint_columns_and_index_targets",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/constraints.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Archive malformed selected indexes, local/target columns, operand types, checks and key columns.",
+      "invariant": "No invalid native constraint dependency reaches private activation; rejected owners retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_foreign_keys_checks_and_partition_rows",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/constraints.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Retire the source, reconstruct exact renamed/partitioned/NOT VALID images, and execute accepted and rejected writes.",
+      "invariant": "Original constraints, flags and runtime mutation behavior survive native restoration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_rejects_missing_named_sequence_function_targets",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/sequence_functions.rs",
+      "capability": "Native sequence function references",
+      "workload": "Capture a legacy named sequence default and omit its target from the actual archive.",
+      "invariant": "Private activation rejects the missing captured relation and retires the complete input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "complete_repository_input_preserves_numeric_dynamic_and_shadowed_sequence_arguments",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/sequence_functions.rs",
+      "capability": "Native sequence function references",
+      "workload": "Retire the source, restore exact images, execute deferred errors and perform later default writes.",
+      "invariant": "PostgreSQL 18.4 numeric, wrong-kind and dynamic argument outcomes survive alongside original sequence and user-function behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_restore_job_activates_full_and_incremental_images_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests.rs",
+      "capability": "Owned memory restore job lifecycle",
+      "workload": "Restore actual full and standalone incremental memory images after source and ancestor retirement, then preserve reads, rollback, sequences, later writes and fresh source identity.",
+      "invariant": "Explicit publication retains one runtime; repeated and late-cancelled completion never replays archived input or loses later writes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_restore_job_cancel_drop_and_failed_steps_retire_unpublished_state",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests.rs",
+      "capability": "Owned memory restore job lifecycle",
+      "workload": "Drop or cancel reading/prepared candidates and reject cancelled or invalid verification steps.",
+      "invariant": "The owning job terminates failed work, releases original admission and prevents reuse without caller repair.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_restore_job_admission_preserves_authority_and_transaction_failures",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests.rs",
+      "capability": "Owned memory restore job lifecycle",
+      "workload": "Attempt memory restoration without import authority, within a failed transaction and without construction allowance.",
+      "invariant": "Ordinary Engine admission preserves 42501 and 25P02 and leaves no retained backup input on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "memory_restore_job_validation_failure_retires_the_candidate_and_archive_lease",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests.rs",
+      "capability": "Owned memory restore job lifecycle",
+      "workload": "Restore a completed archive whose stored view refers to an omitted relation through the actual Engine job.",
+      "invariant": "Logical validation fails before publication, immediately releases the candidate and archive lease, and keeps all later work terminal.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_catalog_steps_publish_only_complete_generations",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Retire an Engine with seven roles and schemas and reconstruct its actual archive one catalog entry per step.",
+      "invariant": "The exact number of native entries determines catalog calls; no partial generation is visible, images remain identical and later writes succeed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_catalog_steps_retire_original_input_between_entries",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/continuation.rs",
+      "capability": "Native catalog input",
+      "workload": "Cancel or exhaust input memory between catalog entries of an actual repository image.",
+      "invariant": "Failure retires the candidate and original archive lease immediately; no reentry or retained input allocation survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_catalog_decoder_obeys_the_current_call_byte_window",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/continuation.rs",
+      "capability": "Native catalog byte input",
+      "workload": "Restore actual archive catalogs and table metadata after source retirement, switching current calls to one-byte input windows.",
+      "invariant": "All 24 catalog components and table metadata slots 1-9 obey the current byte limit; exact images, SQL observations, independent routine/view/rule edits and final retirement survive. Remaining table/resource input and post-input work scheduling are separate requirements.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_metadata_input_retires_partial_units_before_table_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests/metadata_input.rs",
+      "capability": "Native table metadata input",
+      "workload": "Decode preceding table metadata slots, then interrupt each of the nine incomplete native units with cancellation, reordering or drop.",
+      "invariant": "Only complete units advance the table owner; failure or retirement releases every original definition and continuation reservation before table publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_header_conversion_yields_after_eof_before_admitting_the_next_metadata",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests/header_input.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Restore a wide table header and analyzer after source EOF, then cancel, deny admission, reorder, invalidate the window or drop the private table.",
+      "invariant": "The original header converts without rereading EOF, advances only when complete, supports later writable tables and releases unpublished state on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_header_conversion_retires_private_state_on_cancel_denial_and_wrong_order",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests/header_input.rs",
+      "capability": "Resumable table header and analyzer input",
+      "workload": "Restore a wide table header and analyzer after source EOF, then cancel, deny admission, reorder, invalidate the window or drop the private table.",
+      "invariant": "The original header converts without rereading EOF, advances only when complete, supports later writable tables and releases unpublished state on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_restore_forwards_document_windows_through_native_conversion",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests/document_input.rs",
+      "capability": "Resumable document image input and adoption",
+      "workload": "Restore a real captured table after source retirement with alternating one/17-byte and one-poll windows, including work after document EOF and subsequent SQL writes.",
+      "invariant": "The Engine forwards each current window to the native owner and publishes only completed data; restored values and later writes remain correct with no leaked input reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_evaluated_index_input_obeys_current_windows_and_preserves_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/continuation.rs",
+      "capability": "Engine evaluated-index input windows",
+      "workload": "Restore an actual repository containing an expression index after source retirement with changing one/17-byte windows; remove the archive and execute destination SQL writes and rollback.",
+      "invariant": "The complete Engine restore forwards each current byte window, preserves exact native index images and metadata, and supports later indexed writes without the source or leaked input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_text_input_obeys_current_windows_and_preserves_search_and_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/text_input.rs",
+      "capability": "Engine evaluated-text input windows",
+      "workload": "Restore a real full archive through changing one/17-byte windows after source retirement, remove the archive, and execute BM25 search, writes and rollback.",
+      "invariant": "Engine forwards each current text window, preserves complete image and search observations, and supports independent later SQL writes without leaked input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_vector_input_preserves_current_windows_all_native_kinds_and_sql_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/vector_input.rs",
+      "capability": "Engine vector image input windows",
+      "workload": "Restore real exact, IVF, HNSW and DiskANN archives after source retirement through changing byte windows, remove the archive and execute queries, writes and rollback.",
+      "invariant": "Engine forwards the current vector byte window and retains exact native images and later SQL behavior after archive and input-control retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_named_indexes_finish_empty_and_populated_registration_before_activation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/continuation.rs",
+      "capability": "Actual named-index archive restoration",
+      "workload": "Restore an actual archive with empty and populated expression indexes through one-byte windows after source retirement.",
+      "invariant": "Exact native images and values survive archive removal; rollback, later inserts and new index creation use independent destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "table_field_preparation_resumes_after_metadata_eof_and_retires_failed_candidates",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/tests/field_population.rs",
+      "capability": "Private table field preparation",
+      "workload": "Resume field population after the last metadata EOF; interrupt by cancellation, admission failure, invalid order/window, finish and drop.",
+      "invariant": "The state owner never replays EOF or publishes an incomplete table, and releases all original input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_field_population_keeps_historical_revisions_after_source_and_archive_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/field_population.rs",
+      "capability": "Historical fields in actual archives",
+      "workload": "Restore an archive through one-byte windows, retire the source and archive, replace the named analyzer and perform writes/rollback.",
+      "invariant": "Exact native images and independent index/search revisions survive with original resource ownership and writable text results.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_graph_and_path_input_obey_current_windows_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/graph_input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_graph_and_path_interruption_retires_the_private_destination",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/graph_input.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "resource_input_owns_selection_admission_and_incomplete_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/resources/tests.rs",
+      "capability": "Retained graph and path image input",
+      "workload": "Decode captured graph/path resources through changing byte/poll windows, retain native image/name ownership across EOF, and interrupt private input before publication.",
+      "invariant": "Exact evaluated state and original allocation ownership survive source retirement; current windows bound input and terminal paths retire unpublished native owners without replay.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_model_input_obeys_current_windows_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/model_input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_model_interruption_retires_the_private_destination",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/model_input.rs",
+      "capability": "Retained model image input",
+      "workload": "Decode exact native model images through changing byte/poll windows, continue numeric validation and catalog adoption after EOF, and interrupt the private owner before publication.",
+      "invariant": "Original scalar bits, labels, layer order and admission survive suspension and source retirement; failed or abandoned input releases the whole candidate without replay or retraining.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_analyzer_and_field_input_obey_current_windows_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/analyzer_input.rs",
+      "capability": "Retained Engine analyzer resource input",
+      "workload": "Restore an actual archive containing wide named configurations and historical field revisions with alternating one-byte and seventeen-byte windows.",
+      "invariant": "Every selected read obeys the current limit; exact images, historical terms and later writes survive source/archive retirement and input cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "repository_analyzer_and_field_interruption_retires_private_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/memory/restore/database/tests/analyzer_input.rs",
+      "capability": "Engine analyzer input retirement",
+      "workload": "Cancel, exhaust, abandon or invalidate actual named/field archive input while private reconstruction is incomplete.",
+      "invariant": "The owning restore boundary retires its input and unpublished catalogs, and terminal jobs reject reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_field_selection_copies_only_the_lower_bound_and_borrows_exact_revisions",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/input/tests.rs",
+      "capability": "Retained field selection",
+      "workload": "Seek a table with a long Unicode qualified name among other immutable catalog tables.",
+      "invariant": "The lower-bound name resumes without source reads and yields only the exact original field revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_input_resumes_distributions_and_ordered_utf8_names",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests/windows.rs",
+      "capability": "Native table metadata input",
+      "workload": "Decode ordered long UTF-8 column names, nested values and exact frequency bits with current byte/poll windows.",
+      "invariant": "Every advance respects its source-byte and read-attempt limits; native distribution bytes and shared reservation lifetime survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "statistics_input_retires_partial_values_on_faults_and_invalid_windows",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/cardinality/stats/columns/image/tests/windows.rs",
+      "capability": "Native table metadata input",
+      "workload": "Interrupt native statistics decoding with invalid windows, cancellation, quota denial, short/trailing input, unwind and drop.",
+      "invariant": "No incomplete statistics generation is returned and original reservations retire before the decoder rejects all later reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "maintenance_input_resumes_all_inline_fields_and_retires_terminal_states",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/image/tests/windows.rs",
+      "capability": "Native table metadata input",
+      "workload": "Resume all captured inline statistics maintenance fields with three byte/poll windows and interrupt each terminal path.",
+      "invariant": "Counters, optional identities and original timestamps remain exact; no failed or completed decoder reads again, and synchronous inline input remains allocation-free.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

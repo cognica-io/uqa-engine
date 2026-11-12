@@ -317,3 +317,5 @@ fn native_column_statistics_writer_failure_retires_active_traversal() {
         assert!(reader.read(&mut []).is_err());
     }
 }
+
+mod windows;

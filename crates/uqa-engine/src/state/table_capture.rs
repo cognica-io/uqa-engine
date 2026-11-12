@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Newly created table metadata joins the same source domain as its data before publication.
+//! Table data and metadata join one source domain before publication.
 
 use super::{CatalogCell, StorageContext};
 use crate::TableState;
@@ -23,6 +23,20 @@ impl StorageContext {
         let Some(registry) = self.table_capture_registry(table.persistence) else {
             return Ok(Arc::new(table));
         };
+        macro_rules! register {
+            ($($field:ident),+ $(,)?) => {
+                $(match control {
+                    Some(control) => table.$field.register_with_control(registry, control)?,
+                    None => table.$field.register(registry)?,
+                })+
+            };
+        }
+        register!(
+            document_store,
+            inverted_index,
+            vector_indexes,
+            value_indexes
+        );
         macro_rules! capture {
             ($field:ident, $copy:expr) => {
                 table.$field = CatalogCell::capture_source_with_control(

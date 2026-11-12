@@ -17,6 +17,17 @@ use uqa_core::{
 mod tests;
 
 impl FieldAnalyzerCatalog {
+    /// Retain lower-bound name copying before seeking a table's original compiled field revisions. The returned iterator borrows this immutable generation and never resolves resources.
+    pub async fn durable_fields_from<'a>(
+        &'a self,
+        table: &'a str,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<impl Iterator<Item = (&'a str, &'a FieldAnalyzerBinding)>> {
+        let (table_name, memory) = input.copy_text(table).await?.into_parts();
+        let start = Budgeted::new((table_name, String::new()), memory);
+        Ok(self.fields_from_start(table, &start))
+    }
+
     /// Seek one permanent table's original field bindings without visiting earlier tables. Only the temporary lower-bound name is allocated, under the supplied allowance; yielded bindings borrow this immutable catalog generation.
     pub fn durable_fields_with_control<'a>(
         &'a self,
@@ -31,11 +42,19 @@ impl FieldAnalyzerCatalog {
         );
         let (name, memory) = production.copy_text(table)?.into_parts();
         let start = production.finish((name, String::new()), memory)?;
-        let values = self.durable.range_from(std::ops::Bound::Included(&*start));
         control.check()?;
-        Ok(values
+        Ok(self.fields_from_start(table, &start))
+    }
+
+    fn fields_from_start<'a>(
+        &'a self,
+        table: &'a str,
+        start: &(String, String),
+    ) -> impl Iterator<Item = (&'a str, &'a FieldAnalyzerBinding)> + use<'a> {
+        self.durable
+            .range_from(std::ops::Bound::Included(start))
             .take_while(move |(key, _)| key.0 .0 == table)
-            .map(|(key, value)| (key.0 .1.as_str(), &**value)))
+            .map(|(key, value)| (key.0 .1.as_str(), &**value))
     }
 
     /// Add one decoded permanent field binding without resolving or recompiling its revisions. Input owns the complete key and binding name allocations; immutable catalog copies retain those exact owners. Failure consumes the unpublished candidate.
