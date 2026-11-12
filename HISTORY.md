@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation.
+
 - Reconstruct stored graph catalog OIDs through retained native input, preserving label and relation identities, duplicate-map semantics and the selected persistent snapshot across bounded decoding.
 
 - Reconstruct persistent sequence definitions, generation values, bound authority and recorded catalog OIDs through retained input on native SQLite, SQLite KV and redb, preserving validation order, the selected snapshot and subsequent sequence mutations.

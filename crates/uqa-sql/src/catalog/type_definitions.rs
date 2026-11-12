@@ -10,6 +10,8 @@ use super::named_definitions::{sealed, StoredDefinition};
 use crate::SQLError;
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod stored;
+
 pub use super::named_definitions::{
     CapturedNamedDefinitions as CapturedTypeDefinitions, NamedDefinitionIter as TypeDefinitionIter,
     NamedDefinitionView as TypeDefinitionView, NamedDefinitions as TypeDefinitions,

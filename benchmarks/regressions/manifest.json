@@ -63252,6 +63252,71 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_preserves_strict_fields_optional_acls_and_positional_forms",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests.rs",
+      "capability": "Retained stored type declarations",
+      "workload": "type input preserves strict fields optional acls and positional forms.",
+      "invariant": "Original Serde field acceptance and typed values, native key invariants, complete admission and both cancellation owners remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_enum_input_preserves_float4_bits_without_generic_number_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests.rs",
+      "capability": "Retained stored type declarations",
+      "workload": "enum input preserves float4 bits without generic number allocation.",
+      "invariant": "Original Serde field acceptance and typed values, native key invariants, complete admission and both cancellation owners remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_enum_input_retains_core_key_validation_and_ignored_nested_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests.rs",
+      "capability": "Retained stored type declarations",
+      "workload": "enum input retains core key validation and ignored nested fields.",
+      "invariant": "Original Serde field acceptance and typed values, native key invariants, complete admission and both cancellation owners remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_admits_native_key_name_label_and_acl_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests.rs",
+      "capability": "Retained stored type declarations",
+      "workload": "type input admits native key name label and acl allocations.",
+      "invariant": "Original Serde field acceptance and typed values, native key invariants, complete admission and both cancellation owners remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_input_cancels_both_original_owners_after_native_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests.rs",
+      "capability": "Retained stored type declarations",
+      "workload": "type input cancels both original owners after native admission.",
+      "invariant": "Original Serde field acceptance and typed values, native key invariants, complete admission and both cancellation owners remain intact.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
