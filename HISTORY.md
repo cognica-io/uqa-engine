@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored foreign declarations under their original restore allowance, preserving current and legacy formats, SQL field semantics, option order and server-reference fences.
+
 - Retain complete foreign-table records and independent ACL replacements through the shared catalog input lifecycle on native SQLite, SQLite KV and redb. Preserve physical and stable relation ordering, private snapshots and original validation of overwritten authority fields without copying arbitrary-precision numbers that are discarded.
 
 - Resume native constraint identity and inherited-key validation between declaration slots and bounded name comparisons. Physical attribute validation uses the fixed PostgreSQL slot domain without allocating a temporary number vector or tree.

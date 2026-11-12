@@ -62116,6 +62116,136 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_content_preserves_original_fields_and_untyped_numbers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/content/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare original untagged content across defaults, positional forms, duplicate fields, numeric classes, container depth and ordered format validation.",
+      "invariant": "Native stored fields, option order and diagnostics match the original declaration without rewriting syntax or publishing state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_content_keeps_generic_depth_and_strict_discarded_strings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/content/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare original untagged content across defaults, positional forms, duplicate fields, numeric classes, container depth and ordered format validation.",
+      "invariant": "Native stored fields, option order and diagnostics match the original declaration without rewriting syntax or publishing state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_content_matches_original_truncations_and_mutations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/content/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare every truncation and single-byte mutation of current and positional declarations with the original decoder.",
+      "invariant": "The original and admitted readers accept identical representations and preserve failure classification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_content_retains_native_payload_and_retires_failed_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/constraints/input/content/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Measure native payload allocations, retire source controls and deny input memory or cancellation at owning boundaries.",
+      "invariant": "Native output retains its original allowance and every failed or cancelled prefix releases its owned memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_preserves_complete_declarations_and_original_option_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare original untagged content across defaults, positional forms, duplicate fields, numeric classes, container depth and ordered format validation.",
+      "invariant": "Native stored fields, option order and diagnostics match the original declaration without rewriting syntax or publishing state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_retains_exact_allocations_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Measure native payload allocations, retire source controls and deny input memory or cancellation at owning boundaries.",
+      "invariant": "Native output retains its original allowance and every failed or cancelled prefix releases its owned memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_honors_both_cancellation_owners_and_borrows_discarded_numbers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Measure native payload allocations, retire source controls and deny input memory or cancellation at owning boundaries.",
+      "invariant": "Native output retains its original allowance and every failed or cancelled prefix releases its owned memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_preserves_untagged_numeric_duplicate_and_positional_forms",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests/compatibility.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare original untagged content across defaults, positional forms, duplicate fields, numeric classes, container depth and ordered format validation.",
+      "invariant": "Native stored fields, option order and diagnostics match the original declaration without rewriting syntax or publishing state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_preserves_complete_error_precedence_and_generic_depth",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests/compatibility.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare original untagged content across defaults, positional forms, duplicate fields, numeric classes, container depth and ordered format validation.",
+      "invariant": "Native stored fields, option order and diagnostics match the original declaration without rewriting syntax or publishing state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_foreign_input_matches_original_truncation_and_mutation_rejection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/input/tests/compatibility.rs",
+      "capability": "Admitted stored foreign declaration input",
+      "workload": "Compare every truncation and single-byte mutation of current and positional declarations with the original decoder.",
+      "invariant": "The original and admitted readers accept identical representations and preserve failure classification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "catalog_table_row_input_borrows_overwritten_arbitrary_precision_numbers",
