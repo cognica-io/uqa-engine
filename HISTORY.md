@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Read persistent visible document maxima through retained key-only progress, including deleted slots, without collecting document identities or substituting autonomous allocator watermarks.
+
 - Read exact persistent metadata records under caller-selected encoded record and memory limits, retaining original text through private rollback and source retirement.
 
 - Restore persistent vector field catalogs through bounded input, retaining original keys and physical owners while preserving repeated-field selection.

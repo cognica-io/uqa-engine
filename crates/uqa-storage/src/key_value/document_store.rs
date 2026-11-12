@@ -6,6 +6,7 @@
 
 //! Document access and mutations use one provider-owned view of the exact storage name.
 
+mod maximum;
 mod migration;
 mod projection;
 mod read;
@@ -272,6 +273,18 @@ impl DocumentStore for KeyValueDocumentStore {
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
         self.next_doc_ids(None, usize::MAX)
+    }
+
+    fn max_doc_id(&self) -> StorageBackendResult<DocId> {
+        self.read(|view| view.maximum())
+    }
+
+    fn begin_max_doc_id_input(
+        &self,
+        maximum_key_bytes: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::document_store::maximum::MaximumDocIdInput> {
+        maximum::begin(self, maximum_key_bytes, control)
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {

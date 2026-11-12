@@ -679,6 +679,14 @@ impl DocumentStore for SQLiteDocumentStore {
         SQLiteDocumentStore::max_doc_id(self)
     }
 
+    fn begin_max_doc_id_input(
+        &self,
+        maximum_key_bytes: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::document_store::maximum::MaximumDocIdInput> {
+        super::native::maximum::begin(self, maximum_key_bytes, control)
+    }
+
     fn for_each_next_fields(
         &self,
         after: Option<DocId>,

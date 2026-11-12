@@ -57835,6 +57835,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_maximum_retires_source_before_completion_failure_cancellation_or_unwind",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_maximum_admission_and_abandonment_release_the_original_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_maximum_does_not_collect_visible_document_ids",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_maximum_rejects_unversioned_capture_without_copying_records",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_maximum_consumes_each_tombstone_without_reading_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_maximum_failure_retires_its_selected_key_and_read_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/document_store/maximum/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_document_maximum_preserves_private_visibility_and_bounded_progress",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/tests/maximum.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "key_value_document_maximum_preserves_private_visibility_and_bounded_progress",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/tests/maximum.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_document_maximum_preserves_private_visibility_and_bounded_progress",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/documents.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "maximum_native_id_uses_bounded_work_independent_of_live_document_count",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/read/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "maximum_native_id_follows_private_deletes_undo_and_retained_snapshots",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/read/tests.rs",
+      "capability": "Retained visible document maximum",
+      "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
+      "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

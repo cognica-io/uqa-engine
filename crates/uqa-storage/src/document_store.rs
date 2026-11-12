@@ -31,6 +31,7 @@ pub use shared_values::{SharedDocumentProjection, SharedDocumentValues};
 pub mod decoding;
 pub mod identifiers;
 pub mod image;
+pub mod maximum;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
 mod retained_store;
@@ -646,6 +647,18 @@ pub trait DocumentStore: Send + Sync {
 
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         Ok(self.doc_ids()?.into_iter().max().unwrap_or(0))
+    }
+
+    /// Retain the current committed/private view for a key-only maximum lookup. Each advance consumes at most one physical record slot, including a tombstone. Unsupported stores reject without collecting document identities.
+    fn begin_max_doc_id_input(
+        &self,
+        maximum_key_bytes: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<maximum::MaximumDocIdInput> {
+        maximum::validate_limit(maximum_key_bytes, control)?;
+        Err(StorageBackendError::Other(
+            "retained document maximum input is not supported".into(),
+        ))
     }
 
     fn len(&self) -> StorageBackendResult<usize>;
