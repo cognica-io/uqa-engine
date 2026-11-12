@@ -48,20 +48,25 @@ pub fn validate_provenance_with_control(
     constraints: &TableConstraintSet,
     control: &ProductionControl<'_>,
 ) -> super::ConstraintMetadataResult<()> {
+    crate::catalog::work::inline(validate_from(constraints, control, &mut ()))
+}
+
+pub(super) async fn validate_from(
+    constraints: &TableConstraintSet,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> super::ConstraintMetadataResult<()> {
     validation::check(control)?;
     let mut inherited_ids = OwnedSet::new();
     for inherited in &constraints.hierarchy.partition_inherited_key_constraints {
-        validation::check(control)?;
+        validation::checkpoint(control, work).await?;
         let Some(identity) = inherited.catalog_identity else {
             return Err(super::ConstraintMetadataError::Invalid(
                 "partition key provenance has no local catalog identity".into(),
             ));
         };
         if !validation::insert(&mut inherited_ids, identity.object_id, control)?
-            || !validation::any(&constraints.key_constraints, control, |key| {
-                key.catalog_identity == Some(identity)
-                    && crate::schema::inheritance::alter::key_equivalent(key, inherited)
-            })?
+            || !has_local_key(constraints, inherited, control, work).await?
         {
             return Err(super::ConstraintMetadataError::Invalid(
                 "partition key provenance does not identify one local constraint".into(),
@@ -69,4 +74,23 @@ pub fn validate_provenance_with_control(
         }
     }
     validation::check(control)
+}
+
+async fn has_local_key(
+    constraints: &TableConstraintSet,
+    inherited: &TableKeyConstraint,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> super::ConstraintMetadataResult<bool> {
+    for key in &constraints.key_constraints {
+        validation::checkpoint(control, work).await?;
+        if key.catalog_identity == inherited.catalog_identity
+            && crate::schema::inheritance::alter::key_equivalent_from(key, inherited, control, work)
+                .await
+                .map_err(|error| super::ConstraintMetadataError::Execution(Box::new(error)))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

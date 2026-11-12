@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Resume native constraint identity and inherited-key validation between declaration slots and bounded name comparisons. Physical attribute validation uses the fixed PostgreSQL slot domain without allocating a temporary number vector or tree.
+
 - Restore persistent schema catalogs through bounded provider input and shared authority validation, preserving original ordering, snapshot identities and subsequent writable grants. Cancellation deferral checks use the existing inline lock instead of allocating a platform mutex on their first call.
 
 - Admit stored schema names, tuple identities and bound or named grants through the existing authority grammar, retaining original field/default rules and allocation ownership.

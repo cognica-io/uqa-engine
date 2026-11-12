@@ -9,6 +9,8 @@ use crate::ast::{ColumnDef, TableConstraintSet};
 use crate::schema::constraint_metadata::{identity, materialize_constraint_metadata};
 use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
 
+mod continuation;
+
 fn declaration() -> (Vec<ColumnDef>, TableConstraintSet) {
     let crate::Statement::CreateTable(table) = crate::compile("CREATE TABLE child(a integer CONSTRAINT required NOT NULL CONSTRAINT positive CHECK(a > 0) CONSTRAINT inline_fk REFERENCES parent(id), b integer, CONSTRAINT table_fk FOREIGN KEY(b) REFERENCES parent(id), CONSTRAINT unique_a UNIQUE(a), CONSTRAINT positive_b CHECK(b > 0))").unwrap().remove(0) else { panic!("table declaration") };
     let mut columns = table.columns;
@@ -96,83 +98,83 @@ fn constraint_identity_node_admission_retires_partial_validation() {
     }
 }
 
+type Mutation = fn(&mut Vec<ColumnDef>, &mut TableConstraintSet);
+const INVALID_CASES: &[(Mutation, &str)] = &[
+    (
+        |c, _| c[0].not_null_identity = None,
+        "NOT NULL constraint requires an initial catalog identity migration",
+    ),
+    (
+        |c, _| c[0].not_null_identity.as_mut().unwrap().oid = 0,
+        "invalid NOT NULL constraint catalog identity",
+    ),
+    (
+        |c, _| c[0].not_null = false,
+        "nullable column retains a NOT NULL constraint identity",
+    ),
+    (
+        |c, _| c.push(c[0].clone()),
+        "duplicate NOT NULL constraint catalog identity",
+    ),
+    (
+        |c, _| c[0].references.as_mut().unwrap().catalog_identity = None,
+        "foreign keys require an initial catalog identity migration",
+    ),
+    (
+        |c, _| {
+            c[0].references
+                .as_mut()
+                .unwrap()
+                .catalog_identity
+                .as_mut()
+                .unwrap()
+                .oid = 0;
+        },
+        "invalid foreign-key catalog identity",
+    ),
+    (
+        |c, t| {
+            t.foreign_keys[0].catalog_identity = c[0].references.as_ref().unwrap().catalog_identity;
+        },
+        "duplicate foreign-key catalog identity",
+    ),
+    (
+        |_, t| t.hierarchy.partition_inherited_foreign_keys[0].catalog_identity = None,
+        "partition foreign-key provenance does not identify its catalog row",
+    ),
+    (
+        |c, _| c[0].check = None,
+        "column without CHECK retains a constraint identity",
+    ),
+    (
+        |c, _| c[0].check_object_id = None,
+        "CHECK catalog address has no constraint incarnation",
+    ),
+    (
+        |c, t| t.checks[0].catalog_oid = c[0].not_null_identity.map(|identity| identity.oid),
+        "duplicate key or CHECK constraint catalog identity",
+    ),
+    (
+        |_, t| t.key_constraints[0].catalog_identity = None,
+        "key constraints require an initial catalog identity migration",
+    ),
+    (
+        |c, _| c[0].check_catalog_oid = None,
+        "CHECK constraints require an initial catalog identity migration",
+    ),
+    (
+        |_, t| {
+            t.hierarchy
+                .partition_inherited_key_constraints
+                .push(t.hierarchy.partition_inherited_key_constraints[0].clone());
+        },
+        "partition key provenance does not identify one local constraint",
+    ),
+];
+
 #[test]
 fn controlled_constraint_identity_validation_preserves_original_diagnostics() {
-    type Mutation = fn(&mut Vec<ColumnDef>, &mut TableConstraintSet);
-    let cases: &[(Mutation, &str)] = &[
-        (
-            |c, _| c[0].not_null_identity = None,
-            "NOT NULL constraint requires an initial catalog identity migration",
-        ),
-        (
-            |c, _| c[0].not_null_identity.as_mut().unwrap().oid = 0,
-            "invalid NOT NULL constraint catalog identity",
-        ),
-        (
-            |c, _| c[0].not_null = false,
-            "nullable column retains a NOT NULL constraint identity",
-        ),
-        (
-            |c, _| c.push(c[0].clone()),
-            "duplicate NOT NULL constraint catalog identity",
-        ),
-        (
-            |c, _| c[0].references.as_mut().unwrap().catalog_identity = None,
-            "foreign keys require an initial catalog identity migration",
-        ),
-        (
-            |c, _| {
-                c[0].references
-                    .as_mut()
-                    .unwrap()
-                    .catalog_identity
-                    .as_mut()
-                    .unwrap()
-                    .oid = 0;
-            },
-            "invalid foreign-key catalog identity",
-        ),
-        (
-            |c, t| {
-                t.foreign_keys[0].catalog_identity =
-                    c[0].references.as_ref().unwrap().catalog_identity;
-            },
-            "duplicate foreign-key catalog identity",
-        ),
-        (
-            |_, t| t.hierarchy.partition_inherited_foreign_keys[0].catalog_identity = None,
-            "partition foreign-key provenance does not identify its catalog row",
-        ),
-        (
-            |c, _| c[0].check = None,
-            "column without CHECK retains a constraint identity",
-        ),
-        (
-            |c, _| c[0].check_object_id = None,
-            "CHECK catalog address has no constraint incarnation",
-        ),
-        (
-            |c, t| t.checks[0].catalog_oid = c[0].not_null_identity.map(|identity| identity.oid),
-            "duplicate key or CHECK constraint catalog identity",
-        ),
-        (
-            |_, t| t.key_constraints[0].catalog_identity = None,
-            "key constraints require an initial catalog identity migration",
-        ),
-        (
-            |c, _| c[0].check_catalog_oid = None,
-            "CHECK constraints require an initial catalog identity migration",
-        ),
-        (
-            |_, t| {
-                t.hierarchy
-                    .partition_inherited_key_constraints
-                    .push(t.hierarchy.partition_inherited_key_constraints[0].clone());
-            },
-            "partition key provenance does not identify one local constraint",
-        ),
-    ];
-    for &(mutate, message) in cases {
+    for &(mutate, message) in INVALID_CASES {
         let (mut columns, mut constraints) = declaration();
         mutate(&mut columns, &mut constraints);
         let memory = MemoryBudget::new(64 * 1024);
@@ -191,6 +193,11 @@ fn controlled_constraint_identity_validation_preserves_original_diagnostics() {
                 .unwrap_err()
                 .to_string(),
             message
+        );
+        let (result, _) = continuation::run(columns.clone(), constraints.clone());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            crate::SQLError::Internal(message.into()).to_string()
         );
         assert_eq!(memory.used(), 0);
         assert_eq!(

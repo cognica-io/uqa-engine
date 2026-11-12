@@ -142,11 +142,27 @@ pub fn validate_not_null_identities_with_control(
     columns: &[ColumnDef],
     control: &ProductionControl<'_>,
 ) -> ConstraintMetadataResult<()> {
+    crate::catalog::work::inline(validate_not_null_from(columns, control, &mut ()))
+}
+
+pub async fn validate_not_null_identities_from_input(
+    columns: &[ColumnDef],
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> ConstraintMetadataResult<()> {
+    validate_not_null_from(columns, control, input).await
+}
+
+pub(super) async fn validate_not_null_from(
+    columns: &[ColumnDef],
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> ConstraintMetadataResult<()> {
     validation::check(control)?;
     let mut identities = OwnedSet::new();
     let mut oids = OwnedSet::new();
     for column in columns {
-        validation::check(control)?;
+        validation::checkpoint(control, work).await?;
         match (column.not_null, column.not_null_identity) {
             (true, Some(identity)) => {
                 validate(identity)?;

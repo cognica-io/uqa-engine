@@ -9,6 +9,15 @@
 use super::{ConstraintMetadataError, ConstraintMetadataResult};
 use uqa_core::memory::{OwnedSet, ProductionControl};
 
+pub(super) async fn checkpoint(
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> ConstraintMetadataResult<()> {
+    check(control)?;
+    work.checkpoint().await.map_err(execution)?;
+    check(control)
+}
+
 pub(super) fn check(control: &ProductionControl<'_>) -> ConstraintMetadataResult<()> {
     control.check().map_err(execution)
 }
@@ -25,13 +34,14 @@ pub(super) fn insert<K: Ord>(
     }
 }
 
-pub(super) fn any<T>(
+pub(super) async fn any<T>(
     items: impl IntoIterator<Item = T>,
     control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
     mut predicate: impl FnMut(T) -> bool,
 ) -> ConstraintMetadataResult<bool> {
     for item in items {
-        check(control)?;
+        checkpoint(control, work).await?;
         if predicate(item) {
             return Ok(true);
         }

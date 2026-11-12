@@ -34,35 +34,32 @@ pub fn row_identities<'a>(
     keys: &'a [TableKeyConstraint],
     foreign_keys: &'a [ForeignKey],
 ) -> impl Iterator<Item = crate::ast::ConstraintCatalogIdentity> + 'a {
+    row_slots(columns, checks, keys, foreign_keys).flatten()
+}
+
+fn row_slots<'a>(
+    columns: &'a [ColumnDef],
+    checks: &'a [TableCheck],
+    keys: &'a [TableKeyConstraint],
+    foreign_keys: &'a [ForeignKey],
+) -> impl Iterator<Item = Option<crate::ast::ConstraintCatalogIdentity>> + 'a {
     columns
         .iter()
-        .filter_map(|column| column.not_null_identity)
+        .map(|column| column.not_null_identity)
         .chain(
-            columns
-                .iter()
-                .filter_map(|column| column.references.as_ref()?.catalog_identity),
+            super::foreign_keys::identity_slots(columns, foreign_keys).map(|slot| match slot {
+                super::foreign_keys::IdentitySlot::Empty => None,
+                super::foreign_keys::IdentitySlot::Required(identity) => identity,
+            }),
         )
-        .chain(foreign_keys.iter().filter_map(|key| key.catalog_identity))
-        .chain(
-            columns
-                .iter()
-                .filter_map(|column| column.references.as_ref())
-                .flat_map(|reference| &reference.referenced_partitions)
-                .chain(
-                    foreign_keys
-                        .iter()
-                        .flat_map(|key| &key.referenced_partitions),
-                )
-                .map(|derived| derived.catalog_identity),
-        )
-        .chain(keys.iter().filter_map(|key| key.catalog_identity))
-        .chain(columns.iter().filter_map(|column| {
+        .chain(keys.iter().map(|key| key.catalog_identity))
+        .chain(columns.iter().map(|column| {
             column
                 .check_object_id
                 .zip(column.check_catalog_oid)
                 .map(|(object_id, oid)| crate::ast::ConstraintCatalogIdentity { object_id, oid })
         }))
-        .chain(checks.iter().filter_map(|check| {
+        .chain(checks.iter().map(|check| {
             check
                 .object_id
                 .zip(check.catalog_oid)
@@ -87,9 +84,23 @@ pub fn validate_present_identities_with_control(
     constraints: &crate::ast::TableConstraintSet,
     control: &ProductionControl<'_>,
 ) -> super::ConstraintMetadataResult<()> {
+    crate::catalog::work::inline(validate_present_from(
+        columns,
+        constraints,
+        control,
+        &mut (),
+    ))
+}
+
+async fn validate_present_from(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> super::ConstraintMetadataResult<()> {
     validation::check(control)?;
     for column in columns {
-        validation::check(control)?;
+        validation::checkpoint(control, work).await?;
         if column.check.is_none()
             && (column.check_object_id.is_some() || column.check_catalog_oid.is_some())
         {
@@ -103,31 +114,39 @@ pub fn validate_present_identities_with_control(
             ));
         }
     }
-    if validation::any(&constraints.checks, control, |check| {
+    if validation::any(&constraints.checks, control, work, |check| {
         check.catalog_oid.is_some() && check.object_id.is_none()
-    })? {
+    })
+    .await?
+    {
         return Err(invalid(
             "CHECK catalog address has no constraint incarnation",
         ));
     }
     let mut objects = OwnedSet::new();
     let mut oids = OwnedSet::new();
-    for identity in row_identities(
+    for identity in row_slots(
         columns,
         &constraints.checks,
         &constraints.key_constraints,
         &constraints.foreign_keys,
     ) {
-        validation::check(control)?;
-        let kind = if validation::any(columns, control, |column| {
+        validation::checkpoint(control, work).await?;
+        let Some(identity) = identity else { continue };
+        let kind = if validation::any(columns, control, work, |column| {
             column.not_null_identity == Some(identity)
-        })? {
+        })
+        .await?
+        {
             "NOT NULL constraint"
         } else if validation::any(
-            super::foreign_keys::identities(columns, constraints),
+            super::foreign_keys::identity_slots(columns, &constraints.foreign_keys),
             control,
-            |foreign| foreign == Some(identity),
-        )? {
+            work,
+            |slot| matches!(slot, super::foreign_keys::IdentitySlot::Required(Some(foreign)) if foreign == identity),
+        )
+        .await?
+        {
             "foreign-key"
         } else {
             "key or CHECK constraint"
@@ -162,9 +181,32 @@ pub fn validate_constraint_identities_with_control(
     constraints: &crate::ast::TableConstraintSet,
     control: &ProductionControl<'_>,
 ) -> super::ConstraintMetadataResult<()> {
-    super::validate_not_null_identities_with_control(columns, control)?;
-    super::foreign_keys::validate_with_control(columns, constraints, control)?;
-    validate_key_and_check_identities_with_control(columns, constraints, control)
+    crate::catalog::work::inline(validate_constraints_from(
+        columns,
+        constraints,
+        control,
+        &mut (),
+    ))
+}
+
+pub async fn validate_constraint_identities_from_input(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> super::ConstraintMetadataResult<()> {
+    validate_constraints_from(columns, constraints, control, input).await
+}
+
+async fn validate_constraints_from(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> super::ConstraintMetadataResult<()> {
+    super::validate_not_null_from(columns, control, work).await?;
+    super::foreign_keys::validate_from(columns, constraints, control, work).await?;
+    validate_keys_from(columns, constraints, control, work).await
 }
 
 pub fn validate_key_and_check_identities(
@@ -183,25 +225,49 @@ pub fn validate_key_and_check_identities_with_control(
     constraints: &crate::ast::TableConstraintSet,
     control: &ProductionControl<'_>,
 ) -> super::ConstraintMetadataResult<()> {
-    validate_present_identities_with_control(columns, constraints, control)?;
-    if validation::any(&constraints.key_constraints, control, |key| {
+    crate::catalog::work::inline(validate_keys_from(columns, constraints, control, &mut ()))
+}
+
+pub async fn validate_key_and_check_identities_from_input(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> super::ConstraintMetadataResult<()> {
+    validate_keys_from(columns, constraints, control, input).await
+}
+
+async fn validate_keys_from(
+    columns: &[ColumnDef],
+    constraints: &crate::ast::TableConstraintSet,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> super::ConstraintMetadataResult<()> {
+    validate_present_from(columns, constraints, control, work).await?;
+    if validation::any(&constraints.key_constraints, control, work, |key| {
         key.catalog_identity.is_none()
-    })? {
+    })
+    .await?
+    {
         return Err(invalid(
             "key constraints require an initial catalog identity migration",
         ));
     }
-    if validation::any(columns, control, |column| {
+    if validation::any(columns, control, work, |column| {
         column.check.is_some()
             && (column.check_object_id.is_none() || column.check_catalog_oid.is_none())
-    })? || validation::any(&constraints.checks, control, |check| {
-        check.object_id.is_none() || check.catalog_oid.is_none()
-    })? {
+    })
+    .await?
+        || validation::any(&constraints.checks, control, work, |check| {
+            check.object_id.is_none() || check.catalog_oid.is_none()
+        })
+        .await?
+    {
         return Err(invalid(
             "CHECK constraints require an initial catalog identity migration",
         ));
     }
-    super::keys::validate_provenance_with_control(constraints, control)
+    super::keys::validate_from(constraints, control, work).await
 }
 
 fn invalid(message: &str) -> super::ConstraintMetadataError {

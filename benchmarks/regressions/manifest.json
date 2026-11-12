@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -61929,6 +61929,71 @@
       "capability": "Retained persistent schema restoration",
       "workload": "Compare empty/public/Unicode raw legacy values, bound JSON, key/name mismatches and retained trailing-key behavior with the ordinary catalog reader.",
       "invariant": "Original legacy defaults, key semantics, decoder acceptance and diagnostics remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constraint_identity_validation_yields_for_empty_slots_and_large_key_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests/continuation.rs",
+      "capability": "Retained constraint catalog validation",
+      "workload": "Validate zero, 64 and 512 unconstrained columns and inherited keys with large Unicode and included-column names.",
+      "invariant": "Empty declaration slots and bounded byte comparisons yield native polls; syntax remains borrowed and all measured input allocations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constraint_identity_validation_retires_each_unpublished_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests/continuation.rs",
+      "capability": "Retained constraint catalog validation",
+      "workload": "Cancel, reject a zero window, abandon and unwind after every incomplete mixed-constraint validation prefix.",
+      "invariant": "Every terminal path retires the continuation and all temporary identity claims without changing the declaration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_constraint_identity_validation_rejects_each_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraint_metadata/identity/validation/tests/continuation.rs",
+      "capability": "Retained constraint catalog validation",
+      "workload": "Deny continuation and claim-node admission at sampled limits through the successful peak minus one.",
+      "invariant": "Insufficient memory reports 53200 and returns the entire unpublished allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_attribute_validation_preserves_original_error_order_and_fixed_domain",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/relation_attributes/validation/tests.rs",
+      "capability": "Retained constraint catalog validation",
+      "workload": "Compare 900 missing, duplicate, disordered, negative and excessive slot combinations with the original set predicate, plus all 1600 slots and dropped-slot boundaries.",
+      "invariant": "Missing-number and column-limit precedence is unchanged; a complete valid fixed slot domain validates without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_attribute_validation_bounds_work_and_retires_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/relation_attributes/validation/tests.rs",
+      "capability": "Retained constraint catalog validation",
+      "workload": "Cancel at selected input windows across both passes over 128 physical columns and exercise either original or invoking cancellation.",
+      "invariant": "Each column consumes bounded native work; terminal input releases its frame and direct validation admits no heap scratch.",
       "case_names": [
         ""
       ]
