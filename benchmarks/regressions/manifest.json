@@ -61226,6 +61226,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_json_preserves_original_fields_defaults_and_container_forms",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Compare current and legacy role objects, sequence forms, unknown fields and duplicate enum attributes with the original JSON decoder.",
+      "invariant": "Original field values, omitted identity/revision defaults and accepted enum representations are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_membership_json_preserves_original_bound_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Read independently encoded membership objects and sequences with renamed and invalid-but-decodable bound identities.",
+      "invariant": "Native role names and incarnations remain exact; semantic rejection stays at the catalog boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_records_reject_original_malformed_fields_and_truncated_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Compare every truncated prefix and single-byte mutation of role and membership records, plus duplicate/missing fields and unknown attributes.",
+      "invariant": "Accepted record shapes match the original decoder and failed parses retire every admitted native field.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_records_admit_native_allocations_and_retire_failed_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Measure native live/peak allocations for roles and memberships, then deny each sampled prefix and peak-minus-one allowance.",
+      "invariant": "Every retained byte remains admitted through its owner, and failed construction returns the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_role_records_cancel_both_owners_after_native_name_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Cancel each owner synchronously after a 16-KiB role or binding name is allocated.",
+      "invariant": "Original and invoking cancellation reject further parsing and retire the active native prefix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_duplicate_role_attributes_use_constant_retained_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/stored/tests.rs",
+      "capability": "Admitted stored role input",
+      "workload": "Decode one and 4,096 repetitions of the same role attribute.",
+      "invariant": "Set semantics preserve one native attribute without a growing duplicate buffer or retained workspace.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

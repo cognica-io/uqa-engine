@@ -18,6 +18,7 @@ pub use registry::{
 pub mod identity;
 pub mod rename;
 pub mod session;
+mod stored;
 pub mod tuple;
 use identity::RoleBinding;
 pub use identity::{RoleIdentity, RoleReference};
