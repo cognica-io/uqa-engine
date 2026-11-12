@@ -61174,6 +61174,58 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "api_restore_job_retains_the_activated_engine_after_all_job_handles_close",
+      "cases": 1,
+      "source": "crates/uqa-api/src/backup.rs",
+      "capability": "Owned memory restore job lifecycle",
+      "workload": "Restore a real memory archive through uqa-api after source and authorizing Engine retirement, then close the job and mutate the destination.",
+      "invariant": "The returned runtime retains native input owners independently and releases their complete admission at final retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "api_persistent_restore_resolves_completion_and_cancellation_without_archive_replay",
+      "cases": 1,
+      "source": "crates/uqa-api/src/backup.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Restore, retire the archive, recover after writes and resolve late cancellation through uqa-api.",
+      "invariant": "All API entry points share durable Engine ownership and preserve later writes and independent runtime lifetime.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "api_kv_restore_resolves_completion_and_cancellation_without_archive_replay",
+      "cases": 1,
+      "source": "crates/uqa-api/src/backup.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Restore a real SQLite KV archive through uqa-api, write after publication, retire the archive and recover/cancel the exact completed request.",
+      "invariant": "All API entry points share durable Engine ownership and preserve later writes and independent runtime lifetime.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "api_redb_restore_resolves_completion_and_cancellation_without_archive_replay",
+      "cases": 1,
+      "source": "crates/uqa-api/src/backup.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Restore a real redb archive through uqa-api, write after publication, retire the archive and recover/cancel the exact completed request.",
+      "invariant": "All API entry points share durable Engine ownership and preserve later writes and independent runtime lifetime.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

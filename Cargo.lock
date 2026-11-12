@@ -3857,6 +3857,8 @@ dependencies = [
  "uqa-core",
  "uqa-engine",
  "uqa-sql",
+ "uqa-storage-redb",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]

@@ -17,9 +17,10 @@ use std::sync::Arc;
 pub use uqa_storage::backup::{
     BackupCapabilities, BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport,
     BackupCaptureStep, BackupCut, BackupError, BackupId, BackupKey, BackupLimits, BackupResult,
-    BackupRoot, LocalRepository, Protection, ProtectionId,
+    BackupRoot, LocalRepository, PersistentBackupTarget, Protection, ProtectionId, RestoreId,
 };
 pub use uqa_storage::read_control::StorageReadControl;
+pub use uqa_storage_sqlite::{SQLiteBackupMapping, SQLiteBackupTarget};
 
 /// The repository owner implements progress, cancellation, verification and publication. The source Engine and provider may be dropped after construction.
 pub type BackupJob<'a> =
@@ -46,7 +47,7 @@ impl BackupOptions {
 }
 
 impl Engine {
-    /// Report the currently connected Engine paths. Engine restore activation remains unsupported; provider image primitives do not advertise that public capability.
+    /// Report qualified Engine paths. Import remains disabled until complete bounded catalog loading, logical closure and final restore qualification are available.
     pub fn backup_capabilities(&self) -> BackupCapabilities {
         BackupCapabilities {
             export: self.storage.memory_capture.is_some()
