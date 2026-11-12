@@ -47,6 +47,9 @@ pub struct AlterDomain {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AlterDomainAction {
+    SetDefault {
+        expression: Option<Box<Expr>>,
+    },
     AddCheck {
         constraint: Box<DomainCheck>,
     },

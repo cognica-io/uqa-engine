@@ -9,6 +9,37 @@ use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[test]
+fn domain_defaults_select_the_owned_declaration_without_reviving_removed_base_defaults() {
+    struct Catalog(Vec<StoredDomain>);
+    impl DomainCatalog for Catalog {
+        fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain> {
+            self.0.iter().find(|domain| domain.oid == oid).cloned()
+        }
+    }
+    let mut base = registry().remove("public.positive").unwrap();
+    base.definition.default = Some(crate::ast::Expr::Literal(uqa_core::Value::Int(5)));
+    let base_type = base.column_type();
+    let mut derived = base.clone();
+    derived.oid += 1;
+    derived.identity.name = "derived".into();
+    derived.definition.base = base_type;
+    let derived_type = derived.column_type();
+    let mut catalog = Catalog(vec![base, derived]);
+    catalog.0[0].definition.default = Some(crate::ast::Expr::Literal(uqa_core::Value::Int(9)));
+    assert!(matches!(
+        domain_default_expression(&catalog, &derived_type),
+        Some(crate::ast::Expr::Literal(uqa_core::Value::Int(5)))
+    ));
+    catalog.0[1].definition.default = None;
+    assert!(domain_default_expression(&catalog, &derived_type).is_none());
+    catalog.0[1].definition.default = Some(crate::ast::Expr::Literal(uqa_core::Value::Null));
+    assert!(matches!(
+        domain_default_expression(&catalog, &derived_type),
+        Some(crate::ast::Expr::Literal(uqa_core::Value::Null))
+    ));
+}
+
 fn registry() -> BTreeMap<String, StoredDomain> {
     let crate::Statement::CreateDomain(mut definition) =
         crate::compile("CREATE DOMAIN public.positive AS integer CHECK (VALUE > 0)")

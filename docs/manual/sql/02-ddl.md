@@ -100,6 +100,14 @@ INSERT INTO domain_orders VALUES (2, 5);
 SELECT id, amount FROM domain_orders ORDER BY id;
 ```
 
+`ALTER DOMAIN name SET DEFAULT expression` replaces the domain default; `ALTER DOMAIN name DROP DEFAULT` removes it. Both return `ALTER DOMAIN` with no result rows and require domain ownership. Existing columns without their own default use the current domain default; an explicit column default takes precedence. A derived domain keeps the default copied when it was created. Removing its default does not revive a later base-domain default, and `SET DEFAULT NULL` remains an explicit stored NULL default. These changes preserve domain and constraint identities, participate in transaction and savepoint rollback, and survive persistent reopen. Invalid expressions retain the ordinary default-expression diagnostics.
+
+```sql execute
+ALTER DOMAIN positive_amount SET DEFAULT 2;
+INSERT INTO domain_orders (id) VALUES (3);
+SELECT amount FROM domain_orders WHERE id = 3;
+```
+
 `ALTER DOMAIN name ADD [CONSTRAINT constraint_name] CHECK (expression) [NOT VALID]`, `ADD [CONSTRAINT constraint_name] NOT NULL`, `DROP CONSTRAINT [IF EXISTS] constraint_name [CASCADE | RESTRICT]`, and `VALIDATE CONSTRAINT constraint_name` change domain constraints and return `ALTER DOMAIN` with no result rows. The domain owner may change its constraints; its type and existing constraint identities remain stable. A duplicate constraint name reports `42710`; a missing constraint reports `42704`, or a notice with `DROP CONSTRAINT IF EXISTS`.
 
 Adding a CHECK or NOT NULL constraint validates existing columns of the domain and its derived domains, including materialized views. Validation retains relation locks and reads the latest committed rows plus the transaction's own changes, even under REPEATABLE READ or SERIALIZABLE; ordinary queries keep their isolation snapshot. Failed validation reports `23514` for CHECK or `23502` for NOT NULL and rolls back the catalog change. A stored array or composite containing the domain prevents validation with `0A000`, including an empty table with such a column, as PostgreSQL 18 does.

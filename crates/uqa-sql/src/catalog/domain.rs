@@ -122,13 +122,12 @@ pub fn domain_default_expression(
     catalog: &dyn DomainCatalog,
     ty: &crate::ColumnType,
 ) -> Option<crate::ast::Expr> {
-    let crate::ColumnType::Domain { oid, base, .. } = ty else {
+    let crate::ColumnType::Domain { oid, .. } = ty else {
         return None;
     };
     catalog
         .domain_by_oid(*oid)
         .and_then(|domain| domain.definition.default)
-        .or_else(|| domain_default_expression(catalog, base))
 }
 
 #[cfg(test)]

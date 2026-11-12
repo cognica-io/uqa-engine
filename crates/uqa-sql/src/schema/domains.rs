@@ -74,6 +74,29 @@ pub fn prepare_domain_definition(
     Ok(())
 }
 
+/// ALTER DOMAIN keeps an explicitly supplied NULL default; only DROP DEFAULT removes it.
+pub fn prepare_domain_default(
+    context: &SchemaBindingContext<'_, '_>,
+    definition: &CreateDomain,
+    expression: &mut Expr,
+) -> Result<(), SQLError> {
+    let domain = definition
+        .name
+        .rsplit('.')
+        .next()
+        .unwrap_or(&definition.name);
+    if !super::defaults::validate_default_expression(context, expression, &definition.base, domain)?
+    {
+        *expression = Expr::TypedLiteral {
+            value: Value::Null,
+            ty: definition.base.sql_name(),
+            collation_oid: definition.collation_oid,
+            composite_source: None,
+        };
+    }
+    Ok(())
+}
+
 /// Name and bind only a newly added CHECK. Existing defaults and constraints already carry their catalog identities and must not be analyzed again in the ALTER statement's namespace.
 pub fn prepare_added_check(
     context: &SchemaBindingContext<'_, '_>,

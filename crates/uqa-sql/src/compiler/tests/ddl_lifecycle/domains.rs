@@ -10,6 +10,31 @@ use crate::plan::{CommandPlan, UnifiedPlan};
 use uqa_core::Value;
 
 #[test]
+fn domain_default_commands_preserve_set_drop_and_explicit_null() {
+    let statements = crate::compile("ALTER DOMAIN d SET DEFAULT 7; ALTER DOMAIN d DROP DEFAULT; ALTER DOMAIN d SET DEFAULT NULL").unwrap();
+    for (index, statement) in statements.into_iter().enumerate() {
+        let Statement::AlterDomain(alter) = statement else {
+            panic!("domain alteration");
+        };
+        let AlterDomainAction::SetDefault { expression } = alter.action else {
+            panic!("default alteration");
+        };
+        match index {
+            0 => assert!(matches!(
+                expression.as_deref(),
+                Some(Expr::Literal(Value::Int(7)))
+            )),
+            1 => assert!(expression.is_none()),
+            2 => assert!(matches!(
+                expression.as_deref(),
+                Some(Expr::Literal(Value::Null))
+            )),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn domain_constraint_commands_preserve_action_and_validation_state() {
     let statements = crate::compile(
         r#"ALTER DOMAIN "Schema"."Domain.Name" ADD CONSTRAINT "Positive" CHECK (VALUE > 0) NOT VALID;
