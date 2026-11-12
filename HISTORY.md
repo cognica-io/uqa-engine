@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Share ordinary and retained database authority validation, preserving owner and ACL endpoint error order while allowing role traversal to stop at work and cancellation boundaries.
+- Share ordinary and retained authority validation, preserving database endpoint order and built-in routine tuple, grant-path and role checks while allowing traversal to stop at work, memory and cancellation boundaries.
 
 - Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.
 

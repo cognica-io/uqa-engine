@@ -64140,6 +64140,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_authority_input_bounds_grant_closure_and_sorted_role_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/tests/input.rs",
+      "capability": "Retained builtin authority validation",
+      "workload": "Reversed owner-rooted grant chains, invalid tuple/path/role combinations, selected incarnations, work windows and terminal admission.",
+      "invariant": "Shared ordinary/native grant predicates preserve first-error order and selected role identities; admitted scratch retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_authority_input_preserves_tuple_path_and_role_failure_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/tests/input.rs",
+      "capability": "Retained builtin authority validation",
+      "workload": "Reversed owner-rooted grant chains, invalid tuple/path/role combinations, selected incarnations, work windows and terminal admission.",
+      "invariant": "Shared ordinary/native grant predicates preserve first-error order and selected role identities; admitted scratch retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_authority_input_keeps_selected_incarnations_across_later_role_changes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/tests/input.rs",
+      "capability": "Retained builtin authority validation",
+      "workload": "Reversed owner-rooted grant chains, invalid tuple/path/role combinations, selected incarnations, work windows and terminal admission.",
+      "invariant": "Shared ordinary/native grant predicates preserve first-error order and selected role identities; admitted scratch retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_authority_input_retires_denied_cancelled_and_abandoned_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/tests/input.rs",
+      "capability": "Retained builtin authority validation",
+      "workload": "Reversed owner-rooted grant chains, invalid tuple/path/role combinations, selected incarnations, work windows and terminal admission.",
+      "invariant": "Shared ordinary/native grant predicates preserve first-error order and selected role identities; admitted scratch retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
