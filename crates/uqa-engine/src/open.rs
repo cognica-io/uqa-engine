@@ -14,6 +14,8 @@ use super::{
 };
 
 mod authenticated_session;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod authority_input;
 mod cache_refresh;
 mod catalog_reload;
 mod catalog_sync;
@@ -21,7 +23,6 @@ mod data_sync;
 mod graphs;
 mod key_identities;
 mod lifecycle;
-#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod persistent_input;
 mod registries;
 mod session_seed;

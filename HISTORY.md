@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore current built-in routine ACL records through retained physical input and shared native field/authority validation, transferring decoded buffers into the private Engine generation at its original position after routine placeholders. Preserve the selected transaction and independent later mutation allowance.
+
 - Share ordinary and retained authority validation, preserving database endpoint order and built-in routine tuple, grant-path and role checks while allowing traversal to stop at work, memory and cancellation boundaries.
 
 - Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.

@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -64191,6 +64191,101 @@
       "invariant": "Shared ordinary/native grant predicates preserve first-error order and selected role identities; admitted scratch retires on every terminal path.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_builtin_authority_matches_direct_serde_fields_and_native_acl_shapes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/stored/tests.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_builtin_authority_adopts_original_buffers_and_independent_mutation_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/builtin_routines/stored/tests.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_builtin_authority_preserves_complete_roots_and_later_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/input/tests.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_builtin_authority_keeps_physical_key_format_and_semantic_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/input/tests.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_builtin_authority_retires_pending_records_and_grant_scratch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/builtin_routines/input/tests.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_builtin_authority_keeps_selected_roots_and_later_sql_mutations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/authority.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_builtin_authority_retires_private_roots_and_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/authority.rs",
+      "capability": "Persistent builtin authority restoration",
+      "workload": "Original stored fields, complete physical rows, selected role and authority generations, native adoption, later SQL changes and terminal private sessions.",
+      "invariant": "Direct stored JSON interpretation and authority validation order are preserved; unpublished roots and transactions retire on every terminal path.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     }
   ]

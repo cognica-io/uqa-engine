@@ -27,6 +27,7 @@ pub mod sequence;
 pub mod shell_type;
 pub mod table_capture;
 pub mod table_image;
+pub(crate) mod text_records;
 pub mod tuples;
 pub mod type_identity_restoration;
 pub(crate) mod type_records;

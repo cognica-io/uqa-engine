@@ -7,6 +7,7 @@
 //! A private restore session retains its transaction until complete catalog validation.
 
 use super::{
+    authority_input::{AuthorityProgress, PersistentAuthorityInput, RestoredAuthorities},
     table_input::PersistentTableInput,
     type_input::{PersistentTypeInput, TypeProgress},
     CatalogRestoreMode, Engine,
@@ -42,7 +43,8 @@ enum Stage {
     Sequences(uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput),
     GraphOids(uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput),
     Types(PersistentTypeInput),
-    Registries(uqa_execution::catalog::domain::DomainRestoreState),
+    Authority(PersistentAuthorityInput),
+    Registries(RestoredAuthorities),
     Caches,
 }
 
@@ -100,7 +102,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite and domain input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain and built-in routine authority input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -211,10 +213,14 @@ impl Candidate {
             },
             Stage::Types(input) => match input.advance(engine, self.limits, control)? {
                 TypeProgress::Pending(input) => Stage::Types(input),
-                TypeProgress::Complete(domains) => Stage::Registries(domains),
+                TypeProgress::Complete(domains) => Stage::Authority(PersistentAuthorityInput::new(domains)),
             },
-            Stage::Registries(domains) => {
-                self.session.restore_remaining_registries(catalog.as_ref(),domains)?;
+            Stage::Authority(input) => match input.advance(engine, self.limits, control)? {
+                AuthorityProgress::Pending(input) => Stage::Authority(input),
+                AuthorityProgress::Complete(retained) => Stage::Registries(retained),
+            },
+            Stage::Registries(retained) => {
+                self.session.restore_remaining_registries(catalog.as_ref(), retained)?;
                 Stage::Caches
             }
             Stage::Caches => {
@@ -231,12 +237,13 @@ impl PersistentEngineState {
     fn restore_remaining_registries(
         &self,
         catalog: &dyn uqa_storage::CatalogFacade,
-        domains: uqa_execution::catalog::domain::DomainRestoreState,
+        retained: RestoredAuthorities,
     ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_domains(
+        self.engine.restore_registries_after_builtin_authority(
             catalog,
             CatalogRestoreMode::LoadOnly,
-            domains,
+            retained.domains,
+            retained.routines,
         )?;
         uqa_execution::schema::types::relation_arrays::restoration::validate(
             &self.engine.restored_catalog_read_view(),

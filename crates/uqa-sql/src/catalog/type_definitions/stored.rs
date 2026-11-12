@@ -201,52 +201,12 @@ impl<'a> Input<'a, '_> {
         parts.finish(RelationIdentity { schema, name })
     }
 
-    fn stored_role_identity(&mut self, first: JsonToken<'a>) -> Result<RoleIdentity, InputError> {
-        let (mut oid, mut object_id) = (0, [0; 16]);
-        self.fields(first, &["oid", "object_id"], 3, |input, field, token| {
-            if field == 0 {
-                oid = number(token)?;
-            } else {
-                object_id = input.identity(token)?;
-            }
-            Ok(())
-        })?;
-        Ok(RoleIdentity { oid, object_id })
-    }
-
     fn stored_usage_acl(
         &mut self,
         first: JsonToken<'a>,
     ) -> Result<Produced<Option<Vec<ObjectAclEntry>>>, InputError> {
         self.maybe(first, |input, first| {
-            input.array(first, |input, first| {
-                let (mut role, mut grantor, mut grant_option) =
-                    (None, RoleIdentity::BOOTSTRAP, false);
-                input.fields(
-                    first,
-                    &["role", "grantor", "grant_option"],
-                    7,
-                    |input, field, token| {
-                        match field {
-                            0 if token != JsonToken::Null => {
-                                role = Some(input.stored_role_identity(token)?);
-                            }
-                            1 => grantor = input.stored_role_identity(token)?,
-                            2 => grant_option = boolean(token)?,
-                            _ => (),
-                        }
-                        Ok(())
-                    },
-                )?;
-                Ok(input.control.finish(
-                    ObjectAclEntry {
-                        role,
-                        grantor,
-                        grant_option,
-                    },
-                    input.control.empty_reservation(),
-                )?)
-            })
+            input.array(first, Self::stored_object_acl)
         })
     }
 }

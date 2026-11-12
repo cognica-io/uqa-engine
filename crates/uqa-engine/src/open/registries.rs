@@ -84,6 +84,23 @@ impl Engine {
                 catalog,
                 &self.durable.roles.read(),
             )?;
+        self.restore_registries_after_builtin_authority(
+            catalog,
+            mode,
+            domains,
+            pending_sql_functions,
+        )
+    }
+
+    pub(super) fn restore_registries_after_builtin_authority(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+        pending_sql_functions: Option<
+            uqa_execution::routines::restoration::PendingSQLFunctionRestore,
+        >,
+    ) -> StorageBackendResult<()> {
         self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog, mode)?;
         self.restore_foreign_registries_from_catalog(catalog, mode)?;

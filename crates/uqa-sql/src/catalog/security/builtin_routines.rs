@@ -24,6 +24,7 @@ use crate::{ast::RoutineAclEntry, catalog::roles::RoleIdentity, SQLError};
 use std::ops::Deref;
 
 mod registry;
+pub mod stored;
 pub use registry::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities};
 mod validation;
 pub use validation::validate_from_input;

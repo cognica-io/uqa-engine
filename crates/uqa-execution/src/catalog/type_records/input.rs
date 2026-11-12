@@ -7,10 +7,11 @@
 //! Complete physical records and claims precede the native type owner's semantic validation.
 
 use super::{TypeRecord, TypeRecordFormat};
+pub(crate) use crate::catalog::text_records::{claim_oid, rows};
 use std::{future::Future, sync::Arc};
 use uqa_core::{
     image_io::{AsyncImageInput, ImageDecodeWindow, ImageDecoder},
-    memory::{Budgeted, BudgetedVec, MemoryBudget, Produced, ProductionControl, ProductionMap},
+    memory::{Budgeted, MemoryBudget, Produced, ProductionControl, ProductionMap},
 };
 use uqa_sql::{
     catalog::{
@@ -20,10 +21,7 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::{
-    catalog::{
-        input::CatalogInputLimits,
-        text_input::{CatalogTextRow, CatalogTextStep},
-    },
+    catalog::{input::CatalogInputLimits, text_input::CatalogTextRow},
     read_control::StorageReadControl,
     CatalogFacade, StorageBackendError, StorageBackendResult,
 };
@@ -141,26 +139,6 @@ pub(crate) fn new<T: InputType>(
     Ok(TypeCatalogInput { input })
 }
 
-pub(crate) async fn rows(
-    catalog: &dyn CatalogFacade,
-    prefix: &str,
-    limits: CatalogInputLimits,
-    control: &StorageReadControl,
-    work: &mut AsyncImageInput<'_>,
-) -> StorageBackendResult<BudgetedVec<Budgeted<CatalogTextRow>>> {
-    work.checkpoint().await?;
-    let mut source = catalog.begin_metadata_input(prefix, limits, control)?;
-    let mut rows = BudgetedVec::new(control.memory());
-    loop {
-        work.checkpoint().await?;
-        match source.advance()? {
-            CatalogTextStep::Pending => (),
-            CatalogTextStep::Row(row) => rows.push(row)?,
-            CatalogTextStep::Complete => return Ok(rows),
-        }
-    }
-}
-
 async fn check_claims<T: InputType>(
     format: &TypeRecordFormat,
     registry: &TypeDefinitions<T>,
@@ -214,17 +192,6 @@ async fn check_claims<T: InputType>(
         }
     }
     Ok(())
-}
-
-pub(crate) fn claim_oid(text: &str) -> Option<u32> {
-    if text.is_empty()
-        || text.len() > 10
-        || (text.len() > 1 && text.starts_with('0'))
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return None;
-    }
-    text.parse().ok()
 }
 
 pub(crate) fn decode_error(error: SQLError) -> StorageBackendError {
