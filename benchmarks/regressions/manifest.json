@@ -59125,6 +59125,195 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_import_admits_original_header_before_constructor_and_retires_after_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/destination/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Admit original provider headers through physical input and logical validation.",
+      "invariant": "Construction is admitted before allocation, premature validation preserves input and completed validation retires it once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_import_failures_and_unwinds_retire_input_without_reentry",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/destination/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Fail or unwind during physical input and validation.",
+      "invariant": "Failure consumes the owner and allowance and prevents reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scheduled_restore_path_retains_one_file_through_input_and_logical_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests/paths/scheduled.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Write and validate one pinned private file across continuation steps.",
+      "invariant": "The file closes after validation and before completion without repeating work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "durable_restore_cancellation_needs_neither_live_input_nor_an_active_token",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/restore/tests.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Cancel admitted, interrupted and completed requests after archive deletion with a cancelled token.",
+      "invariant": "Cancellation never reopens source input and preserves completed destinations and later contents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_restore_targets_never_create_a_missing_completed_database",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Open a missing completed file through both mappings and all four file modes.",
+      "invariant": "A missing destination is rejected without creating a replacement or retaining pathname admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_restore_target_never_creates_a_missing_completed_database",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Open a missing completed redb file.",
+      "invariant": "A missing destination is rejected without creating a replacement or retaining pathname admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_backup_import_recovery_rejects_partial_or_wrong_request_and_keeps_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Owned persistent restore lifecycle",
+      "workload": "Recover an incomplete import, reject a mismatched durable request and resolve complete input after archive retirement and later writes.",
+      "invariant": "Only the exact atomically completed image can recover; incomplete files stay inaccessible and later writes are never replaced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "logical_validation_admits_before_construction_and_closes_before_releasing_its_allowance",
+      "source": "crates/uqa-storage/src/backup/destination/validation/tests.rs",
+      "cases": 1,
+      "capability": "Retained private-image logical validation",
+      "workload": "Deny construction before header admission, then advance one retained validator through three windows and late cancellation.",
+      "invariant": "The same work receives each window, retires before its allowance and never reenters after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "logical_validation_failure_cancellation_unwind_and_drop_retire_the_original_owner",
+      "source": "crates/uqa-storage/src/backup/destination/validation/tests.rs",
+      "cases": 1,
+      "capability": "Retained private-image logical validation",
+      "workload": "Exercise callback error, panic, original cancellation, zero windows and explicit drop.",
+      "invariant": "Every terminal path closes the original work and releases its reservation without reentry.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "logical_validation_completed_callback_is_allocation_free_and_constructor_failure_is_retired",
+      "source": "crates/uqa-storage/src/backup/destination/validation/tests.rs",
+      "cases": 1,
+      "capability": "Retained private-image logical validation",
+      "workload": "Complete an empty callback with zero allowance and fail an admitted constructor.",
+      "invariant": "Completed work remains idempotent after cancellation and constructor failure leaves no reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_import_retains_validation_between_calls_and_never_reopens_physical_input",
+      "source": "crates/uqa-storage/src/backup/destination/tests.rs",
+      "cases": 1,
+      "capability": "Retained private-image logical validation",
+      "workload": "Reject early validation, import once, and advance logical validation through three pending/completed calls.",
+      "invariant": "Physical input is never reentered and the importer retires only after logical completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_destination_retains_validation_until_completion_and_recovers_cancellation",
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "cases": 8,
+      "capability": "Retained private-image logical validation",
+      "workload": "Validate native SQLite and SQLite KV imports in all four destination protection modes, cancel after a pending step and recover the exact image.",
+      "invariant": "One provider/validator survives each pending step, closes before preparation and preserves original metadata after recovery.",
+      "case_names": [
+        "mapping_1_SQLiteBackupMapping__Native::mode_1_0",
+        "mapping_1_SQLiteBackupMapping__Native::mode_2_1",
+        "mapping_1_SQLiteBackupMapping__Native::mode_3_2",
+        "mapping_1_SQLiteBackupMapping__Native::mode_4_3",
+        "mapping_2_SQLiteBackupMapping__KeyValue::mode_1_0",
+        "mapping_2_SQLiteBackupMapping__KeyValue::mode_2_1",
+        "mapping_2_SQLiteBackupMapping__KeyValue::mode_3_2",
+        "mapping_2_SQLiteBackupMapping__KeyValue::mode_4_3"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_destination_retains_validation_until_completion_and_recovers_cancellation",
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "cases": 1,
+      "capability": "Retained private-image logical validation",
+      "workload": "Retain a redb private-image validator across three calls, then separately cancel and recover its original imported image.",
+      "invariant": "Pending work cannot publish, provider handles retire at terminal transitions and recovery preserves the original catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "persistent_import_cancellation_retires_before_invoking_physical_or_validation_work",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/destination/tests.rs",
+      "capability": "Original restore input cancellation",
+      "workload": "Cancel the original control before physical input or before logical validation, with independently observed callback counts and destruction.",
+      "invariant": "The shared import owner rejects work before invocation and retires its original header; no failed operation can resume or publish.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

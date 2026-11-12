@@ -14,6 +14,10 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_validation;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup_validation::verify_backup_validation_continuation;
 mod catalog_index_input;
 mod catalog_statistics_input;
 pub use catalog_statistics_input::verify_catalog_statistics_input;

@@ -6,6 +6,53 @@
 
 use super::*;
 
+#[test]
+fn scheduled_restore_path_retains_one_file_through_input_and_logical_validation() {
+    struct FileOwner {
+        file: std::fs::File,
+        closed: Arc<AtomicUsize>,
+    }
+    impl Drop for FileOwner {
+        fn drop(&mut self) {
+            self.closed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let temporary = tempfile::tempdir().unwrap();
+    let pinned = Dir::open_ambient_dir(temporary.path(), cap_std::ambient_authority()).unwrap();
+    let directory = RestoreDirectory { directory: &pinned };
+    let file = directory.create_file("database").unwrap();
+    let control = StorageReadControl::with_limit(128 << 10);
+    let closed = Arc::new(AtomicUsize::new(0));
+    let mut work = directory
+        .begin_file_work("database", &control, |_| {
+            Ok(FileOwner {
+                file,
+                closed: closed.clone(),
+            })
+        })
+        .unwrap();
+    work.advance_with(|owner, _| {
+        std::io::Write::write_all(&mut owner.file, b"complete image")?;
+        owner.file.sync_all()?;
+        Ok(BackupRestoreWorkStep::Pending)
+    })
+    .unwrap();
+    assert_eq!(closed.load(Ordering::SeqCst), 0);
+    assert!(control.memory().used() > 0);
+    work.advance_with(|_, path| {
+        assert_eq!(std::fs::read(path)?, b"complete image");
+        Ok(BackupRestoreWorkStep::Complete)
+    })
+    .unwrap();
+    assert_eq!(closed.load(Ordering::SeqCst), 1);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        work.advance_with(|_, _| panic!("completed provider was invoked again"))
+            .unwrap(),
+        BackupRestoreWorkStep::Complete
+    );
+}
+
 struct Step {
     action: Option<Box<dyn FnOnce()>>,
     closed: Arc<AtomicUsize>,

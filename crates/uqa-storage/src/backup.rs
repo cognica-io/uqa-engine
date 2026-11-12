@@ -11,6 +11,8 @@
 //! remain provider-owned operations. Decoding a root alone does not prove that
 //! its objects exist, authenticate, or form a complete provider image.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod destination;
 mod error;
 mod frame;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -39,6 +41,12 @@ pub use repository::{
     VerifiedBackupImage,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use destination::{
+    BackupImageImportStep, BackupImageValidationStep, BackupImageValidationWork,
+    BackupImageValidator, BackupImportLimits, OwnedBackupImageValidation,
+    OwnedPersistentBackupImport, PersistentBackupImport, PersistentBackupTarget,
+};
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]

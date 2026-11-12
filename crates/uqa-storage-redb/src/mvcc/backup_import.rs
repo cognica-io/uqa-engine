@@ -6,9 +6,9 @@
 
 //! Exclusive fresh-file image import keeps the ordinary record owner unavailable until verification and atomic history replacement.
 
-use std::fs::File;
+use std::{fs::File, path::Path};
 
-use redb::{Database, ReadableTable};
+use redb::{Database, ReadableDatabase, ReadableTable};
 use uqa_storage::{
     backup::{BackupError, BackupLeaseInput, BackupResult, BackupRoot, ImageProvider},
     key_value::{KeyValueImageImportReader, KeyValueImageStep, KeyValueImportUnit},
@@ -46,6 +46,43 @@ pub struct RedbBackupImport<'a> {
 }
 
 impl<'a> RedbBackupImport<'a> {
+    /// Resolve the atomic completion of this exact archive and history request. Partial imports keep format zero and reject; completed imports retain later writes. No input records or history are replayed.
+    pub fn recover(
+        path: &Path,
+        root: BackupRoot,
+        request: DatabaseRestore,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        control.check()?;
+        if root.cut().format.provider() != ImageProvider::Redb
+            || root.cut().source != request.source()
+        {
+            return Err(BackupError::Invalid(
+                "redb import recovery mapping or source",
+            ));
+        }
+        let database = Database::open(path).map_err(redb_error)?;
+        let transaction = database.begin_read().map_err(redb_error)?;
+        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        if codec::read_u64(&metadata, "format")? != RECORD_FORMAT
+            || codec::database_id(&metadata)? != request.target()
+            || metadata
+                .get("backup_target")
+                .map_err(redb_error)?
+                .is_none_or(|value| value.value() != request.target().as_bytes())
+            || metadata
+                .get("backup_image")
+                .map_err(redb_error)?
+                .is_none_or(|value| value.value() != root.encode())
+        {
+            return Err(BackupError::Invalid(
+                "redb import recovery identity or incomplete input",
+            ));
+        }
+        control.check()?;
+        Ok(())
+    }
+
     pub fn new(
         file: File,
         lease: impl Into<BackupLeaseInput<'a>>,
@@ -114,7 +151,15 @@ impl<'a> RedbBackupImport<'a> {
     }
 
     pub fn advance(&mut self) -> BackupResult<RedbBackupImportStep> {
-        let result = self.advance_inner();
+        self.advance_with_window(16 * 1024)
+    }
+
+    /// Advance with a caller-selected whole-object verification window. At most one record is imported, under its existing admitted value limit.
+    pub fn advance_with_window(
+        &mut self,
+        maximum_object_bytes: usize,
+    ) -> BackupResult<RedbBackupImportStep> {
+        let result = self.advance_inner(maximum_object_bytes);
         if result.is_err() {
             self.input = None;
             self.database = None;
@@ -122,13 +167,13 @@ impl<'a> RedbBackupImport<'a> {
         result
     }
 
-    fn advance_inner(&mut self) -> BackupResult<RedbBackupImportStep> {
+    fn advance_inner(&mut self, maximum_object_bytes: usize) -> BackupResult<RedbBackupImportStep> {
         if self.complete {
             return Ok(RedbBackupImportStep::Complete);
         }
         let input = self.input.as_mut().ok_or(BackupError::Finished)?;
         let database = self.database.as_ref().expect("active import owns its file");
-        match input.advance(16 * 1024)? {
+        match input.advance(maximum_object_bytes)? {
             KeyValueImageStep::Pending => return Ok(RedbBackupImportStep::Pending),
             KeyValueImageStep::Complete => {
                 // The reader has retired its verification files and no provider sessions or snapshots were created. The exclusive history owner changes identity and format together.

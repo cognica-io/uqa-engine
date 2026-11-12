@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain private native SQLite, SQLite KV and redb restore destinations through logical validation, preserving original cancellation, exact-request recovery and later published writes.
+
 - Keep a verified archive component selected until native reconstruction explicitly completes, and decode table lifecycle metadata through the same bounded input grammar.
 
 - Resume complete table data reconstruction without changing selected component identities, replaying completed input or publishing incomplete native owners.

@@ -305,6 +305,29 @@ impl LocalRepository {
         path: impl AsRef<Path>,
         control: &StorageReadControl,
     ) -> BackupResult<BackupRestoreOperation<'_>> {
+        let mut restore = self.open_restore(id, path.as_ref(), control)?;
+        restore.resume()?;
+        Ok(restore)
+    }
+
+    /// Resolve durable cancellation without reopening source input. The returned operation is terminal: cancelled or previously completed. An interrupted caller may use its original cancelled token, and a retired archive is not required.
+    pub fn cancel_restore(
+        &self,
+        id: RestoreId,
+        path: impl AsRef<Path>,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupRestoreOperation<'_>> {
+        let mut restore = self.open_restore(id, path.as_ref(), control)?;
+        restore.cancel()?;
+        Ok(restore)
+    }
+
+    fn open_restore(
+        &self,
+        id: RestoreId,
+        path: &Path,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupRestoreOperation<'_>> {
         let completion = StorageReadControl::new(control.memory(), &CancellationToken::new());
         let restores = self.restore_directory(false, &completion)?;
         let name = directory::name(id.as_bytes());
@@ -328,7 +351,7 @@ impl LocalRepository {
         if intent.id != id {
             return Err(BackupError::Integrity);
         }
-        let destination = Destination::open(path.as_ref(), &completion)?;
+        let destination = Destination::open(path, &completion)?;
         if intent.parent != native::identity(&destination.parent)?
             || intent.name != destination.name_digest()
         {
@@ -348,7 +371,7 @@ impl LocalRepository {
         if target.intent != intent {
             return Err(BackupError::Integrity);
         }
-        let mut restore = BackupRestoreOperation {
+        Ok(BackupRestoreOperation {
             repository: self,
             directory: operation,
             target,
@@ -358,13 +381,15 @@ impl LocalRepository {
             state: State::New,
             control: control.clone(),
             completion,
-        };
-        restore.resume()?;
-        Ok(restore)
+        })
     }
 }
 
 impl BackupRestoreOperation<'_> {
+    pub const fn backup(&self) -> BackupId {
+        self.target.intent.backup
+    }
+
     pub const fn id(&self) -> RestoreId {
         self.target.intent.id
     }
@@ -374,6 +399,16 @@ impl BackupRestoreOperation<'_> {
 
     pub fn completed(&self) -> Option<RestoredDatabase> {
         (self.state == State::Complete).then(|| self.target.intent.receipt())
+    }
+
+    /// The durable owner alone determines whether publication is admitted; no source input is needed after this boundary.
+    pub fn progress(&self) -> BackupResult<BackupRestoreStep> {
+        match self.state {
+            State::New | State::Started => Ok(BackupRestoreStep::Pending),
+            State::Prepared => Ok(BackupRestoreStep::Prepared),
+            State::Complete => Ok(BackupRestoreStep::Complete),
+            State::Cancelling | State::Cancelled => Err(BackupError::Finished),
+        }
     }
 
     fn has_record(&self, name: &str, kind: FrameKind) -> BackupResult<bool> {

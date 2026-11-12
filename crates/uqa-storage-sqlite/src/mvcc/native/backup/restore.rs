@@ -128,7 +128,15 @@ impl<'a> SQLiteNativeBackupImport<'a> {
 
     /// Admit one input record, one physical row, or one fixed schema/verification boundary. Complete remains stable after later cancellation; every failed operation releases its input, row workspace and exclusive file owner.
     pub fn advance(&mut self) -> BackupResult<SQLiteBackupImportStep> {
-        let result = self.advance_inner();
+        self.advance_with_window(16 * 1024)
+    }
+
+    /// Bound the whole-object verification pass by the supplied window. Record, projection and value limits apply independently, and a zero window retires active input.
+    pub fn advance_with_window(
+        &mut self,
+        maximum_object_bytes: usize,
+    ) -> BackupResult<SQLiteBackupImportStep> {
+        let result = self.advance_inner(maximum_object_bytes);
         if result.is_err() {
             self.state = State::Failed;
             self.connection = None;
@@ -136,12 +144,18 @@ impl<'a> SQLiteNativeBackupImport<'a> {
         result
     }
 
-    fn advance_inner(&mut self) -> BackupResult<SQLiteBackupImportStep> {
+    fn advance_inner(
+        &mut self,
+        maximum_object_bytes: usize,
+    ) -> BackupResult<SQLiteBackupImportStep> {
         if matches!(self.state, State::Complete) {
             return Ok(SQLiteBackupImportStep::Complete);
         }
         if matches!(self.state, State::Failed) {
             return Err(BackupError::Finished);
+        }
+        if maximum_object_bytes == 0 {
+            return Err(BackupError::Invalid("zero object verification window"));
         }
         self.control.check()?;
         let connection = self
@@ -154,7 +168,7 @@ impl<'a> SQLiteNativeBackupImport<'a> {
             State::Reading {
                 input, namespace, ..
             } => {
-                let step = input.advance(16 * 1024)?;
+                let step = input.advance(maximum_object_bytes)?;
                 if let Some(admitted) = input.native_namespace() {
                     *namespace = Some(admitted);
                 }

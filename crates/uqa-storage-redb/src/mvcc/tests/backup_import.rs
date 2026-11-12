@@ -178,6 +178,59 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
     );
 }
 
+#[test]
+fn redb_backup_import_recovery_rejects_partial_or_wrong_request_and_keeps_later_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let source = RedbStorage::open(directory.path().join("source")).unwrap();
+    source.store().put(b"value", b"captured").unwrap();
+    let (repository, root) = capture(&source, &directory.path().join("repository"), &control);
+    drop(source);
+    let request = DatabaseRestore::new(root.cut().source).unwrap();
+    let partial = directory.path().join("partial");
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    drop(
+        RedbBackupImport::new(file(&partial), lease, request, 1 << 20, 2 << 20, &control).unwrap(),
+    );
+    assert!(matches!(
+        RedbBackupImport::recover(&partial, root, request, &control),
+        Err(BackupError::Invalid(_))
+    ));
+    assert!(RedbStorage::open(&partial).is_err());
+
+    let path = directory.path().join("complete");
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let mut import =
+        RedbBackupImport::new(file(&path), lease, request, 1 << 20, 2 << 20, &control).unwrap();
+    complete_import(&mut import);
+    drop(import);
+    repository.remove_backup(root.backup(), &control).unwrap();
+    RedbBackupImport::recover(&path, root, request, &control).unwrap();
+    assert!(RedbBackupImport::recover(
+        &path,
+        root,
+        DatabaseRestore::new(root.cut().source).unwrap(),
+        &control
+    )
+    .is_err());
+    let restored = RedbStorage::open(&path).unwrap();
+    restored
+        .store()
+        .put(b"value", b"after publication")
+        .unwrap();
+    drop(restored);
+    RedbBackupImport::recover(&path, root, request, &control).unwrap();
+    let restored =
+        RedbStorage::open_restored(&path, request, VersionedSessionOptions::default(), &control)
+            .unwrap();
+    assert_eq!(
+        restored.store().get(b"value").unwrap(),
+        Some(b"after publication".to_vec())
+    );
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn verify_completed_import(
     import: &mut RedbBackupImport<'_>,
     expected_records: u64,
