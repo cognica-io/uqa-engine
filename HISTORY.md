@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain canonical vector handle names, concrete allocations and shared SQLite cache state under their original reconstruction allowance while preserving subsequent writes and rollback.
+
 - Prepare every stored table column declaration and its bound authority before physical hydration. Decode columns once, retire their JSON immediately and retain original physical fields until native table assembly.
 
 - Keep admitted document and text-index handles in Engine table, snapshot and capture cells. Replacing a physical handle retires its own allocation allowance while retained tables keep their original handles alive.

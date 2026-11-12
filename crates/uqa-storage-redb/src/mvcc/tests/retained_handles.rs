@@ -15,6 +15,8 @@ use uqa_storage::{
     PersistentStorageBackend, StorageName,
 };
 
+mod vectors;
+
 #[test]
 fn redb_controlled_handles_preserve_writes_rollback_and_reopen_after_input_retirement() {
     let directory = tempfile::tempdir().unwrap();

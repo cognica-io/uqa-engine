@@ -247,6 +247,27 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         }
     }
 
+    fn canonical_vector_index_with_control(
+        &self,
+        table: crate::StorageName,
+        field: crate::StorageName,
+        dimensions: u32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::StorageHandle<dyn VectorIndex>> {
+        table.check_control(control)?;
+        field.check_control(control)?;
+        let memory = control.memory().reserve(size_of::<KeyValueVectorIndex>())?;
+        let value: Box<dyn VectorIndex> = Box::new(KeyValueVectorIndex::from_names(
+            self.store.clone(),
+            table,
+            field,
+            dimensions,
+        ));
+        let value = uqa_core::memory::Budgeted::new(value, memory);
+        control.check()?;
+        Ok(value.into())
+    }
+
     fn diskann_index(
         &self,
         binding: crate::diskann_index::DiskANNIndexBinding<'_>,

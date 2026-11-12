@@ -523,6 +523,20 @@ pub trait PersistentStorageBackend: Send + Sync {
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>>;
 
+    /// Restore the canonical vector field under its original admitted table and field names. This opens the existing exact vector records without loading or rebuilding a catalog-selected acceleration index. The concrete box and any shared handle state retain their construction allowance; completed handles do not retain input cancellation.
+    fn canonical_vector_index_with_control(
+        &self,
+        _table: StorageName,
+        _field: StorageName,
+        _dimensions: u32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn VectorIndex>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled canonical vector handles are not implemented by this backend".into(),
+        ))
+    }
+
     /// Open a catalog-bound `DiskANN` owner on this exact backend session. Creation joins the active catalog transaction and returns an initialized index; restoration never builds missing state.
     fn diskann_index(
         &self,

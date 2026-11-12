@@ -9,6 +9,8 @@ use uqa_analysis::{AnalyzerDefinition, AnalyzerResources};
 use uqa_core::memory::{Budgeted, BudgetedString};
 use uqa_storage::{inverted_index::AnalyzerDefault, read_control::StorageReadControl, StorageName};
 
+mod vectors;
+
 fn backend(mode: &str) -> Arc<dyn PersistentStorageBackend> {
     match mode {
         "native" => {

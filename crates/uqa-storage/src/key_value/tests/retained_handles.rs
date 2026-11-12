@@ -9,6 +9,8 @@ use crate::{inverted_index::AnalyzerDefault, read_control::StorageReadControl, S
 use uqa_analysis::{AnalyzerDefinition, AnalyzerResources};
 use uqa_core::memory::{Budgeted, BudgetedString};
 
+mod vectors;
+
 fn name(control: &StorageReadControl) -> StorageName {
     let mut value = BudgetedString::new(control.memory());
     value.push_str("public.notes").unwrap();

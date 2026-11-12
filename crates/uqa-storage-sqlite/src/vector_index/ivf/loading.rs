@@ -26,7 +26,10 @@ impl SQLiteIVFIndex {
                         trained_size, deletes_since_train, vector_count
                    FROM _ivf_indexes
                   WHERE table_name = ?1 AND field = ?2",
-                    params![self.persistent.table, self.persistent.field],
+                    params![
+                        self.persistent.table.as_str(),
+                        self.persistent.field.as_str()
+                    ],
                     |row| {
                         Ok((
                             row.get::<_, i64>(0)?,
@@ -53,7 +56,10 @@ impl SQLiteIVFIndex {
                   ORDER BY centroid_id",
             )?;
             let rows = statement.query_map(
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
                 |row| row.get::<_, Vec<u8>>(0),
             )?;
             let mut centroids = Vec::new();
@@ -84,8 +90,8 @@ impl SQLiteIVFIndex {
             for centroid in centroids {
                 let rows = statement.query_map(
                     params![
-                        self.persistent.table,
-                        self.persistent.field,
+                        self.persistent.table.as_str(),
+                        self.persistent.field.as_str(),
                         usize_to_i64("centroid_id", *centroid)?
                     ],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)),

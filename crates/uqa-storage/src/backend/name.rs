@@ -33,6 +33,14 @@ impl StorageName {
         }
     }
 
+    /// Native buffers need admission from their enclosing owner. Shared admitted names already retain their payload allowance and must not be charged again.
+    pub fn unadmitted_payload_bytes(&self) -> usize {
+        match &self.0 {
+            Owner::Native(value) => value.capacity(),
+            Owner::Admitted(_) => 0,
+        }
+    }
+
     /// A controlled factory admits only a name owned by that same restore allowance.
     pub fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         control.check()?;

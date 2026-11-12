@@ -24,8 +24,16 @@ fn name(control: &StorageReadControl, text: &str) -> StorageName {
 
 #[test]
 fn admitted_storage_names_share_original_buffers_until_the_last_handle_retires() {
+    let mut native = String::with_capacity(128);
+    native.push_str("public.table");
+    let capacity = native.capacity();
+    assert_eq!(
+        StorageName::from(native).unadmitted_payload_bytes(),
+        capacity
+    );
     let control = StorageReadControl::with_limit(1 << 20);
     let original = name(&control, "공개.테이블");
+    assert_eq!(original.unadmitted_payload_bytes(), 0);
     let pointer = original.as_ptr();
     let bytes = control.memory().used();
     let clone = allocation_counter::measure(|| {

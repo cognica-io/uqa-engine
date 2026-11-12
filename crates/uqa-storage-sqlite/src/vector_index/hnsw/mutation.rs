@@ -89,7 +89,11 @@ impl SQLiteHNSWIndex {
             |connection| {
                 connection.execute(
                     "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                    params![self.persistent.table, self.persistent.field, encoded],
+                    params![
+                        self.persistent.table.as_str(),
+                        self.persistent.field.as_str(),
+                        encoded
+                    ],
                 )?;
                 Ok(())
             },
@@ -107,7 +111,10 @@ impl SQLiteHNSWIndex {
         self.mutate_graph(HNSWIndex::clear, |connection| {
             connection.execute(
                 "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2",
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
             )?;
             Ok(())
         })
@@ -156,13 +163,17 @@ fn replace_canonical(
 ) -> Result<()> {
     connection.execute(
         "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-        params![index.persistent.table, index.persistent.field, doc_id],
+        params![
+            index.persistent.table.as_str(),
+            index.persistent.field.as_str(),
+            doc_id
+        ],
     )?;
     let mut insert = connection.prepare("INSERT INTO _vectors (table_name, field, doc_id, vector_ordinal, vector) VALUES (?1, ?2, ?3, ?4, ?5)")?;
     for (ordinal, vector) in vectors {
         insert.execute(params![
-            index.persistent.table,
-            index.persistent.field,
+            index.persistent.table.as_str(),
+            index.persistent.field.as_str(),
             doc_id,
             ordinal,
             vector

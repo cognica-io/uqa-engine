@@ -57588,6 +57588,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_handles_keep_original_names_after_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/tests/retained_handles/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Open a canonical vector handle with admitted names, cancel input and mutate its exact records.",
+      "invariant": "Construction allocates only the concrete handle and retains the original name allowances until final retirement; canonical reads and writes remain usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "controlled_vector_handle_rejection_retires_original_names_and_headers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/tests/retained_handles/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Mix name allowances and reject construction under exhausted or cancelled input.",
+      "invariant": "Foreign ownership is rejected and typed memory/cancellation failures retire every unpublished allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_controlled_vector_handles_preserve_native_reads_and_rollback",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Open native SQLite, SQLite KV and legacy SQLite canonical handles, cancel input and query committed/private/rolled-back records.",
+      "invariant": "Canonical scores, record visibility and later ordinary reopen preserve existing semantics while the original box/name/cache allowance retires with its handle.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_controlled_vector_handle_failures_retire_names_and_cache",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Deny concrete-box admission and deny the later shared-cache allocation on native/legacy SQLite, with cancellation on every provider.",
+      "invariant": "Partial construction retains the typed failure and releases provisional box/cache owners without releasing surviving input names.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_controlled_vector_handles_preserve_committed_records_after_reopen",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/retained_handles/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Write and roll back actual redb vectors after input cancellation, close all handles and reopen the file.",
+      "invariant": "Only committed canonical vectors survive, exact query output is preserved and the original input allowance retires completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_vector_snapshots_keep_original_shared_handle_allowances",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/backend/retained_tests/vectors.rs",
+      "capability": "Persistent canonical vector handle ownership",
+      "workload": "Retain native/legacy SQLite vector snapshots, cancel construction and retire the original concrete handle.",
+      "invariant": "Only the original concrete box allowance retires first; shared names and cache header retain their original allowances until the final snapshot is destroyed.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

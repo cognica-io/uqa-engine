@@ -47,8 +47,8 @@ impl KeyValueDiskANNCanonical {
         control.check()?;
         let bytes = [
             size_of::<KeyValueDiskANNHandle>(),
-            self.index.table.capacity(),
-            self.index.field.capacity(),
+            self.index.table.unadmitted_payload_bytes(),
+            self.index.field.unadmitted_payload_bytes(),
             index.schema.capacity(),
             index.name.capacity(),
         ]

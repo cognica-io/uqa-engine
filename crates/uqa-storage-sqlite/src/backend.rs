@@ -329,6 +329,28 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(value.into())
     }
 
+    fn canonical_vector_index_with_control(
+        &self,
+        table: uqa_storage::StorageName,
+        field: uqa_storage::StorageName,
+        dimensions: u32,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::StorageHandle<dyn VectorIndex>> {
+        table.check_control(control)?;
+        field.check_control(control)?;
+        let memory = control.memory().reserve(size_of::<SQLiteVectorIndex>())?;
+        let value: Box<dyn VectorIndex> = Box::new(SQLiteVectorIndex::from_names(
+            self.conn.clone(),
+            table,
+            field,
+            dimensions,
+            control,
+        )?);
+        let value = uqa_core::memory::Budgeted::new(value, memory);
+        control.check()?;
+        Ok(value.into())
+    }
+
     fn vector_index(
         &self,
         table: &str,
