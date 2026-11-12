@@ -19,6 +19,7 @@ mod backup_import;
 mod backup_metadata;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod backup_restore;
+mod catalog_names;
 mod commit;
 mod diskann;
 mod identifiers;

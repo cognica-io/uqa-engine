@@ -18,7 +18,9 @@ use crate::{StorageBackendError, StorageBackendResult};
 mod backup_validation;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use backup_validation::verify_backup_validation_continuation;
+mod catalog_graph_names;
 mod catalog_index_input;
+pub use catalog_graph_names::verify_catalog_graph_name_input;
 mod catalog_schema_input;
 pub use catalog_schema_input::verify_catalog_schema_input;
 mod catalog_statistics_input;

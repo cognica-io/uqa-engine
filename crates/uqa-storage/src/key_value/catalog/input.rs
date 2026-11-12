@@ -39,16 +39,43 @@ impl KeyValueCatalog {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogInput<T>> {
+        CatalogInput::new(
+            self.retained_input_view(prefix, control)?,
+            prefix,
+            decode,
+            limits,
+            control,
+        )
+    }
+
+    pub(super) fn graph_name_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogInput<String>> {
+        let prefix = &[super::TAG_NAMED_GRAPH];
+        CatalogInput::new_keys(
+            self.retained_input_view(prefix, control)?,
+            prefix,
+            decode_graph_name,
+            limits,
+            control,
+        )
+    }
+
+    fn retained_input_view(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<std::sync::Arc<dyn crate::key_value::KeyValueRead + Send + Sync>>
+    {
         control.check()?;
         if !self.store.transaction_model().is_versioned() {
             return Err(StorageBackendError::Other(
                 "retained catalog input requires a versioned read owner".into(),
             ));
         }
-        let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
-            read.retain(&[prefix])
-        })?;
-        CatalogInput::new(read, prefix, decode, limits, control)
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| read.retain(&[prefix]))
     }
 
     pub(super) fn index_input(
@@ -151,3 +178,20 @@ fn relation(
 
 #[cfg(test)]
 mod tests;
+
+fn decode_graph_name(
+    key: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<String>>> {
+    let name = read_str_ref(key, &mut 1)?;
+    Ok(Some(
+        ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(name)?
+        .into_budgeted()
+        .expect("retained graph name"),
+    ))
+}

@@ -597,6 +597,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.drop_named_graph_impl(name)
     }
 
+    fn begin_graph_name_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::input::CatalogInput<String>> {
+        self.graph_name_input(limits, control)
+    }
+
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.load_named_graphs_impl()
     }

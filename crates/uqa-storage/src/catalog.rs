@@ -260,6 +260,18 @@ pub struct SequenceRow {
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Retain physical graph-name records from one selected view. Consumers finish complete membership before validating label metadata; Key/Value name records do not read their ignored payloads.
+    fn begin_graph_name_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<String>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained graph name input is not supported".into(),
+        ))
+    }
+
     /// Retain complete foreign definitions and independent relation ACLs from one original view, preserving physical errors before publication and the provider's original result order.
     fn begin_foreign_table_load(
         &self,

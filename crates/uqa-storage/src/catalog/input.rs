@@ -48,6 +48,15 @@ pub enum CatalogInputStep<T> {
 pub type CatalogRowDecoder<T> =
     fn(&[u8], &[u8], &StorageReadControl) -> StorageBackendResult<Option<Budgeted<T>>>;
 
+/// Decode a key-only catalog family without observing or allocating its ignored value.
+pub type CatalogKeyDecoder<T> =
+    fn(&[u8], &StorageReadControl) -> StorageBackendResult<Option<Budgeted<T>>>;
+
+enum Decoder<T> {
+    Row(CatalogRowDecoder<T>),
+    Key(CatalogKeyDecoder<T>),
+}
+
 /// Select a live key before reading its value. The selection preserves original physical key validation and cannot reenter persistence.
 pub type CatalogKeyFilter = fn(&[u8], &StorageReadControl) -> StorageBackendResult<bool>;
 pub type CatalogKeyPrefixFilter =
@@ -72,7 +81,7 @@ struct Input<T> {
     read: Arc<dyn KeyValueRead + Send + Sync>,
     prefix: BudgetedVec<u8>,
     after: Option<BudgetedVec<u8>>,
-    decode: CatalogRowDecoder<T>,
+    decode: Decoder<T>,
     select: Option<CatalogKeyFilter>,
     key_prefix: Option<KeyPrefix>,
     limits: CatalogInputLimits,
@@ -108,7 +117,18 @@ impl<T> CatalogInput<T> {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        Self::create(read, prefix, None, decode, limits, control)
+        Self::create(read, prefix, None, Decoder::Row(decode), limits, control)
+    }
+
+    /// Consume the same merged key slots and tombstones as row input while never materializing values.
+    pub fn new_keys(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        prefix: &[u8],
+        decode: CatalogKeyDecoder<T>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::create(read, prefix, None, Decoder::Key(decode), limits, control)
     }
 
     /// Retain the same bounded stream while rejecting unrelated keys before any value read. Each rejected live key still consumes its one physical slot.
@@ -120,7 +140,14 @@ impl<T> CatalogInput<T> {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        Self::create(read, prefix, Some(select), decode, limits, control)
+        Self::create(
+            read,
+            prefix,
+            Some(select),
+            Decoder::Row(decode),
+            limits,
+            control,
+        )
     }
 
     /// Filter a decoded key prefix before reading a value. The original provider order and one-slot polling are retained, and the prefix allocation belongs to the cursor's original allowance.
@@ -135,7 +162,7 @@ impl<T> CatalogInput<T> {
         control.check_value_size(selection.0.len(), limits.maximum_key_bytes)?;
         let mut selected = BudgetedString::new(control.memory());
         selected.push_str(selection.0)?;
-        let mut input = Self::create(read, prefix, None, decode, limits, control)?;
+        let mut input = Self::create(read, prefix, None, Decoder::Row(decode), limits, control)?;
         let State::Reading(value) = &mut input.state else {
             unreachable!("new catalog cursor");
         };
@@ -150,7 +177,7 @@ impl<T> CatalogInput<T> {
         read: Arc<dyn KeyValueRead + Send + Sync>,
         prefix: &[u8],
         select: Option<CatalogKeyFilter>,
-        decode: CatalogRowDecoder<T>,
+        decode: Decoder<T>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
@@ -234,17 +261,20 @@ impl<T> Input<T> {
                 (filter.select)(key, &filter.prefix, &self.control)
             })?;
         if selected {
-            self.read.visit_value_bounded(
-                key,
-                self.limits.maximum_value_bytes,
-                &self.control,
-                &mut |value| {
-                    let value =
-                        value.ok_or_else(|| invalid("selected catalog record is absent"))?;
-                    row = (self.decode)(key, value, &self.control)?;
-                    Ok(())
-                },
-            )?;
+            match &self.decode {
+                Decoder::Key(decode) => row = decode(key, &self.control)?,
+                Decoder::Row(decode) => self.read.visit_value_bounded(
+                    key,
+                    self.limits.maximum_value_bytes,
+                    &self.control,
+                    &mut |value| {
+                        let value =
+                            value.ok_or_else(|| invalid("selected catalog record is absent"))?;
+                        row = decode(key, value, &self.control)?;
+                        Ok(())
+                    },
+                )?,
+            }
         }
         self.control.check()?;
         self.read.control().check()?;

@@ -62549,6 +62549,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_key_input_ignores_values_and_counts_tombstones_as_original_slots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests/keys.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Read original physical named-graph membership through one-key windows and retain private rows through source rollback and closure.",
+      "invariant": "Ignored Key/Value payloads are never materialized; original native names, membership, controls and terminal ownership are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_key_input_retires_original_controls_invalid_keys_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests/keys.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Read original physical named-graph membership through one-key windows and retain private rows through source rollback and closure.",
+      "invariant": "Ignored Key/Value payloads are never materialized; original native names, membership, controls and terminal ownership are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_graph_name_input_preserves_private_membership_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Read original physical named-graph membership through one-key windows and retain private rows through source rollback and closure.",
+      "invariant": "Ignored Key/Value payloads are never materialized; original native names, membership, controls and terminal ownership are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_graph_name_input_preserves_private_membership_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Read original physical named-graph membership through one-key windows and retain private rows through source rollback and closure.",
+      "invariant": "Ignored Key/Value payloads are never materialized; original native names, membership, controls and terminal ownership are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "redb_graph_name_input_preserves_private_membership_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/catalog_names.rs",
+      "capability": "Retained graph catalog input",
+      "workload": "Read original physical named-graph membership through one-key windows and retain private rows through source rollback and closure.",
+      "invariant": "Ignored Key/Value payloads are never materialized; original native names, membership, controls and terminal ownership are preserved.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -571,6 +571,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::drop_named_graph(self, name))
     }
 
+    fn begin_graph_name_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::input::CatalogInput<String>> {
+        self.native_graph_name_input(limits, control)
+    }
+
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         into_storage_result(Catalog::load_named_graphs(self))
     }

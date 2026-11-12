@@ -21,6 +21,14 @@ use uqa_storage::{
 };
 
 impl Catalog {
+    pub(in crate::catalog) fn native_graph_name_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogInput<String>> {
+        self.native_row_input(Family::NamedGraphs, decode_graph_name, limits, control)
+    }
+
     pub(in crate::catalog) fn native_schema_load(
         &self,
         limits: CatalogInputLimits,
@@ -116,4 +124,24 @@ fn decode_index(
         [text(3)?, table, text(6)?, text(7)?],
         (row[8] != ValueRef::Null).then(|| text(8)).transpose()?,
     )))
+}
+
+fn decode_graph_name(
+    key: &[u8],
+    value: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<String>>> {
+    let (_, row) = decode_record(key, value, control)
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+    let name = string_ref(row[0])?;
+    Ok(Some(
+        ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(name)?
+        .into_budgeted()
+        .expect("retained native graph name"),
+    ))
 }
