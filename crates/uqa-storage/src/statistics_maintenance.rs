@@ -10,6 +10,7 @@ use crate::{CatalogFacade, StorageBackendResult};
 use serde::{Deserialize, Serialize};
 
 mod image;
+mod stored;
 pub use image::StatisticsMaintenanceImageReader;
 
 const MAX_DIRTY_AGE_MS: u64 = 60_000;
@@ -85,13 +86,15 @@ impl StatisticsMaintenance {
         object_id: [u8; 16],
     ) -> StorageBackendResult<Self> {
         let state = Self::load(catalog, table)?;
-        Ok(
-            if state.object_id.is_some_and(|stored| stored != object_id) {
-                Self::default()
-            } else {
-                state
-            },
-        )
+        Ok(state.for_object(object_id))
+    }
+
+    fn for_object(self, object_id: [u8; 16]) -> Self {
+        if self.object_id.is_some_and(|stored| stored != object_id) {
+            Self::default()
+        } else {
+            self
+        }
     }
 
     pub fn save(&self, catalog: &dyn CatalogFacade, table: &str) -> StorageBackendResult<()> {

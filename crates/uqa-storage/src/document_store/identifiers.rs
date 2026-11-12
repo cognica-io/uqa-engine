@@ -13,8 +13,12 @@ use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendRes
 
 pub mod conformance;
 
+mod stored;
 #[cfg(test)]
 mod tests;
+pub use stored::load_legacy_document_id_watermark_from;
+
+const LEGACY_KEY_PREFIX: &str = "uqa.table_next_id.v1:";
 
 /// The durable object and storage generation of a table, which name the namespace of its document identities. A claim about a table's identities, such as that one was never used, holds for the namespace its watermark was read in and for no other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,7 +170,7 @@ fn document_namespace(object: [u8; 16], generation: [u8; 16]) -> [u8; 41] {
 }
 
 pub fn legacy_document_id_metadata_key(table: &str) -> String {
-    format!("uqa.table_next_id.v1:{table}")
+    format!("{LEGACY_KEY_PREFIX}{table}")
 }
 
 /// Combine visible rows with a persisted or retained reservation floor without losing the full-width exhaustion sentinel.

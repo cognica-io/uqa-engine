@@ -58160,6 +58160,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_statistics_maintenance_matches_struct_defaults_fields_and_unsigned_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/stored/tests.rs",
+      "capability": "Stored statistics maintenance",
+      "workload": "Compare complete and partial structs, raw field order, positional input, ignored values and malformed numbers with the public typed decoder; interrupt each suspended constructor.",
+      "invariant": "Native inline state matches the original decoder, each cancellation owner retires the candidate, and a 1 MiB ignored value yields at least 256 times without a payload tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_statistics_maintenance_retires_every_pending_cancellation_window_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/stored/tests.rs",
+      "capability": "Stored statistics maintenance",
+      "workload": "Compare complete and partial structs, raw field order, positional input, ignored values and malformed numbers with the public typed decoder; interrupt each suspended constructor.",
+      "invariant": "Native inline state matches the original decoder, each cancellation owner retires the candidate, and a 1 MiB ignored value yields at least 256 times without a payload tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_statistics_maintenance_skips_large_values_in_bounded_polls",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/statistics_maintenance/stored/tests.rs",
+      "capability": "Stored statistics maintenance",
+      "workload": "Compare complete and partial structs, raw field order, positional input, ignored values and malformed numbers with the public typed decoder; interrupt each suspended constructor.",
+      "invariant": "Native inline state matches the original decoder, each cancellation owner retires the candidate, and a 1 MiB ignored value yields at least 256 times without a payload tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_document_reservations_match_full_width_unsigned_text_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/identifiers/stored/tests.rs",
+      "capability": "Stored document reservations",
+      "workload": "Parse full-width counters, the exhaustion sentinel, arbitrary leading zeros, plus signs and invalid text; interrupt every suspended read.",
+      "invariant": "Values and diagnostics match u128 parsing, fixed 256-byte progress allocates no parsing scratch and interrupted input releases every owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_document_reservations_yield_and_retire_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/identifiers/stored/tests.rs",
+      "capability": "Stored document reservations",
+      "workload": "Parse full-width counters, the exhaustion sentinel, arbitrary leading zeros, plus signs and invalid text; interrupt every suspended read.",
+      "invariant": "Values and diagnostics match u128 parsing, fixed 256-byte progress allocates no parsing scratch and interrupted input releases every owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_table_metadata_preserves_identity_reservations_and_read_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent table metadata input",
+      "workload": "Read committed and private table maintenance and document reservations through actual providers, then delete, roll back and retire the source.",
+      "invariant": "Relation identity selection, missing and empty values, original cancellation and key/value/memory limits preserve ordinary lookup semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_table_metadata_preserves_identity_reservations_and_read_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent table metadata input",
+      "workload": "Read committed and private table maintenance and document reservations through actual providers, then delete, roll back and retire the source.",
+      "invariant": "Relation identity selection, missing and empty values, original cancellation and key/value/memory limits preserve ordinary lookup semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_table_metadata_preserves_identity_reservations_and_read_limits",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Persistent table metadata input",
+      "workload": "Read committed and private table maintenance and document reservations through actual providers, then delete, roll back and retire the source.",
+      "invariant": "Relation identity selection, missing and empty values, original cancellation and key/value/memory limits preserve ordinary lookup semantics.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

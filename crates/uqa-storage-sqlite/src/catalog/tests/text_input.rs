@@ -8,6 +8,24 @@ use crate::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
 use uqa_storage::PersistentStorageProvider;
 
 #[test]
+fn sqlite_native_table_metadata_preserves_identity_reservations_and_read_limits() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    uqa_storage::key_value::conformance::verify_table_metadata_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_table_metadata_preserves_identity_reservations_and_read_limits() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_table_metadata_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn sqlite_native_metadata_reads_preserve_private_text_and_original_allowance() {
     let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
     uqa_storage::key_value::conformance::verify_controlled_metadata_reads(

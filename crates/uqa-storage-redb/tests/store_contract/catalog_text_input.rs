@@ -7,6 +7,16 @@
 use super::*;
 
 #[test]
+fn redb_table_metadata_preserves_identity_reservations_and_read_limits() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("table-metadata.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_table_metadata_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_metadata_reads_preserve_private_text_and_original_allowance() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("metadata-input.redb")).unwrap();
