@@ -62114,6 +62114,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_table_row_input_borrows_overwritten_arbitrary_precision_numbers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/input/table/row/tests.rs",
+      "capability": "Borrowed discarded catalog numbers",
+      "workload": "Decode an overwritten 2 MiB arbitrary-precision number under an 8 KiB allowance and measure actual peak allocations.",
+      "invariant": "Original accepted authority is preserved without constructing an unadmitted discarded number.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "foreign_catalog_envelopes_borrow_overwritten_arbitrary_precision_numbers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/foreign_input/row/tests.rs",
+      "capability": "Borrowed discarded catalog numbers",
+      "workload": "Decode an overwritten 2 MiB arbitrary-precision number under an 8 KiB allowance and measure actual peak allocations.",
+      "invariant": "Original accepted authority is preserved without constructing an unadmitted discarded number.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -134,6 +134,19 @@ fn foreign_catalog_envelopes_retain_exact_payload_allocations_and_retire_denied_
 }
 
 #[test]
+fn foreign_catalog_envelopes_borrow_overwritten_arbitrary_precision_numbers() {
+    let text = envelope(&format!(
+        r#""role_owner":{},"role_owner":"owner""#,
+        "9".repeat(2 << 20)
+    ));
+    compare(&text);
+    let control = StorageReadControl::with_limit(8192);
+    let allocation = allocation_counter::measure(|| drop(decode(&text, &control).unwrap()));
+    assert_eq!(control.memory().used(), 0);
+    assert!(allocation.bytes_max < 8192, "{allocation:?}");
+}
+
+#[test]
 fn foreign_catalog_envelopes_reject_every_truncated_native_record() {
     let text = envelope(r#""role_owner":"owner""#);
     for end in 0..text.len() {

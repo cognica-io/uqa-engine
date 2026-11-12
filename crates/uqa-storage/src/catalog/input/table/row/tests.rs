@@ -34,6 +34,19 @@ fn compare(text: &str) {
 }
 
 #[test]
+fn catalog_table_row_input_borrows_overwritten_arbitrary_precision_numbers() {
+    let text = envelope(&format!(
+        r#""role_owner":{},"role_owner":"owner""#,
+        "9".repeat(2 << 20)
+    ));
+    compare(&text);
+    let control = StorageReadControl::with_limit(8192);
+    let allocation = allocation_counter::measure(|| drop(row(text.as_bytes(), &control).unwrap()));
+    assert_eq!(control.memory().used(), 0);
+    assert!(allocation.bytes_max < 8192, "{allocation:?}");
+}
+
+#[test]
 fn catalog_table_row_input_preserves_flattened_security_versions_and_original_fields() {
     let owner = serde_json::to_string(&RoleIdentity::BOOTSTRAP).unwrap();
     let security = serde_json::to_value(RelationSecurityRow::bootstrap()).unwrap();

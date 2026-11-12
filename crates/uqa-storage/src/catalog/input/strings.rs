@@ -175,7 +175,7 @@ pub(crate) fn take<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> T {
     value
 }
 
-/// Flattened serde content validates every retained or overwritten value before field projection, including numeric range and strict string escapes.
+/// Flattened serde content validates every retained or overwritten value before field projection. Arbitrary-precision numbers keep their original lexical representation; strict strings and container depth are checked without constructing a discarded numeric owner.
 pub(crate) fn validate_content(
     bytes: &[u8],
     remaining_depth: usize,
@@ -183,10 +183,6 @@ pub(crate) fn validate_content(
 ) -> StorageBackendResult<()> {
     let mut reader = JsonReader::from_slice(bytes, control.memory(), control.cancellation())
         .with_depth_limit(remaining_depth);
-    while let Some(event) = reader.next_event().map_err(json_error)? {
-        if let JsonToken::Number(number) = event.token {
-            let _ = serde_json::from_str::<serde_json::Number>(number)?;
-        }
-    }
+    while reader.next_event().map_err(json_error)?.is_some() {}
     Ok(())
 }
