@@ -63317,6 +63317,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_registry_validation_preserves_ordered_diagnostics_before_owner_resolution",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/enum_type/validation/tests.rs",
+      "capability": "Retained type registry validation",
+      "workload": "enum registry validation preserves ordered diagnostics before owner resolution.",
+      "invariant": "Ordinary and retained paths preserve identity, OID, name, label and owner error order with admitted scratch and terminal retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_registry_validation_bounds_entry_label_and_role_work_and_releases_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/enum_type/validation/tests.rs",
+      "capability": "Retained type registry validation",
+      "workload": "enum registry validation bounds entry label and role work and releases scratch.",
+      "invariant": "Ordinary and retained paths preserve identity, OID, name, label and owner error order with admitted scratch and terminal retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enum_registry_validation_retires_native_scratch_on_every_terminal_boundary",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/enum_type/validation/tests.rs",
+      "capability": "Retained type registry validation",
+      "workload": "enum registry validation retires native scratch on every terminal boundary.",
+      "invariant": "Ordinary and retained paths preserve identity, OID, name, label and owner error order with admitted scratch and terminal retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shell_registry_validation_preserves_ordered_identity_oid_name_and_owner_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/shell_type/validation/tests.rs",
+      "capability": "Retained type registry validation",
+      "workload": "shell registry validation preserves ordered identity oid name and owner errors.",
+      "invariant": "Ordinary and retained paths preserve identity, OID, name, label and owner error order with admitted scratch and terminal retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shell_registry_validation_preserves_native_generations_across_windows_and_terminal_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/shell_type/validation/tests.rs",
+      "capability": "Retained type registry validation",
+      "workload": "shell registry validation preserves native generations across windows and terminal failures.",
+      "invariant": "Ordinary and retained paths preserve identity, OID, name, label and owner error order with admitted scratch and terminal retirement.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

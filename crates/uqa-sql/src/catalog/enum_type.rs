@@ -10,13 +10,9 @@
 //! `pg_enum.enumsortorder` that reproduces `PostgreSQL`'s float4 midpoint and renumbering
 //! algorithm. Renumbering changes only the catalog column; stored values keep their keys.
 
-use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, EnumLabelKey, RelationIdentity};
 
-use super::roles::identity::RoleSubject;
 use crate::ast::{ColumnType, EnumNeighbor, EnumTypeReference};
 use crate::SQLError;
 
@@ -279,57 +275,10 @@ impl<Owner> StoredEnum<Owner> {
     }
 }
 
-/// Validate a complete enum registry before restoration exposes it or publication persists it.
-pub fn validate_enum_registry(
-    registry: &impl super::type_definitions::TypeDefinitionView<StoredEnum>,
-    roles: &RoleDefinitions,
-) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for (name, definition) in registry.iter() {
-        if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
-            return Err(format!("invalid or duplicate enum identity for `{name}`"));
-        }
-        for oid in [definition.oid, definition.array_oid]
-            .into_iter()
-            .chain(definition.label_oids())
-        {
-            if oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(oid) {
-                return Err(format!("invalid or duplicate enum OID {oid} for `{name}`"));
-            }
-        }
-        if definition.identity.schema.is_empty()
-            || definition.identity.name.is_empty()
-            || definition.identity.qualified_name() != *name
-            || !super::array_type_names::valid_type_name(&definition.array_name)
-        {
-            return Err(format!("inconsistent enum name for `{name}`"));
-        }
-        let mut labels = BTreeSet::new();
-        for label in &definition.labels {
-            if label.label.len() > MAX_ENUM_LABEL_BYTES
-                || !labels.insert(label.label.as_str())
-                || !label.sort_order.is_finite()
-            {
-                return Err(format!("invalid enum label for `{name}`"));
-            }
-        }
-        if definition
-            .labels
-            .windows(2)
-            .any(|pair| pair[0].key >= pair[1].key || pair[0].sort_order >= pair[1].sort_order)
-        {
-            return Err(format!("enum labels for `{name}` are out of order"));
-        }
-        if !definition.owner.is_valid() || definition.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "enum `{name}` references missing role incarnation {}",
-                definition.owner.oid
-            ));
-        }
-    }
-    Ok(())
-}
+mod validation;
+pub use validation::{
+    validate_enum_registry, validate_enum_registry_from_input, validate_enum_registry_with_control,
+};
 
 #[cfg(test)]
 mod tests;
