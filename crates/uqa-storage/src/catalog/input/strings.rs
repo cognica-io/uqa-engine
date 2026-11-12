@@ -10,7 +10,7 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 use serde::de::Error as _;
 use uqa_core::{
     json::{decode_json_string, JsonReadError, JsonReader, JsonToken},
-    memory::Budgeted,
+    memory::{Budgeted, MemoryReservation},
 };
 
 /// Decode the stored struct's map or positional representation. Unknown map fields remain ignored, duplicate known fields fail, and nullable fields retain their absent/null default.
@@ -134,7 +134,7 @@ fn string_field(
     }
 }
 
-fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
+pub(super) fn next<'a>(reader: &mut JsonReader<'a, '_>) -> StorageBackendResult<JsonToken<'a>> {
     reader
         .next_event()
         .map_err(json_error)?
@@ -167,4 +167,26 @@ pub(crate) fn json_error(error: JsonReadError) -> StorageBackendError {
         JsonReadError::Cancelled(error) => error.into(),
         error => invalid(error),
     }
+}
+
+pub(crate) fn take<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> T {
+    let (value, payload) = value.into_parts();
+    memory.absorb(payload);
+    value
+}
+
+/// Flattened serde content validates every retained or overwritten value before field projection, including numeric range and strict string escapes.
+pub(crate) fn validate_content(
+    bytes: &[u8],
+    remaining_depth: usize,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let mut reader = JsonReader::from_slice(bytes, control.memory(), control.cancellation())
+        .with_depth_limit(remaining_depth);
+    while let Some(event) = reader.next_event().map_err(json_error)? {
+        if let JsonToken::Number(number) = event.token {
+            let _ = serde_json::from_str::<serde_json::Number>(number)?;
+        }
+    }
+    Ok(())
 }

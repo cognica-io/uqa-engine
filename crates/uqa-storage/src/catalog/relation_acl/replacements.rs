@@ -6,7 +6,6 @@
 
 //! Independent replacements preserve original physical order within each relation.
 
-use super::CatalogTable;
 use crate::{
     catalog::{relation_acl::RelationAclTuple, table_input::CatalogTableAcl},
     read_control::StorageReadControl,
@@ -27,14 +26,14 @@ struct Replacement {
     tuple: RelationAclTuple,
 }
 
-pub(super) struct Records(OwnedMap<RelationIdentity, BudgetedVec<Budgeted<Replacement>>>);
+pub(crate) struct Records(OwnedMap<RelationIdentity, BudgetedVec<Budgeted<Replacement>>>);
 
 impl Records {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(OwnedMap::new())
     }
 
-    pub(super) fn insert(
+    pub(crate) fn insert(
         &mut self,
         row: Budgeted<CatalogTableAcl>,
         control: &StorageReadControl,
@@ -60,23 +59,25 @@ impl Records {
         Ok(())
     }
 
-    pub(super) async fn apply(
+    pub(crate) async fn apply(
         &self,
-        table: &mut CatalogTable,
+        relation: &RelationIdentity,
+        security: &mut RelationSecurityRow,
+        memory: &mut MemoryReservation,
         progress: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<()> {
         progress.checkpoint().await?;
-        let Some(records) = self.0.get(&table.relation) else {
+        let Some(records) = self.0.get(relation) else {
             return Ok(());
         };
-        if !matches!(table.security, RelationSecurityRow::Bound(_)) {
+        if !matches!(security, RelationSecurityRow::Bound(_)) {
             return Err(StorageBackendError::Other(
                 "ACL tuple requires captured relation ownership".into(),
             ));
         }
         for replacement in records.iter() {
             progress.checkpoint().await?;
-            apply(table, replacement, progress).await?;
+            apply(security, memory, replacement, progress).await?;
         }
         Ok(())
     }
@@ -102,7 +103,8 @@ async fn copy(
 }
 
 async fn apply(
-    table: &mut CatalogTable,
+    authority: &mut RelationSecurityRow,
+    memory: &mut MemoryReservation,
     replacement: &Replacement,
     progress: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<()> {
@@ -112,19 +114,13 @@ async fn apply(
         ));
     }
     let copied = copy(replacement.tuple.acl.as_deref(), progress).await?;
-    let RelationSecurityRow::Bound(security) = &mut table.schema.security else {
+    let RelationSecurityRow::Bound(security) = authority else {
         unreachable!()
     };
     if let Some(column) = &replacement.column {
-        let (copied, memory) = copied.into_parts();
-        let copied = Budgeted::new(copied.expect("column ACL"), memory);
-        replace_column(
-            &mut security.column_acls,
-            column,
-            copied,
-            &mut table.memory,
-            progress,
-        )?;
+        let (copied, payload) = copied.into_parts();
+        let copied = Budgeted::new(copied.expect("column ACL"), payload);
+        replace_column(&mut security.column_acls, column, copied, memory, progress)?;
         let revision = replacement.tuple.revision;
         if let Some(previous) = security.acl_revisions.columns.get_mut(column.as_str()) {
             *previous = revision;
@@ -143,14 +139,14 @@ async fn apply(
                 .insert_admitted_key(name, revision)?;
         }
     } else {
-        let (copied, memory) = copied.into_parts();
+        let (copied, payload) = copied.into_parts();
         let previous = std::mem::replace(&mut security.acl, copied);
         let bytes = previous
             .as_ref()
             .map_or(0, |acl| acl.capacity() * size_of::<Entry>());
         drop(previous);
-        drop(table.memory.split(bytes));
-        table.memory.absorb(memory);
+        drop(memory.split(bytes));
+        memory.absorb(payload);
         security.acl_revisions.relation = Some(replacement.tuple.revision);
     }
     Ok(())

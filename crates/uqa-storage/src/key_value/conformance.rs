@@ -255,3 +255,6 @@ where
 
 mod vector_spill;
 pub use vector_spill::verify_vector_transaction_spill;
+
+mod catalog_foreign_table_input;
+pub use catalog_foreign_table_input::verify_catalog_foreign_table_input;

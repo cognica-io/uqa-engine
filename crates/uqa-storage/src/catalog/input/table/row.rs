@@ -6,7 +6,7 @@
 
 //! Original flattened table fields retain stream validation and owned destination buffers.
 
-mod security;
+use super::super::{relation_security as security, strings::take};
 
 use super::{invalid, json_error, Input};
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 };
 use uqa_core::{
     json::{decode_json_string, JsonEvent, JsonReader, JsonToken},
-    memory::{Budgeted, MemoryReservation, OwnedMap},
+    memory::{Budgeted, OwnedMap},
 };
 
 const TABLE_FIELDS: [&str; 8] = [
@@ -95,10 +95,7 @@ pub fn row(
         if selected.is_none() {
             let value = &bytes[start..end];
             // Flattened fields were retained as strict serde content while the enclosing table object occupied one recursion level.
-            let mut validation =
-                JsonReader::from_slice(value, control.memory(), control.cancellation())
-                    .with_depth_limit(126);
-            while validation.next_event().map_err(json_error)?.is_some() {}
+            super::super::strings::validate_content(value, 126, control)?;
             authority.insert_admitted_key(name, value)?;
         }
     }
@@ -185,12 +182,6 @@ fn skip<'a>(first: &JsonEvent<'a>, reader: &mut JsonReader<'a, '_>) -> StorageBa
         end = event.range.end;
     }
     Ok(end)
-}
-
-fn take<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> T {
-    let (value, lease) = value.into_parts();
-    memory.absorb(lease);
-    value
 }
 
 #[cfg(test)]

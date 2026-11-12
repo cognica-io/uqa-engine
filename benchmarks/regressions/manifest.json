@@ -61997,6 +61997,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_foreign_input_preserves_physical_and_stable_relation_order_with_acl_replacement",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/foreign_load/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Load physical z/a/a definitions and an independent ACL replacement in both provider order modes.",
+      "invariant": "At most one source slot is visited per poll; complete native fields preserve physical or stable equal-relation order and retire the original source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_foreign_input_rejects_late_definitions_and_acl_errors_before_returning_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/foreign_load/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Append a corrupt definition or independent ACL after valid foreign definitions.",
+      "invariant": "No complete catalog escapes a late physical error and the failed owner remains terminal with no retained allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_foreign_input_retires_each_terminal_prefix_and_rejects_changed_controls",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/foreign_load/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Cancel, reject zero work, abandon or unwind after every unpublished prefix and attempt to replace original controls.",
+      "invariant": "The original complete input boundary owns admission, terminal cleanup and source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "foreign_catalog_envelopes_preserve_flattened_authority_fields_and_version_precedence",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/foreign_input/row/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Compare bound/named authority, overwritten fields, invalid numeric and string content, duplicate known fields and ten security-version spellings with ordinary catalog decoding.",
+      "invariant": "Original native fields, field-error classes and security-version fence precedence are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "foreign_catalog_envelopes_retain_exact_payload_allocations_and_retire_denied_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/foreign_input/row/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Decode a 64 KiB stored column field, measure actual live allocations and deny sampled limits through peak minus one.",
+      "invariant": "Native payloads retain their exact allowance; cancellation and every denied prefix return all retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "foreign_catalog_envelopes_reject_every_truncated_native_record",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/foreign_input/row/tests.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Compare every truncation and single-byte mutation of an original foreign envelope against ordinary storage decoding.",
+      "invariant": "Both decoders agree on accepted native values and failed record classes without retaining partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_foreign_table_input_preserves_private_rows_acls_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Retain committed and private foreign definitions plus relation/column ACLs, roll back the source and publish later independent changes.",
+      "invariant": "Original ordered native fields and ACL revisions survive source retirement; cancellation, zero windows, admission and encoded limits retire incomplete input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_foreign_table_input_preserves_private_rows_acls_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Retain committed and private foreign definitions plus relation/column ACLs, roll back the source and publish later independent changes.",
+      "invariant": "Original ordered native fields and ACL revisions survive source retirement; cancellation, zero windows, admission and encoded limits retire incomplete input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_foreign_table_input_preserves_private_rows_acls_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained foreign table catalog input",
+      "workload": "Retain committed and private foreign definitions plus relation/column ACLs, roll back the source and publish later independent changes.",
+      "invariant": "Original ordered native fields and ACL revisions survive source retirement; cancellation, zero windows, admission and encoded limits retire incomplete input.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

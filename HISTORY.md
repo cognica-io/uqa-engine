@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain complete foreign-table records and independent ACL replacements through the shared catalog input lifecycle on native SQLite, SQLite KV and redb. Preserve physical and stable relation ordering, private snapshots and original numeric validation of overwritten authority fields.
+
 - Resume native constraint identity and inherited-key validation between declaration slots and bounded name comparisons. Physical attribute validation uses the fixed PostgreSQL slot domain without allocating a temporary number vector or tree.
 
 - Restore persistent schema catalogs through bounded provider input and shared authority validation, preserving original ordering, snapshot identities and subsequent writable grants. Cancellation deferral checks use the existing inline lock instead of allocating a platform mutex on their first call.

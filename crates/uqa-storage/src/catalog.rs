@@ -17,6 +17,7 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
 pub mod capture;
+pub mod foreign_load;
 mod graph_access;
 pub mod graph_guards;
 pub mod graph_identifiers;
@@ -259,6 +260,18 @@ pub struct SequenceRow {
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Retain complete foreign definitions and independent relation ACLs from one original view, preserving physical errors before publication and the provider's original result order.
+    fn begin_foreign_table_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<foreign_load::CatalogForeignTableLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained foreign table loading is not supported".into(),
+        ))
+    }
+
     /// Retain and assemble a complete admitted table catalog, preserving the provider's original cross-record predicates, ACL replacement order and result ordering.
     fn begin_table_load(
         &self,

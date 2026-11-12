@@ -93,7 +93,7 @@ fn decode_definition(
     )))
 }
 
-fn copy(
+pub(super) fn copy(
     value: ValueRef<'_>,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<String>> {
@@ -107,7 +107,7 @@ fn copy(
     .expect("controlled table text"))
 }
 
-fn decode_acl(
+pub(super) fn decode_acl(
     key: &[u8],
     value: &[u8],
     control: &StorageReadControl,

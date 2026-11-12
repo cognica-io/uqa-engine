@@ -6,7 +6,7 @@
 
 //! The original format discriminator selects bound identities or legacy role names.
 
-use super::{invalid, json_error, take, text};
+use super::strings::{invalid, json_error, next, take};
 use crate::{
     catalog::relation_security::{BoundRelationSecurity, LegacyRelationSecurity},
     read_control::StorageReadControl,
@@ -14,11 +14,11 @@ use crate::{
 };
 use uqa_core::{
     catalog_acl::{input::projected, RelationAclRevisions},
-    json::JsonReader,
+    json::{decode_json_string, JsonReader, JsonToken},
     memory::{Budgeted, OwnedMap},
 };
 
-pub(super) fn read(
+pub(crate) fn read(
     fields: &OwnedMap<String, &[u8]>,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<RelationSecurityRow>> {
@@ -90,7 +90,7 @@ fn legacy(
             "role_owner" => {
                 let mut reader =
                     JsonReader::from_slice(bytes, control.memory(), control.cancellation());
-                owner = Some(text(super::next(&mut reader)?.token, control)?);
+                owner = Some(text(next(&mut reader)?, control)?);
             }
             "acl" => {
                 acl = projected::legacy_entries(bytes, control.memory(), control.cancellation())
@@ -115,4 +115,14 @@ fn legacy(
         column_acls: take(columns, &mut memory),
     };
     Ok(Budgeted::new(RelationSecurityRow::Legacy(security), memory))
+}
+
+fn text(
+    token: JsonToken<'_>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<String>> {
+    let JsonToken::String(value) = token else {
+        return Err(invalid("expected a table catalog string"));
+    };
+    decode_json_string(value, control.memory(), control.cancellation()).map_err(json_error)
 }

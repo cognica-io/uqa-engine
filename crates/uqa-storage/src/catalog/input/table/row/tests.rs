@@ -117,6 +117,8 @@ fn catalog_table_row_input_preserves_known_duplicates_and_projected_authority_co
         r#""role_owner":"owner","column_acls":{"x":[{"role":"PUBLIC"}]},"acl_revisions":{}"#.to_owned(),
         r#""role_owner":"owner","unrecognized":true"#.to_owned(),
         r#""role_owner":"\ud800","role_owner":"owner""#.to_owned(),
+        r#""role_owner":1e9999,"role_owner":"owner""#.to_owned(),
+        r#""role_owner":"owner","column_acls":{"x":1e9999,"x":[]}"#.to_owned(),
     ] { compare(&envelope(&fields)); }
     let text = envelope(r#""role_owner":"owner""#).replace(
         r#""name":"items""#,

@@ -112,13 +112,13 @@ fn definition(
     Ok(Some(schema))
 }
 
-fn select_acl(key: &[u8], control: &StorageReadControl) -> StorageBackendResult<bool> {
+pub(super) fn select_acl(key: &[u8], control: &StorageReadControl) -> StorageBackendResult<bool> {
     control.check()?;
     // The original ACL scan reads the first encoded string and accepts its existing suffix representation.
     Ok(read_str_ref(key, &mut 1)?.starts_with(METADATA_PREFIX))
 }
 
-fn acl(
+pub(super) fn acl(
     key: &[u8],
     value: &[u8],
     control: &StorageReadControl,

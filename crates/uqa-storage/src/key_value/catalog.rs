@@ -39,6 +39,7 @@ use super::{
 mod analyzers;
 pub(super) mod diskann;
 mod foreign;
+mod foreign_input;
 mod graph_access;
 mod graph_guards;
 mod graph_observations;
@@ -103,6 +104,14 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn begin_foreign_table_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::foreign_load::CatalogForeignTableLoad> {
+        self.foreign_table_load(limits, control)
+    }
+
     fn begin_index_input(
         &self,
         limits: crate::catalog::input::CatalogInputLimits,
