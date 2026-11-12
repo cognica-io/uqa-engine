@@ -36,6 +36,7 @@ enum Stage {
     WatermarkPublication(crate::hierarchy::watermarks::Plan),
     Graphs(uqa_graph::GraphCatalogInput),
     Sequences(uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput),
+    GraphOids(uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput),
     Registries,
     Caches,
 }
@@ -94,7 +95,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph and sequence input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence and graph OID input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -160,15 +161,7 @@ impl Candidate {
             Stage::Schemas(mut input) => match input.advance(1)? {
                 Some(schemas) => {
                     *engine.durable.schemas.write() = schemas;
-                    Stage::Tables(PersistentTableInput::from_catalog(
-                        catalog,
-                        Arc::clone(
-                            engine.storage.backend.as_ref().expect("persistent backend"),
-                        ),
-                        engine.durable.roles.read().clone(),
-                        self.limits,
-                        control,
-                    )?)
+                    Stage::Tables(engine.table_input(self.limits, control)?)
                 }
                 None => Stage::Schemas(input),
             },
@@ -200,12 +193,19 @@ impl Candidate {
             Stage::Sequences(mut input) => match input.advance(1)? {
                 Some(sequences) => {
                     *engine.durable.sequences.write() = sequences;
-                    Stage::Registries
+                    Stage::GraphOids(engine.graph_oid_input(self.limits, control)?)
                 }
                 None => Stage::Sequences(input),
             },
+            Stage::GraphOids(mut input) => match input.advance(1)? {
+                Some(oids) => {
+                    *engine.durable.graph_catalog_oids.write() = oids;
+                    Stage::Registries
+                }
+                None => Stage::GraphOids(input),
+            },
             Stage::Registries => {
-                engine.restore_registries_after_sequences(
+                engine.restore_registries_after_graph_oids(
                     catalog.as_ref(),
                     CatalogRestoreMode::LoadOnly,
                 )?;

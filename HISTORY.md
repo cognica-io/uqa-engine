@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct stored graph catalog OIDs through retained native input, preserving label and relation identities, duplicate-map semantics and the selected persistent snapshot across bounded decoding.
+
 - Reconstruct persistent sequence definitions, generation values, bound authority and recorded catalog OIDs through retained input on native SQLite, SQLite KV and redb, preserving validation order, the selected snapshot and subsequent sequence mutations.
 
 - Reconstruct persistent graph catalogs through retained name, native label and identifier input, preserving selected membership, original allocation rules and terminal transaction cleanup without materializing ignored Key/Value payloads.

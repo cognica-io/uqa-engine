@@ -40,6 +40,22 @@ struct Declarations {
     _memory: MemoryReservation,
 }
 
+impl super::Engine {
+    pub(super) fn table_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<PersistentTableInput> {
+        PersistentTableInput::from_catalog(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
+            self.durable.roles.read().clone(),
+            limits,
+            control,
+        )
+    }
+}
+
 impl PersistentTableInput {
     /// Restore complete table membership from one caller-retained catalog transaction. Physical table/ACL validation and all columns/authority precede index-name input, which precedes table hydration. Failure never publishes an earlier table prefix.
     pub(crate) fn from_catalog(

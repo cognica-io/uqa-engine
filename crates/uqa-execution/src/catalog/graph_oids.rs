@@ -13,6 +13,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 pub const GRAPH_CATALOG_OIDS_METADATA_PREFIX: &str = "graph_catalog_oids:";
 
 pub mod changes;
+pub mod input;
 
 /// The recorded OIDs of the catalog's graphs by graph name.
 pub fn load(catalog: &dyn CatalogFacade) -> StorageBackendResult<GraphOidRegistry> {

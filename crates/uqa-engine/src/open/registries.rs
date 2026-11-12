@@ -28,6 +28,14 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         *self.durable.graph_catalog_oids.write() =
             uqa_execution::catalog::graph_oids::load(catalog)?;
+        self.restore_registries_after_graph_oids(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_graph_oids(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
         self.restore_ranges_from_catalog(catalog)?;

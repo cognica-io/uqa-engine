@@ -8,6 +8,7 @@ use super::*;
 use crate::tests::providers::Provider;
 use uqa_core::Value;
 
+mod graph_oids;
 mod graphs;
 mod sequences;
 mod watermarks;

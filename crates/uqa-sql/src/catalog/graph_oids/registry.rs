@@ -14,10 +14,21 @@ use crate::{
     plan::copy::SyntaxProduction,
     SQLError,
 };
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 
 pub type GraphOidRegistry = NamedDefinitions<GraphCatalogOids>;
 pub type CapturedGraphOidRegistry = CapturedNamedDefinitions<GraphCatalogOids>;
+
+impl GraphOidRegistry {
+    /// Adopt a complete stored definition with its original decoded allocation owners.
+    pub fn insert_stored_entry(
+        &mut self,
+        name: Budgeted<String>,
+        value: Budgeted<GraphCatalogOids>,
+    ) -> Result<(), SQLError> {
+        self.insert_image_entry(name, value)
+    }
+}
 
 impl sealed::Definition for GraphCatalogOids {}
 impl StoredDefinition for GraphCatalogOids {

@@ -11,6 +11,19 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 impl Engine {
+    pub(super) fn graph_oid_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput> {
+        uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput::new(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            limits,
+            self.durable.graph_catalog_oids.read().budget(),
+            control,
+        )
+    }
+
     pub(super) fn graph_input(
         &self,
         limits: uqa_storage::catalog::input::CatalogInputLimits,

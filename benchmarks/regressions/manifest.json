@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -63126,6 +63126,127 @@
       "capability": "Retained persistent sequence reconstruction",
       "workload": "Restore valid sequence rows followed by malformed recorded OID metadata.",
       "invariant": "OID rejection destroys the complete private session and leaves subsequent ordinary operations usable.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_graph_oid_input_preserves_named_positional_and_optional_field_shapes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "preserves named positional and optional field shapes.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_graph_oid_input_preserves_numeric_classes_and_ordered_duplicate_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "preserves numeric classes and ordered duplicate maps.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_graph_oid_input_rejects_truncation_and_keeps_exact_native_allocation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "rejects truncation and keeps exact native allocation owners.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_graph_oid_input_resumes_long_tokens_and_retires_every_terminal_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "resumes long tokens and retires every terminal owner.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_graph_oid_input_preserves_ordered_native_roots_and_later_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "preserves ordered native roots and later mutation ownership.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_graph_oid_input_finishes_physical_validation_before_semantic_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "finishes physical validation before semantic records.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_graph_oid_input_retires_physical_and_nested_json_prefixes_without_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/graph_oids/input/tests.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "retires physical and nested json prefixes without publication.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_graph_oid_input_keeps_selected_identity_roots_and_live_later_mutations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_oids.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "keeps selected identity roots and live later mutations.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_graph_oid_input_retires_private_identity_roots_and_selected_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_oids.rs",
+      "capability": "Retained graph catalog OID reconstruction",
+      "workload": "retires private identity roots and selected transactions.",
+      "invariant": "Stored OID values and strict JSON shapes remain unchanged; bounded input retains original memory and retires the entire unpublished owner on failure.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
