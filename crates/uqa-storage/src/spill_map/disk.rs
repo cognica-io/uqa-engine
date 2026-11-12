@@ -64,7 +64,7 @@ pub(super) struct Builder {
     map: Map,
     writer: BufWriter<BlockTemporaryFile<BLOCK_BYTES>>,
     position: u64,
-    path: [Header; 128],
+    path: Box<[Header; 128]>,
     depth: usize,
     previous: Option<u128>,
     _workspace: Reservation,
@@ -113,7 +113,7 @@ impl Builder {
             map,
             writer,
             position: HEADER_BYTES as u64,
-            path: [Header::default(); 128],
+            path: Box::new([Header::default(); 128]),
             depth: 0,
             previous: None,
             _workspace: workspace,
@@ -121,16 +121,28 @@ impl Builder {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn push<V: Record>(
         &mut self,
         key: u128,
         value: &V,
         memory: &MemoryBudget,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.push_from(key, value, memory, &mut ()))
+    }
+
+    pub(super) async fn push_from<V: Record>(
+        &mut self,
+        key: u128,
+        value: &V,
+        memory: &MemoryBudget,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         let encoded = value.encoded_bytes()?;
         let mut encoded_memory = Reservation::reserve(memory, self.workspace.as_ref(), encoded)?;
         let mut bytes = Vec::with_capacity(encoded);
-        value.encode(&mut bytes);
+        value.encode_from(&mut bytes, work).await?;
         if bytes.len() != encoded {
             return Err(invalid("encoded size"));
         }
@@ -170,7 +182,7 @@ impl Builder {
             memory: value.memory_bytes()? as u64,
             ..Header::default()
         })?;
-        self.append_bytes(&bytes)?;
+        self.append_bytes_from(&bytes, work).await?;
         self.map.root = offset;
         self.map.logical_bytes = self
             .map
@@ -198,8 +210,17 @@ impl Builder {
         Ok(offset)
     }
 
-    fn append_bytes(&mut self, mut bytes: &[u8]) -> StorageBackendResult<()> {
+    fn append_bytes(&mut self, bytes: &[u8]) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.append_bytes_from(bytes, &mut ()))
+    }
+
+    async fn append_bytes_from(
+        &mut self,
+        mut bytes: &[u8],
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         while !bytes.is_empty() {
+            work.checkpoint().await?;
             let count = bytes
                 .len()
                 .min(BLOCK_BYTES - (self.position % BLOCK_BYTES as u64) as usize);
@@ -245,6 +266,11 @@ impl Map {
     #[cfg(test)]
     pub(super) fn written_bytes(&self) -> u64 {
         self.file.lock().file.block_io_counts().1
+    }
+
+    #[cfg(test)]
+    pub(super) fn file_bytes(&self) -> u64 {
+        self.file.lock().file.metadata().unwrap().len()
     }
 
     fn with_workspace(
@@ -405,11 +431,22 @@ impl Map {
         value: &V,
         memory: &MemoryBudget,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.insert_from(key, value, memory, &mut ()))
+    }
+
+    pub(super) async fn insert_from<V: Record>(
+        &mut self,
+        key: u128,
+        value: &V,
+        memory: &MemoryBudget,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         let _workspace = memory.reserve(size_of::<[u64; 128]>())?;
         let encoded = value.encoded_bytes()?;
         let mut encoded_memory = memory.reserve(encoded)?;
         let mut bytes = Vec::with_capacity(encoded);
-        value.encode(&mut bytes);
+        value.encode_from(&mut bytes, work).await?;
         if bytes.len() != encoded {
             return Err(invalid("encoded size"));
         }
@@ -566,6 +603,16 @@ impl Map {
         memory: &MemoryBudget,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.compact_from::<V>(memory, control, &mut ()))
+    }
+
+    pub(super) async fn compact_from<V: Record>(
+        &mut self,
+        memory: &MemoryBudget,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         let bytes = self.file.lock().file.metadata().map_err(io)?.len();
         if bytes <= self.logical_bytes.saturating_mul(4).max(1024 * 1024) {
             return Ok(());
@@ -575,7 +622,7 @@ impl Map {
         let mut after = None;
         while let Some((key, value)) = self.next::<V>(after, memory)? {
             super::check(control)?;
-            replacement.push(key, &*value, memory)?;
+            replacement.push_from(key, &*value, memory, work).await?;
             after = Some(key);
         }
         *self = replacement.finish()?;

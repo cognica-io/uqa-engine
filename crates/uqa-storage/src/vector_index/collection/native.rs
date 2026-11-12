@@ -50,26 +50,60 @@ impl NativeVectorSources {
         field: &str,
         index: &dyn VectorIndex,
     ) -> StorageBackendResult<Self> {
+        let (next, key) = self.prepare_index(field, index)?;
+        let cancellation = CancellationToken::new();
+        let production = ProductionControl::new(self.fields.budget(), &cancellation, &cancellation);
+        let field = production.copy_text(field)?;
+        next.finish_index(field, key)
+    }
+
+    pub(super) async fn with_index_from(
+        &self,
+        field: &str,
+        index: &dyn VectorIndex,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        input.checkpoint().await?;
+        let (next, key) = self.prepare_index(field, index)?;
+        let field = input.copy_text(field).await?;
+        next.finish_index(field.into(), key)
+    }
+
+    fn prepare_index(
+        &self,
+        field: &str,
+        index: &dyn VectorIndex,
+    ) -> StorageBackendResult<(Self, VectorSourceKey)> {
         let capture = index.memory_capture().ok_or_else(|| {
             StorageBackendError::Other("vector owner lacks memory capture admission".into())
         })?;
         let key = capture.key()?;
-        let cancellation = CancellationToken::new();
-        let production = ProductionControl::new(self.fields.budget(), &cancellation, &cancellation);
         let mut next = self.clone();
         if let Some(previous) = self.fields.get(field) {
             next.sources = next.sources.without_source(previous)?;
         }
         next.sources = next.sources.with_source(&key)?;
-        let field = production.copy_text(field)?;
+        Ok((next, key))
+    }
+
+    fn finish_index(
+        mut self,
+        field: Produced<FieldName>,
+        key: VectorSourceKey,
+    ) -> StorageBackendResult<Self> {
+        if !field.is_retained_by(self.fields.budget()) {
+            return Err(StorageBackendError::Other(
+                "vector field belongs to another allowance".into(),
+            ));
+        }
         let bytes = key.retained_source_bytes();
         let footprint = field
             .capacity()
             .checked_add(bytes)
             .ok_or(MemoryError::SizeOverflow)?;
         let key = Budgeted::new(key, self.fields.budget().reserve(bytes)?);
-        next.fields.insert(field, key, footprint)?;
-        Ok(next)
+        self.fields.insert(field, key, footprint)?;
+        Ok(self)
     }
 
     pub(super) fn without_index(&self, field: &str) -> StorageBackendResult<Self> {

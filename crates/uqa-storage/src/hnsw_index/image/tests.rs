@@ -49,13 +49,21 @@ fn fixture() -> Vec<u8> {
 
 fn restore(bytes: &[u8], dimensions: u32, control: &StorageReadControl) -> HNSWIndex {
     let mut bytes = &bytes[13..];
-    let mut input = ImageInput {
-        reader: &mut bytes,
-        control,
-    };
-    let result = read(&mut input, dimensions).unwrap();
-    input.end().unwrap();
-    result
+    uqa_core::image_io::decode_image(
+        &mut bytes,
+        control.memory(),
+        control.cancellation(),
+        async |mut source| {
+            let mut input = Input {
+                source: &mut source,
+                control,
+            };
+            let result = read(&mut input, dimensions).await?;
+            input.source.end().await?;
+            Ok::<_, crate::StorageBackendError>(result)
+        },
+    )
+    .unwrap()
 }
 
 #[test]

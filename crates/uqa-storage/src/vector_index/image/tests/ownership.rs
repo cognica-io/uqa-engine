@@ -15,7 +15,7 @@ use crate::{
     VectorIndex,
 };
 
-fn owners() -> Vec<Box<dyn VectorIndex>> {
+pub(super) fn owners() -> Vec<Box<dyn VectorIndex>> {
     let mut owners = sources();
     let control = StorageReadControl::with_limit(32 << 20);
     let mut options =

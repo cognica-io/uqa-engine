@@ -41,13 +41,26 @@ impl Record for HNSWVector {
     }
 
     fn encode(&self, bytes: &mut Vec<u8>) {
+        crate::image_io::work::inline(self.encode_from(bytes, &mut ()))
+            .expect("inline native record encoding cannot fail");
+    }
+
+    async fn encode_from(
+        &self,
+        bytes: &mut Vec<u8>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         #[cfg(test)]
         super::ENCODED_VECTORS.set(super::ENCODED_VECTORS.get() + 1);
         bytes.extend_from_slice(&self.norm.to_bits().to_le_bytes());
         bytes.extend_from_slice(&(self.values.len() as u64).to_le_bytes());
-        for value in &self.values {
-            bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+        for part in self.values.chunks(1024) {
+            work.checkpoint().await?;
+            for value in part {
+                bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
         }
+        Ok(())
     }
 
     fn decode(mut bytes: &[u8]) -> StorageBackendResult<Self> {

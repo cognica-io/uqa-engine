@@ -58631,6 +58631,149 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_input_preserves_all_native_images_queries_and_original_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/input.rs",
+      "capability": "Retained native vector grammar",
+      "workload": "Resume exact, IVF, HNSW and DiskANN images through changing one/17-byte windows and preserve independent payload owners through queries, mutation, malformed input and failed admission.",
+      "invariant": "Source reads obey the current window; exact images, query observations and original ownership survive completion, while failed or abandoned candidates retire all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_input_retires_truncated_cancelled_and_unfunded_native_candidates",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/input.rs",
+      "capability": "Retained native vector grammar",
+      "workload": "Resume exact, IVF, HNSW and DiskANN images through changing one/17-byte windows and preserve independent payload owners through queries, mutation, malformed input and failed admission.",
+      "invariant": "Source reads obey the current window; exact images, query observations and original ownership survive completion, while failed or abandoned candidates retire all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "vector_input_preserves_wide_spilled_hnsw_and_exact_tensor_bits",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/image/tests/input.rs",
+      "capability": "Retained native vector grammar",
+      "workload": "Resume exact, IVF, HNSW and DiskANN images through changing one/17-byte windows and preserve independent payload owners through queries, mutation, malformed input and failed admission.",
+      "invariant": "Source reads obey the current window; exact images, query observations and original ownership survive completion, while failed or abandoned candidates retire all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "abandoned_ordered_spill_insertion_cannot_resume_or_publish_partial_state",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests/input.rs",
+      "capability": "Ordered construction cancellation ownership",
+      "workload": "Abandon a retained ordered insertion at each native encoding/file checkpoint and attempt another insertion and final publication.",
+      "invariant": "An incomplete mutation makes its owning builder terminal; only complete insertions publish exact records, and every path retires temporary-file and memory ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "unordered_spill_and_compaction_keep_private_progress_and_reusable_original_roots",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/spill_map/tests/input.rs",
+      "capability": "Unordered native vector map input",
+      "workload": "Suspend resident conversion and obsolete-file compaction at native checkpoints, abandon pending insertions and mutate the preserved original roots.",
+      "invariant": "Only complete native candidates publish replacement keys; suspended conversion preserves the existing mapping, retained readers and allocation retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "memory_reader_preparation_resumes_large_records_and_retires_partial_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/pages/tests/input.rs",
+      "capability": "Resumable native DiskANN query preparation",
+      "workload": "Prepare a 4096-dimensional physical source with a large codebook, abandon every checkpoint, and reject cancelled or unfunded preparation.",
+      "invariant": "The completed reader retains its exact manifest and nodes; every unpublished reader releases its admission while the original physical source remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "abandoned_native_sealing_rejects_reentry_and_releases_partial_node_and_codebook_state",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/pages/tests/input.rs",
+      "capability": "Terminal native DiskANN artifact sealing",
+      "workload": "Suspend large codebook validation and the final fragment of a multi-page node at every checkpoint, then attempt sealer reentry and publication.",
+      "invariant": "An abandoned operation leaves its owning sealer terminal and releases all partial codebook and node reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "diskann_input_resumes_wide_physical_preparation_without_rebuilding_or_replaying",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/input.rs",
+      "capability": "Bounded physical DiskANN image adoption",
+      "workload": "Read a 4096-dimensional image with multi-page nodes, side vectors, empty tensors and uncovered changes using alternating byte windows and one continuation poll.",
+      "invariant": "Sealing and query preparation yield without source bytes; exact artifacts and query score bits survive source retirement, later writes, snapshots and input cancellation without rebuilding.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "diskann_input_failure_during_physical_sealing_and_query_preparation_retires_all_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/memory/tests/images/input.rs",
+      "capability": "Private DiskANN preparation retirement",
+      "workload": "Drop, cancel, exhaust allocation or reject a zero window at the physical/canonical boundary and after the final canonical input byte.",
+      "invariant": "No unfinished candidate publishes; physical, canonical, prepared-reader and input owners release their original reservations on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_collection_input_retains_long_fields_through_post_eof_registration",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests/input.rs",
+      "capability": "Retained native vector registration",
+      "workload": "Reconstruct a long multibyte field and evaluated vector after an existing registration with one-poll windows; retain capture through mutation and interrupt every pending boundary.",
+      "invariant": "Post-EOF registration does not reread the source; success preserves image bytes and independent writes, while cancellation or abandonment retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "native_vector_collection_input_retires_every_suspended_candidate",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/collection/image/tests/input.rs",
+      "capability": "Retained native vector registration",
+      "workload": "Reconstruct a long multibyte field and evaluated vector after an existing registration with one-poll windows; retain capture through mutation and interrupt every pending boundary.",
+      "invariant": "Post-EOF registration does not reread the source; success preserves image bytes and independent writes, while cancellation or abandonment retires every unpublished owner.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

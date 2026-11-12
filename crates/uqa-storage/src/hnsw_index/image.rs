@@ -11,9 +11,9 @@ use super::{
     MAX_HNSW_LEVEL,
 };
 use crate::{
-    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
+    image_io::{ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
-    vector_index::image::{invalid, read_floats},
+    vector_index::image::{invalid, read_floats, Input},
     StorageBackendResult,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec};
@@ -56,8 +56,8 @@ pub(super) fn write(
     Ok(out.written)
 }
 
-fn flag(input: &mut ImageInput<'_>) -> StorageBackendResult<bool> {
-    match input.array::<1>()?[0] {
+async fn flag(input: &mut Input<'_, '_>) -> StorageBackendResult<bool> {
+    match input.source.array::<1>().await?[0] {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(invalid()),

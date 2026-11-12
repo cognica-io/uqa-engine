@@ -71,13 +71,17 @@ fn corrupt(source: &Canonical, fault: usize, original: &StorageReadControl) -> C
 fn memory_diskann_image_preparation_rejects_corrupt_origins_counts_and_changes_before_output() {
     let original = StorageReadControl::with_limit(1 << 20);
     let mut wire = &include_bytes!("../../tests/images/fixtures/evaluated.uqa")[13..];
-    let source = image::read(
-        &mut ImageInput {
-            reader: &mut wire,
-            control: &original,
+    let source = uqa_core::image_io::decode_image(
+        &mut wire,
+        original.memory(),
+        original.cancellation(),
+        async |mut source| {
+            let mut input = Input {
+                source: &mut source,
+                control: &original,
+            };
+            image::read(&mut input, 2, &DiskANNTemporaryBudget::new(1 << 20)).await
         },
-        2,
-        &DiskANNTemporaryBudget::new(1 << 20),
     )
     .unwrap();
     assert!(wire.is_empty());

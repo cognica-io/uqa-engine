@@ -16,7 +16,7 @@ use crate::{
         pages::DiskANNMemorySource,
         DiskANNCanonicalCounts,
     },
-    image_io::ImageInput,
+    vector_index::image::Input,
     vector_index::image::{invalid, read_floats},
     StorageBackendResult,
 };
@@ -30,8 +30,8 @@ pub(in crate::diskann_index::memory) use stream::CanonicalImageCursor;
 pub(in crate::diskann_index::memory) use validation::CanonicalImageValidation;
 
 impl Canonical {
-    pub(in crate::diskann_index::memory) fn read_image(
-        input: &mut ImageInput<'_>,
+    pub(in crate::diskann_index::memory) async fn read_image(
+        input: &mut Input<'_, '_>,
         dimensions: u32,
         generation: DiskANNGeneration,
         physical: &DiskANNMemorySource,
@@ -39,11 +39,12 @@ impl Canonical {
     ) -> StorageBackendResult<Self> {
         let mut source = Self::empty(dimensions, input.control);
         source.covered_generation = Some(generation);
-        source.revision = match input.array::<1>()?[0] {
+        source.revision = match input.source.array::<1>().await?[0] {
             0 => None,
             1 => {
-                let revision =
-                    DiskANNChangeIdentity::decode(&input.array::<CHANGE_IDENTITY_BYTES>()?)?;
+                let revision = DiskANNChangeIdentity::decode(
+                    &input.source.array::<CHANGE_IDENTITY_BYTES>().await?,
+                )?;
                 if revision.document() != 0 {
                     return Err(invalid());
                 }
@@ -52,18 +53,18 @@ impl Canonical {
             _ => return Err(invalid()),
         };
         source.counts = DiskANNCanonicalCounts::new(
-            u64::from_le_bytes(input.array()?),
-            u64::from_le_bytes(input.array()?),
+            u64::from_le_bytes(input.source.array().await?),
+            u64::from_le_bytes(input.source.array().await?),
         )?;
-        let count = input.count()?;
+        let count = input.source.count().await?;
         let mut previous = None;
         for _ in 0..count {
-            let document = u64::from_le_bytes(input.array()?);
+            let document = u64::from_le_bytes(input.source.array().await?);
             if previous.is_some_and(|previous| previous >= document) {
                 return Err(invalid());
             }
             let origin = DiskANNCanonicalOrigin::decode(
-                &input.array::<CANONICAL_ORIGIN_BYTES>()?,
+                &input.source.array::<CANONICAL_ORIGIN_BYTES>().await?,
                 dimensions,
             )?;
             let mut values = BudgetedVec::new(input.control.memory());
@@ -71,7 +72,7 @@ impl Canonical {
             let count = usize::try_from(origin.count()).map_err(|_| MemoryError::SizeOverflow)?;
             values.reserve(count)?;
             for _ in 0..count {
-                let (value, lease) = read_floats(input, dimensions)?.into_parts();
+                let (value, lease) = read_floats(input, dimensions).await?.into_parts();
                 memory.absorb(lease);
                 values.push(value)?;
             }
@@ -86,10 +87,12 @@ impl Canonical {
             )?;
             previous = Some(document);
         }
-        let count = input.count()?;
+        let count = input.source.count().await?;
         let mut previous = None;
         for _ in 0..count {
-            let change = DiskANNChangeIdentity::decode(&input.array::<CHANGE_IDENTITY_BYTES>()?)?;
+            let change = DiskANNChangeIdentity::decode(
+                &input.source.array::<CHANGE_IDENTITY_BYTES>().await?,
+            )?;
             if previous.is_some_and(|previous| previous >= change.document()) {
                 return Err(invalid());
             }
@@ -98,21 +101,26 @@ impl Canonical {
                 .try_insert(change.document(), change.version())?;
             previous = Some(change.document());
         }
-        source.validate_image(physical, generation, input.control)?;
+        source.validate_image(physical, generation, input).await?;
         source.documents = source.documents.into_mutation_budget(owner.memory());
         source.changes = source.changes.into_mutation_budget(owner.memory());
         source.control = owner.clone();
         Ok(source)
     }
 
-    fn validate_image(
+    async fn validate_image(
         &self,
         physical: &DiskANNMemorySource,
         generation: DiskANNGeneration,
-        control: &crate::read_control::StorageReadControl,
+        input: &mut Input<'_, '_>,
     ) -> StorageBackendResult<()> {
         let mut validation = CanonicalImageValidation::new(self, physical, generation)?;
-        while !validation.advance(128, control)?.ready {}
+        loop {
+            input.source.checkpoint().await?;
+            if validation.advance(1, input.control)?.ready {
+                break;
+            }
+        }
         Ok(())
     }
 }

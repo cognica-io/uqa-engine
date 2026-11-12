@@ -37,30 +37,43 @@ impl<V: Record> Builder<V> {
         value: V,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
-        if self.failed {
-            return Err(invalid("construction cannot continue after an error"));
-        }
-        let result = self.insert_inner(key, value, control);
-        self.failed = result.is_err();
-        result
+        crate::image_io::work::inline(self.insert_from(key, value, control, &mut ()))
     }
 
-    fn insert_inner(
+    pub(crate) async fn insert_from(
         &mut self,
         key: u128,
         value: V,
         control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
     ) -> StorageBackendResult<()> {
+        if self.failed {
+            return Err(invalid("construction cannot continue after an error"));
+        }
+        self.failed = true;
+        let result = self.insert_inner(key, value, control, work).await;
+        self.failed = result.is_err();
+        result
+    }
+
+    async fn insert_inner(
+        &mut self,
+        key: u128,
+        value: V,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         check(control)?;
         if self.previous.is_some_and(|previous| key <= previous) {
             self.finish_pending()?;
             self.ordered = false;
         }
         if !self.ordered {
-            return self.map.insert(key, value, control);
+            return self.map.insert_from(key, value, control, work).await;
         }
         if let Some(disk) = &mut self.pending {
-            disk.push(key, &value, &self.map.memory)?;
+            disk.push_from(key, &value, &self.map.memory, work).await?;
         } else if let Some(value) = self.map.insert_resident(key, value)? {
             let mut disk = disk::Builder::with_workspace(
                 &self.map.memory,
@@ -73,9 +86,9 @@ impl<V: Record> Builder<V> {
             for entry in self.map.iter() {
                 check(control)?;
                 let (key, value) = entry?;
-                disk.push(key, &*value, &self.map.memory)?;
+                disk.push_from(key, &*value, &self.map.memory, work).await?;
             }
-            disk.push(key, &value, &self.map.memory)?;
+            disk.push_from(key, &value, &self.map.memory, work).await?;
             self.map.root = Root::Memory(BudgetedSharedMap::new(
                 &self.map.memory.child(self.map.resident_bytes),
             ));

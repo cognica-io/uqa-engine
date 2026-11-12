@@ -10,7 +10,9 @@ use super::selection::{DiskANNReadChanges, DiskANNReadSnapshot, SelectedCanonica
 use super::{invalid, DiskANNQuery};
 use crate::diskann_index::{
     format::{DiskANNGeneration, DiskANNManifest},
-    pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
+    pages::{
+        DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader, RecordInput,
+    },
     DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNQueryRead, ExactVectorReason,
 };
 use crate::{
@@ -65,17 +67,34 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> RetainedDiskANNIndex<S> {
         control: &StorageReadControl,
         owner: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let DiskANNQuery {
-            reader,
-            origins,
-            control: original,
-            ..
-        } = DiskANNQuery::open_with_owner(&canonical, source, parameters, limits, control, owner)?;
+        crate::image_io::work::inline(Self::open_from(
+            canonical,
+            RecordInput::Provider(source),
+            parameters,
+            limits,
+            control,
+            owner,
+            &mut (),
+        ))
+    }
+
+    pub(in crate::diskann_index) async fn open_from(
+        canonical: S,
+        source: RecordInput,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<Self> {
+        let (reader, origins) =
+            DiskANNQuery::prepare(&canonical, source, parameters, limits, control, owner, work)
+                .await?;
         let retained = Retained {
             canonical,
             reader,
             origins,
-            control: original,
+            control: owner.clone(),
             observed_counts: OnceLock::new(),
         };
         let retained =

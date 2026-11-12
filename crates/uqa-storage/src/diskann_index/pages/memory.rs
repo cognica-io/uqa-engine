@@ -57,6 +57,16 @@ impl DiskANNMemoryBuilder {
         bytes: &[u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.write_record_from(key, bytes, control, &mut ()))
+    }
+
+    async fn write_record_from(
+        &mut self,
+        key: DiskANNRecordKey,
+        bytes: &[u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         control.check()?;
         if key == DiskANNRecordKey::Manifest || self.records.records.contains_key(&key) {
             return Err(invalid(
@@ -64,7 +74,7 @@ impl DiskANNMemoryBuilder {
             ));
         }
         let owner = StorageReadControl::new(&self.budget, control.cancellation());
-        let bytes = copy(bytes, usize::MAX, &owner)?;
+        let bytes = super::copy_from(bytes, usize::MAX, &owner, work).await?;
         self.records.records.insert(key, bytes)?;
         Ok(())
     }
@@ -86,28 +96,45 @@ impl DiskANNMemoryBuilder {
     }
 
     pub fn finish(
-        mut self,
+        self,
         manifest: DiskANNManifest,
         control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNMemorySource> {
+        crate::image_io::work::inline(self.finish_from(&manifest, control, &mut ()))
+    }
+
+    async fn finish_from(
+        mut self,
+        manifest: &DiskANNManifest,
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
     ) -> StorageBackendResult<DiskANNMemorySource> {
         control.check()?;
         if manifest.input().generation != self.generation {
             return Err(invalid("manifest does not belong to staging owner"));
         }
-        let mut sealer = DiskANNArtifactSealer::new(manifest, control)?;
+        let mut sealer = DiskANNArtifactSealer::new(*manifest, control)?;
         for (key, bytes) in &self.records.records {
+            work.checkpoint().await?;
             match key {
-                DiskANNRecordKey::Codebook => sealer.codebook(bytes)?,
-                DiskANNRecordKey::Codes(first) => sealer.code_batch(*first, bytes)?,
-                DiskANNRecordKey::Side(first) => sealer.side_batch(*first, bytes)?,
-                DiskANNRecordKey::Origins(first) => sealer.origin_batch(*first, bytes)?,
+                DiskANNRecordKey::Codebook => sealer.codebook_from(bytes, work).await?,
+                DiskANNRecordKey::Codes(first) => {
+                    sealer.code_batch_from(*first, bytes, work).await?;
+                }
+                DiskANNRecordKey::Side(first) => {
+                    sealer.side_batch_from(*first, bytes, work).await?;
+                }
+                DiskANNRecordKey::Origins(first) => {
+                    sealer.origin_batch_from(*first, bytes, work).await?;
+                }
                 DiskANNRecordKey::Manifest => {
                     return Err(invalid("staged manifest before sealing"))
                 }
             }
         }
         for (id, bytes) in &self.records.graph {
-            sealer.graph_page(*id, bytes)?;
+            work.checkpoint().await?;
+            sealer.graph_page_from(*id, bytes, work).await?;
         }
         let seal = sealer.finish()?;
         let owner = StorageReadControl::new(&self.budget, control.cancellation());
@@ -117,6 +144,30 @@ impl DiskANNMemoryBuilder {
         let records = Budgeted::new(self.records, self.budget.empty_reservation()).into_shared()?;
         control.check()?;
         Ok(DiskANNMemorySource { seal, records })
+    }
+}
+
+impl DiskANNMemorySource {
+    pub(super) fn record(
+        &self,
+        key: DiskANNRecordKey,
+        max_bytes: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<&[u8]> {
+        control.check()?;
+        let bytes = self
+            .records
+            .records
+            .get(&key)
+            .ok_or_else(|| invalid("missing memory record"))?;
+        if bytes.len() > max_bytes {
+            return Err(uqa_core::memory::MemoryError::Limit {
+                required: bytes.len(),
+                limit: max_bytes,
+            }
+            .into());
+        }
+        Ok(bytes)
     }
 }
 
@@ -137,19 +188,7 @@ impl DiskANNPageSource for DiskANNMemorySource {
         control: &StorageReadControl,
         visit: &mut DiskANNRecordVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        control.check()?;
-        let bytes = self
-            .records
-            .records
-            .get(&key)
-            .ok_or_else(|| invalid("missing memory record"))?;
-        if bytes.len() > max_bytes {
-            return Err(uqa_core::memory::MemoryError::Limit {
-                required: bytes.len(),
-                limit: max_bytes,
-            }
-            .into());
-        }
+        let bytes = self.record(key, max_bytes, control)?;
         visit(bytes)?;
         control.check()
     }

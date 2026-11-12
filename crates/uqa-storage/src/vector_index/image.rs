@@ -8,13 +8,15 @@
 
 use super::VectorIndex;
 use crate::{
-    image_io::{ImageInput, ImageOutput},
-    read_control::StorageReadControl,
-    StorageBackendError, StorageBackendResult,
+    image_io::ImageOutput, read_control::StorageReadControl, StorageBackendError,
+    StorageBackendResult,
 };
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation};
+use uqa_core::memory::{MemoryError, MemoryReservation};
 
 mod exact;
+mod input;
+pub use input::vector_image_input;
+pub(crate) use input::{read_floats, read_from as read_vector_from, Input};
 mod snapshot;
 pub(super) use exact::{reader as read_exact, write as write_exact};
 pub use snapshot::VectorImageSnapshot;
@@ -34,7 +36,7 @@ pub fn read_vector_image(
     reader: &mut dyn std::io::Read,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Box<dyn VectorIndex>> {
-    read_with_temporary(reader, control, None)
+    input::read(reader, control, None)
 }
 
 /// Decode an image using the destination's shared temporary-file allowance for future `DiskANN` builds. Import itself does not rebuild an index or consume that allowance.
@@ -43,49 +45,7 @@ pub fn read_vector_image_with_temporary(
     control: &StorageReadControl,
     temporary: &crate::diskann_index::build::DiskANNTemporaryBudget,
 ) -> StorageBackendResult<Box<dyn VectorIndex>> {
-    read_with_temporary(reader, control, Some(temporary))
-}
-
-fn read_with_temporary(
-    reader: &mut dyn std::io::Read,
-    control: &StorageReadControl,
-    temporary: Option<&crate::diskann_index::build::DiskANNTemporaryBudget>,
-) -> StorageBackendResult<Box<dyn VectorIndex>> {
-    control.check()?;
-    let mut input = ImageInput { reader, control };
-    if &input.array::<8>()? != MAGIC {
-        return Err(invalid());
-    }
-    let kind = input.array::<1>()?[0];
-    let dimensions = u32::from_le_bytes(input.array()?);
-    let index = match kind {
-        0 => boxed(exact::read(&mut input, dimensions)?),
-        1 => boxed(crate::ivf_index::image::read(&mut input, dimensions)?),
-        2 => boxed(crate::hnsw_index::image::read(&mut input, dimensions)?),
-        3 => {
-            let default;
-            let temporary = if let Some(temporary) = temporary {
-                temporary
-            } else {
-                default = crate::diskann_index::build::DiskANNTemporaryBudget::new(
-                    crate::diskann_index::DiskANNIndexOptions::DEFAULT_TEMPORARY_BYTES,
-                );
-                &default
-            };
-            boxed(crate::diskann_index::memory::image::read(
-                &mut input, dimensions, temporary,
-            )?)
-        }
-        _ => return Err(invalid()),
-    };
-    input.end()?;
-    control.check()?;
-    Ok(index)
-}
-
-fn boxed<T: VectorIndex + 'static>(value: T) -> Box<dyn VectorIndex> {
-    // Each concrete decoder retains its admitted header and native payloads.
-    Box::new(value)
+    input::read(reader, control, Some(temporary))
 }
 
 pub(crate) fn entries<T>(memory: &mut MemoryReservation, count: usize) -> StorageBackendResult<()> {
@@ -109,32 +69,4 @@ pub(crate) fn coordinate_bytes(
         bytes.copy_from_slice(&value.to_bits().to_le_bytes());
     }
     Ok(count * 4)
-}
-
-pub(crate) fn read_floats(
-    input: &mut ImageInput<'_>,
-    dimensions: u32,
-) -> StorageBackendResult<Budgeted<Vec<f32>>> {
-    let count = input.count()?;
-    if u64::try_from(count).map_err(|_| MemoryError::SizeOverflow)? != u64::from(dimensions) {
-        return Err(invalid());
-    }
-    let mut values = BudgetedVec::new(input.control.memory());
-    values.reserve(count)?;
-    let mut buffer = [0_u8; 4096];
-    while values.len() < count {
-        let length = (count - values.len()).min(buffer.len() / 4);
-        input.exact(&mut buffer[..length * 4])?;
-        for bytes in buffer[..length * 4].chunks_exact(4) {
-            let value = f32::from_bits(u32::from_le_bytes(
-                bytes.try_into().expect("fixed float width"),
-            ));
-            if !value.is_finite() {
-                return Err(invalid());
-            }
-            values.push(value)?;
-        }
-    }
-    let (values, memory) = values.into_parts();
-    Ok(Budgeted::new(values, memory))
 }

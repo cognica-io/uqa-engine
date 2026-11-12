@@ -15,9 +15,18 @@ use crate::{
 };
 use uqa_core::memory::MemoryError;
 
-pub(super) fn validate(index: &IVFData, control: &StorageReadControl) -> StorageBackendResult<()> {
+pub(super) async fn validate_from(
+    index: &IVFData,
+    control: &StorageReadControl,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<()> {
     let mut validation = Validation::new(index);
-    while !validation.advance(128, control)?.ready {}
+    loop {
+        input.checkpoint().await?;
+        if validation.advance(1, control)?.ready {
+            break;
+        }
+    }
     Ok(())
 }
 

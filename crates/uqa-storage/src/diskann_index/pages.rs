@@ -12,12 +12,14 @@ use super::format::{DiskANNGeneration, DiskANNManifest};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
 mod cache;
+mod input;
 mod memory;
 mod origins;
 mod reader;
 mod seal;
 mod statistics;
 
+pub(super) use input::RecordInput;
 pub use memory::{DiskANNMemoryBuilder, DiskANNMemorySource};
 pub(super) use memory::{ImageOrigins, PhysicalImageCursor};
 pub use origins::DiskANNOriginReader;
@@ -107,6 +109,15 @@ fn copy(
     limit: usize,
     control: &StorageReadControl,
 ) -> StorageBackendResult<BudgetedVec<u8>> {
+    crate::image_io::work::inline(copy_from(bytes, limit, control, &mut ()))
+}
+
+async fn copy_from(
+    bytes: &[u8],
+    limit: usize,
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<BudgetedVec<u8>> {
     control.check()?;
     if bytes.len() > limit {
         return Err(MemoryError::Limit {
@@ -118,6 +129,7 @@ fn copy(
     let mut result = BudgetedVec::new(control.memory());
     result.reserve(bytes.len())?;
     for part in bytes.chunks(4096) {
+        work.checkpoint().await?;
         control.check()?;
         result.extend_from_slice(part)?;
     }

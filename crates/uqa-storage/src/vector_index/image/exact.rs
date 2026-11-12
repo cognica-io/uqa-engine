@@ -7,14 +7,17 @@
 //! Exact tensors stream from the retained ordered root without its legacy full-map export.
 
 use super::{
-    invalid, read_floats, BudgetedVec, ImageInput, ImageOutput, MemoryError, StorageBackendResult,
+    invalid, read_floats, ImageOutput, Input, MemoryError, StorageBackendResult,
     StorageReadControl, VectorIndex,
 };
 use crate::{
     image_io::{ImageRead, ImageReader},
     vector_index::{memory_state::MemoryVectorState, MemoryVectorIndex},
 };
-use uqa_core::{memory::OwnedMap, DocId};
+use uqa_core::{
+    memory::{BudgetedVec, OwnedMap},
+    DocId,
+};
 
 mod stream;
 #[cfg(test)]
@@ -50,8 +53,8 @@ pub(in crate::vector_index) fn write(
     Ok(out.written)
 }
 
-pub(super) fn read(
-    input: &mut ImageInput<'_>,
+pub(super) async fn read(
+    input: &mut Input<'_, '_>,
     dimensions: u32,
 ) -> StorageBackendResult<MemoryVectorIndex> {
     let header = input
@@ -62,8 +65,8 @@ pub(super) fn read(
         .control
         .memory()
         .reserve(size_of::<MemoryVectorState>())?;
-    let count = input.count()?;
-    let expected_vectors = input.count()?;
+    let count = input.source.count().await?;
+    let expected_vectors = input.source.count().await?;
     memory.grow(
         count
             .checked_mul(OwnedMap::<DocId, Vec<Vec<f32>>>::entry_bytes())
@@ -73,24 +76,24 @@ pub(super) fn read(
     let state = std::sync::Arc::get_mut(&mut index.state).expect("private image root is unique");
     let mut previous = None;
     for _ in 0..count {
-        let document = u64::from_le_bytes(input.array()?);
+        let document = u64::from_le_bytes(input.source.array().await?);
         if previous.is_some_and(|previous| previous >= document) {
             return Err(invalid());
         }
-        let count = input.count()?;
+        let count = input.source.count().await?;
         if count == 0 {
             return Err(invalid());
         }
         let mut tensor = BudgetedVec::new(input.control.memory());
         tensor.reserve(count)?;
         for _ in 0..count {
-            let (vector, lease) = read_floats(input, dimensions)?.into_parts();
+            let (vector, lease) = read_floats(input, dimensions).await?.into_parts();
             memory.absorb(lease);
             tensor.push(vector)?;
         }
         let (tensor, lease) = tensor.into_parts();
         memory.absorb(lease);
-        state.replace(document, tensor);
+        state.replace_from(document, tensor, input.source).await?;
         previous = Some(document);
     }
     state.image_memory = Some(memory);
