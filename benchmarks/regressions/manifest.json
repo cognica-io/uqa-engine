@@ -63421,6 +63421,32 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_adoption_preserves_native_buffers_captured_predecessors_and_future_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/adoption.rs",
+      "capability": "Native stored type adoption",
+      "workload": "stored type adoption preserves native buffers captured predecessors and future mutation ownership.",
+      "invariant": "Decoded native buffers retain their original leases through publication, duplicate replacement and captures; failed admission preserves roots and later mutations use independent allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_type_adoption_failure_preserves_native_roots_and_temporary_capture_eligibility",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_definitions/stored/tests/adoption.rs",
+      "capability": "Native stored type adoption",
+      "workload": "stored type adoption failure preserves native roots and temporary capture eligibility.",
+      "invariant": "Decoded native buffers retain their original leases through publication, duplicate replacement and captures; failed admission preserves roots and later mutations use independent allowances.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

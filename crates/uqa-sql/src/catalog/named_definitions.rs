@@ -296,7 +296,7 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
 }
 
 impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
-    /// Move decoded payloads into their native tree without copying or releasing their admission. The image owner has already validated keys and definitions.
+    /// Move decoded payloads into their native tree without copying or releasing their admission. The calling image or stored-catalog owner supplies the required semantic validation boundary.
     pub(crate) fn insert_image_entry(
         &mut self,
         name: Budgeted<K>,

@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.
-- Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation. Share ordered identity, OID, label and owner validation between ordinary loading and retained input, with admitted scratch and terminal cleanup.
+- Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation. Share ordered identity, OID, label and owner validation between ordinary loading and retained input, with admitted scratch and terminal cleanup. Move decoded buffers into immutable type roots without copying, preserving captured predecessors and independent later mutation allowances.
 
 - Reconstruct stored graph catalog OIDs through retained native input, preserving label and relation identities, duplicate-map semantics and the selected persistent snapshot across bounded decoding.
 

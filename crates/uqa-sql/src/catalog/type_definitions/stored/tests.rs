@@ -275,3 +275,5 @@ fn stored_type_input_cancels_both_original_owners_after_native_admission() {
         StoredShellType::from_stored_json_with_control,
     );
 }
+
+mod adoption;
