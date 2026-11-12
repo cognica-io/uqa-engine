@@ -51,6 +51,17 @@ impl<'a> DocumentIdAllocator<'a> {
         self.durable.is_some()
     }
 
+    /// Read the allocation floor without reserving or observing an identity. Legacy metadata can already have moved into the durable namespace, so a reconstructed shared owner must include that namespace even when its local counter only reflects surviving documents.
+    pub fn next_id_floor(&self, local: u128) -> StorageBackendResult<u128> {
+        watermark_identity(local)?;
+        let durable = self
+            .durable
+            .map(|allocator| allocator.identifier_watermark(&self.namespace))
+            .transpose()?
+            .flatten();
+        Ok(durable.map_or(local, |watermark| local.max(u128::from(watermark) + 1)))
+    }
+
     /// Reserve one identity at or above the restored local floor. The local cache changes only after successful durable reservation; private rollback cannot reclaim a returned identity.
     pub fn allocate(&self, next: &mut u128) -> StorageBackendResult<u64> {
         let minimum = u64::try_from(*next)

@@ -8,6 +8,8 @@ use super::*;
 use crate::tests::providers::Provider;
 use uqa_core::Value;
 
+mod watermarks;
+
 const LIMITS: CatalogInputLimits = CatalogInputLimits {
     maximum_key_bytes: 4096,
     maximum_value_bytes: 1 << 20,

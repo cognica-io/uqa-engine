@@ -351,7 +351,6 @@ impl TableRegistry {
         Ok((registry, sources))
     }
 
-    #[cfg(test)]
     pub(crate) fn live_snapshot(&self) -> RetainedValue<Tables> {
         self.cell.read().live.clone()
     }

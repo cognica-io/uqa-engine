@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct legacy partition counters through retained native hierarchy input, validating the complete hierarchy before private counter publication. Include migrated durable child reservations so reopening SQLite KV or redb cannot restart a shared parent below those reservations.
+
 - Validate complete persistent constraint catalogs through retained native input, preserving format and physical-row error order, cross-table identity uniqueness and terminal transaction cleanup.
 
 - Observe legacy stored function dispatches, array-slice omissions and range predicates without copying or rewriting declarations during load-only validation. Initial-open migration shares the same selection rules.

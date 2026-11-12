@@ -32,6 +32,8 @@ enum Stage {
     Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput),
     Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput),
     Tables(PersistentTableInput),
+    Watermarks(crate::hierarchy::watermarks::Input),
+    WatermarkPublication(crate::hierarchy::watermarks::Plan),
     Registries,
     Caches,
 }
@@ -90,7 +92,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema and table input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table and partition-counter input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -154,12 +156,22 @@ impl PersistentEngineInput {
                 Stage::Tables(mut input) => match input.advance(1)? {
                     Some(tables) => {
                         engine.storage.tables = Arc::new(tables);
-                        Stage::Registries
+                        Stage::Watermarks(engine.partition_watermark_input(&self.control)?)
                     }
                     None => Stage::Tables(input),
                 },
+                Stage::Watermarks(mut input) => match input.advance(1)? {
+                    Some(plan) => Stage::WatermarkPublication(plan),
+                    None => Stage::Watermarks(input),
+                },
+                Stage::WatermarkPublication(mut plan) => match plan.next() {
+                    Some(update) => {
+                        update.publish();
+                        Stage::WatermarkPublication(plan)
+                    }
+                    None => Stage::Registries,
+                },
                 Stage::Registries => {
-                    engine.synchronize_partition_identity_watermarks()?;
                     engine.restore_graphs_from_catalog(catalog.as_ref())?;
                     engine.restore_engine_registries_from_catalog(
                         catalog.as_ref(),

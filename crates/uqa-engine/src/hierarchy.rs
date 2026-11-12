@@ -9,6 +9,8 @@
 use super::{Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult};
 use std::collections::BTreeSet;
 
+pub(crate) mod watermarks;
+
 impl Engine {
     /// Read hierarchy metadata from an already-loaded relation without synchronizing catalogs or consulting a transaction snapshot. Trigger catalog restoration uses this path while the transaction state mutex is already held.
     pub(crate) fn loaded_table_hierarchy(
@@ -209,67 +211,5 @@ impl Engine {
             pending.extend(hierarchy.parents);
         }
         Ok(output)
-    }
-
-    /// Rebuild a partitioned parent's shared legacy auto-increment watermark from every physical partition. Persistent table counters are reconstructed from document ids, so the logical owner must observe the maximum restored descendant watermark before it can allocate another value.
-    pub(crate) fn synchronize_partition_identity_watermarks(&self) -> StorageBackendResult<()> {
-        let entries = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .map(|(relation, table)| (relation.qualified_name(), table.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut root_watermarks = std::collections::BTreeMap::<String, u128>::new();
-        for (name, table) in &entries {
-            if !table.columns.read().iter().any(|column| {
-                column
-                    .auto_increment
-                    .as_ref()
-                    .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy)
-            }) {
-                continue;
-            }
-            let mut current = name.clone();
-            let mut visited = BTreeSet::new();
-            let mut participates = false;
-            loop {
-                if !visited.insert(current.clone()) {
-                    return Err(StorageBackendError::Other(format!(
-                        "partition hierarchy cycle reaches `{current}`"
-                    )));
-                }
-                let state = entries.get(&current).ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "partition hierarchy references missing table `{current}`"
-                    ))
-                })?;
-                let hierarchy = state.hierarchy.read();
-                participates |= hierarchy.partition_spec.is_some() || hierarchy.is_partition();
-                if !hierarchy.is_partition() {
-                    break;
-                }
-                current = hierarchy.parents.first().cloned().ok_or_else(|| {
-                    StorageBackendError::Other("partition has no parent relation".into())
-                })?;
-            }
-            if participates {
-                let watermark = *table.next_id.read();
-                root_watermarks
-                    .entry(current)
-                    .and_modify(|current| *current = (*current).max(watermark))
-                    .or_insert(watermark);
-            }
-        }
-        for (root, watermark) in root_watermarks {
-            let table = entries.get(&root).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "partition hierarchy references missing root `{root}`"
-                ))
-            })?;
-            let mut current = table.next_id.write();
-            *current = (*current).max(watermark);
-        }
-        Ok(())
     }
 }

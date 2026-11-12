@@ -62415,6 +62415,140 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_preserve_legacy_roots_and_defer_monotone_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_keep_quoted_name_order_and_native_definition_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_reject_corrupt_ancestry_before_any_update",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_retire_all_cancelled_denied_and_abandoned_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_bound_wide_columns_and_retained_name_production",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_partition_watermarks_match_reopen_and_publish_one_root_per_step",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/watermarks.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_partition_watermarks_retire_partial_private_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/watermarks.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_keep_empty_selection_allocation_free_and_reject_parentless_partitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "partition_watermarks_discard_earlier_roots_after_a_counter_read_failure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/hierarchy/watermarks/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "restored_document_floors_read_durable_reservations_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/identifiers/tests.rs",
+      "capability": "Partition counter restoration",
+      "workload": "Reconstruct legacy partition counters with ordered native input, bounded work, explicit publication and terminal retirement.",
+      "invariant": "Complete ancestry validation precedes monotone counter publication; retained input observes original membership and releases every failed private candidate.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
