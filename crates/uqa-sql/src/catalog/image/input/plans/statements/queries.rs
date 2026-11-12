@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, Body, Empty, Field, Input, Node, PlanMemory, SQLError, Step, Tree};
+use super::{invalid, Body, Empty, Field, Fields, Input, Node, PlanMemory, SQLError, Step, Tree};
 use crate::ast::{CteBody, CteCycleClause, SelectStmt, SetOp, Statement, CTE};
 
 syntax_struct!(SelectStmt {
@@ -63,27 +63,15 @@ impl Body for CTE {
             body: Field::new(memory)?,
         })
     }
-    fn field(&mut self, position: usize) -> Option<&mut dyn Field> {
-        let Self {
-            name,
-            columns,
-            recursive,
-            materialization,
-            search,
-            cycle,
-            body,
-        } = self;
-        let fields: [&mut dyn Field; 7] = [
-            name,
-            columns,
-            recursive,
-            materialization,
-            search,
-            cycle,
-            body,
-        ];
-        fields.into_iter().nth(position)
-    }
+    syntax_body_fields!(
+        name,
+        columns,
+        recursive,
+        materialization,
+        search,
+        cycle,
+        body
+    );
 }
 
 impl Field for CteBody {
@@ -91,8 +79,39 @@ impl Field for CteBody {
         Ok(Self::Query(Field::new(memory)?))
     }
     fn read(&mut self, input: &mut Input<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+        self.begin_image_body(input.binary.array::<1>()?[0], memory)
+    }
+    async fn read_fields(
+        &mut self,
+        input: &mut Fields<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step, SQLError> {
+        self.begin_image_body(await_field!(input.binary.array::<1>())?[0], memory)
+    }
+    fn attach(&mut self, child: Node) {
+        match self {
+            Self::Query(value) => Field::attach(value, child),
+            Self::Insert(value) => Field::attach(value, child),
+            Self::Update(value) => Field::attach(value, child),
+            Self::Delete(value) => Field::attach(value, child),
+            Self::Merge(value) => Field::attach(value, child),
+        }
+    }
+    fn retire(&mut self) -> Option<Node> {
+        match self {
+            Self::Query(value) => Field::retire(value),
+            Self::Insert(value) => Field::retire(value),
+            Self::Update(value) => Field::retire(value),
+            Self::Delete(value) => Field::retire(value),
+            Self::Merge(value) => Field::retire(value),
+        }
+    }
+}
+
+impl CteBody {
+    fn begin_image_body(&mut self, tag: u8, memory: &mut PlanMemory) -> Result<Step, SQLError> {
         use crate::ast::{DeleteStmt, InsertStmt, MergeStmt, UpdateStmt};
-        let kind = match input.binary.array::<1>()?[0] {
+        let kind = match tag {
             0 => return Ok(Step::Child(SelectStmt::KIND)),
             1 => {
                 *self = Self::Insert(Field::new(memory)?);
@@ -114,23 +133,5 @@ impl Field for CteBody {
         };
         drop(memory.split(size_of::<SelectStmt>()));
         Ok(Step::Child(kind))
-    }
-    fn attach(&mut self, child: Node) {
-        match self {
-            Self::Query(value) => Field::attach(value, child),
-            Self::Insert(value) => Field::attach(value, child),
-            Self::Update(value) => Field::attach(value, child),
-            Self::Delete(value) => Field::attach(value, child),
-            Self::Merge(value) => Field::attach(value, child),
-        }
-    }
-    fn retire(&mut self) -> Option<Node> {
-        match self {
-            Self::Query(value) => Field::retire(value),
-            Self::Insert(value) => Field::retire(value),
-            Self::Update(value) => Field::retire(value),
-            Self::Delete(value) => Field::retire(value),
-            Self::Merge(value) => Field::retire(value),
-        }
     }
 }

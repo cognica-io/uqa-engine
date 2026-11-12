@@ -7,7 +7,7 @@
 //! Evaluated literals keep original type and tuple metadata without running input or casts.
 
 use super::super::collections::ImageValue;
-use super::{boxed, payload, Expr, Fields, Input, MemoryReservation, SQLError};
+use super::{boxed, payload, Expr, Fields, MemoryReservation, SQLError};
 use crate::{
     ast::{CompositeRowBinding, CompositeRowLayout, RetainedInputLiteral},
     expr::composites::{
@@ -160,27 +160,5 @@ impl ImageValue for DroppedCompositeAttribute {
             },
             input.binary.memory.empty_reservation(),
         ))
-    }
-}
-
-impl Input<'_> {
-    pub(in super::super) fn scalar_row_binding(
-        &mut self,
-        memory: &mut MemoryReservation,
-    ) -> Result<CompositeRowBinding, SQLError> {
-        self.fields(async |mut input| input.scalar_row_binding(memory).await)
-    }
-
-    pub(in super::super) fn composite_source(
-        &mut self,
-        memory: &mut MemoryReservation,
-    ) -> Result<CompositeConstantSource, SQLError> {
-        self.fields(async |mut input| input.composite_source(memory).await)
-    }
-
-    pub(in super::super) fn retained_scalar_data(
-        &mut self,
-    ) -> Result<RetainedScalarLiteral, SQLError> {
-        self.fields(async |mut input| input.retained_scalar_data().await)
     }
 }

@@ -145,11 +145,6 @@ impl Input<'_> {
     pub(super) fn optional_incarnation(&mut self) -> Result<Option<[u8; 16]>, SQLError> {
         self.fields(async |mut input| input.optional_incarnation().await)
     }
-    pub(super) fn optional_catalog_identity(
-        &mut self,
-    ) -> Result<Option<crate::ast::ConstraintCatalogIdentity>, SQLError> {
-        self.fields(async |mut input| input.optional_catalog_identity().await)
-    }
     pub(super) fn object_id(&mut self) -> Result<[u8; 16], SQLError> {
         self.fields(async |mut input| input.object_id().await)
     }

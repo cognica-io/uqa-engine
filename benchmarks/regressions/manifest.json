@@ -59821,6 +59821,383 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_windows_preserve_sources_mutations_and_original_arenas",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Resume joins, windows, recursive CTEs and all mutation CTE families under independent byte and poll ceilings.",
+      "invariant": "Native fields match the compiler-produced source and retain the original image after input cancellation and allowance exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_windows_retire_original_parents_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Interrupt a query with assignments and nested original arenas at cancellation, memory, framing, unwind and drop boundaries.",
+      "invariant": "All partial native parents and original reservations retire without publication or later source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_windows_preserve_large_fields_and_reject_original_scope_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Split a large UTF-8 query literal and an independent invalid scalar-query address across input windows.",
+      "invariant": "Original field bytes survive each split and dangling arena addresses reject before native publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_windows_keep_deep_input_and_retirement_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Read an independent 10,000-node scalar query with 17-byte and three-poll windows on a 128 KiB stack.",
+      "invariant": "Input preserves original wire data and retirement allocates nothing with the allowance exhausted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_windows_keep_the_original_ordered_query_arena",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Read an independently encoded expression addressing the second of two original query members.",
+      "invariant": "Windowed input preserves both members and the exact address without pruning or rebinding, and retires all terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_bound_plan_windows_keep_each_original_root_constructor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Resume query, INSERT, UPDATE, DELETE and MERGE bound-plan roots through independent input windows.",
+      "invariant": "Each original root and its native fields match compiler output and retire on every malformed, cancelled or denied path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_input_preserves_original_fields_and_independent_mutations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Resume view authority, large options, materialized values and original query fields, then edit with an independent destination allowance.",
+      "invariant": "Exact native fields and evaluated value bits survive; retained generations preserve their original image and every terminal path releases partial ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_input_keeps_identity_claims_across_completed_entries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Suspend after the first view before reading a later entry with its duplicate object identity.",
+      "invariant": "The original identity claim and exact entry boundary survive suspension; duplicate rejection retires input and prevents later source reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_view_input_retains_deep_queries_and_scalar_owners_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/views/tests/windows.rs",
+      "capability": "Native query and view input",
+      "workload": "Resume a view containing 10,000 nested query arenas and 10,000 scalar parents on a 128 KiB stack.",
+      "invariant": "The complete native tree preserves its depth and retires without allocation after the original allowance is exhausted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_windows_preserve_original_query_and_mutation_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Resume original query/source/window, CTE, mutation and NOTIFY syntax under independent byte and poll ceilings.",
+      "invariant": "All original fields match the parser-produced source and preserve their exact image after input retirement and allowance exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_windows_retire_partial_fields_and_original_parents",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Interrupt nested original syntax at framing, cancellation, admission, unwind and drop boundaries; split large UTF-8 payloads.",
+      "invariant": "Only complete original syntax publishes and every terminal path retires its original parents and reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_windows_keep_deep_retirement_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Read an independent 10,000-node original expression using 17-byte and three-poll windows on a 128 KiB stack.",
+      "invariant": "Original bytes remain exact and complete native retirement allocates nothing after allowance exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_windows_preserve_overloads_bodies_and_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Resume source/bound routine overloads and retained bodies, then edit using an independent destination allowance.",
+      "invariant": "Declarations, bound plans and original payload ownership survive later edits, cancellation, parent retirement and every failure boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_windows_preserve_large_lazy_source_and_identity_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Split large lazy UTF-8 source and duplicate overload identities across one-byte windows.",
+      "invariant": "Source text remains unparsed and original identity claims reject duplicates without publication or later reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_routine_windows_keep_original_and_bound_forests_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Read independent original and bound 10,000-node routine forests on a 128 KiB stack with byte/poll limits.",
+      "invariant": "Both original forests match exact wire bytes and retire without allocation under an exhausted allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_windows_preserve_actions_conditions_and_nested_destination_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Resume original rule actions, bound conditions, dependencies and nested catalog owners, then edit with an independent allowance.",
+      "invariant": "Exact native fields and original generations survive destination edits; all failure boundaries retire partial ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_windows_retain_original_identity_claims_across_relations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Split two different relation entries carrying the same original rule OID across one-byte windows.",
+      "invariant": "Original cross-relation identity claims survive suspension and duplicate rejection permanently retires the input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_windows_keep_original_and_bound_conditions_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/rules/tests/windows.rs",
+      "capability": "Native routine and rule input",
+      "workload": "Read independent original and bound 10,000-node rule conditions on a 128 KiB stack with byte/poll limits.",
+      "invariant": "Both original conditions preserve exact images and retire without allocation when their allowance is exhausted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_input_resumes_nested_fields_with_paired_original_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests/continuation.rs",
+      "capability": "Native foreign catalog input",
+      "workload": "Resume foreign definitions with large UTF-8 defaults/options, dropped slots, checks and authority, then mutate under an independent allowance.",
+      "invariant": "Every input call obeys its byte window; paired old definitions and ACLs retain exact original images after later edits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_input_retires_partial_children_on_failure_cancellation_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests/continuation.rs",
+      "capability": "Native foreign catalog input",
+      "workload": "Cancel, truncate or drop input within multiple positions of actual nested foreign catalog images.",
+      "invariant": "No incomplete paired catalog is published and all original input and mutation allocations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_foreign_input_admits_continuations_and_payload_before_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/registry/image/tests/continuation.rs",
+      "capability": "Native foreign catalog input",
+      "workload": "Deny foreign continuation admission and exhaust the original input allowance before payload allocation.",
+      "invariant": "Construction and payload rejection preserve SQL memory errors and release their original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_definition_input_resumes_original_columns_checks_and_hierarchy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/tables/tests.rs",
+      "capability": "Native table metadata input",
+      "workload": "Decode original column, CHECK and inheritance images with one-byte and one-poll windows after source retirement.",
+      "invariant": "Exact native images and independently owned literal payloads survive; invalid windows, truncation, trailing input, quota denial, cancellation, unwinding and dropped input retire their original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "table_metadata_input_resumes_keys_foreign_keys_and_dropped_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/tables/tests.rs",
+      "capability": "Native table metadata input",
+      "workload": "Resume native key, foreign-key and dropped-attribute images through three byte/poll windows.",
+      "invariant": "The original identities, constraint order and physical attributes survive; incomplete or invalid input cannot become a shared generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_authority_input_resumes_acl_paths_and_retires_partial_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/table_security_tests.rs",
+      "capability": "Native table metadata input",
+      "workload": "Resume original owner, ACL grant paths, column privileges and authority revisions across three byte/poll windows.",
+      "invariant": "Independent native authority output is exact after source-token cancellation; partial or failed input releases its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_table_metadata_input_resumes_deep_partition_scalars_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/expressions/tables/tests/relations/ownership.rs",
+      "capability": "Native table metadata input",
+      "workload": "Retire the source and decode an original 10,000-node partition expression through 17-byte/three-poll windows on a 128 KiB stack.",
+      "invariant": "Native hierarchy reconstruction and retirement preserve the exact original image and release all reservations without increasing the calling stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_preserves_bound_fields_and_scope_addresses_across_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/windows.rs",
+      "capability": "Native compiled scalar input",
+      "workload": "Resume typed literals, selected function bindings and window clauses using independent source-byte and poll ceilings.",
+      "invariant": "Original scalar values, written metadata and query/window addresses remain exact after decoder retirement and allowance exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_retires_partial_frames_at_all_terminal_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/windows.rs",
+      "capability": "Native compiled scalar input",
+      "workload": "Interrupt native scalar headers and child fields with cancellation, truncation, rejected memory, invalid windows, source unwind and decoder drop.",
+      "invariant": "Partial scalar trees and their original reservations retire without publishing incomplete values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_keeps_original_literals_after_input_and_parent_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/windows.rs",
+      "capability": "Native compiled scalar input",
+      "workload": "Retire the original literal and input owner, then retain one decoded literal beyond its scalar parent.",
+      "invariant": "Independently retained literals preserve original values, type declarations and collation with the original admitted payload lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_input_retains_constant_stack_for_deep_original_trees",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/scalars/tests/windows.rs",
+      "capability": "Native compiled scalar input",
+      "workload": "Read and retire an independent 10,000-node native binary-expression image with 17-byte and three-poll windows on a 128 KiB stack.",
+      "invariant": "Native input and iterative retirement preserve exact wire bytes without stack growth proportional to tree depth.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

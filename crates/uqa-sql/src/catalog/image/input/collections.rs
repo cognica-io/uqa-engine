@@ -6,7 +6,7 @@
 
 //! Cooperative native vectors retain completed elements while the next field is incomplete.
 
-use super::Fields;
+use super::{Fields, Input};
 use crate::SQLError;
 use std::future::Future;
 use uqa_core::memory::{Budgeted, BudgetedVec};
@@ -15,6 +15,10 @@ pub(super) trait ImageValue: Sized + Send {
     fn read(
         input: &mut Fields<'_>,
     ) -> impl Future<Output = Result<Budgeted<Self>, SQLError>> + Send;
+
+    fn read_sync(input: &mut Input<'_>) -> Result<Budgeted<Self>, SQLError> {
+        input.fields(async |mut fields| Self::read(&mut fields).await)
+    }
 }
 
 impl Fields<'_> {

@@ -13,7 +13,7 @@ use crate::{
     SQLError,
 };
 use std::io::Read;
-use uqa_core::CancellationToken;
+use uqa_core::{image_io::ImageDecoder, CancellationToken};
 
 impl<T: TableDefinitionValue> TableDefinition<T> {
     fn from_image_parts(
@@ -31,7 +31,7 @@ impl<T: TableDefinitionValue> TableDefinition<T> {
 }
 
 macro_rules! definition_image {
-    ($value:ty, $read:ident) => {
+    ($value:ty, $read:ident, $resume:ident) => {
         impl TableDefinition<$value> {
             /// Decode directly into an unpublished native generation. The existing image owner validates the complete representation; the decoded payload, literal leases and cached footprint transfer without a second copy or expression evaluation. Relation-wide validation remains with the enclosing restore owner.
             pub fn read_image(
@@ -42,10 +42,40 @@ macro_rules! definition_image {
                 let (value, children) = image::$read(reader, memory, cancellation)?;
                 Self::from_image_parts(value, children, cancellation)
             }
+
+            /// Resume the same native definition grammar within the current byte/poll window. Decoded payloads and literal reservations remain private until completion.
+            pub fn image_input(
+                memory: &MemoryBudget,
+                cancellation: &CancellationToken,
+            ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+                Ok(ImageDecoder::new(
+                    memory,
+                    cancellation,
+                    |mut reader| async move {
+                        let input = reader.input();
+                        let cancellation = input.cancellation;
+                        let operation = std::pin::pin!(image::$resume(input));
+                        let (value, children) = operation.await?;
+                        Self::from_image_parts(value, children, cancellation)
+                    },
+                )?)
+            }
         }
     };
 }
 
-definition_image!(Vec<ColumnDef>, read_columns_image_with_footprint);
-definition_image!(Vec<TableCheck>, read_table_checks_image_with_footprint);
-definition_image!(TableHierarchy, read_table_hierarchy_image_with_footprint);
+definition_image!(
+    Vec<ColumnDef>,
+    read_columns_image_with_footprint,
+    read_columns_image_from
+);
+definition_image!(
+    Vec<TableCheck>,
+    read_table_checks_image_with_footprint,
+    read_table_checks_image_from
+);
+definition_image!(
+    TableHierarchy,
+    read_table_hierarchy_image_with_footprint,
+    read_table_hierarchy_image_from
+);

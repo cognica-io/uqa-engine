@@ -16,6 +16,9 @@ use uqa_core::{
     CancellationToken,
 };
 
+#[macro_use]
+mod grammar;
+
 mod authorities;
 mod callbacks;
 mod collections;
@@ -60,11 +63,14 @@ pub use scalars::CapturedScalar;
 pub(super) use security::{database, schemas};
 pub(super) use sequences::sequence_authorities;
 pub(super) use structured_types::{composites, ranges};
-pub(super) use table_security::{bound_table_security, table_security};
+pub(super) use table_security::{bound_table_security, bound_table_security_from, table_security};
 pub use tables::{
-    read_columns_image, read_columns_image_with_footprint, read_dropped_attributes_image,
-    read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
-    read_table_hierarchy_image, read_table_hierarchy_image_with_footprint, read_table_keys_image,
+    read_columns_image, read_columns_image_from, read_columns_image_with_footprint,
+    read_dropped_attributes_image, read_dropped_attributes_image_from, read_foreign_keys_image,
+    read_foreign_keys_image_from, read_table_checks_image, read_table_checks_image_from,
+    read_table_checks_image_with_footprint, read_table_hierarchy_image,
+    read_table_hierarchy_image_from, read_table_hierarchy_image_with_footprint,
+    read_table_keys_image, read_table_keys_image_from,
 };
 pub(super) use triggers::triggers;
 pub(super) use types::{enums, shells};
@@ -112,6 +118,10 @@ impl<'a> Input<'a> {
             },
         )
     }
+    fn checkpoint(&self) -> Result<(), SQLError> {
+        self.binary.cancellation.check()?;
+        Ok(())
+    }
     fn header(&mut self, magic: [u8; 8]) -> Result<usize, SQLError> {
         self.fields(async |mut input| input.header(magic).await)
     }
@@ -155,4 +165,10 @@ fn validate_identity(identity: RoleIdentity) -> Result<(), SQLError> {
         return Err(invalid("role identity"));
     }
     Ok(())
+}
+
+impl Fields<'_> {
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Ok(self.binary.checkpoint().await?)
+    }
 }

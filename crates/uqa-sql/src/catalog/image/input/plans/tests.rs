@@ -11,6 +11,7 @@ use uqa_core::CancellationToken;
 mod resources;
 mod scopes;
 mod sources;
+mod windows;
 
 #[test]
 fn native_query_input_rejects_default_positions_outside_original_value_width() {

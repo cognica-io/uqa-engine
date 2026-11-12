@@ -8,16 +8,19 @@
 
 use super::{
     expressions::{boxed, payload},
-    invalid, Input,
+    invalid, Fields, Input,
 };
 use crate::{ir::ScalarExpr, SQLError};
 use std::io::Read;
 use uqa_core::{
-    memory::{BudgetedVec, MemoryBudget, MemoryReservation},
+    image_io::ImageDecoder,
+    memory::{MemoryBudget, MemoryReservation},
     CancellationToken,
 };
 
 mod children;
+mod continuation;
+use continuation::ScalarInput;
 mod nodes;
 #[cfg(test)]
 mod tests;
@@ -96,43 +99,60 @@ impl Drop for Frame {
 
 impl Input<'_> {
     pub(super) fn native_scalar(&mut self) -> Result<CapturedScalar, SQLError> {
-        let mut memory = self.binary.memory.empty_reservation();
-        let mut parents = BudgetedVec::new(self.binary.memory);
-        let mut references = References::default();
-        let mut frame = Frame {
-            value: self.native_scalar_node(&mut memory)?,
-            cursor: 0,
-        };
-        loop {
-            self.binary.cancellation.check()?;
-            references.observe(&frame.value);
-            if frame.prepare_child(self)? {
-                parents.push(frame)?;
-                frame = Frame {
-                    value: self.native_scalar_node(&mut memory)?,
-                    cursor: 0,
-                };
-            } else if let Some(mut parent) = parents.pop() {
-                *parent.child().expect("suspended native scalar child") =
-                    std::mem::replace(&mut frame.value, ScalarExpr::Star);
-                parent.cursor += 1;
-                frame = parent;
-            } else {
-                return Ok(CapturedScalar {
-                    expression: std::mem::replace(&mut frame.value, ScalarExpr::Star),
-                    memory,
-                    references,
-                });
-            }
+        let mut owner = ScalarInput::new(self.binary.memory);
+        while !owner.complete() {
+            self.fields(async |mut input| owner.advance(&mut input).await)?;
         }
+        owner.finish()
+    }
+}
+
+impl Fields<'_> {
+    pub(super) async fn native_scalar(&mut self) -> Result<CapturedScalar, SQLError> {
+        let mut owner = ScalarInput::new(self.binary.memory);
+        while !owner.complete() {
+            self.binary.checkpoint().await?;
+            owner.advance(self).await?;
+        }
+        owner.finish()
     }
 
-    fn native_scalar_slots(
+    async fn native_scalar_slots(
         &mut self,
         count: usize,
         memory: &mut MemoryReservation,
     ) -> Result<Vec<ScalarExpr>, SQLError> {
-        self.items(count, memory, |_, _| Ok(ScalarExpr::Star))
+        self.slots(count, memory, || ScalarExpr::Star).await
+    }
+
+    async fn scalar_image(&mut self) -> Result<CapturedScalar, SQLError> {
+        if self.header(super::super::expressions::SCALAR_MAGIC).await? != 1 {
+            return Err(invalid("native scalar count"));
+        }
+        let value = self.native_scalar().await?;
+        self.binary.end().await?;
+        Ok(value)
+    }
+}
+
+impl ScalarExpr {
+    /// Retain native scalar fields, query/window addresses and original payload ownership across independent byte and continuation-poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<CapturedScalar, SQLError>, SQLError> {
+        Ok(ImageDecoder::new(
+            memory,
+            cancellation,
+            |mut reader| async move {
+                Fields {
+                    binary: reader.input(),
+                    retained_children: &mut 0,
+                }
+                .scalar_image()
+                .await
+            },
+        )?)
     }
 }
 

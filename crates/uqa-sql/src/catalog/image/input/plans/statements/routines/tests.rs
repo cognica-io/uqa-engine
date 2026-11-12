@@ -9,6 +9,7 @@ use crate::ast::Statement;
 use uqa_core::memory::ProductionControl;
 mod footprints;
 mod resources;
+mod windows;
 
 fn routine(sql: &str, id: u8) -> SQLRoutine {
     let Statement::CreateFunction(mut definition) = crate::compile(sql).unwrap().remove(0) else {

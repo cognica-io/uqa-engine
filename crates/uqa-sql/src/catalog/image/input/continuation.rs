@@ -129,7 +129,7 @@ pub(super) fn registry<T: CatalogEntries>(
     let progress = completed.clone();
     let mutations = mutations.clone();
     let decoder = ImageDecoder::new(memory, cancellation, |mut reader| async move {
-        decode::<T>(reader.input(), &mutations, Some(&progress)).await
+        await_field!(decode::<T>(reader.input(), &mutations, Some(&progress)))
     })?;
     Ok(CatalogImageInput {
         state: Some(State { decoder, completed }),
@@ -142,7 +142,7 @@ pub(super) fn read_registry<T: CatalogEntries>(
     cancellation: &CancellationToken,
 ) -> Result<T, SQLError> {
     decode_image(reader, memory, cancellation, async |binary| {
-        decode::<T>(binary, memory, None).await
+        await_field!(decode::<T>(binary, memory, None))
     })
 }
 
@@ -159,7 +159,7 @@ async fn decode<T: CatalogEntries>(
     let (mut value, mut scratch) = T::create(input.binary.memory);
     let count = input.header(T::MAGIC).await?;
     for index in 0..count {
-        T::read_entry(&mut input, &mut value, &mut scratch).await?;
+        await_field!(T::read_entry(&mut input, &mut value, &mut scratch))?;
         if index + 1 < count {
             if let Some(progress) = progress {
                 progress.fetch_add(1, Ordering::Relaxed);

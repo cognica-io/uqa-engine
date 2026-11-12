@@ -6,6 +6,25 @@
 
 //! Native plan reconstruction keeps every partial node inside one admitted owner.
 
+macro_rules! plan_scalar_list {
+    ($read:ident, $owner:expr, $allowance:expr, |$input:pat_param, $memory:pat_param| $body:block) => {{
+        let count = $read!($owner.binary.count())?;
+        let mut buffer = uqa_core::memory::BudgetedVec::new($owner.binary.memory);
+        buffer.reserve(count)?;
+        let (buffer, reservation) = buffer.into_parts();
+        $allowance.absorb(reservation);
+        let mut values = $crate::catalog::image::input::plans::retirement::Pending::new(buffer);
+        for _ in 0..count {
+            $read!($owner.checkpoint())?;
+            let $input = &mut *$owner;
+            let $memory = &mut *$allowance;
+            let value: Result<_, SQLError> = $body;
+            values.push(value?.take());
+        }
+        Ok::<_, SQLError>(values)
+    }};
+}
+
 mod api;
 mod assignments;
 mod ctes;
@@ -33,7 +52,7 @@ pub use statements::CapturedStatement;
 pub(in crate::catalog::image) use statements::{read_routines, read_rules};
 pub use unified::CapturedPlan;
 
-use super::{invalid, Input};
+use super::{invalid, Fields, Input};
 use crate::{
     plan::{
         CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, QueryPlan, RelationalPlan, SourcePlan,
@@ -135,7 +154,7 @@ impl Node {
     }
 }
 
-fn empty_query() -> QueryPlan {
+pub(super) fn empty_query() -> QueryPlan {
     QueryPlan {
         analyzed_output: None,
         analyzed_source: None,

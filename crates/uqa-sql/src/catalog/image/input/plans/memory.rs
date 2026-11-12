@@ -6,7 +6,9 @@
 
 //! Independent catalog captures fund shared role payloads as well as the native query owner.
 
-use super::{empty_query, Frame, Input, Kind, NativeNode, Node, Owner, QueryPlan, SQLError};
+use super::{
+    empty_query, Fields, Frame, Input, Kind, NativeNode, Node, Owner, QueryPlan, SQLError,
+};
 use std::ops::{Deref, DerefMut};
 use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
 
@@ -66,11 +68,17 @@ impl Owner {
     }
 }
 
-impl Input<'_> {
-    pub(in super::super) fn stored_query(&mut self) -> Result<(QueryPlan, Owner), SQLError> {
-        let mut owner = self.native_plan(Kind::Query)?;
-        let mut query = empty_query();
-        owner.exchange_query(&mut query);
-        Ok((query, owner))
-    }
+macro_rules! stored_query_input {
+    ($input:ident, $read:ident $(, $async:ident)?) => {
+        impl $input<'_> {
+            pub(in super::super) $($async)? fn stored_query(&mut self) -> Result<(QueryPlan, Owner), SQLError> {
+                let mut owner = $read!(self.native_plan(Kind::Query))?;
+                let mut query = empty_query();
+                owner.exchange_query(&mut query);
+                Ok((query, owner))
+            }
+        }
+    };
 }
+stored_query_input!(Input, read_field);
+stored_query_input!(Fields, await_field, async);

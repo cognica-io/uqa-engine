@@ -6,11 +6,11 @@
 
 //! One cursor selects native slots in the exact encoded child order.
 
-use super::{invalid, Frame, Input, SQLError, ScalarExpr};
+use super::{invalid, Fields, Frame, SQLError, ScalarExpr};
 use crate::{ast::NullsOrder, ir::ScalarFrameBound};
 
 impl Frame {
-    pub(super) fn prepare_child(&mut self, input: &mut Input<'_>) -> Result<bool, SQLError> {
+    pub(super) async fn prepare_child(&mut self, input: &mut Fields<'_>) -> Result<bool, SQLError> {
         if self.child().is_none() {
             return Ok(false);
         }
@@ -26,8 +26,8 @@ impl Frame {
             _ => None,
         };
         if let Some(order) = order {
-            order.descending = input.flag()?;
-            order.nulls = match input.binary.array::<1>()?[0] {
+            order.descending = input.flag().await?;
+            order.nulls = match input.binary.array::<1>().await?[0] {
                 0 => None,
                 1 => Some(NullsOrder::First),
                 2 => Some(NullsOrder::Last),

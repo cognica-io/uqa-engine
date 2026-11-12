@@ -13,6 +13,7 @@ use std::io;
 use uqa_core::{memory::ProductionControl, Value};
 
 mod metadata;
+mod windows;
 
 fn encode(value: &ScalarExpr) -> Vec<u8> {
     let memory = MemoryBudget::new(64 << 20);

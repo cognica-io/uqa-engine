@@ -6,7 +6,7 @@
 
 //! Table authority reconstruction preserves ordered ACL paths and independent tuple revisions.
 
-use super::{expressions::payload, invalid, Input};
+use super::{collections::ImageValue, expressions::payload, invalid, Fields};
 use crate::{
     catalog::security::table_binding::{
         BoundTableAclEntry, BoundTableSecurity, CapturedTablePrivileges, CapturedTableSecurity,
@@ -16,16 +16,16 @@ use crate::{
 use std::io::Read;
 use uqa_core::{
     catalog_acl::RelationAclRevisions,
+    image_io::{decode_image, AsyncImageInput},
     memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, OwnedMap},
     CancellationToken,
 };
 
-impl Input<'_> {
-    fn native_authority_map<T>(
+impl Fields<'_> {
+    async fn native_authority_map<T: ImageValue>(
         &mut self,
         count: usize,
         memory: &mut MemoryReservation,
-        mut decode: impl FnMut(&mut Self) -> Result<Budgeted<T>, SQLError>,
     ) -> Result<OwnedMap<String, T>, SQLError> {
         fn publish<T>(
             values: &mut OwnedMap<String, T>,
@@ -39,8 +39,10 @@ impl Input<'_> {
         let mut values = OwnedMap::new();
         let mut pending: Option<(Budgeted<String>, Budgeted<T>)> = None;
         for _ in 0..count {
-            let name = self.ordered_name(pending.as_ref().map(|(name, _)| &**name))?;
-            let value = decode(self)?;
+            let name = self
+                .ordered_name(pending.as_ref().map(|(name, _)| &**name))
+                .await?;
+            let value = T::read(self).await?;
             if let Some(previous) = pending.replace((name, value)) {
                 publish(&mut values, previous, memory)?;
             }
@@ -51,7 +53,7 @@ impl Input<'_> {
         Ok(values)
     }
 
-    fn table_column_acls(
+    async fn table_column_acls(
         &mut self,
         count: usize,
         memory: &mut MemoryReservation,
@@ -60,8 +62,10 @@ impl Input<'_> {
             BudgetedVec::new(self.binary.memory);
         values.reserve(count)?;
         for _ in 0..count {
-            let name = self.ordered_name(values.last().map(|(name, _)| name))?;
-            let acl = self.acl_entries()?;
+            let name = self
+                .ordered_name(values.last().map(|(name, _)| name))
+                .await?;
+            let acl = self.acl_entries().await?;
             values.push((payload(name, memory), payload(acl, memory)))?;
         }
         let (values, reservation) = values.into_parts();
@@ -69,7 +73,7 @@ impl Input<'_> {
         Ok(values)
     }
 
-    fn table_column_revisions(
+    async fn table_column_revisions(
         &mut self,
         count: usize,
         memory: &mut MemoryReservation,
@@ -77,8 +81,10 @@ impl Input<'_> {
         let mut values: BudgetedVec<(String, [u8; 16])> = BudgetedVec::new(self.binary.memory);
         values.reserve(count)?;
         for _ in 0..count {
-            let name = self.ordered_name(values.last().map(|(name, _)| name))?;
-            let revision = self.object_id()?;
+            let name = self
+                .ordered_name(values.last().map(|(name, _)| name))
+                .await?;
+            let revision = self.object_id().await?;
             values.push((payload(name, memory), revision))?;
         }
         let (values, reservation) = values.into_parts();
@@ -92,25 +98,35 @@ pub(in super::super) fn bound_table_security(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<BoundTableSecurity>, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    if input.header(super::super::TABLE_SECURITY)? != 1 {
+    decode_image(reader, memory, cancellation, async |binary| {
+        bound_table_security_from(binary).await
+    })
+}
+
+pub(in super::super) async fn bound_table_security_from(
+    binary: AsyncImageInput<'_>,
+) -> Result<Budgeted<BoundTableSecurity>, SQLError> {
+    let memory = binary.memory;
+    let mut input = Fields {
+        binary,
+        retained_children: &mut 0,
+    };
+    if input.header(super::super::TABLE_SECURITY).await? != 1 {
         return Err(invalid("table authority count"));
     }
-    let role_owner = input.identity()?;
-    let relation = input.optional_incarnation()?;
-    let acl_count = input.binary.count()?;
-    let revision_count = input.binary.count()?;
+    let role_owner = input.identity().await?;
+    let relation = input.optional_incarnation().await?;
+    let acl_count = input.binary.count().await?;
+    let revision_count = input.binary.count().await?;
     let mut reservation = memory.empty_reservation();
-    let acl = payload(input.acl()?, &mut reservation);
-    let column_acls =
-        input.native_authority_map(acl_count, &mut reservation, |input| input.acl_entries())?;
-    let columns = input.native_authority_map(revision_count, &mut reservation, |input| {
-        Ok(Budgeted::new(
-            input.object_id()?,
-            input.binary.memory.empty_reservation(),
-        ))
-    })?;
-    input.binary.end()?;
+    let acl = payload(input.acl().await?, &mut reservation);
+    let column_acls = input
+        .native_authority_map(acl_count, &mut reservation)
+        .await?;
+    let columns = input
+        .native_authority_map(revision_count, &mut reservation)
+        .await?;
+    input.binary.end().await?;
     Ok(Budgeted::new(
         BoundTableSecurity {
             role_owner,
@@ -127,19 +143,33 @@ pub(in super::super) fn table_security(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Budgeted<CapturedTableSecurity>, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    if input.header(super::super::TABLE_SECURITY)? != 1 {
+    decode_image(reader, memory, cancellation, async |binary| {
+        table_security_from(binary).await
+    })
+}
+
+pub(in super::super) async fn table_security_from(
+    binary: AsyncImageInput<'_>,
+) -> Result<Budgeted<CapturedTableSecurity>, SQLError> {
+    let memory = binary.memory;
+    let mut input = Fields {
+        binary,
+        retained_children: &mut 0,
+    };
+    if input.header(super::super::TABLE_SECURITY).await? != 1 {
         return Err(invalid("table authority count"));
     }
-    let role_owner = input.identity()?;
-    let relation_revision = input.optional_incarnation()?;
-    let acl_count = input.binary.count()?;
-    let revision_count = input.binary.count()?;
+    let role_owner = input.identity().await?;
+    let relation_revision = input.optional_incarnation().await?;
+    let acl_count = input.binary.count().await?;
+    let revision_count = input.binary.count().await?;
     let mut reservation = memory.empty_reservation();
-    let acl = payload(input.acl()?, &mut reservation);
-    let column_acls = input.table_column_acls(acl_count, &mut reservation)?;
-    let column_revisions = input.table_column_revisions(revision_count, &mut reservation)?;
-    input.binary.end()?;
+    let acl = payload(input.acl().await?, &mut reservation);
+    let column_acls = input.table_column_acls(acl_count, &mut reservation).await?;
+    let column_revisions = input
+        .table_column_revisions(revision_count, &mut reservation)
+        .await?;
+    input.binary.end().await?;
     Ok(Budgeted::new(
         CapturedTableSecurity {
             privileges: CapturedTablePrivileges::from_image_fields(role_owner, acl, column_acls),
@@ -148,4 +178,19 @@ pub(in super::super) fn table_security(
         },
         reservation,
     ))
+}
+
+impl ImageValue for Vec<BoundTableAclEntry> {
+    async fn read(input: &mut Fields<'_>) -> Result<Budgeted<Self>, SQLError> {
+        input.acl_entries().await
+    }
+}
+
+impl ImageValue for [u8; 16] {
+    async fn read(input: &mut Fields<'_>) -> Result<Budgeted<Self>, SQLError> {
+        Ok(Budgeted::new(
+            input.object_id().await?,
+            input.binary.memory.empty_reservation(),
+        ))
+    }
 }

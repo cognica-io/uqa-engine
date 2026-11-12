@@ -80,7 +80,7 @@ impl Fields<'_> {
         self.slots(count, memory, || Expr::Star).await
     }
 
-    async fn slots<T: Send>(
+    pub(super) async fn slots<T: Send>(
         &mut self,
         count: usize,
         memory: &mut MemoryReservation,
@@ -108,10 +108,6 @@ impl Fields<'_> {
 }
 
 impl Input<'_> {
-    pub(super) fn expression(&mut self) -> Result<Budgeted<Expr>, SQLError> {
-        self.fields(async |mut input| input.expression().await)
-    }
-
     pub(super) fn scalar_value(&mut self) -> Result<Budgeted<Value>, SQLError> {
         self.fields(async |mut input| input.scalar_value().await)
     }

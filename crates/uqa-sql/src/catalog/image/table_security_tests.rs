@@ -415,3 +415,32 @@ fn native_table_authority_input_retires_io_cancellation_and_unwinding() {
         }
     }
 }
+
+#[test]
+fn native_table_authority_input_resumes_acl_paths_and_retires_partial_generations() {
+    use super::input::window_tests::{assert_retirement, read_windowed, WINDOWS};
+    use crate::catalog::{security::BoundTableSecurity, table_metadata::TableMetadata};
+    let original = encode(&fixture(), 17);
+    for (width, steps) in WINDOWS {
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let restored = read_windowed(
+            TableMetadata::<BoundTableSecurity>::image_input(&memory, &token).unwrap(),
+            &original,
+            width,
+            steps,
+        );
+        token.cancel();
+        let fresh = CancellationToken::new();
+        let mut output = Vec::new();
+        restored
+            .image_reader(&fresh)
+            .unwrap()
+            .write_to(&mut output)
+            .unwrap();
+        assert_eq!(output, original);
+        drop(restored);
+        assert_eq!(memory.used(), 0);
+    }
+    assert_retirement(&original, TableMetadata::<BoundTableSecurity>::image_input);
+}

@@ -9,11 +9,8 @@
 use super::{CapturedForeignCatalog, ForeignCatalog, StoredForeignTable};
 use std::{cmp::Ordering, io::Read, ops::Bound, sync::Arc};
 use uqa_core::{
-    image_io::ImageInput,
-    memory::{
-        Budgeted, BudgetedMap, BudgetedVec, MemoryBudget, MemoryReservation, OwnedMap,
-        ProductionControl,
-    },
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryBudget, MemoryReservation, OwnedMap},
     CancellationToken, RelationIdentity,
 };
 use uqa_sql::{
@@ -25,7 +22,7 @@ use uqa_sql::{
     },
     SQLError,
 };
-use uqa_storage::{image_io::FramedImageInput, read_control::StorageReadControl};
+use uqa_storage::{image_io::read_framed_image_from, read_control::StorageReadControl};
 
 mod output;
 
@@ -44,39 +41,43 @@ fn take<T>(value: Budgeted<T>, memory: &mut MemoryReservation) -> T {
     value
 }
 
-fn compare(left: &str, right: &str, token: &CancellationToken) -> Result<Ordering, SQLError> {
-    for (left, right) in left
-        .as_bytes()
-        .chunks(4096)
-        .zip(right.as_bytes().chunks(4096))
-    {
-        token.check()?;
-        let order = left.cmp(right);
-        if order != Ordering::Equal {
-            return Ok(order);
-        }
-    }
-    token.check()?;
-    Ok(left.len().cmp(&right.len()))
-}
-
-struct Decoder<'a>(ImageInput<'a>);
+struct Decoder<'a>(AsyncImageInput<'a>);
 impl Decoder<'_> {
-    fn flag(&mut self) -> Result<bool, SQLError> {
-        match self.0.array::<1>()?[0] {
+    async fn compare(&mut self, left: &str, right: &str) -> Result<Ordering, SQLError> {
+        for (left, right) in left
+            .as_bytes()
+            .chunks(4096)
+            .zip(right.as_bytes().chunks(4096))
+        {
+            self.0.checkpoint().await?;
+            let order = left.cmp(right);
+            if order != Ordering::Equal {
+                return Ok(order);
+            }
+        }
+        self.0.checkpoint().await?;
+        Ok(left.len().cmp(&right.len()))
+    }
+
+    async fn flag(&mut self) -> Result<bool, SQLError> {
+        match self.0.array::<1>().await?[0] {
             0 => Ok(false),
             1 => Ok(true),
             _ => Err(invalid("presence tag")),
         }
     }
-    fn text(&mut self, memory: &mut MemoryReservation, name: bool) -> Result<String, SQLError> {
-        let text = self.0.text()?;
+    async fn text(
+        &mut self,
+        memory: &mut MemoryReservation,
+        name: bool,
+    ) -> Result<String, SQLError> {
+        let text = self.0.text().await?;
         if name {
             if text.is_empty() {
                 return Err(invalid("empty name"));
             }
             for chunk in text.as_bytes().chunks(4096) {
-                self.0.cancellation.check()?;
+                self.0.checkpoint().await?;
                 if chunk.contains(&0) {
                     return Err(invalid("name contains NUL"));
                 }
@@ -84,59 +85,45 @@ impl Decoder<'_> {
         }
         Ok(take(text, memory))
     }
-    fn optional_text(
+    async fn optional_text(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<Option<String>, SQLError> {
-        if self.flag()? {
-            Ok(Some(self.text(memory, true)?))
+        if self.flag().await? {
+            Ok(Some(self.text(memory, true).await?))
         } else {
             Ok(None)
         }
     }
-    fn oid(&mut self) -> Result<u32, SQLError> {
-        let value = u32::from_le_bytes(self.0.array()?);
+    async fn oid(&mut self) -> Result<u32, SQLError> {
+        let value = u32::from_le_bytes(self.0.array().await?);
         if value == 0 {
             return Err(invalid("zero OID"));
         }
         Ok(value)
     }
-    fn optional_oid(&mut self) -> Result<Option<u32>, SQLError> {
-        if self.flag()? {
-            Ok(Some(self.oid()?))
+    async fn optional_oid(&mut self) -> Result<Option<u32>, SQLError> {
+        if self.flag().await? {
+            Ok(Some(self.oid().await?))
         } else {
             Ok(None)
         }
     }
-    fn child<T>(
-        &mut self,
-        decode: impl FnOnce(
-            &mut dyn Read,
-            &uqa_core::memory::MemoryBudget,
-            &CancellationToken,
-        ) -> Result<T, SQLError>,
-    ) -> Result<T, SQLError> {
-        decode(
-            &mut FramedImageInput::new(self.0.reader),
-            self.0.memory,
-            self.0.cancellation,
-        )
-    }
-    fn options(
+    async fn options(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<OwnedMap<String, String>, SQLError> {
-        let count = self.0.count()?;
+        let count = self.0.count().await?;
         let mut values = OwnedMap::new();
         let mut pending: Option<(String, String)> = None;
         for _ in 0..count {
-            let name = self.text(memory, true)?;
+            let name = self.text(memory, true).await?;
             if let Some((previous, _)) = &pending {
-                if compare(previous, &name, self.0.cancellation)? != Ordering::Less {
+                if self.compare(previous, &name).await? != Ordering::Less {
                     return Err(invalid("option order"));
                 }
             }
-            let value = self.text(memory, false)?;
+            let value = self.text(memory, false).await?;
             memory.grow(OwnedMap::<String, String>::entry_bytes())?;
             if let Some((name, value)) = pending.replace((name, value)) {
                 values.insert(name, value);
@@ -147,35 +134,35 @@ impl Decoder<'_> {
         }
         Ok(values)
     }
-    fn names(&mut self, memory: &mut MemoryReservation) -> Result<Vec<String>, SQLError> {
-        let count = self.0.count()?;
+    async fn names(&mut self, memory: &mut MemoryReservation) -> Result<Vec<String>, SQLError> {
+        let count = self.0.count().await?;
         let mut values = BudgetedVec::new(self.0.memory);
         values.reserve(count)?;
         for _ in 0..count {
-            values.push(self.text(memory, true)?)?;
+            values.push(self.text(memory, true).await?)?;
         }
         let (values, lease) = values.into_parts();
         memory.absorb(lease);
         Ok(values)
     }
-    fn table(&mut self) -> Result<(Budgeted<StoredForeignTable>, usize), SQLError> {
+    async fn table(&mut self) -> Result<(Budgeted<StoredForeignTable>, usize), SQLError> {
         let mut memory = self.0.memory.empty_reservation();
-        let name = self.text(&mut memory, true)?;
-        let persistence = match self.0.array::<1>()?[0] {
+        let name = self.text(&mut memory, true).await?;
+        let persistence = match self.0.array::<1>().await?[0] {
             0 => RelationPersistence::Permanent,
             1 => RelationPersistence::Unlogged,
             _ => return Err(invalid("durable persistence")),
         };
-        let object_id = self.0.array::<16>()?;
+        let object_id = self.0.array::<16>().await?;
         if object_id == [0; 16] {
             return Err(invalid("zero object identity"));
         }
-        let catalog_oids = if self.flag()? {
+        let catalog_oids = if self.flag().await? {
             let oids = RelationCatalogOids {
-                relation: self.oid()?,
-                row_type: self.optional_oid()?,
-                array_type: self.optional_oid()?,
-                rule: self.optional_oid()?,
+                relation: self.oid().await?,
+                row_type: self.optional_oid().await?,
+                array_type: self.optional_oid().await?,
+                rule: self.optional_oid().await?,
             };
             if !oids.is_valid_for(RelationOidKind::ForeignTable, &object_id) {
                 return Err(invalid("relation OIDs"));
@@ -184,12 +171,12 @@ impl Decoder<'_> {
         } else {
             None
         };
-        let row_type_array_name = self.optional_text(&mut memory)?;
-        let server_name = self.text(&mut memory, true)?;
-        let server_reference = if self.flag()? {
+        let row_type_array_name = self.optional_text(&mut memory).await?;
+        let server_name = self.text(&mut memory, true).await?;
+        let server_reference = if self.flag().await? {
             let reference = super::super::ForeignServerReference {
-                oid: self.oid()?,
-                object_id: self.0.array()?,
+                oid: self.oid().await?,
+                object_id: self.0.array().await?,
             };
             if reference.oid < 16384 || reference.object_id == [0; 16] {
                 return Err(invalid("server identity"));
@@ -198,26 +185,35 @@ impl Decoder<'_> {
         } else {
             None
         };
-        let options = self.options(&mut memory)?;
-        let option_order = self.names(&mut memory)?;
+        let options = self.options(&mut memory).await?;
+        let option_order = self.names(&mut memory).await?;
         if option_order.len() != options.len() {
             return Err(invalid("option membership"));
         }
         let mut seen = BudgetedMap::new(self.0.memory);
         for name in &option_order {
-            self.0.cancellation.check()?;
+            self.0.checkpoint().await?;
             if !options.contains_key(name) || seen.insert(name.as_str(), ())?.is_some() {
                 return Err(invalid("option membership"));
             }
         }
         drop(seen);
-        let (columns, column_children) = self.child(image::read_columns_image_with_footprint)?;
+        let (columns, column_children) = read_framed_image_from(&mut self.0, async |input| {
+            image::read_columns_image_from(input).await
+        })
+        .await?;
         let columns = take(columns, &mut memory);
         let dropped_attributes = take(
-            self.child(image::read_dropped_attributes_image)?,
+            read_framed_image_from(&mut self.0, async |input| {
+                image::read_dropped_attributes_image_from(input).await
+            })
+            .await?,
             &mut memory,
         );
-        let (checks, check_children) = self.child(image::read_table_checks_image_with_footprint)?;
+        let (checks, check_children) = read_framed_image_from(&mut self.0, async |input| {
+            image::read_table_checks_image_from(input).await
+        })
+        .await?;
         let checks = take(checks, &mut memory);
         let children = column_children
             .checked_add(check_children)
@@ -260,71 +256,87 @@ impl ForeignCatalog {
         control: &StorageReadControl,
         mutations: &MemoryBudget,
     ) -> Result<Self, SQLError> {
-        let mut input = Decoder(ImageInput {
+        decode_image(
             reader,
-            memory: control.memory(),
-            cancellation: control.cancellation(),
-        });
-        if input.0.array::<8>()? != MAGIC {
-            return Err(invalid("version header"));
-        }
-        let count = input.0.count()?;
-        let mut tables = super::ForeignTables::with_budget(control.memory());
-        let mut securities =
-            uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities::with_budget(
-                control.memory(),
-            );
-        let production = ProductionControl::new(
             control.memory(),
             control.cancellation(),
-            control.cancellation(),
-        );
-        for _ in 0..count {
-            let mut key_memory = control.memory().empty_reservation();
-            let key = RelationIdentity {
-                schema: input.text(&mut key_memory, true)?,
-                name: input.text(&mut key_memory, true)?,
-            };
-            if let Some((previous, _)) = tables.durable.last_before(Bound::Unbounded) {
-                let mut order = compare(&previous.schema, &key.schema, control.cancellation())?;
-                if order == Ordering::Equal {
-                    order = compare(&previous.name, &key.name, control.cancellation())?;
-                }
-                if order != Ordering::Less {
-                    return Err(invalid("relation order"));
-                }
-            }
-            let (table, children) = input.table()?;
-            let security = input.child(BoundTableSecurity::read_image)?;
-            let (schema, mut security_memory) = production.copy_text(&key.schema)?.into_parts();
-            let (name, name_memory) = production.copy_text(&key.name)?.into_parts();
-            security_memory = production.combine(security_memory, name_memory);
-            securities.insert_image_entry(
-                Budgeted::new(
-                    RelationIdentity { schema, name },
-                    security_memory.expect("admitted foreign key"),
-                ),
-                table.persistence,
-                security,
-            )?;
-            let (table, mut memory) = table.into_parts();
-            memory.absorb(key_memory);
-            let bytes = memory
-                .bytes()
-                .checked_add(children)
-                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-            tables
-                .durable
-                .insert(key, Budgeted::new(table, memory), bytes)?;
-        }
-        input.0.end()?;
-        tables.durable = tables.durable.into_mutation_budget(mutations);
-        tables.temporary = tables.temporary.into_mutation_budget(mutations);
-        Ok(Self {
-            tables: Arc::new(tables),
-            security: Arc::new(securities.into_mutation_budget(mutations)),
-        })
+            async |input| read_catalog(input, mutations).await,
+        )
     }
+
+    /// Retain native catalog and framed SQL field continuations within each byte/poll window. Both published roots preserve their original input ownership and use the independent destination allowance for later mutations.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+        let mutations = mutations.clone();
+        Ok(ImageDecoder::new(
+            memory,
+            cancellation,
+            |mut reader| async move { read_catalog(reader.input(), &mutations).await },
+        )?)
+    }
+}
+
+async fn read_catalog(
+    binary: AsyncImageInput<'_>,
+    mutations: &MemoryBudget,
+) -> Result<ForeignCatalog, SQLError> {
+    let memory = binary.memory;
+    let mut input = Decoder(binary);
+    if input.0.array::<8>().await? != MAGIC {
+        return Err(invalid("version header"));
+    }
+    let count = input.0.count().await?;
+    let mut tables = super::ForeignTables::with_budget(memory);
+    let mut securities =
+        uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities::with_budget(memory);
+    for _ in 0..count {
+        let mut key_memory = memory.empty_reservation();
+        let key = RelationIdentity {
+            schema: input.text(&mut key_memory, true).await?,
+            name: input.text(&mut key_memory, true).await?,
+        };
+        if let Some((previous, _)) = tables.durable.last_before(Bound::Unbounded) {
+            let mut order = input.compare(&previous.schema, &key.schema).await?;
+            if order == Ordering::Equal {
+                order = input.compare(&previous.name, &key.name).await?;
+            }
+            if order != Ordering::Less {
+                return Err(invalid("relation order"));
+            }
+        }
+        let (table, children) = input.table().await?;
+        let security = read_framed_image_from(&mut input.0, async |input| {
+            BoundTableSecurity::read_image_from(input).await
+        })
+        .await?;
+        let (schema, mut security_memory) = input.0.copy_text(&key.schema).await?.into_parts();
+        let (name, name_memory) = input.0.copy_text(&key.name).await?.into_parts();
+        security_memory.absorb(name_memory);
+        securities.insert_image_entry(
+            Budgeted::new(RelationIdentity { schema, name }, security_memory),
+            table.persistence,
+            security,
+        )?;
+        let (table, mut memory) = table.into_parts();
+        memory.absorb(key_memory);
+        let bytes = memory
+            .bytes()
+            .checked_add(children)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        tables
+            .durable
+            .insert(key, Budgeted::new(table, memory), bytes)?;
+    }
+    input.0.end().await?;
+    tables.durable = tables.durable.into_mutation_budget(mutations);
+    tables.temporary = tables.temporary.into_mutation_budget(mutations);
+    Ok(ForeignCatalog {
+        tables: Arc::new(tables),
+        security: Arc::new(securities.into_mutation_budget(mutations)),
+    })
 }
 
 #[cfg(test)]

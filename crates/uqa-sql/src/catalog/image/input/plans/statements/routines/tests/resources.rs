@@ -101,8 +101,7 @@ fn native_routine_images_match_independent_wire_and_reject_invalid_catalog_membe
     assert_eq!(memory.used(), 0);
 }
 
-#[test]
-fn native_routine_images_retire_deep_original_and_bound_forests_without_stack_growth() {
+pub(super) fn deep_image() -> Vec<u8> {
     let mut original = vec![1]; // Original VALUES.
     original.extend(1u64.to_le_bytes());
     original.extend(1u64.to_le_bytes());
@@ -116,7 +115,12 @@ fn native_routine_images_retire_deep_original_and_bound_forests_without_stack_gr
     bound.extend(std::iter::repeat_n(14, 10_000));
     bound.push(0);
     bound.extend(0u64.to_le_bytes());
-    let bytes = independent(Some(&original), Some(&bound));
+    independent(Some(&original), Some(&bound))
+}
+
+#[test]
+fn native_routine_images_retire_deep_original_and_bound_forests_without_stack_growth() {
+    let bytes = deep_image();
     std::thread::Builder::new()
         .stack_size(128 << 10)
         .spawn(move || {

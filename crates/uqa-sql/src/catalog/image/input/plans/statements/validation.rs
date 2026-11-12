@@ -32,19 +32,33 @@ pub(in super::super) fn validate(
     references: &References,
     input: &Input<'_>,
 ) -> Result<(), SQLError> {
+    let mut position = 0;
+    loop {
+        input.binary.cancellation.check()?;
+        if validate_step(node, references, position)? {
+            return Ok(());
+        }
+        position += 1;
+    }
+}
+
+pub(in super::super) fn validate_step(
+    node: &Node,
+    references: &References,
+    position: usize,
+) -> Result<bool, SQLError> {
     let windows = match node {
         Node::Query(query) => {
-            for (index, window) in query.windows.iter().enumerate() {
-                input.binary.cancellation.check()?;
+            if let Some(window) = query.windows.get(position) {
                 if window.spec.definition.is_some() {
                     return Err(invalid("stored canonical window address"));
                 }
-                if window
-                    .inherited
-                    .is_some_and(|parent| parent >= index || query.windows[parent].name.is_none())
-                {
+                if window.inherited.is_some_and(|parent| {
+                    parent >= position || query.windows[parent].name.is_none()
+                }) {
                     return Err(invalid("stored window inheritance address"));
                 }
+                return Ok(false);
             }
             query.windows.len()
         }
@@ -61,18 +75,18 @@ pub(in super::super) fn validate(
             if targets.targets.len() != targets.source_positions.len() {
                 return Err(invalid("stored multiple assignment positions"));
             }
-            for position in &targets.source_positions {
-                input.binary.cancellation.check()?;
+            if let Some(position) = targets.source_positions.get(position) {
                 if *position >= targets.source_width {
                     return Err(invalid("stored multiple assignment position"));
                 }
+                return Ok(false);
             }
-            return Ok(());
+            return Ok(true);
         }
-        _ => return Ok(()),
+        _ => return Ok(true),
     };
     if references.window.is_some_and(|index| index >= windows) {
         return Err(invalid("stored window arena address"));
     }
-    Ok(())
+    Ok(true)
 }

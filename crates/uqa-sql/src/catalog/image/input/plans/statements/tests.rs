@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 mod resources;
+mod windows;
 
 fn encode(value: &Statement) -> Vec<u8> {
     let memory = MemoryBudget::new(64 << 20);
@@ -40,9 +41,7 @@ fn check_image(value: &Statement) {
     assert_eq!(memory.used(), 0);
 }
 
-#[test]
-fn native_statement_input_preserves_queries_sources_windows_and_cte_bodies() {
-    for sql in [
+const QUERY_SOURCES: &[&str] = &[
         "SELECT t.a AS named, (SELECT 1) FROM t LEFT JOIN u USING (a) WHERE t.a > 0 ORDER BY named LIMIT 3 OFFSET 1 FOR UPDATE OF t",
         "SELECT sum(a) OVER w FROM t WINDOW w AS (PARTITION BY b ORDER BY a ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING)",
         "SELECT a, count(*) FROM t GROUP BY DISTINCT GROUPING SETS ((a), ()) HAVING count(*) > 0",
@@ -57,20 +56,26 @@ fn native_statement_input_preserves_queries_sources_windows_and_cte_bodies() {
         "WITH q AS (MERGE INTO t USING u ON t.a = u.a WHEN MATCHED THEN DELETE RETURNING t.a) SELECT * FROM q",
         "SELECT (SELECT sum(a) OVER () FROM t) + 1 WHERE EXISTS (SELECT 1) AND 1 IN (SELECT 1)",
         "SELECT array_agg((SELECT 1) ORDER BY (SELECT 2) DESC NULLS LAST) FILTER (WHERE EXISTS (SELECT 3))",
-    ] {
+    ];
+
+#[test]
+fn native_statement_input_preserves_queries_sources_windows_and_cte_bodies() {
+    for sql in QUERY_SOURCES {
         check_image(&crate::compile(sql).unwrap().remove(0));
     }
 }
 
-#[test]
-fn native_statement_input_preserves_mutations_and_notify() {
-    for sql in [
+const MUTATION_SOURCES: &[&str] = &[
         "INSERT INTO t(a, b[1:2]) VALUES (1, ARRAY[2, 3]) ON CONFLICT (a) DO UPDATE SET b[1] = 4 WHERE t.a > 0 RETURNING a",
         "UPDATE t SET (a, b) = (SELECT 1, 2), c[1:2] = ARRAY[3, 4] FROM u WHERE t.a = u.a RETURNING t.a",
         "DELETE FROM t USING u WHERE t.a = u.a RETURNING t.a",
         "MERGE INTO t USING u ON t.a = u.a WHEN MATCHED AND u.a > 3 THEN UPDATE SET b = u.b WHEN MATCHED THEN DELETE WHEN NOT MATCHED BY SOURCE THEN UPDATE SET b = 0 WHEN NOT MATCHED THEN INSERT (a, b) VALUES (u.a, u.b) RETURNING t.a",
         "NOTIFY events, 'hello'",
-    ] {
+    ];
+
+#[test]
+fn native_statement_input_preserves_mutations_and_notify() {
+    for sql in MUTATION_SOURCES {
         check_image(&crate::compile(sql).unwrap().remove(0));
     }
 }

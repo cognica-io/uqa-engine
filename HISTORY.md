@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve stored query, routine, rule, scalar and table definitions across native input windows, including paired foreign-table metadata and authority, without SQL replay or rebinding.
+
 - Resume native catalog metadata, authority, sequence, expression, trigger, index, comment and scoring input within retained byte/work windows, preserving existing encodings and terminal cleanup.
 
 - Retain private native SQLite, SQLite KV and redb restore destinations through logical validation, preserving original cancellation, exact-request recovery and later published writes.

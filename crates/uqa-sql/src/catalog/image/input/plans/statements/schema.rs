@@ -6,6 +6,30 @@
 
 //! The field schema is exhaustive over native structures, including fields omitted from durable images.
 
+macro_rules! read_syntax_fields {
+    ($position:expr, $input:expr, $memory:expr;) => { Ok(Step::Done) };
+    ($position:expr, $input:expr, $memory:expr; $first:expr $(, $rest:expr)* $(,)?) => {{
+        let position = $position;
+        if position == 0 {
+            await_field!(Field::read_fields($first, $input, $memory))
+        } else {
+            read_syntax_fields!(position - 1, $input, $memory; $($rest),*)
+        }
+    }};
+}
+
+macro_rules! syntax_body_fields {
+    ($($field:tt),+ $(,)?) => {
+        fn field(&mut self, position: usize) -> Option<&mut dyn Field> {
+            let fields = [$(&mut self.$field as &mut dyn Field),+];
+            fields.into_iter().nth(position)
+        }
+        async fn read_fields(&mut self, position: usize, _: &mut Option<usize>, input: &mut $crate::catalog::image::input::Fields<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+            read_syntax_fields!(position, input, memory; $(&mut self.$field),+)
+        }
+    };
+}
+
 macro_rules! syntax_nodes {
     ($($variant:ident: $ty:ty),+ $(,)?) => {
         #[derive(Debug)]
@@ -21,6 +45,12 @@ macro_rules! syntax_nodes {
         impl Node {
             fn body(&mut self) -> &mut dyn Body {
                 match self { Self::Empty => unreachable!("empty syntax root"), $(Self::$variant(value) => value,)+ }
+            }
+            async fn read_fields(&mut self, position: usize, count: &mut Option<usize>, input: &mut Fields<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+                match self {
+                    Self::Empty => unreachable!("empty syntax root"),
+                    $(Self::$variant(value) => await_field!(Body::read_fields(value, position, count, input, memory)),)+
+                }
             }
         }
         $(impl Tree for $ty {
@@ -41,6 +71,9 @@ macro_rules! syntax_members {
                 <Self as Body>::new(memory)
             }
             fn read(&mut self, _: &mut Input<'_>, _: &mut PlanMemory) -> Result<Step, SQLError> {
+                Ok(Step::Child(Self::KIND))
+            }
+            async fn read_fields(&mut self, _: &mut Fields<'_>, _: &mut PlanMemory) -> Result<Step, SQLError> {
                 Ok(Step::Child(Self::KIND))
             }
             fn attach(&mut self, child: Node) { *self = Self::from_node(child); }
@@ -67,6 +100,9 @@ macro_rules! syntax_struct {
                 let Self { $($field,)* $($($skip: _,)*)? } = self;
                 let fields = [$($field as &mut dyn Field,)*];
                 fields.into_iter().nth(position)
+            }
+            async fn read_fields(&mut self, position: usize, _: &mut Option<usize>, input: &mut $crate::catalog::image::input::Fields<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+                read_syntax_fields!(position, input, memory; $(&mut self.$field),*)
             }
         }
     };
@@ -107,6 +143,22 @@ macro_rules! syntax_enum {
                     return Ok(Step::Advance);
                 }
                 self.field(position).map_or(Ok(Step::Done), |value| value.read(input, memory))
+            }
+            async fn read_fields(&mut self, position: usize, _: &mut Option<usize>, input: &mut $crate::catalog::image::input::Fields<'_>, memory: &mut PlanMemory) -> Result<Step, SQLError> {
+                if position == 0 {
+                    *self = match await_field!(input.binary.array::<1>())?[0] {
+                        $($tag => Self::$variant $({ $($field: Field::new(memory)?,)* })? $(( { let _ = stringify!($tuple); Field::new(memory)? } ))?,)+
+                        _ => return Err(invalid(stringify!($ty))),
+                    };
+                    return Ok(Step::Advance);
+                }
+                let position = position - 1;
+                match self {
+                    $(Self::$variant $({ $($field),* })? $(($tuple))? => {
+                        read_syntax_fields!(position, input, memory; $($($field,)*)? $($tuple,)?)
+                    },)+
+                    $($($pattern)|+ => Ok(Step::Done),)?
+                }
             }
         }
     };
