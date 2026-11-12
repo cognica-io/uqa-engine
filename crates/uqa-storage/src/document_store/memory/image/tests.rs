@@ -10,6 +10,8 @@ use crate::{
     DocumentMetadata, DocumentStore,
 };
 
+mod input;
+
 fn input(control: &StorageReadControl, payload: &str, capacity: usize) -> Budgeted<StoredDocument> {
     let mut text = String::with_capacity(capacity);
     text.push_str(payload);

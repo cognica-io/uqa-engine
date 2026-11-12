@@ -58475,6 +58475,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_input_bounds_each_call_and_preserves_embedded_tuple_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/input.rs",
+      "capability": "Cooperative native document input",
+      "workload": "Decode an independent tuple fixture with one-byte and fragmented read windows, followed by another tuple.",
+      "invariant": "Each advance respects its byte ceiling, tuple boundaries and exact metadata; completed and empty tuples retain their original allocation behavior.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_input_rejects_truncation_and_retires_partial_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/image/tests/input.rs",
+      "capability": "Cooperative native document input",
+      "workload": "Truncate every fixture byte and inject cancellation, zero windows, I/O failure, abandonment and unwinding.",
+      "invariant": "No incomplete tuple escapes; the original partial allocations retire on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_conversion_yields_after_eof_and_preserves_native_layout_reuse",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests/input.rs",
+      "capability": "Cooperative native document input",
+      "workload": "Restore wide multibyte fields and nested values with a one-poll window, then mutate and retain a snapshot.",
+      "invariant": "Native conversion continues after EOF without rereading input; restored and ordinary writes reuse identical layouts and retain original values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_conversion_retires_the_unpublished_corpus_on_failure_after_eof",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests/input.rs",
+      "capability": "Cooperative native document input",
+      "workload": "Retain a complete preceding tuple and fail conversion after source EOF through cancellation, memory denial, zero windows or abandonment.",
+      "invariant": "The entire unpublished corpus and all layout/value owners retire before their allowance is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "document_conversion_checks_both_cancellation_owners_at_every_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests/input.rs",
+      "capability": "Cooperative native document input",
+      "workload": "Cancel original and independent invoking controls at every pending native adoption boundary.",
+      "invariant": "The next advance fails terminally and retires both the preceding corpus and the partially adopted tuple.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
