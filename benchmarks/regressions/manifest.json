@@ -57482,7 +57482,7 @@
         ""
       ],
       "capability": "Retained persistent storage handles",
-      "workload": "Document/text mutations and rollback through native SQLite, SQLite KV and legacy SQLite handles.",
+      "workload": "Construct native, key/value and unbound SQLite handles, cancel and exhaust their original construction allowance, then write, capture a snapshot, roll back and retire the handles.",
       "invariant": "Original input cancellation cannot poison published handles; rows, term frequencies, rollback and final allocation retirement remain exact."
     },
     {

@@ -60,6 +60,10 @@ fn sqlite_controlled_handles_preserve_mutation_rollback_and_input_independence()
             .inverted_index_with_control(name, default, &control)
             .unwrap();
         control.cancellation().cancel();
+        let full = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
         docs.put(1, [("body".into(), Value::Str("First WORD".into()))].into())
             .unwrap();
         index
@@ -71,6 +75,12 @@ fn sqlite_controlled_handles_preserve_mutation_rollback_and_input_independence()
             "{mode}"
         );
         assert_eq!(index.doc_freq("body", "word").unwrap(), 1, "{mode}");
+        let snapshot = index
+            .snapshot()
+            .unwrap_or_else(|error| panic!("{mode}: {error}"));
+        assert_eq!(snapshot.doc_freq("body", "word").unwrap(), 1, "{mode}");
+        drop(snapshot);
+        assert_eq!(control.memory().used(), control.memory().limit(), "{mode}");
         backend.begin_transaction().unwrap();
         docs.put(2, [("body".into(), Value::Str("discarded".into()))].into())
             .unwrap();
@@ -80,6 +90,8 @@ fn sqlite_controlled_handles_preserve_mutation_rollback_and_input_independence()
         backend.rollback_transaction().unwrap();
         assert_eq!(docs.len().unwrap(), 1, "{mode}");
         assert_eq!(index.doc_freq("body", "discarded").unwrap(), 0, "{mode}");
+        assert_eq!(control.memory().used(), control.memory().limit(), "{mode}");
+        drop(full);
         let bytes = control.memory().used();
         drop(docs);
         assert!(control.memory().used() < bytes, "{mode}");

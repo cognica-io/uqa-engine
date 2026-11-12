@@ -319,10 +319,6 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
             self.conn.clone(),
             table,
             uqa_storage::inverted_index::AnalyzerBindings::from_default(default),
-            uqa_storage::read_control::StorageReadControl::new(
-                control.memory(),
-                &uqa_core::CancellationToken::new(),
-            ),
         ));
         let value = uqa_core::memory::Budgeted::new(value, memory);
         control.check()?;

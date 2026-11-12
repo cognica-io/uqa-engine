@@ -6,9 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-- Keep original admitted vector field, map-node and physical-handle owners through writable collection replacement, removal and reinsertion, preserving existing memory captures.
-
 ### Changed
+
+- Keep original admitted vector field, map-node and physical-handle owners through writable collection replacement, removal and reinsertion, preserving existing memory captures.
 
 - Retain canonical vector handle names, concrete allocations and shared SQLite cache state under their original reconstruction allowance while preserving subsequent writes and rollback.
 
@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Keep admitted document and text-index handles in Engine table, snapshot and capture cells. Replacing a physical handle retires its own allocation allowance while retained tables keep their original handles alive.
 
-- Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation.
+- Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation and exhaustion; later SQLite snapshots retain their ordinary provider policy.
 
 - Resume stored table-authority validation across bounded work windows while preserving role incarnations, grant-path order and original allocation ownership.
 
