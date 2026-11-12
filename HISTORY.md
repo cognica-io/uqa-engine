@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Decode stored scalar domain declarations with admitted native defaults, CHECK expressions, constraint identities and optional legacy metadata, preserving original field defaults without rebinding or executing SQL.
+- Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.
+
+- Restore persistent domain definitions and exact OID claims through retained input, preserving marker precedence, native defaults and CHECK expressions, owner and constraint validation, private snapshots and later writable mutations. Keep the original delayed cross-catalog constraint validation before publication.
 - Restore persistent enum, shell, range and composite catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot. Restore object comments in their original position between range and composite definitions, retaining admitted text and independent future mutation ownership.
 
 - Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.

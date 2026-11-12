@@ -8,6 +8,8 @@ use super::*;
 use std::sync::Arc;
 use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
 
+mod projection;
+
 const FORMAT: TypeRecordFormat = TypeRecordFormat {
     label: "test",
     definition_context: "test definition",

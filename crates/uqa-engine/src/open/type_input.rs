@@ -8,7 +8,7 @@
 
 use super::Engine;
 use std::sync::Arc;
-use uqa_execution::catalog::{comments, composite_type, enum_type, range_type, shell_type};
+use uqa_execution::catalog::{comments, composite_type, domain, enum_type, range_type, shell_type};
 use uqa_storage::{
     catalog::input::CatalogInputLimits, read_control::StorageReadControl, StorageBackendResult,
 };
@@ -19,6 +19,12 @@ pub(super) enum PersistentTypeInput {
     Ranges(range_type::RangeCatalogInput),
     Comments(comments::CommentCatalogInput),
     Composites(composite_type::CompositeCatalogInput),
+    Domains(domain::DomainCatalogInput),
+}
+
+pub(super) enum TypeProgress {
+    Pending(PersistentTypeInput),
+    Complete(domain::DomainRestoreState),
 }
 
 impl PersistentTypeInput {
@@ -42,48 +48,67 @@ impl PersistentTypeInput {
         engine: &Engine,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Option<Self>> {
+    ) -> StorageBackendResult<TypeProgress> {
         match self {
             Self::Enums(mut input) => match input.advance(1)? {
                 Some(enums) => {
                     *engine.durable.enums.write() = enums;
-                    Ok(Some(Self::Shells(shell_type::begin_input(
-                        Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
-                        engine.durable.roles.read().clone(),
-                        limits,
-                        engine.durable.shells.read().budget(),
-                        control,
-                    )?)))
+                    Ok(TypeProgress::Pending(Self::Shells(
+                        shell_type::begin_input(
+                            Arc::clone(
+                                engine.storage.catalog.as_ref().expect("persistent catalog"),
+                            ),
+                            engine.durable.roles.read().clone(),
+                            limits,
+                            engine.durable.shells.read().budget(),
+                            control,
+                        )?,
+                    )))
                 }
-                None => Ok(Some(Self::Enums(input))),
+                None => Ok(TypeProgress::Pending(Self::Enums(input))),
             },
             Self::Shells(mut input) => match input.advance(1)? {
                 Some(shells) => {
                     *engine.durable.shells.write() = shells;
-                    Ok(Some(Self::ranges(engine, limits, control)?))
+                    Ok(TypeProgress::Pending(Self::ranges(
+                        engine, limits, control,
+                    )?))
                 }
-                None => Ok(Some(Self::Shells(input))),
+                None => Ok(TypeProgress::Pending(Self::Shells(input))),
             },
             Self::Ranges(mut input) => match input.advance(1)? {
                 Some(ranges) => {
                     *engine.durable.ranges.write() = ranges;
-                    Ok(Some(Self::comments(engine, limits, control)?))
+                    Ok(TypeProgress::Pending(Self::comments(
+                        engine, limits, control,
+                    )?))
                 }
-                None => Ok(Some(Self::Ranges(input))),
+                None => Ok(TypeProgress::Pending(Self::Ranges(input))),
             },
             Self::Comments(mut input) => match input.advance(1)? {
                 Some(comments) => {
                     *engine.durable.comments.write() = comments;
-                    Ok(Some(Self::composites(engine, limits, control)?))
+                    Ok(TypeProgress::Pending(Self::composites(
+                        engine, limits, control,
+                    )?))
                 }
-                None => Ok(Some(Self::Comments(input))),
+                None => Ok(TypeProgress::Pending(Self::Comments(input))),
             },
             Self::Composites(mut input) => match input.advance(1)? {
                 Some(composites) => {
                     *engine.durable.composites.write() = composites;
-                    Ok(None)
+                    Ok(TypeProgress::Pending(Self::domains(
+                        engine, limits, control,
+                    )?))
                 }
-                None => Ok(Some(Self::Composites(input))),
+                None => Ok(TypeProgress::Pending(Self::Composites(input))),
+            },
+            Self::Domains(mut input) => match input.advance(1)? {
+                Some(domains) => {
+                    *engine.durable.domains.write() = domains.registry;
+                    Ok(TypeProgress::Complete(domains.state))
+                }
+                None => Ok(TypeProgress::Pending(Self::Domains(input))),
             },
         }
     }
@@ -98,6 +123,20 @@ impl PersistentTypeInput {
             engine.durable.roles.read().clone(),
             limits,
             engine.durable.ranges.read().budget(),
+            control,
+        )?))
+    }
+
+    fn domains(
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self::Domains(domain::DomainCatalogInput::new(
+            Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
+            engine.durable.roles.read().clone(),
+            limits,
+            engine.durable.domains.read().budget(),
             control,
         )?))
     }

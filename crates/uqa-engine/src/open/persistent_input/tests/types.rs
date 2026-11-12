@@ -7,6 +7,7 @@
 use super::*;
 use std::fmt::Write;
 
+mod domains;
 mod structured;
 
 #[derive(Clone, Copy)]
@@ -16,6 +17,7 @@ enum Kind {
     Range,
     Comment,
     Composite,
+    Domain,
 }
 
 fn selected(input: &PersistentEngineInput, kind: Kind) -> bool {
@@ -32,6 +34,7 @@ fn selected(input: &PersistentEngineInput, kind: Kind) -> bool {
                 Stage::Types(PersistentTypeInput::Composites(_)),
                 Kind::Composite
             )
+            | (Stage::Types(PersistentTypeInput::Domains(_)), Kind::Domain)
     )
 }
 fn reach_types(input: &mut PersistentEngineInput, kind: Kind) {

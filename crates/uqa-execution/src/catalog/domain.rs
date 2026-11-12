@@ -16,8 +16,10 @@ use uqa_sql::catalog::{
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 mod constructors;
+mod input;
 mod records;
 pub use constructors::restore_constructors;
+pub use input::DomainCatalogInput;
 mod restoration;
 pub use restoration::{finish_restore, restore, DomainRestoreState, RestoredDomains};
 

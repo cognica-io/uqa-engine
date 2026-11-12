@@ -141,7 +141,7 @@ pub(crate) fn new<T: InputType>(
     Ok(TypeCatalogInput { input })
 }
 
-async fn rows(
+pub(crate) async fn rows(
     catalog: &dyn CatalogFacade,
     prefix: &str,
     limits: CatalogInputLimits,
@@ -189,14 +189,7 @@ async fn check_claims<T: InputType>(
             .name
             .strip_prefix(format.oid_prefix)
             .ok_or_else(mismatch)?;
-        if text.is_empty()
-            || text.len() > 10
-            || (text.len() > 1 && text.starts_with('0'))
-            || !text.bytes().all(|byte| byte.is_ascii_digit())
-        {
-            return Err(mismatch());
-        }
-        let oid: u32 = text.parse().map_err(|_| mismatch())?;
+        let oid = claim_oid(text).ok_or_else(mismatch)?;
         actual.insert_copy(oid, row.value.as_str())?;
     }
     if actual.len() != expected.len() {
@@ -223,7 +216,18 @@ async fn check_claims<T: InputType>(
     Ok(())
 }
 
-fn decode_error(error: SQLError) -> StorageBackendError {
+pub(crate) fn claim_oid(text: &str) -> Option<u32> {
+    if text.is_empty()
+        || text.len() > 10
+        || (text.len() > 1 && text.starts_with('0'))
+        || !text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    text.parse().ok()
+}
+
+pub(crate) fn decode_error(error: SQLError) -> StorageBackendError {
     match error {
         SQLError::Internal(message) => {
             StorageBackendError::Serde(<serde_json::Error as serde::de::Error>::custom(message))

@@ -63897,6 +63897,210 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_input_preserves_windows_and_complete_scratch_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests/input.rs",
+      "capability": "Retained native domain validation",
+      "workload": "Selected roles, local and global constraint identities, required metadata, work windows and both cancellation owners.",
+      "invariant": "The existing semantic state preserves first-error precedence and retires all incomplete validation scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_input_keeps_local_global_and_required_field_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests/input.rs",
+      "capability": "Retained native domain validation",
+      "workload": "Selected roles, local and global constraint identities, required metadata, work windows and both cancellation owners.",
+      "invariant": "The existing semantic state preserves first-error precedence and retires all incomplete validation scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_validation_input_retires_original_invoking_memory_and_abandoned_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/validation/tests/input.rs",
+      "capability": "Retained native domain validation",
+      "workload": "Selected roles, local and global constraint identities, required metadata, work windows and both cancellation owners.",
+      "invariant": "The existing semantic state preserves first-error precedence and retires all incomplete validation scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "marker_field_projection_preserves_public_value_roots_and_overwritten_fields",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests/projection.rs",
+      "capability": "Generic catalog marker projection",
+      "workload": "Public Value roots, numeric/raw wrappers, duplicate fields, discarded syntax, depth and bounded work.",
+      "invariant": "Root field observations equal the independent public JSON decoder without retaining discarded value trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "marker_field_projection_validates_discarded_depth_truncation_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/type_records/marker/tests/projection.rs",
+      "capability": "Generic catalog marker projection",
+      "workload": "Public Value roots, numeric/raw wrappers, duplicate fields, discarded syntax, depth and bounded work.",
+      "invariant": "Root field observations equal the independent public JSON decoder without retaining discarded value trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_domain_input_preserves_native_roots_and_future_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Persistent native domain input",
+      "workload": "Current and legacy markers, complete physical families, exact OID claims, captured roots and terminal input paths.",
+      "invariant": "Marker-first restoration preserves ordinary load-only diagnostics, native allocation ownership and independent future mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_domain_input_retires_every_partial_owner_without_catalog_writes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Persistent native domain input",
+      "workload": "Current and legacy markers, complete physical families, exact OID claims, captured roots and terminal input paths.",
+      "invariant": "Marker-first restoration preserves ordinary load-only diagnostics, native allocation ownership and independent future mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_domain_input_preserves_marker_claim_and_semantic_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Persistent native domain input",
+      "workload": "Current and legacy markers, complete physical families, exact OID claims, captured roots and terminal input paths.",
+      "invariant": "Marker-first restoration preserves ordinary load-only diagnostics, native allocation ownership and independent future mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_domain_input_keeps_marker_then_physical_then_native_field_precedence",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Persistent native domain input",
+      "workload": "Current and legacy markers, complete physical families, exact OID claims, captured roots and terminal input paths.",
+      "invariant": "Marker-first restoration preserves ordinary load-only diagnostics, native allocation ownership and independent future mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_domains_keep_selected_constraints_and_later_sql_mutation_ownership",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types/domains.rs",
+      "capability": "Private persistent domain restoration",
+      "workload": "Native SQLite, SQLite KV and redb selected snapshots, peer commits, domain SQL, final constraint collisions and terminal transactions.",
+      "invariant": "Complete native roots retain selected definitions and the delayed finalizer; future writes use their own allowance and failed sessions retire every private owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_domains_retire_private_roots_and_selected_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types/domains.rs",
+      "capability": "Private persistent domain restoration",
+      "workload": "Native SQLite, SQLite KV and redb selected snapshots, peer commits, domain SQL, final constraint collisions and terminal transactions.",
+      "invariant": "Complete native roots retain selected definitions and the delayed finalizer; future writes use their own allowance and failed sessions retire every private owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_domains_keep_delayed_cross_catalog_constraint_validation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/types/domains.rs",
+      "capability": "Private persistent domain restoration",
+      "workload": "Native SQLite, SQLite KV and redb selected snapshots, peer commits, domain SQL, final constraint collisions and terminal transactions.",
+      "invariant": "Complete native roots retain selected definitions and the delayed finalizer; future writes use their own allowance and failed sessions retire every private owner.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_default_commands_preserve_set_drop_and_explicit_null",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/compiler/tests/ddl_lifecycle/domains.rs",
+      "capability": "Domain default alterations",
+      "workload": "SET DEFAULT, DROP DEFAULT and explicit NULL declarations.",
+      "invariant": "The parsed command preserves presence and absence without treating NULL as DROP DEFAULT.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "domain_defaults_select_the_owned_declaration_without_reviving_removed_base_defaults",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/domain/tests.rs",
+      "capability": "Domain default selection",
+      "workload": "Copied inherited expressions, changed base defaults, removed derived defaults and explicit NULL.",
+      "invariant": "The selected declaration owns its default; absence never revives an ancestor default.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "domain_defaults_match_postgresql_and_persistent_reopen",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/domain_constraints.rs",
+      "capability": "Transactional domain defaults",
+      "workload": "PostgreSQL 18.4 transcript across memory, native SQLite, SQLite KV and redb with durable reopen.",
+      "invariant": "Default mutations preserve rows, column overrides, inherited values, rollback, diagnostics, function binding and ownership.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

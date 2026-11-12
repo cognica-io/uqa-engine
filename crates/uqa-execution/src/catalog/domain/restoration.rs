@@ -34,6 +34,15 @@ pub struct RestoredDomains {
     pub state: DomainRestoreState,
 }
 
+impl RestoredDomains {
+    pub(super) fn current(registry: DomainRegistry) -> Self {
+        Self {
+            registry,
+            state: DomainRestoreState { current: true },
+        }
+    }
+}
+
 /// This read never writes conversion metadata; later relation restoration still needs these domain definitions for type binding.
 pub fn restore(
     storage: &dyn CatalogFacade,
@@ -172,6 +181,6 @@ impl CatalogObjectAllocator for RestorationAllocator<'_> {
     }
 }
 
-fn invalid(error: impl std::fmt::Display) -> StorageBackendError {
+pub(super) fn invalid(error: impl std::fmt::Display) -> StorageBackendError {
     StorageBackendError::Other(format!("domain constraint catalog: {error}"))
 }

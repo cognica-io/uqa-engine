@@ -23,6 +23,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod input;
+
 fn domain(number: u32, checks: usize) -> StoredDomain {
     let object_id = u128::from(number + 1).to_le_bytes();
     let identity = RelationIdentity::new("public", format!("domain_{number}"));

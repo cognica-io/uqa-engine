@@ -60,6 +60,15 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_registries_after_domains(catalog, mode, domains)
+    }
+
+    pub(super) fn restore_registries_after_domains(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+    ) -> StorageBackendResult<()> {
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(
                 catalog,

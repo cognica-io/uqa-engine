@@ -19,8 +19,32 @@ mod protocol;
 #[cfg(test)]
 mod tests;
 mod value;
+pub(crate) use value::FieldProjection;
 
 type Token<'a> = JsonToken<'a, &'a [u8]>;
+
+/// Observe one field of the original generic root value, including transparent raw-value representations.
+pub(crate) async fn field_from(
+    text: &str,
+    field: &'static str,
+    control: &ProductionControl<'_>,
+    work: &mut AsyncImageInput<'_>,
+) -> StorageBackendResult<FieldProjection> {
+    let keys = protocol::keys(control)?;
+    let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
+    let first = next(&mut reader, work).await?;
+    let value = value::observe(first, &mut reader, control, work, keys, Some(field)).await?;
+    if reader
+        .next_event_with_work(work)
+        .await
+        .map_err(json_error)?
+        .is_some()
+    {
+        return Err(invalid());
+    }
+    control.check()?;
+    Ok(value.field())
+}
 
 pub(super) fn check(format: &TypeRecordFormat, text: &str) -> StorageBackendResult<()> {
     use std::{

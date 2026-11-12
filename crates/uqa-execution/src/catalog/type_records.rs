@@ -13,7 +13,7 @@ use uqa_sql::catalog::type_definitions::{StoredTypeDefinition, TypeDefinitions};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub(crate) mod input;
-mod marker;
+pub(crate) mod marker;
 
 /// The metadata keys and format marker of one type form's catalog.
 pub(crate) struct TypeRecordFormat {
