@@ -50508,8 +50508,8 @@
       "cases": 1,
       "source": "crates/uqa-analysis/src/analyzer/definition/tests/image.rs",
       "capability": "Original analyzer configuration",
-      "workload": "Decode original common tokenizer, character-filter, token-filter and normalization settings, including deferred invalid settings.",
-      "invariant": "Native enum values, option presence, ordered payloads and original encoded buffer addresses survive under the input allowance.",
+      "workload": "Decode original common tokenizer, character-filter, token-filter and normalization settings, including deferred invalid settings. Republish each decoded native configuration through admitted canonical output.",
+      "invariant": "Native enum values, option presence, ordered payloads and original encoded buffer addresses survive under the input allowance. Canonical publication matches the ordinary public serializer byte for byte.",
       "case_names": [
         ""
       ]
@@ -50573,8 +50573,8 @@
       "cases": 1,
       "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
       "capability": "Original Korean configuration",
-      "workload": "Decode every Korean tokenizer mode and POS tag, omitted and empty options, and unresolved original Unicode profiles.",
-      "invariant": "Feature-selected native configuration and exact bytes are preserved without resolving or compiling dictionaries.",
+      "workload": "Decode every Korean tokenizer mode and POS tag, omitted and empty options, and unresolved original Unicode profiles. Republish each decoded native configuration through admitted canonical output.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without resolving or compiling dictionaries. Canonical publication matches the ordinary public serializer byte for byte.",
       "case_names": [
         ""
       ]
@@ -50586,8 +50586,8 @@
       "cases": 1,
       "source": "crates/uqa-analysis/src/analyzer/definition/tests/image/languages.rs",
       "capability": "Original Japanese configuration",
-      "workload": "Decode every Japanese tokenizer mode and filter shape, omitted and empty options, and unresolved profiles and probes.",
-      "invariant": "Feature-selected native configuration and exact bytes are preserved without expanding defaults, validating deferred settings or resolving resources.",
+      "workload": "Decode every Japanese tokenizer mode and filter shape, omitted and empty options, and unresolved profiles and probes. Republish each decoded native configuration through admitted canonical output.",
+      "invariant": "Feature-selected native configuration and exact bytes are preserved without expanding defaults, validating deferred settings or resolving resources. Canonical publication matches the ordinary public serializer byte for byte.",
       "case_names": [
         ""
       ]
@@ -57975,6 +57975,58 @@
       "capability": "Retained visible document maximum",
       "workload": "Read original visible maxima across private deletes, undo, later writes and source retirement; bound each key slot and every retained allocation without reading document payloads.",
       "invariant": "Results equal the original visible maximum, deleted slots consume progress, and failure, cancellation, completion or abandonment retire the selected view and allowance; ordinary KV output does not collect identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_analyzer_publication_yields_and_separates_configuration_and_image_owners",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/publication.rs",
+      "capability": "Native analyzer image publication",
+      "workload": "Publish a native analyzer with long escaped Unicode keys, paths and values through one-poll windows and independent source, output and capture allowances.",
+      "invariant": "Bytes equal ordinary Serde output, native buffers keep their original addresses and reservations, deferred validation remains deferred and captured images outlive source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_analyzer_publication_retires_every_interrupted_continuation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/publication.rs",
+      "capability": "Native analyzer publication lifetime",
+      "workload": "Cancel, exhaust remaining allowance, invalidate the window or abandon publication at every pending boundary.",
+      "invariant": "Cancellation and invalid windows are terminal; denied allocations retire partial owners, while reclaimed scratch can fund a correct result without exceeding the original limit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_analyzer_publication_allocates_only_output_and_fixed_traversal",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/publication.rs",
+      "capability": "Native analyzer publication allocation",
+      "workload": "Publish 32 and 4096 synonym entries from admitted native configurations.",
+      "invariant": "The exact encoded destination plus less than 16 KiB of fixed traversal allocation covers both passes, with no population-sized intermediate tree or second full image.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "native_analyzer_publication_rejects_invalid_path_bytes_without_panic_or_leak",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/definition/tests/publication.rs",
+      "capability": "Native analyzer path encoding",
+      "workload": "Place invalid native path bytes before, at and after fixed-fragment boundaries.",
+      "invariant": "The ordinary serializer diagnostic is preserved, no definition is published and all original reservations retire.",
       "case_names": [
         ""
       ]

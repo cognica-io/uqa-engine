@@ -144,3 +144,4 @@ fn published_analyzer_encoding_errors_leave_the_original_configuration_usable() 
 }
 
 mod image;
+mod publication;

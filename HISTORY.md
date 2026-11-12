@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Publish admitted native analyzer configurations with their original owners and a canonical image, using bounded field/text progress and no complete intermediate JSON tree.
+
 - Read persistent visible document maxima through retained key-only progress, including deleted slots, without collecting document identities or substituting autonomous allocator watermarks.
 
 - Read exact persistent metadata records under caller-selected encoded record and memory limits, retaining original text through private rollback and source retirement.

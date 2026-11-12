@@ -38,6 +38,7 @@ fn restored(config: &Analyzer) {
         drop(value);
         assert_eq!(memory.used(), 0);
     }
+    super::publication::check_bytes(config);
 }
 
 #[test]

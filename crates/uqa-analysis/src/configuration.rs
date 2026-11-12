@@ -65,6 +65,8 @@ macro_rules! fields {
 
 mod inspection;
 mod morphology;
+mod output;
+pub(crate) use output::encode_from;
 mod view;
 pub(crate) use inspection::{check_encoded_size, matches_snapshot};
 mod value;
