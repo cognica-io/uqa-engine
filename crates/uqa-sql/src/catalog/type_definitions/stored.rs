@@ -50,6 +50,7 @@ stored!(StoredRange, stored_range);
 stored!(StoredComposite, stored_composite);
 
 mod composite;
+mod domain;
 mod range;
 
 impl<'a> Input<'a, '_> {

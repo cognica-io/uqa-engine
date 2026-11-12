@@ -209,7 +209,10 @@ fn stored_enum_input_retains_core_key_validation_and_ignored_nested_fields() {
     );
 }
 
-fn retention<T: std::fmt::Debug>(text: &str, read: Read<T>) {
+fn retention<T: std::fmt::Debug>(
+    text: &str,
+    read: impl Fn(&str, &ProductionControl<'_>) -> Result<Produced<T>, SQLError>,
+) {
     let memory = MemoryBudget::new(4 << 20);
     let token = CancellationToken::new();
     let mut output = None;
@@ -277,4 +280,5 @@ fn stored_type_input_cancels_both_original_owners_after_native_admission() {
 }
 
 mod adoption;
+mod domains;
 mod structured;

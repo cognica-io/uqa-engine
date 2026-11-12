@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Decode stored scalar domain declarations with admitted native defaults, CHECK expressions, constraint identities and optional legacy metadata, preserving original field defaults without rebinding or executing SQL.
 - Restore persistent enum, shell, range and composite catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot. Restore object comments in their original position between range and composite definitions, retaining admitted text and independent future mutation ownership.
 
 - Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.
