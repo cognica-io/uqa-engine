@@ -14,6 +14,31 @@ use uqa_core::{
 };
 
 #[test]
+fn backup_retained_catalog_diagnostics_release_and_hide_original_payloads() {
+    use uqa_core::{json::JsonPosition, memory::ProductionControl};
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let secret = "private stored role 한🙂".repeat(1024);
+    let cause = std::sync::Arc::new(JsonDiagnostic::unknown_field(
+        control.copy_text(&secret).unwrap(),
+        &["owner"],
+        JsonPosition::unlocated(),
+    ));
+    let weak = std::sync::Arc::downgrade(&cause);
+    assert!(memory.used() >= secret.len());
+    let error = BackupError::from(StorageBackendError::RetainedDiagnostic(cause));
+    assert!(matches!(
+        error,
+        BackupError::Invalid("stored catalog authority")
+    ));
+    assert!(!format!("{error}\n{error:?}").contains("private stored role"));
+    assert!(std::error::Error::source(&error).is_none());
+    assert!(weak.upgrade().is_none());
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn backup_native_json_boundary_retires_payloads_and_preserves_diagnostic_identity() {
     for text in [r#""private\n\u0000payload""#, "true", "42", "[1,]", "["] {
         let memory = MemoryBudget::new(65536);

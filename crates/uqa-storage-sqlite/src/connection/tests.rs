@@ -7,6 +7,7 @@
 mod anchors;
 #[cfg(unix)]
 mod commit_monitor;
+mod retained_diagnostic;
 mod source_identity;
 mod statements;
 

@@ -2,6 +2,227 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_routine_binding_admits_complete_grants_and_retires_denied_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/legacy_input.rs",
+      "capability": "Legacy routine authority binding",
+      "workload": "Deny native grant construction and semantic scratch immediately below independently measured complete admission.",
+      "invariant": "Denial preserves SQLSTATE 53200 and releases every private owner; complete admission preserves grant output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_native_diagnostics_preserve_their_owner_across_provider_and_transaction_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/tests/retained_diagnostic.rs",
+      "capability": "Retained catalog diagnostic boundaries",
+      "workload": "Round-trip a wide retained cause through SQLite and transaction adapters after its original handle is retired.",
+      "invariant": "Cause identity and complete message remain unchanged until the final owner releases its allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_retained_catalog_diagnostics_release_and_hide_original_payloads",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/errors.rs",
+      "capability": "Retained catalog diagnostic boundaries",
+      "workload": "Pass an independently retained catalog diagnostic through the public backup error boundary.",
+      "invariant": "Display, debug and error sources expose no stored payload; original reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_acl_grantee_preserves_tagged_legacy_and_untagged_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/grantee/input/tests.rs",
+      "capability": "Projected ACL recipients",
+      "workload": "Compare legacy strings, tagged maps and positional forms with the original deserializer and retire the input generation.",
+      "invariant": "Accepted identities, untagged errors and independently admitted name payloads remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_acl_grantee_retains_only_its_admitted_name_after_source_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/catalog_acl/grantee/input/tests.rs",
+      "capability": "Projected ACL recipients",
+      "workload": "Compare legacy strings, tagged maps and positional forms with the original deserializer and retire the input generation.",
+      "invariant": "Accepted identities, untagged errors and independently admitted name payloads remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_input_lookup_preserves_independent_order_and_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/input/tests.rs",
+      "capability": "Retained catalog lookup",
+      "workload": "Select entries with a non-Ord query and a suspending comparator across retained generations, faults and abandonment.",
+      "invariant": "Ordered selection follows only completed comparisons, allocates no payload and never changes a retained tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_input_lookup_failure_or_abandonment_never_mutates_the_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/input/tests.rs",
+      "capability": "Retained catalog lookup",
+      "workload": "Select entries with a non-Ord query and a suspending comparator across retained generations, faults and abandonment.",
+      "invariant": "Ordered selection follows only completed comparisons, allocates no payload and never changes a retained tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_legacy_routine_acl_preserves_complete_typed_fields_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/input/tests.rs",
+      "capability": "Legacy routine ACL input",
+      "workload": "Compare complete maps, positional fields, missing/defaulted values and independently owned payloads against the original decoder.",
+      "invariant": "Complete typed entry order, diagnostics and native allocation ownership survive generic input retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_legacy_routine_acl_retains_exact_owned_payloads_without_source_aliases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/input/tests.rs",
+      "capability": "Legacy routine ACL input",
+      "workload": "Compare complete maps, positional fields, missing/defaulted values and independently owned payloads against the original decoder.",
+      "invariant": "Complete typed entry order, diagnostics and native allocation ownership survive generic input retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_legacy_routine_acl_resumes_and_retires_all_interrupted_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/input/tests/resources.rs",
+      "capability": "Legacy routine ACL input",
+      "workload": "Resume wide legacy ACL input with changing work windows, both cancellation owners, denied admission and abandonment.",
+      "invariant": "Only complete independently admitted native ACLs escape; every interrupted owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_routine_binding_preserves_identity_grant_order_and_owner_formats",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/legacy_input.rs",
+      "capability": "Legacy routine authority binding",
+      "workload": "Bind historical owner formats and grant paths through ordinary and retained work; interrupt traversal and retain wide missing-role errors.",
+      "invariant": "Role incarnations, grant order, default grantors and diagnostic ownership preserve the selected role generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_legacy_routine_binding_retains_cancelled_work_and_owned_missing_role_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/legacy_input.rs",
+      "capability": "Legacy routine authority binding",
+      "workload": "Bind historical owner formats and grant paths through ordinary and retained work; interrupt traversal and retain wide missing-role errors.",
+      "invariant": "Role incarnations, grant order, default grantors and diagnostic ownership preserve the selected role generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_routine_diagnostic_preserves_primary_state_context_and_original_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/error/retained/tests.rs",
+      "capability": "Retained routine diagnostics",
+      "workload": "Retain native message ownership through cloning, SQL context/position adapters and denied header admission.",
+      "invariant": "Primary message and SQLSTATE remain unchanged; only the final diagnostic owner releases its admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_routine_diagnostic_releases_payloads_when_header_admission_fails",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/error/retained/tests.rs",
+      "capability": "Retained routine diagnostics",
+      "workload": "Retain native message ownership through cloning, SQL context/position adapters and denied header admission.",
+      "invariant": "Primary message and SQLSTATE remain unchanged; only the final diagnostic owner releases its admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_authority_preserves_complete_raw_validation_before_typed_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/authority/tests.rs",
+      "capability": "Routine catalog authority preparation",
+      "workload": "Compare legacy/current catalogs containing malformed bodies, later authority failures and empty groups with the ordinary raw prefix.",
+      "invariant": "All raw authority checks finish in original order before any typed routine construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_authority_retains_selected_roles_and_retires_interrupted_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/authority/tests/resources.rs",
+      "capability": "Routine catalog authority preparation",
+      "workload": "Replace selected roles and retire sources while authority preparation resumes; cancel, deny or abandon the work and retain missing-role diagnostics.",
+      "invariant": "Completed authority keeps original identities and allowances; failure publishes nothing and retires all unrelated owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_authority_retains_only_the_owned_missing_role_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/authority/tests/resources.rs",
+      "capability": "Routine catalog authority preparation",
+      "workload": "Replace selected roles and retire sources while authority preparation resumes; cancel, deny or abandon the work and retain missing-role diagnostics.",
+      "invariant": "Completed authority keeps original identities and allowances; failure publishes nothing and retires all unrelated owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "generic_document_projection_preserves_sorted_scalar_fields_and_failure_order",
@@ -21586,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -66660,6 +66881,45 @@
       "capability": "Analyzer descriptor diagnostic ownership",
       "workload": "Restore an actual unknown-field descriptor and convert its admitted diagnostic through Analysis and Storage into Backup.",
       "invariant": "Protected-image errors release original field bytes while preserving the Analysis owner, category and source position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_typed_integers_preserve_each_width_and_value_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/numbers/tests.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Compare every stored-declaration integer width, signed/unsigned boundaries and JSON kinds with original public generic-value deserialization.",
+      "invariant": "Typed integer values, first errors, categories and unlocated positions remain exact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_projected_scalars_check_both_owners_after_suspended_work",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/numbers/tests.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Cancel original or invoking work while native integer and boolean readers yield at their checkpoint.",
+      "invariant": "No successful scalar escapes after either owning cancellation becomes observable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_typed_integer_adopts_no_source_or_scalar_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/numbers/tests.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Read a wide native integer under a zero-byte destination allowance and retire its original generic input.",
+      "invariant": "Scalar construction allocates nothing and retains no source owner.",
       "case_names": [
         ""
       ]

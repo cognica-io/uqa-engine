@@ -155,6 +155,19 @@ impl<K: Ord, V> RetainedMap<K, V> {
         self.values.get(key).map(|entry| &entry.value)
     }
 
+    /// Borrow one original payload while its immutable search path retains the caller's comparison progress.
+    pub async fn get_from<Q: ?Sized, C: super::MapKeyInput<Q, K>>(
+        &self,
+        key: &Q,
+        input: &mut C,
+    ) -> Result<Option<&V>, C::Error> {
+        Ok(self
+            .values
+            .get_from(key, input)
+            .await?
+            .map(|entry| &entry.value))
+    }
+
     /// Replace a matching key and its value together. Failed footprint or tree admission leaves the original root and footprint unchanged.
     pub fn insert(&mut self, key: K, value: V, payload_bytes: usize) -> Result<(), MemoryError> {
         self.prepare_insert(key, payload_bytes)?.publish(value);

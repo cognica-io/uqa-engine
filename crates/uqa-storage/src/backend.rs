@@ -70,6 +70,9 @@ pub enum StorageBackendError {
     },
     #[error("{0}")]
     Other(String),
+    /// A native diagnostic retains its original owner instead of copying its message across the catalog boundary.
+    #[error("{0}")]
+    RetainedDiagnostic(#[source] Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl StorageBackendError {

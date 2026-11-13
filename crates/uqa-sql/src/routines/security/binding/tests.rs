@@ -9,6 +9,7 @@ use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
 
 mod input;
+mod legacy_input;
 
 fn roles() -> RoleDefinitions {
     RoleDefinitions::try_from_iter(

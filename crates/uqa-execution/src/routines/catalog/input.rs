@@ -22,6 +22,9 @@ use uqa_storage::{
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
+mod authority;
+pub use authority::RoutineCatalogAuthority;
+
 /// Select and retain the physical routine record before interpreting any definition. A failed or abandoned input is terminal and publishes no registry state.
 pub struct RoutineCatalogInput {
     input: ImageDecoder<RoutineCatalogDocument, StorageBackendError>,

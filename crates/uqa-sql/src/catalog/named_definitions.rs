@@ -217,6 +217,21 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
             .map(|value| &**value)
     }
 
+    pub(crate) async fn get_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
+        &self,
+        name: &Q,
+        input: &mut C,
+    ) -> Result<Option<&T>, C::Error> {
+        if let Some(value) = self.durable.get_from(name, input).await? {
+            return Ok(Some(&**value));
+        }
+        Ok(self
+            .temporary
+            .get_from(name, input)
+            .await?
+            .map(|value| &**value))
+    }
+
     pub fn contains_key<Q: Ord + ?Sized>(&self, name: &Q) -> bool
     where
         K: Borrow<Q>,

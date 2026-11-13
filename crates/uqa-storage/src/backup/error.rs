@@ -80,6 +80,9 @@ impl From<crate::StorageBackendError> for BackupError {
             crate::StorageBackendError::Analysis(error) => Self::Storage(
                 crate::StorageBackendError::Analysis(error.redact_json_payloads()),
             ),
+            crate::StorageBackendError::RetainedDiagnostic(_) => {
+                Self::Invalid("stored catalog authority")
+            }
             error => Self::Storage(error),
         }
     }

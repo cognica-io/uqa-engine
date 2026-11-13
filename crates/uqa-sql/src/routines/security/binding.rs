@@ -11,7 +11,7 @@ use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::security::object_acl;
 use crate::{
     ast::{CreateFunction, RoutineAclEntry},
-    catalog::roles::{identity::RoleSubject, RoleIdentity, RoleReference},
+    catalog::roles::{identity::RoleSubject, RoleIdentity},
     SQLError,
 };
 use serde::Deserialize;
@@ -20,6 +20,9 @@ use uqa_core::catalog_acl::AclGrantee;
 
 mod validation;
 pub use validation::{validate_routine_authority, validate_routine_authority_from_input};
+pub mod input;
+mod legacy;
+pub use legacy::bind_legacy_authority_from_input;
 
 /// Only the initial catalog converter may interpret named routine authority.
 #[derive(Deserialize)]
@@ -41,41 +44,20 @@ pub fn bind_legacy_authority(
     roles: &RoleDefinitions,
     implicit_owner_execute: bool,
 ) -> Result<BoundRoutineAuthority, SQLError> {
-    let bind = |name: &str| {
-        RoleReference::from(name)
-            .bind(roles)
-            .map(|role| role.identity())
-    };
-    let identity = bind(owner)?;
-    let mut execute_acl = acl
-        .map(|acl| {
-            acl.into_iter()
-                .map(|entry| {
-                    Ok(RoutineAclEntry {
-                        role: entry.role.role_name().map(bind).transpose()?,
-                        grantor: bind(entry.grantor.as_deref().unwrap_or(owner))?,
-                        grant_option: entry.grant_option,
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()
-        })
-        .transpose()?;
-    if implicit_owner_execute {
-        if let Some(acl) = execute_acl.as_mut() {
-            if !acl.iter().any(|entry| entry.role == Some(identity)) {
-                acl.push(RoutineAclEntry {
-                    role: Some(identity),
-                    grantor: identity,
-                    grant_option: false,
-                });
-            }
-        }
-    }
-    validate_acl(identity, execute_acl.as_deref())?;
-    Ok(BoundRoutineAuthority {
-        owner: identity,
-        execute_acl,
-    })
+    let result = crate::catalog::work::inline(legacy::bind_from(
+        owner,
+        acl.as_deref(),
+        roles,
+        implicit_owner_execute,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))?;
+    let (value, memory) = result.into_parts();
+    debug_assert!(
+        memory.is_none(),
+        "ordinary role binding has no admission owner"
+    );
+    Ok(value)
 }
 
 fn invalid(message: &str) -> SQLError {
