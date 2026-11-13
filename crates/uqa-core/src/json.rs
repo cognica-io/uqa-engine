@@ -12,6 +12,8 @@ use crate::{
 };
 
 mod diagnostics;
+mod document;
+pub use document::{JsonDocument, JsonValue, JsonValueKind};
 mod input;
 mod lexical;
 pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};

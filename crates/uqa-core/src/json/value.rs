@@ -71,15 +71,20 @@ enum Frame {
 
 impl Frame {
     fn enter(self, reader: &mut JsonReader<'_, '_>) -> JsonResult<Self> {
-        if reader.stack.frames().len() > 127 {
-            return Err(JsonDiagnostic::from(JsonSyntaxError {
-                kind: JsonSyntaxKind::DepthLimit,
-                position: reader.position(),
-            })
-            .into());
-        }
+        generic_container_depth(reader)?;
         Ok(self)
     }
+}
+
+pub(super) fn generic_container_depth(reader: &mut JsonReader<'_, '_>) -> JsonResult<()> {
+    if reader.stack.frames().len() > 127 {
+        return Err(JsonDiagnostic::from(JsonSyntaxError {
+            kind: JsonSyntaxKind::DepthLimit,
+            position: reader.position(),
+        })
+        .into());
+    }
+    Ok(())
 }
 
 /// Validate one generic value, including every overwritten child, and return its unsigned scalar observation. The reader's enclosing owner checks trailing input; the control must carry allocation admission.
@@ -372,7 +377,7 @@ fn invalid() -> JsonInputError {
     JsonInputError::Invalid
 }
 
-fn scalar_error(error: JsonInputError) -> JsonInputError {
+pub(super) fn scalar_error(error: JsonInputError) -> JsonInputError {
     match error {
         JsonInputError::Diagnostic(error) => error.into_data().into(),
         error => error,

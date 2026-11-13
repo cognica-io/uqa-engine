@@ -2,6 +2,110 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_output_retires_each_interrupted_or_denied_generation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/output.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Interrupt every pending output boundary and deny output allocations.",
+      "invariant": "Both cancellation owners, abandonment and quota denial retire source and output generations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_retires_overwritten_nodes_and_accounts_for_actual_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/resources.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Measure actual allocations while replacing a wide generic subtree.",
+      "invariant": "Retained and peak allocations are admitted; replaced nodes release their original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_resumes_native_input_and_output_under_original_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/resources.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Resume long Unicode fields and ordered output under multiple work windows.",
+      "invariant": "Progress preserves exact complete output and never rereads the retained source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_releases_failed_cancelled_and_abandoned_generations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/resources.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Deny allocations, cancel either input owner and abandon a retained input.",
+      "invariant": "Private incomplete values and all original reservations retire on terminal failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_preserves_complete_generic_values_and_number_projection",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Decode arbitrary-precision numbers, strings, containers and duplicate keys.",
+      "invariant": "Native nodes preserve complete generic values and canonical output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_preserves_scalar_protocols_and_first_key_error_order",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Decode public numeric/raw scalar forms and malformed enclosing objects.",
+      "invariant": "First-field scalar selection, overwritten-value validation and original diagnostic precedence are unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_preserves_invalid_prefixes_overwritten_values_and_depth",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Truncate Unicode input and decode malformed replaced values at the ordinary nesting limit.",
+      "invariant": "Syntax, data and EOF diagnostics retain their original locations and classifications.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_document_preserves_scalar_depth_and_number_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests.rs",
+      "capability": "Native generic JSON document input",
+      "workload": "Decode maximal-depth scalar errors, expanded raw values and extreme numeric forms.",
+      "invariant": "Scalar type errors precede generic depth checks and expanded logical values remain accepted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "stored_statement_input_retains_queries_declarations_and_routine_bodies",
@@ -21352,7 +21456,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
