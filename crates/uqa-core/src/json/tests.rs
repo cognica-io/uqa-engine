@@ -377,6 +377,7 @@ fn controlled_strings_match_serde_escapes_and_preserve_both_cancellation_owners(
 fn failed_json_read_retains_the_original_position_and_structural_expectation() {
     for (input, offset, expected) in [
         ("{bad", 1, JsonExpected::ObjectKeyOrEnd),
+        ("[}", 1, JsonExpected::ArrayValueOrEnd),
         ("[1,", 3, JsonExpected::Value),
         ("{\"a\":1", 6, JsonExpected::ObjectSeparator),
         ("[1,]", 3, JsonExpected::Value),

@@ -8,7 +8,6 @@
 
 use super::{AnalyzerBindingOwner, AnalyzerPhase, BoundAnalyzerRevision, FieldAnalyzerBinding};
 use crate::{StorageBackendError, StorageBackendResult};
-use serde::de::DeserializeOwned;
 use uqa_analysis::AnalyzerResources;
 use uqa_core::{
     image_io::AsyncImageInput,
@@ -26,6 +25,7 @@ struct Input<'a, 'c> {
 
 struct Fields {
     names: &'static [&'static str],
+    expected_length: &'static str,
     sequence: Option<usize>,
     seen: u8,
 }
@@ -81,19 +81,6 @@ impl<'a> Input<'a, '_> {
         Ok(&self.text[start..end])
     }
 
-    async fn atom<T: DeserializeOwned>(
-        &mut self,
-        work: &mut AsyncImageInput<'_>,
-    ) -> StorageBackendResult<T> {
-        let bytes = self
-            .reader
-            .read_value_span_with_work(work)
-            .await
-            .map_err(|error| JsonInputError::from_reader(&self.reader, error))?;
-        let end = self.reader.position().byte_offset;
-        Ok(serde_json::from_str(&self.text[end - bytes.len()..end])?)
-    }
-
     async fn text(
         &mut self,
         work: &mut AsyncImageInput<'_>,
@@ -138,23 +125,42 @@ impl<'a> Input<'a, '_> {
 
     async fn fields(
         &mut self,
+        expected: &'static str,
+        expected_length: &'static str,
         names: &'static [&'static str],
         work: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<Fields> {
         let sequence = match self.next(work).await?.token {
             JsonToken::StartObject => None,
             JsonToken::StartArray => Some(0),
-            _ => return Err(invalid()),
+            token => {
+                return Err(JsonDiagnostic::invalid_type_from(
+                    token,
+                    self.reader.position(),
+                    expected,
+                    work,
+                )
+                .await?
+                .into())
+            }
         };
         Ok(Fields {
             names,
+            expected_length,
             sequence,
             seen: 0,
         })
     }
 
     async fn side(&mut self, work: &mut AsyncImageInput<'_>) -> StorageBackendResult<Side<'a>> {
-        let mut fields = self.fields(&["name", "descriptor"], work).await?;
+        let mut fields = self
+            .fields(
+                "struct StoredSide",
+                "struct StoredSide with 2 elements",
+                &["name", "descriptor"],
+                work,
+            )
+            .await?;
         let (mut name, mut descriptor) = (None, None);
         while let Some(field) = fields.next(self, work).await? {
             match field {
@@ -165,7 +171,9 @@ impl<'a> Input<'a, '_> {
         }
         Ok(Side {
             name,
-            descriptor: descriptor.ok_or_else(invalid)?,
+            descriptor: descriptor.ok_or_else(|| {
+                JsonDiagnostic::missing_field("descriptor", self.reader.position())
+            })?,
         })
     }
 
@@ -175,6 +183,8 @@ impl<'a> Input<'a, '_> {
     ) -> StorageBackendResult<Binding<'a>> {
         let mut fields = self
             .fields(
+                "struct StoredBinding",
+                "struct StoredBinding with 6 elements",
                 &[
                     "format",
                     "version",
@@ -191,14 +201,48 @@ impl<'a> Input<'a, '_> {
         while let Some(field) = fields.next(self, work).await? {
             match field {
                 0 => format = Some(self.text(work).await?),
-                1 => version = Some(self.atom(work).await?),
-                2 => owner = Some(self.atom(work).await?),
-                3 => last_phase = Some(self.atom(work).await?),
+                1 => version = Some(self.reader.read_u32_from(work).await?),
+                2 => {
+                    owner = Some(
+                        match self
+                            .reader
+                            .read_unit_variant_from(&["field", "gin"], work)
+                            .await?
+                        {
+                            0 => AnalyzerBindingOwner::Field,
+                            1 => AnalyzerBindingOwner::Gin,
+                            _ => unreachable!(),
+                        },
+                    );
+                }
+                3 => {
+                    last_phase = Some(
+                        match self
+                            .reader
+                            .read_unit_variant_from(&["index", "search", "both"], work)
+                            .await?
+                        {
+                            0 => AnalyzerPhase::Index,
+                            1 => AnalyzerPhase::Search,
+                            2 => AnalyzerPhase::Both,
+                            _ => unreachable!(),
+                        },
+                    );
+                }
                 4 => index = Some(self.side(work).await?),
                 5 => search = Some(self.side(work).await?),
                 _ => unreachable!(),
             }
         }
+        let missing = |field| JsonDiagnostic::missing_field(field, self.reader.position());
+        let binding = Binding {
+            format: format.ok_or_else(|| missing("format"))?,
+            version: version.ok_or_else(|| missing("version"))?,
+            owner: owner.ok_or_else(|| missing("owner"))?,
+            last_phase: last_phase.ok_or_else(|| missing("last_phase"))?,
+            index: index.ok_or_else(|| missing("index"))?,
+            search: search.ok_or_else(|| missing("search"))?,
+        };
         if self
             .reader
             .next_event_from(work)
@@ -208,14 +252,7 @@ impl<'a> Input<'a, '_> {
         {
             return Err(invalid());
         }
-        Ok(Binding {
-            format: format.ok_or_else(invalid)?,
-            version: version.ok_or_else(invalid)?,
-            owner: owner.ok_or_else(invalid)?,
-            last_phase: last_phase.ok_or_else(invalid)?,
-            index: index.ok_or_else(invalid)?,
-            search: search.ok_or_else(invalid)?,
-        })
+        Ok(binding)
     }
 }
 
@@ -227,10 +264,25 @@ impl Fields {
     ) -> StorageBackendResult<Option<usize>> {
         if let Some(index) = &mut self.sequence {
             if *index == self.names.len() {
-                if input.next(work).await?.token != JsonToken::EndArray {
-                    return Err(invalid());
-                }
+                input
+                    .reader
+                    .finish_array_with_work(work)
+                    .await
+                    .map_err(|error| JsonInputError::from_reader(&input.reader, error))?;
                 return Ok(None);
+            }
+            if !input
+                .reader
+                .next_array_value_with_work(work)
+                .await
+                .map_err(|error| JsonInputError::from_reader(&input.reader, error))?
+            {
+                return Err(JsonDiagnostic::invalid_length(
+                    *index,
+                    self.expected_length,
+                    input.reader.position(),
+                )
+                .into());
             }
             let field = *index;
             *index += 1;
@@ -246,13 +298,17 @@ impl Fields {
         let name = decode_json_string_from(bytes, work)
             .await
             .map_err(json_error)?;
-        let field = self
-            .names
-            .iter()
-            .position(|field| *field == name.as_str())
-            .ok_or_else(invalid)?;
+        let Some(field) = self.names.iter().position(|field| *field == name.as_str()) else {
+            return Err(
+                JsonDiagnostic::unknown_field(name, self.names, input.reader.position()).into(),
+            );
+        };
         if self.seen & (1 << field) != 0 {
-            return Err(invalid());
+            return Err(JsonDiagnostic::duplicate_field(
+                self.names[field],
+                input.reader.position(),
+            )
+            .into());
         }
         self.seen |= 1 << field;
         Ok(Some(field))

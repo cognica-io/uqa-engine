@@ -12,6 +12,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod diagnostics;
+
 struct NoRead;
 impl std::io::Read for NoRead {
     fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
@@ -133,6 +135,9 @@ fn complete(
 }
 
 fn compare(text: &str) {
+    if serde_json::from_str::<super::super::StoredBinding>(text).is_err() {
+        compare_diagnostic(text);
+    }
     let ordinary =
         FieldAnalyzerBinding::from_json(text, &AnalyzerResources::new(AnalyzerLimits::default()));
     let memory = MemoryBudget::new(8 << 20);

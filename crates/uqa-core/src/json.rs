@@ -19,6 +19,7 @@ pub use input::{JsonDiagnostic, JsonInputError};
 mod object;
 mod raw;
 mod string;
+mod typed;
 mod value;
 pub use value::{
     observe_json_text, observe_json_value, read_json_unsigned, JsonFieldProjection,
@@ -90,6 +91,12 @@ enum Frame {
     ObjectKey,
     ObjectValue,
     ObjectAfter,
+}
+
+enum ReadStep<'a> {
+    End,
+    Event(JsonEvent<'a, &'a [u8]>),
+    Value,
 }
 
 /// Open containers. A bounded stack keeps ordinary nesting inline and charges only deeper nesting.
@@ -268,6 +275,18 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         work: &mut W,
         raw: bool,
     ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        match self.next_step(work, raw).await? {
+            ReadStep::End => Ok(None),
+            ReadStep::Event(event) => Ok(Some(event)),
+            ReadStep::Value => self.value(work, raw).await.map(Some),
+        }
+    }
+
+    async fn next_step<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<ReadStep<'a>, W::Error> {
         work.checkpoint().await?;
         self.check()?;
         self.skip_whitespace(work).await?;
@@ -285,38 +304,22 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         match frame {
             None if self.root_started => {
                 return if self.position == self.input.len() {
-                    Ok(None)
+                    Ok(ReadStep::End)
                 } else {
                     Err(self.reject(JsonSyntaxKind::TrailingCharacters, true).into())
                 };
             }
             None => self.root_started = true,
-            Some(Frame::ArrayFirst) if self.peek().is_none() => {
-                return Err(self.reject(JsonSyntaxKind::EndOfArray, false).into())
-            }
-            Some(Frame::ArrayFirst) if self.peek() == Some(b']') => {
-                return self.close(JsonToken::EndArray).map_err(Into::into)
+            Some(Frame::ArrayFirst | Frame::ArrayAfter) => {
+                if let Some(event) = self.array_step(work).await? {
+                    return Ok(ReadStep::Event(event));
+                }
             }
             Some(Frame::ObjectFirst) if self.peek() == Some(b'}') => {
-                return self.close(JsonToken::EndObject).map_err(Into::into)
+                return self.close_step(JsonToken::EndObject).map_err(Into::into)
             }
-            Some(Frame::ArrayAfter) => match self.peek() {
-                Some(b']') => return self.close(JsonToken::EndArray).map_err(Into::into),
-                Some(b',') => {
-                    self.advance(work).await?;
-                    self.skip_whitespace(work).await?;
-                    self.replace(Frame::ArrayValue);
-                    self.expected = JsonExpected::Value;
-                }
-                None => return Err(self.reject(JsonSyntaxKind::EndOfArray, false).into()),
-                _ => {
-                    return Err(self
-                        .reject(JsonSyntaxKind::ExpectedArraySeparator, true)
-                        .into())
-                }
-            },
             Some(Frame::ObjectAfter) => match self.peek() {
-                Some(b'}') => return self.close(JsonToken::EndObject).map_err(Into::into),
+                Some(b'}') => return self.close_step(JsonToken::EndObject).map_err(Into::into),
                 Some(b',') => {
                     self.advance(work).await?;
                     self.skip_whitespace(work).await?;
@@ -334,7 +337,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         }
         match self.stack.frames().last().copied() {
             Some(Frame::ObjectFirst | Frame::ObjectKey) => {
-                return self.key(work, raw).await.map(Some);
+                return self.key(work, raw).await.map(ReadStep::Event);
             }
             Some(Frame::ObjectValue) => {
                 if self.peek() != Some(b':') {
@@ -361,7 +364,15 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}
         }
-        self.value(work, raw).await.map(Some)
+        Ok(ReadStep::Value)
+    }
+
+    fn close_step(
+        &mut self,
+        token: JsonToken<'a, &'a [u8]>,
+    ) -> Result<ReadStep<'a>, JsonReadError> {
+        self.close(token)
+            .map(|event| ReadStep::Event(event.expect("closing delimiter event")))
     }
 
     async fn key<W: Work>(

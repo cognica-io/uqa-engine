@@ -66000,6 +66000,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_u32_preserves_original_values_error_categories_and_scalar_positions",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/typed/numbers/tests.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Compare public u32 decoding across signed and unsigned limits, negative zero, decimal and exponent boundaries, every truncated prefix and per-byte mutations.",
+      "invariant": "Values, first errors, numeric spelling, categories and original byte-based positions match the public scalar decoder.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_numeric_probe_fits_its_fixed_scratch_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/typed/numbers/tests.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Observe long integer, fractional and exponent scalars and malformed numeric input through the public visitor.",
+      "invariant": "Peak dependency allocation fits the admitted fixed scalar allowance and no dependency allocation remains after observation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_numeric_work_retires_cancelled_denied_and_abandoned_input",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/typed/numbers/tests.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Advance a long numeric scalar with one-step windows; cancel or abandon at every pending boundary and deny scalar scratch admission.",
+      "invariant": "Cursor advancement retains the original work channel; cancellation and admission errors remain terminal and retire all native input ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_u32_type_errors_precede_container_admission_and_redact_scalars",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/typed/numbers/tests.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Reject container values with zero depth and no remaining allowance; observe signed and floating-point diagnostic redaction.",
+      "invariant": "Typed rejection does not enter a container, and redaction preserves error kind and position without retaining scalar values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_field_diagnostics_match_public_messages_and_retire_original_names",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/input/fields/tests.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Compare missing, duplicate, short-sequence and unknown-name diagnostics with the public error constructors, including wide escaped names and every expected-name list size.",
+      "invariant": "Messages retain original formatting and category; unknown names retain admitted ownership until error release or redaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_typed_envelopes_preserve_field_sequence_and_enum_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests/diagnostics.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Compare original binding envelopes across missing/duplicate/unknown fields, positional structs, unit enums, typed versions, truncated prefixes and structural mutations.",
+      "invariant": "Native diagnostics preserve the original first error, message, category and location before format and descriptor validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_unknown_names_retain_original_ownership_until_error_redaction",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests/diagnostics.rs",
+      "capability": "Stored binding diagnostics",
+      "workload": "Reject wide unknown root fields, side fields and enum variants through one-step stored input.",
+      "invariant": "Returned diagnostics retain only admitted original names; redaction releases their allowance without changing category or position.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

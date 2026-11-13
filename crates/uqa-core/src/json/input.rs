@@ -16,6 +16,8 @@ use crate::{
     QueryCancelled,
 };
 
+mod fields;
+
 #[derive(Debug, thiserror::Error)]
 pub enum JsonInputError {
     #[error(transparent)]
@@ -67,6 +69,7 @@ enum Unexpected {
     Bool(bool),
     Signed(i64),
     Unsigned(u64),
+    Float(f64),
     Number,
     String(Budgeted<String>),
     Sequence,
@@ -81,6 +84,11 @@ impl std::fmt::Display for Unexpected {
             Self::Bool(value) => write!(f, "boolean `{value}`"),
             Self::Signed(value) => write!(f, "integer `{value}`"),
             Self::Unsigned(value) => write!(f, "integer `{value}`"),
+            Self::Float(value) => {
+                f.write_str("floating point `")?;
+                serde_json::to_writer(JsonFloatWriter(f), value).map_err(|_| std::fmt::Error)?;
+                f.write_str("`")
+            }
             Self::Number => f.write_str("number"),
             Self::String(value) => write!(f, "string {:?}", value.as_str()),
             Self::Sequence => f.write_str("sequence"),
@@ -90,12 +98,64 @@ impl std::fmt::Display for Unexpected {
     }
 }
 
+struct JsonFloatWriter<'a, 'b>(&'a mut std::fmt::Formatter<'b>);
+
+impl std::io::Write for JsonFloatWriter<'_, '_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let text = std::str::from_utf8(bytes).map_err(|_| std::io::ErrorKind::InvalidData)?;
+        self.0
+            .write_str(text)
+            .map_err(|_| std::io::ErrorKind::Other)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl JsonReader<'_, '_> {
+    /// Observe a rejected scalar type without entering a container that the typed value cannot accept.
+    pub(super) async fn type_error_from(
+        &mut self,
+        expected: &'static str,
+        work: &mut AsyncImageInput<'_>,
+    ) -> Result<JsonDiagnostic, JsonInputError> {
+        let actual = match self.peek() {
+            Some(b'[') => Unexpected::Sequence,
+            Some(b'{') => Unexpected::Map,
+            _ => {
+                let event = self
+                    .value(work, false)
+                    .await
+                    .map_err(|error| JsonInputError::from_reader(self, error))?;
+                return JsonDiagnostic::invalid_type_from(
+                    event.token,
+                    self.position(),
+                    expected,
+                    work,
+                )
+                .await;
+            }
+        };
+        Ok(JsonDiagnostic {
+            position: self.position(),
+            cause: Cause::Type { expected, actual },
+        })
+    }
+}
+
 #[derive(Debug)]
 enum Cause {
     Syntax(super::JsonSyntaxKind),
     DataSyntax(super::JsonSyntaxKind),
     Message(&'static str),
+    Field(fields::FieldFailure),
     Type {
+        expected: &'static str,
+        actual: Unexpected,
+    },
+    Value {
         expected: &'static str,
         actual: Unexpected,
     },
@@ -118,6 +178,36 @@ impl From<JsonSyntaxError> for JsonDiagnostic {
 }
 
 impl JsonDiagnostic {
+    pub(super) fn invalid_unsigned(value: u64, position: JsonPosition) -> Self {
+        Self {
+            position,
+            cause: Cause::Value {
+                expected: "u32",
+                actual: Unexpected::Unsigned(value),
+            },
+        }
+    }
+
+    pub(super) fn invalid_signed(value: i64, position: JsonPosition) -> Self {
+        Self {
+            position,
+            cause: Cause::Value {
+                expected: "u32",
+                actual: Unexpected::Signed(value),
+            },
+        }
+    }
+
+    pub(super) fn invalid_float(value: f64, position: JsonPosition) -> Self {
+        Self {
+            position,
+            cause: Cause::Type {
+                expected: "u32",
+                actual: Unexpected::Float(value),
+            },
+        }
+    }
+
     pub fn message(message: &'static str, position: JsonPosition) -> Self {
         Self {
             position,
@@ -200,13 +290,17 @@ impl JsonDiagnostic {
 
     /// Drop original scalar values before crossing a boundary that must not disclose input payloads. Syntax, expected type, error category and source position remain available.
     pub fn into_type_only(mut self) -> Self {
-        if let Cause::Type { actual, .. } = &mut self.cause {
+        if let Cause::Field(failure) = &mut self.cause {
+            failure.redact();
+        }
+        if let Cause::Type { actual, .. } | Cause::Value { actual, .. } = &mut self.cause {
             match actual {
                 Unexpected::Bool(_) => *actual = Unexpected::Type("boolean"),
                 Unexpected::Signed(_) | Unexpected::Unsigned(_) => {
                     *actual = Unexpected::Type("integer");
                 }
                 Unexpected::String(_) => *actual = Unexpected::Type("string"),
+                Unexpected::Float(_) => *actual = Unexpected::Type("floating point"),
                 _ => (),
             }
         }
@@ -234,8 +328,12 @@ impl std::fmt::Display for JsonDiagnostic {
         match &self.cause {
             Cause::Syntax(kind) | Cause::DataSyntax(kind) => f.write_str(kind.message())?,
             Cause::Message(message) => f.write_str(message)?,
+            Cause::Field(failure) => std::fmt::Display::fmt(failure, f)?,
             Cause::Type { expected, actual } => {
                 write!(f, "invalid type: {actual}, expected {expected}")?;
+            }
+            Cause::Value { expected, actual } => {
+                write!(f, "invalid value: {actual}, expected {expected}")?;
             }
         }
         write!(

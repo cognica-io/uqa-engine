@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve complete stored analyzer-binding envelope diagnostics through retained input, including missing/duplicate/unknown fields, positional forms, unit enums and numeric versions. Original error order, numeric spelling and source positions survive work suspension; error redaction releases admitted input names.
+
 - Preserve raw analyzer descriptor spans and their original syntax diagnostics through bounded input. Strict enclosing names and fields retain their own string validation, while raw descriptors keep their original escape and nesting rules until revision validation.
 
 - Preserve native GIN key and option diagnostics, including original type messages, byte-based positions and syntax/EOF classification. Retain memory and cancellation error types through field reconstruction; remove original scalar values at the backup error boundary. Other stored-owner diagnostic conversion remains in progress.
