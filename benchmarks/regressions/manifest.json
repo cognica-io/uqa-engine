@@ -65359,6 +65359,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_field_append_preserves_prior_snapshots_exact_ownership_and_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/names.rs",
+      "capability": "Admitted table field publication",
+      "workload": "Wide and long physical-field name generations, retained predecessor snapshots, exact successor admission, bounded copy windows and interrupted or denied preparation.",
+      "invariant": "Preparing one appended field preserves every prior generation, accounts for all new native buffers before publication and retires incomplete successors; later independent writes do not inherit the original input cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "admitted_field_append_retires_partial_copies_without_changing_selected_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/table_metadata/tests/names.rs",
+      "capability": "Admitted table field publication",
+      "workload": "Wide and long physical-field name generations, retained predecessor snapshots, exact successor admission, bounded copy windows and interrupted or denied preparation.",
+      "invariant": "Preparing one appended field preserves every prior generation, accounts for all new native buffers before publication and retires incomplete successors; later independent writes do not inherit the original input cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_parameter_input_preserves_sorted_case_selection_duplicates_and_unicode_trim",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/parameters/tests.rs",
+      "capability": "Persistent GIN analyzer options",
+      "workload": "Case-sensitive sorted selection of case-insensitive analyzer names, exact-key replacement, Unicode trimming, overwritten/unselected malformed values, truncations and long ignored text.",
+      "invariant": "Complete original string-option validation precedes analyzer use; selected output equals the ordinary BTreeMap/trim projection and retains only admitted native names through all terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_parameter_input_rejects_every_original_invalid_value_and_truncation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/parameters/tests.rs",
+      "capability": "Persistent GIN analyzer options",
+      "workload": "Case-sensitive sorted selection of case-insensitive analyzer names, exact-key replacement, Unicode trimming, overwritten/unselected malformed values, truncations and long ignored text.",
+      "invariant": "Complete original string-option validation precedes analyzer use; selected output equals the ordinary BTreeMap/trim projection and retains only admitted native names through all terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_parameter_input_bounds_discarded_text_and_retires_interrupted_selection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/parameters/tests.rs",
+      "capability": "Persistent GIN analyzer options",
+      "workload": "Case-sensitive sorted selection of case-insensitive analyzer names, exact-key replacement, Unicode trimming, overwritten/unselected malformed values, truncations and long ignored text.",
+      "invariant": "Complete original string-option validation precedes analyzer use; selected output equals the ordinary BTreeMap/trim projection and retains only admitted native names through all terminal paths.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

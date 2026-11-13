@@ -16,6 +16,9 @@ use uqa_storage::{
     CatalogFacade, CatalogIndexRow, RelationIdentity, StorageBackendError, StorageBackendResult,
 };
 
+mod parameters;
+pub use parameters::GinAnalyzerParameter;
+
 /// The table owner publishes an absent physical FTS field at the original per-column boundary.
 pub trait GinAnalyzerTable: AnalyzerTableDefinition {
     fn register_field(&self, field: &str) -> StorageBackendResult<()>;

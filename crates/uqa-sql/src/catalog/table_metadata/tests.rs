@@ -11,6 +11,7 @@ use uqa_core::{
 };
 
 mod image;
+mod names;
 
 fn capture_bytes<T: TableMetadataValue>(value: &TableMetadata<T>, bytes: usize) {
     let memory = MemoryBudget::new(bytes);

@@ -18,6 +18,7 @@ use uqa_core::{
 
 mod footprint;
 mod image;
+mod names;
 mod shared;
 pub use shared::SharedTableMetadata;
 #[cfg(test)]
@@ -33,8 +34,9 @@ impl TableMetadataValue for Vec<crate::ast::ForeignKey> {}
 impl TableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
 impl TableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
 
-/// Stored constraint fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
+/// Stored metadata fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
 pub(crate) trait DecodedTableMetadataValue: TableMetadataValue {}
+impl DecodedTableMetadataValue for Vec<String> {}
 impl DecodedTableMetadataValue for Option<String> {}
 impl DecodedTableMetadataValue for Vec<crate::ast::ForeignKey> {}
 impl DecodedTableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
