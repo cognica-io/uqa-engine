@@ -65424,6 +65424,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_comparisons_preserve_order_balancing_and_original_entry_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/input/tests.rs",
+      "capability": "Retained ordered-map comparisons",
+      "workload": "Ascending, descending and repeated keys; suspended lookup/insertion; every failure, abandonment and unwind boundary; exhausted replacement allowance and retained key/node identity.",
+      "invariant": "Native comparisons preserve ordinary AVL order and exact key/node leases; failed operations leave the selected root unchanged and successful publication performs no hidden synchronous comparison.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_comparison_failure_abandonment_and_denial_leave_selected_root_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/input/tests.rs",
+      "capability": "Retained ordered-map comparisons",
+      "workload": "Ascending, descending and repeated keys; suspended lookup/insertion; every failure, abandonment and unwind boundary; exhausted replacement allowance and retained key/node identity.",
+      "invariant": "Native comparisons preserve ordinary AVL order and exact key/node leases; failed operations leave the selected root unchanged and successful publication performs no hidden synchronous comparison.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_publication_never_repeats_comparisons_or_replaces_key_leases",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/input/tests.rs",
+      "capability": "Retained ordered-map comparisons",
+      "workload": "Ascending, descending and repeated keys; suspended lookup/insertion; every failure, abandonment and unwind boundary; exhausted replacement allowance and retained key/node identity.",
+      "invariant": "Native comparisons preserve ordinary AVL order and exact key/node leases; failed operations leave the selected root unchanged and successful publication performs no hidden synchronous comparison.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_gin_owners_adopt_exact_buffers_and_preserve_case_sensitive_compound_keys",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/owners/tests.rs",
+      "capability": "Retained GIN analyzer ownership",
+      "workload": "Case-sensitive compound keys, exact-key replacement, long UTF-8 table/field prefixes, independent invocation controls and every terminal cleanup path.",
+      "invariant": "Original admitted key/name buffers transfer without copying; comparisons yield in bounded fragments, replacements retain original key leases and terminal input releases every provisional owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_gin_lookup_uses_invoking_work_without_copying_or_reusing_the_source_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/owners/tests.rs",
+      "capability": "Retained GIN analyzer ownership",
+      "workload": "Case-sensitive compound keys, exact-key replacement, long UTF-8 table/field prefixes, independent invocation controls and every terminal cleanup path.",
+      "invariant": "Original admitted key/name buffers transfer without copying; comparisons yield in bounded fragments, replacements retain original key leases and terminal input releases every provisional owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_gin_input_retires_original_and_provisional_owners_after_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/owners/tests.rs",
+      "capability": "Retained GIN analyzer ownership",
+      "workload": "Case-sensitive compound keys, exact-key replacement, long UTF-8 table/field prefixes, independent invocation controls and every terminal cleanup path.",
+      "invariant": "Original admitted key/name buffers transfer without copying; comparisons yield in bounded fragments, replacements retain original key leases and terminal input releases every provisional owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_input_consumes_native_gin_owners_without_cloning_or_inheriting_source_controls",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests/gin.rs",
+      "capability": "Native GIN and field binding handoff",
+      "workload": "Complete native GIN maps, matching/mismatched field ownership and labels, exhausted/cancelled source controls and terminal field input.",
+      "invariant": "Field restoration consumes original admitted GIN ownership without cloning or inheriting source controls and preserves the original label-before-owner error order.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

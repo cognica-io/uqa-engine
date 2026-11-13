@@ -71,6 +71,27 @@ pub(super) fn insert<K: Ord, V>(link: &mut Link<K, V>, entry: OwnedNode<K, V>) -
     previous
 }
 
+/// The exclusive insertion owner completed every comparison before publishing this path. Rotations move the same nodes and never repeat a key comparison.
+pub(super) fn insert_selected<K, V>(
+    link: &mut Link<K, V>,
+    entry: OwnedNode<K, V>,
+    path: &[Ordering],
+) {
+    let Some((direction, rest)) = path.split_first() else {
+        debug_assert!(link.is_none());
+        *link = Some(entry);
+        return;
+    };
+    let node = &mut *link.as_mut().expect("selected insertion ancestor").value;
+    let child = match direction {
+        Ordering::Less => &mut node.left,
+        Ordering::Greater => &mut node.right,
+        Ordering::Equal => unreachable!("vacant insertion path has no equal key"),
+    };
+    insert_selected(child, entry, rest);
+    balance(link);
+}
+
 pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
     link: &mut Link<K, V>,
     key: &Q,

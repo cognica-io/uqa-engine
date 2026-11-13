@@ -6,7 +6,10 @@
 
 //! Stored binding and label buffers survive ordered native assembly under one allowance.
 
-use super::{corrupt, validate_binding, FieldKey, GinAnalyzerOwners};
+#[cfg(test)]
+use super::GinAnalyzerOwners;
+use super::{corrupt, validate_binding, FieldKey};
+use crate::catalog::analyzers::gin::GinAnalyzerLookup;
 use std::{borrow::Borrow, sync::Arc};
 use uqa_analysis::AnalyzerResources;
 use uqa_core::{
@@ -78,7 +81,7 @@ impl FieldAnalyzerCatalogInput {
         catalog: &dyn CatalogFacade,
         resources: Arc<AnalyzerResources>,
         limits: CatalogInputLimits,
-        gin_owners: Arc<GinAnalyzerOwners>,
+        gin_owners: impl GinAnalyzerLookup + 'static,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -98,7 +101,8 @@ impl FieldAnalyzerCatalogInput {
                         [label] => Some((label.0.as_str(), label.1.as_str())),
                         _ => None,
                     });
-                    validate_binding(binding, label, gin_owners.get(&*key.0).map(String::as_str))?;
+                    let gin = gin_owners.find_from(&key.0, &mut work).await?;
+                    validate_binding(binding, label, gin)?;
                 }
                 retained.check()?;
                 Ok(RestoredFieldAnalyzers { bindings, labels })

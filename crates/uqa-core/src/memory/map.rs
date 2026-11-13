@@ -13,7 +13,8 @@ mod tests;
 mod tree;
 
 pub use owned::{
-    OwnedMap, OwnedMapIntoIter, OwnedMapRange, OwnedSet, OwnedSetIntoIter, OwnedSetIter,
+    MapKeyInput, OwnedMap, OwnedMapIntoIter, OwnedMapRange, OwnedSet, OwnedSetIntoIter,
+    OwnedSetIter,
 };
 pub use shared::{
     BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,

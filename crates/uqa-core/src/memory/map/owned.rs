@@ -6,7 +6,9 @@
 
 //! Ordinary ordered owners expose exact allocation layouts for later immutable retention.
 
+mod input;
 mod iter_mut;
+pub use input::MapKeyInput;
 mod serialization;
 mod set;
 #[cfg(test)]

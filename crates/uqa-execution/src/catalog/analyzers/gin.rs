@@ -18,6 +18,8 @@ use uqa_storage::{
 
 mod parameters;
 pub use parameters::GinAnalyzerParameter;
+mod owners;
+pub use owners::{GinAnalyzerLookup, RetainedGinAnalyzerOwners};
 
 /// The table owner publishes an absent physical FTS field at the original per-column boundary.
 pub trait GinAnalyzerTable: AnalyzerTableDefinition {

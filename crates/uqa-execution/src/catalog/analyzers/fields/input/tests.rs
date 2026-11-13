@@ -13,6 +13,7 @@ use uqa_storage::{
 };
 
 mod errors;
+mod gin;
 mod retention;
 
 const LIMITS: CatalogInputLimits = CatalogInputLimits {
