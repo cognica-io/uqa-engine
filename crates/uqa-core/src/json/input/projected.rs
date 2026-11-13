@@ -56,7 +56,7 @@ impl JsonDiagnostic {
             position: JsonPosition::unlocated(),
             cause: Cause::Type {
                 expected,
-                actual: Unexpected::WideUnsigned(value),
+                actual: Unexpected::WideUnsigned(value.to_le_bytes()),
             },
         }
     }
@@ -66,7 +66,7 @@ impl JsonDiagnostic {
             position: JsonPosition::unlocated(),
             cause: Cause::Type {
                 expected,
-                actual: Unexpected::WideSigned(value),
+                actual: Unexpected::WideSigned(value.to_le_bytes()),
             },
         }
     }
@@ -88,8 +88,8 @@ impl JsonDiagnostic {
         let actual = match observe(text) {
             Observation::Unsigned(value) => Unexpected::Unsigned(value),
             Observation::Signed(value) => Unexpected::Signed(value),
-            Observation::WideUnsigned(value) => Unexpected::WideUnsigned(value),
-            Observation::WideSigned(value) => Unexpected::WideSigned(value),
+            Observation::WideUnsigned(value) => Unexpected::WideUnsigned(value.to_le_bytes()),
+            Observation::WideSigned(value) => Unexpected::WideSigned(value.to_le_bytes()),
             Observation::Float(value) => Unexpected::Float(value),
             Observation::Map(_) => Unexpected::Map,
         };

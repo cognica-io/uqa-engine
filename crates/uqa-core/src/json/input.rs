@@ -77,8 +77,9 @@ enum Unexpected {
     Bool(bool),
     Signed(i64),
     Unsigned(u64),
-    WideSigned(i128),
-    WideUnsigned(u128),
+    // Preserve all bits without imposing 128-bit alignment on every enclosing diagnostic.
+    WideSigned([u8; 16]),
+    WideUnsigned([u8; 16]),
     Float(f64),
     Number,
     String(Produced<String>),
@@ -94,8 +95,12 @@ impl std::fmt::Display for Unexpected {
             Self::Bool(value) => write!(f, "boolean `{value}`"),
             Self::Signed(value) => write!(f, "integer `{value}`"),
             Self::Unsigned(value) => write!(f, "integer `{value}`"),
-            Self::WideSigned(value) => write!(f, "integer `{value}` as i128"),
-            Self::WideUnsigned(value) => write!(f, "integer `{value}` as u128"),
+            Self::WideSigned(value) => {
+                write!(f, "integer `{}` as i128", i128::from_le_bytes(*value))
+            }
+            Self::WideUnsigned(value) => {
+                write!(f, "integer `{}` as u128", u128::from_le_bytes(*value))
+            }
             Self::Float(value) => {
                 f.write_str("floating point `")?;
                 serde_json::to_writer(JsonFloatWriter(f), value).map_err(|_| std::fmt::Error)?;
