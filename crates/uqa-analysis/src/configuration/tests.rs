@@ -230,3 +230,5 @@ fn native_configuration_preserves_tagged_and_struct_sequence_forms() {
         compare(&pipeline("normalization", value));
     }
 }
+
+mod diagnostic;

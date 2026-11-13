@@ -14,6 +14,11 @@ use crate::{
 mod lexical;
 mod object;
 mod string;
+mod value;
+pub use value::{
+    observe_json_text, observe_json_value, read_json_unsigned, JsonFieldProjection,
+    JsonScalarProtocol, JsonValueObservation,
+};
 mod work;
 pub use object::JsonObjectProjection;
 use work::Work;

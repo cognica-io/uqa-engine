@@ -63,6 +63,8 @@ macro_rules! fields {
     }};
 }
 
+mod diagnostic;
+pub use diagnostic::AnalyzerDiagnostic;
 mod inspection;
 mod morphology;
 mod output;

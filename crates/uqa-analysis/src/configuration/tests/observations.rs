@@ -7,7 +7,7 @@
 use super::*;
 use crate::AnalyzerLimits;
 
-fn configurations() -> Vec<Analyzer> {
+pub(super) fn configurations() -> Vec<Analyzer> {
     stages()
         .into_iter()
         .map(|(field, stage)| serde_json::from_value(pipeline(field, stage)).unwrap())

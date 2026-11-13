@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share retained generic JSON validation between catalog markers and analyzer diagnostics. Compare saved analyzer configurations with the original native public fields, preserving omitted defaults, duplicate-key semantics, raw/numeric scalar representations and bounded work without another value tree.
+
 - Retain field analyzer bindings and compatibility labels from one selected native SQLite, SQLite KV or redb catalog view. Bound physical reads, preserve original field bytes and the binding-before-label validation boundary, and retire both streams together on failure or cancellation.
 
 - Resume stored analyzer and field revision preparation through the original work channel, preserving exact descriptor/resource validation, historical index/search sides, admitted names and complete paired catalog publication.

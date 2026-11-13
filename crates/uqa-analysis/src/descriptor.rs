@@ -262,6 +262,14 @@ impl AnalyzerDescriptor {
         crate::work::inline(self.configuration_with(&mut ()))
     }
 
+    /// Reconstruct the same resolved native diagnostic configuration through the enclosing work channel. Analysis retains the descriptor's original representation limits and allocation ownership.
+    pub async fn configuration_with_input(
+        &self,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> AnalysisResult<Analyzer> {
+        self.configuration_with(input).await
+    }
+
     pub(crate) async fn configuration_with(
         &self,
         work: &mut impl crate::work::Work<AnalysisError>,

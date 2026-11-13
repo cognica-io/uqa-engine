@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -64776,6 +64776,110 @@
       "capability": "Retained physical field analyzer catalogs",
       "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
       "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_observation_preserves_public_scalars_duplicates_and_overwritten_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Retained generic JSON observation",
+      "workload": "Public scalar encodings, duplicate and overwritten fields, depth limits, long strings and nested raw values through bounded work.",
+      "invariant": "Native validation matches the public generic value oracle, retains original input and retires every admitted temporary on cancellation, failure or abandonment.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_observation_resumes_long_strings_and_nested_raw_values_without_a_tree",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Retained generic JSON observation",
+      "workload": "Public scalar encodings, duplicate and overwritten fields, depth limits, long strings and nested raw values through bounded work.",
+      "invariant": "Native validation matches the public generic value oracle, retains original input and retires every admitted temporary on cancellation, failure or abandonment.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_observation_retires_failed_cancelled_and_abandoned_expansions",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Retained generic JSON observation",
+      "workload": "Public scalar encodings, duplicate and overwritten fields, depth limits, long strings and nested raw values through bounded work.",
+      "invariant": "Native validation matches the public generic value oracle, retains original input and retires every admitted temporary on cancellation, failure or abandonment.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_diagnostics_preserve_public_field_omission_defaults_and_complete_object_equality",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/diagnostic.rs",
+      "capability": "Retained analyzer diagnostic comparison",
+      "workload": "Every enabled native stage, omitted/default fields, exact generic numbers and raw values, long strings and failure at work boundaries.",
+      "invariant": "Complete saved-value validation precedes native comparison; exact public configuration membership and ordered children match without building another value tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_diagnostics_keep_generic_numeric_raw_and_overwritten_value_semantics",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/diagnostic.rs",
+      "capability": "Retained analyzer diagnostic comparison",
+      "workload": "Every enabled native stage, omitted/default fields, exact generic numbers and raw values, long strings and failure at work boundaries.",
+      "invariant": "Complete saved-value validation precedes native comparison; exact public configuration membership and ordered children match without building another value tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_diagnostic_comparison_retains_long_native_fields_and_original_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/diagnostic.rs",
+      "capability": "Retained analyzer diagnostic comparison",
+      "workload": "Every enabled native stage, omitted/default fields, exact generic numbers and raw values, long strings and failure at work boundaries.",
+      "invariant": "Complete saved-value validation precedes native comparison; exact public configuration membership and ordered children match without building another value tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_diagnostic_comparison_retires_cancelled_denied_and_abandoned_native_scratch",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/diagnostic.rs",
+      "capability": "Retained analyzer diagnostic comparison",
+      "workload": "Every enabled native stage, omitted/default fields, exact generic numbers and raw values, long strings and failure at work boundaries.",
+      "invariant": "Complete saved-value validation precedes native comparison; exact public configuration membership and ordered children match without building another value tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_diagnostic_configuration_uses_original_resolved_fields_through_retained_work",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/configuration/tests/diagnostic.rs",
+      "capability": "Retained analyzer diagnostic comparison",
+      "workload": "Every enabled native stage, omitted/default fields, exact generic numbers and raw values, long strings and failure at work boundaries.",
+      "invariant": "Complete saved-value validation precedes native comparison; exact public configuration membership and ordered children match without building another value tree.",
       "case_names": [
         ""
       ]

@@ -13,6 +13,7 @@ mod cache;
 pub mod char_filter;
 mod character_class;
 mod configuration;
+pub use configuration::AnalyzerDiagnostic;
 mod cooperative_regex;
 pub mod descriptor;
 pub mod error;

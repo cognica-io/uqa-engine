@@ -33,7 +33,9 @@ pub(crate) async fn field_from(
     let keys = protocol::keys(control)?;
     let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
     let first = next(&mut reader, work).await?;
-    let value = value::observe(first, &mut reader, control, work, keys, Some(field)).await?;
+    let value = value::observe(first, &mut reader, control, work, keys, Some(field))
+        .await
+        .map_err(json_error)?;
     if reader
         .next_event_with_work(work)
         .await
@@ -102,7 +104,9 @@ async fn check_with_work<W: JsonReadWork<Error = JsonReadError>>(
         let matches = name.as_str() == format.format_field;
         drop(name);
         let token = next(&mut reader, work).await?;
-        let scalar = value::read(token, &mut reader, control, work, keys).await?;
+        let scalar = value::read(token, &mut reader, control, work, keys)
+            .await
+            .map_err(json_error)?;
         if matches {
             seen = true;
             version = scalar;
