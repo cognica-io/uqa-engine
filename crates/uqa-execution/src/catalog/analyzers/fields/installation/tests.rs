@@ -24,10 +24,7 @@ struct Table {
     log: Arc<Mutex<Vec<String>>>,
 }
 
-impl AnalyzerTable for Table {
-    fn persistence(&self) -> RelationPersistence {
-        RelationPersistence::Permanent
-    }
+impl AnalyzerTableDefinition for Table {
     fn fields(&self) -> SharedTableMetadata<Vec<String>> {
         self.fields.clone()
     }
@@ -36,6 +33,12 @@ impl AnalyzerTable for Table {
     }
     fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>> {
         self.columns.clone()
+    }
+}
+
+impl AnalyzerTable for Table {
+    fn persistence(&self) -> RelationPersistence {
+        RelationPersistence::Permanent
     }
     fn default_binding(&self, _: &str) -> StorageBackendResult<FieldAnalyzerBinding> {
         Ok(self.default.clone())

@@ -30,12 +30,16 @@ use work::Work;
 #[cfg(test)]
 mod tests;
 
-/// Table adapters retain declarations and provide physical revision publication at its original boundary.
-pub trait AnalyzerTable: Clone + Send + Sync {
-    fn persistence(&self) -> RelationPersistence;
+/// Analyzer predicates observe the original declared-column and physical-field generations.
+pub trait AnalyzerTableDefinition: Send + Sync {
     fn fields(&self) -> SharedTableMetadata<Vec<String>>;
     fn columns_declared(&self) -> bool;
     fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>>;
+}
+
+/// Table adapters retain declarations and provide physical revision publication at its original boundary.
+pub trait AnalyzerTable: AnalyzerTableDefinition + Clone {
+    fn persistence(&self) -> RelationPersistence;
     fn default_binding(&self, field: &str) -> StorageBackendResult<FieldAnalyzerBinding>;
     fn set_default(&self, definition: AnalyzerDefinition);
     fn install(&self, field: &str, binding: &FieldAnalyzerBinding) -> StorageBackendResult<()>;
@@ -112,7 +116,7 @@ where
                 && table.columns_declared()
                 && (binding.index.name.is_some() || binding.search.name.is_some())
             {
-                validate_declared_field(&table, &name, field, work).await?;
+                validate_declared_field_with(&table, &name, field, work).await?;
             }
             for side in [&binding.index, &binding.search] {
                 work.checkpoint().await?;
@@ -140,8 +144,17 @@ where
     saved.finish()
 }
 
-async fn validate_declared_field(
-    table: &impl AnalyzerTable,
+/// Ordinary assignments and GIN reconstruction keep declaration checks before current physical membership.
+pub fn validate_declared_field(
+    table: &impl AnalyzerTableDefinition,
+    name: &str,
+    field: &str,
+) -> StorageBackendResult<()> {
+    work::inline(validate_declared_field_with(table, name, field, &mut ()))
+}
+
+async fn validate_declared_field_with(
+    table: &impl AnalyzerTableDefinition,
     name: &str,
     field: &str,
     work: &mut impl Work,

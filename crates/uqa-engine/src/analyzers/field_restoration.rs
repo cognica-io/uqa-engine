@@ -12,27 +12,25 @@ use uqa_analysis::{AnalyzerDefinition, AnalyzerResources, CompiledAnalyzer};
 use uqa_core::{memory::RetainedValue, RelationIdentity};
 use uqa_execution::catalog::analyzers::fields::{
     installation::{
-        self, AnalyzerCatalogState, AnalyzerTable, AnalyzerTables, BindingMigrations,
-        FieldAnalyzerInstallation,
+        self, AnalyzerCatalogState, AnalyzerTable, AnalyzerTableDefinition, AnalyzerTables,
+        BindingMigrations, FieldAnalyzerInstallation,
     },
     CatalogFieldBindings, FieldAnalyzerCatalogInput, GinAnalyzerOwners, RestoredFieldAnalyzers,
 };
+use uqa_execution::catalog::analyzers::gin::{self, GinAnalyzerTable, GinAnalyzerTables};
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
     catalog::{table_definition::SharedTableDefinition, table_metadata::SharedTableMetadata},
 };
 use uqa_storage::{
     analyzer_binding::registry::FieldAnalyzerCatalog, catalog::input::CatalogInputLimits,
-    read_control::StorageReadControl, FieldAnalyzerBinding, StorageBackendResult,
+    read_control::StorageReadControl, CatalogFacade, FieldAnalyzerBinding, StorageBackendResult,
 };
 
 #[derive(Clone)]
 struct Table(Arc<TableState>);
 
-impl AnalyzerTable for Table {
-    fn persistence(&self) -> RelationPersistence {
-        self.0.persistence
-    }
+impl AnalyzerTableDefinition for Table {
     fn fields(&self) -> SharedTableMetadata<Vec<String>> {
         self.0.fts_fields.snapshot()
     }
@@ -41,6 +39,12 @@ impl AnalyzerTable for Table {
     }
     fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>> {
         self.0.columns.snapshot()
+    }
+}
+
+impl AnalyzerTable for Table {
+    fn persistence(&self) -> RelationPersistence {
+        self.0.persistence
     }
     fn default_binding(&self, field: &str) -> StorageBackendResult<FieldAnalyzerBinding> {
         let index = self.0.inverted_index.read();
@@ -57,6 +61,22 @@ impl AnalyzerTable for Table {
     }
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         self.0.inverted_index.read().source_rebuild_required()
+    }
+}
+
+impl GinAnalyzerTable for Table {
+    fn register_field(&self, field: &str) -> StorageBackendResult<()> {
+        self.0.fts_fields.write().push(field.to_owned());
+        Ok(())
+    }
+}
+
+struct GinTables<'a>(&'a Engine);
+
+impl GinAnalyzerTables for GinTables<'_> {
+    type Table = Table;
+    fn table(&self, name: &str) -> StorageBackendResult<Option<Table>> {
+        self.0.try_table(name).map(|table| table.map(Table))
     }
 }
 
@@ -86,6 +106,22 @@ impl AnalyzerCatalogState for Catalog<'_> {
 }
 
 impl Engine {
+    pub(crate) fn validate_table_analyzer_field(
+        table_name: &str,
+        table: &Arc<TableState>,
+        field: &str,
+    ) -> Result<(), String> {
+        installation::validate_declared_field(&Table(Arc::clone(table)), table_name, field)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(super) fn restore_gin_analyzer_owners(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<GinAnalyzerOwners> {
+        gin::restore(catalog, &GinTables(self))
+    }
+
     pub(super) fn install_catalog_field_analyzers(
         &self,
         saved: CatalogFieldBindings,

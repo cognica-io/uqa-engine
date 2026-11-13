@@ -107,6 +107,16 @@ fn redb_catalog_text_input_retains_private_rows_and_source_lifetime() {
 }
 
 #[test]
+fn redb_catalog_index_load_preserves_complete_order_and_terminal_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("catalog-index-load.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_index_load(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_catalog_statistics_input_retains_original_values_and_private_membership() {
     let directory = tempfile::tempdir().unwrap();
     let provider =

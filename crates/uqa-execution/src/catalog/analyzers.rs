@@ -7,4 +7,5 @@
 //! Persistent analyzer catalog assembly owns physical boundaries, native revisions and cross-record predicates.
 
 pub mod fields;
+pub mod gin;
 pub mod named;

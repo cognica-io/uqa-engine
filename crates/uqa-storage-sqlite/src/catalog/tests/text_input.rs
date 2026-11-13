@@ -200,6 +200,25 @@ fn sqlite_native_catalog_text_input_retains_private_rows_and_source_lifetime() {
 }
 
 #[test]
+fn sqlite_native_catalog_index_load_preserves_complete_order_and_terminal_ownership() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let provider = SQLiteStorageProvider::new(connection);
+    uqa_storage::key_value::conformance::verify_catalog_index_load(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_catalog_index_load_preserves_complete_order_and_terminal_ownership() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_index_load(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn sqlite_key_value_catalog_text_input_retains_private_rows_and_source_lifetime() {
     let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
     uqa_storage::key_value::conformance::verify_catalog_text_input(

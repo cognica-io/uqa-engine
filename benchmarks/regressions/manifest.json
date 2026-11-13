@@ -65242,6 +65242,123 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_owners_preserve_full_expression_acceptance_and_sorted_parameter_selection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests.rs",
+      "capability": "Persistent GIN analyzer ownership",
+      "workload": "Complete non-column window expressions, duplicate ordinary keys, differently cased analyzer parameters and trimmed names.",
+      "invariant": "Complete original key and parameter parsing precedes per-column publication; ordinary table lookup, exact column predicates, first sorted analyzer parameter and competing-owner errors retain their original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_owners_preserve_filter_table_key_parameter_and_column_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests.rs",
+      "capability": "Persistent GIN analyzer ownership",
+      "workload": "Non-GIN malformed payloads, missing tables, malformed expression keys and invalid parameter values paired with invalid declared columns.",
+      "invariant": "Complete original key and parameter parsing precedes per-column publication; ordinary table lookup, exact column predicates, first sorted analyzer parameter and competing-owner errors retain their original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_owners_publish_fields_before_declared_type_and_competing_owner_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests.rs",
+      "capability": "Persistent GIN analyzer ownership",
+      "workload": "New physical fields, non-TEXT declared columns, competing GIN analyzer names and undeclared document fields.",
+      "invariant": "Complete original key and parameter parsing precedes per-column publication; ordinary table lookup, exact column predicates, first sorted analyzer parameter and competing-owner errors retain their original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_catalog_index_load_preserves_complete_order_and_terminal_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Complete original provider order through private rollback, peer replacement and source retirement; partial load cancellation, quota exhaustion, zero windows, abandonment, unwinding and record-size failure.",
+      "invariant": "The complete physical family precedes semantic consumers, every native row keeps its original fields and ownership, and terminal cleanup leaves independent catalog writes usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_catalog_index_load_preserves_complete_order_and_terminal_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Complete original provider order through private rollback, peer replacement and source retirement; partial load cancellation, quota exhaustion, zero windows, abandonment, unwinding and record-size failure.",
+      "invariant": "The complete physical family precedes semantic consumers, every native row keeps its original fields and ownership, and terminal cleanup leaves independent catalog writes usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_catalog_index_load_preserves_complete_order_and_terminal_ownership",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Complete original provider order through private rollback, peer replacement and source retirement; partial load cancellation, quota exhaustion, zero windows, abandonment, unwinding and record-size failure.",
+      "invariant": "The complete physical family precedes semantic consumers, every native row keeps its original fields and ownership, and terminal cleanup leaves independent catalog writes usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_index_load_preserves_physical_and_stable_relation_order_without_copying_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/index_load/tests.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Physical and stable relation order, duplicate identities, long common prefixes, source retirement, denied later allocations and malformed physical rows before semantic consumers.",
+      "invariant": "Complete original rows retain their admitted buffers; bounded relation comparison preserves stable ties and terminal failure releases the whole unpublished family.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_index_load_resumes_long_relation_comparisons_and_retires_ordering_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/index_load/tests.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Physical and stable relation order, duplicate identities, long common prefixes, source retirement, denied later allocations and malformed physical rows before semantic consumers.",
+      "invariant": "Complete original rows retain their admitted buffers; bounded relation comparison preserves stable ties and terminal failure releases the whole unpublished family.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_index_load_rejects_foreign_controls_and_late_physical_corruption_before_semantics",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/index_load/tests.rs",
+      "capability": "Complete persistent index loading",
+      "workload": "Physical and stable relation order, duplicate identities, long common prefixes, source retirement, denied later allocations and malformed physical rows before semantic consumers.",
+      "invariant": "Complete original rows retain their admitted buffers; bounded relation comparison preserves stable ties and terminal failure releases the whole unpublished family.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

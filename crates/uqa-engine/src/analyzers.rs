@@ -6,7 +6,6 @@
 
 use super::{
     analyzer_registry, normalize_analyzer_phase, parse_analyzer_config, AnalyzerPhase, Arc, Engine,
-    TableState,
 };
 use uqa_execution::storage_errors::storage_error;
 use uqa_sql::SQLError;
@@ -273,34 +272,6 @@ impl Engine {
         if self.is_persistent() {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();
-        }
-        Ok(())
-    }
-
-    /// A per-field analyzer is meaningful only for a real text column that is
-    /// already part of the table's physical FTS index.  Enforce the same
-    /// invariant both when accepting a new assignment and while hydrating
-    /// persisted assignments on reopen.
-    pub(crate) fn validate_table_analyzer_field(
-        table_name: &str,
-        table: &Arc<TableState>,
-        field: &str,
-    ) -> Result<(), String> {
-        uqa_sql::semantics::text_indexes::validate_analyzer_column(
-            &table.columns.read(),
-            table_name,
-            field,
-        )
-        .map_err(|error| error.to_string())?;
-        if !table
-            .fts_fields
-            .read()
-            .iter()
-            .any(|candidate| candidate == field)
-        {
-            return Err(format!(
-                "set_table_analyzer: field `{table_name}`.`{field}` is not registered in the physical FTS index"
-            ));
         }
         Ok(())
     }

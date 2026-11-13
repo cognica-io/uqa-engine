@@ -25,6 +25,7 @@ pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
+pub mod index_load;
 pub mod input;
 mod ordering;
 mod record_revisions;
@@ -314,6 +315,18 @@ pub trait CatalogFacade: Send + Sync {
         control.check()?;
         Err(StorageBackendError::Other(
             "retained catalog index input is not supported".into(),
+        ))
+    }
+
+    /// Complete physical index rows in the same order as the ordinary provider loader before interpreting their definitions.
+    fn begin_index_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<index_load::CatalogIndexLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog index loading is not supported".into(),
         ))
     }
 
