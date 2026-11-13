@@ -62,11 +62,6 @@ impl ArrayValue {
         .ok()
     }
 
-    /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
-    pub(super) fn decoded_shape(elements: &[Value], bound_count: usize) -> Option<Vec<usize>> {
-        shape::unbounded(elements, Some(bound_count))
-    }
-
     pub(super) fn decoded_shape_budgeted(
         elements: &[Value],
         bound_count: usize,
@@ -76,12 +71,23 @@ impl ArrayValue {
         shape::budgeted(elements, Some(bound_count), memory, cancellation)
     }
 
-    pub(super) fn decoded_shape_with_control(
+    pub(in crate::types) async fn decoded_shape_with_work<W: crate::types::work::Work>(
         elements: &[Value],
         bound_count: usize,
         control: &crate::memory::ProductionControl<'_>,
-    ) -> Result<Option<crate::memory::Produced<Vec<usize>>>, super::ValueRetentionError> {
-        shape::produced(elements, Some(bound_count), control)
+        work: &mut W,
+    ) -> Result<Option<crate::memory::Produced<Vec<usize>>>, W::Error> {
+        shape::produced_with_work(elements, Some(bound_count), control, work).await
+    }
+
+    pub(in crate::types) async fn normalize_decoded_with_work<W: crate::types::work::Work>(
+        elements: &mut [Value],
+        rank: usize,
+        memory: &mut Option<crate::memory::MemoryReservation>,
+        control: &crate::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error> {
+        production::normalize_with_work(elements, rank, memory, control, work).await
     }
 
     /// Reserve this exact boxed layout before consuming validated decoded buffers.

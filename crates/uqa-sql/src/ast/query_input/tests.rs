@@ -13,7 +13,7 @@ mod alternatives;
 mod compatibility;
 mod resources;
 
-const QUERIES: &[&str] = &[
+pub(in crate::ast::query_input) const QUERIES: &[&str] = &[
     "SELECT t.a AS named, (SELECT 1) FROM t LEFT JOIN u USING (a) WHERE t.a > 0 ORDER BY named LIMIT 3 OFFSET 1 FOR UPDATE OF t",
     "SELECT sum(a) OVER w FROM t WINDOW w AS (PARTITION BY b ORDER BY a ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING)",
     "SELECT a, count(*) FROM t GROUP BY DISTINCT GROUPING SETS ((a), ()) HAVING count(*) > 0",

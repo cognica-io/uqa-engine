@@ -18,7 +18,13 @@ use crate::{
     },
 };
 
-mod numbers;
+pub(in crate::json) mod numbers;
+
+#[derive(Clone, Copy)]
+enum Projection {
+    Generic,
+    Buffered,
+}
 
 type Result<T> = std::result::Result<T, JsonInputError>;
 enum Frame<'a> {
@@ -40,6 +46,25 @@ pub(super) async fn value<W: JsonReadWork<Error = JsonReadError>>(
     work: &mut W,
     protocol: JsonScalarProtocol,
 ) -> Result<JsonDocument> {
+    project(source, control, work, protocol, Projection::Generic).await
+}
+
+pub(super) async fn buffered<W: JsonReadWork<Error = JsonReadError>>(
+    source: JsonValue<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    protocol: JsonScalarProtocol,
+) -> Result<JsonDocument> {
+    project(source, control, work, protocol, Projection::Buffered).await
+}
+
+async fn project<W: JsonReadWork<Error = JsonReadError>>(
+    source: JsonValue<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    protocol: JsonScalarProtocol,
+    projection: Projection,
+) -> Result<JsonDocument> {
     let memory = control.budget().expect("admitted generic projection");
     let mut document = JsonDocument {
         nodes: BudgetedMap::new(memory),
@@ -57,7 +82,16 @@ pub(super) async fn value<W: JsonReadWork<Error = JsonReadError>>(
                     document: source.document,
                     index,
                 };
-                enter(&mut document, value, &mut frames, control, work, protocol).await?
+                enter(
+                    &mut document,
+                    value,
+                    &mut frames,
+                    control,
+                    work,
+                    protocol,
+                    projection,
+                )
+                .await?
             }
             Frame::Array {
                 mut remaining,
@@ -126,15 +160,21 @@ async fn enter<'a, W: JsonReadWork<Error = JsonReadError>>(
     control: &ProductionControl<'_>,
     work: &mut W,
     protocol: JsonScalarProtocol,
+    projection: Projection,
 ) -> Result<Option<usize>> {
     let memory = control.budget().expect("admitted generic projection");
     let value = source;
     Ok(match value.value() {
         Value::Null => Some(document.insert(Value::Null)?),
         Value::Boolean(value) => Some(document.insert(Value::Boolean(*value))?),
-        Value::Number(text) => Some(document.insert(Value::Number(
-            copy_text(numbers::project(text).as_str(), control, work).await?,
-        ))?),
+        Value::Number(text) => Some(match projection {
+            Projection::Generic => document.insert(Value::Number(
+                copy_text(numbers::project(text).as_str(), control, work).await?,
+            ))?,
+            Projection::Buffered => {
+                numbers::buffered(document, text, control, work, protocol).await?
+            }
+        }),
         Value::String(text) => {
             Some(document.insert(Value::String(copy_text(text, control, work).await?))?)
         }
@@ -147,7 +187,8 @@ async fn enter<'a, W: JsonReadWork<Error = JsonReadError>>(
         }
         Value::Object(fields) => {
             if let Some((name, &index)) = fields.iter().next().filter(|(name, _)| {
-                name.as_str() == protocol.number || name.as_str() == protocol.raw
+                matches!(projection, Projection::Generic)
+                    && (name.as_str() == protocol.number || name.as_str() == protocol.raw)
             }) {
                 let child = JsonValue {
                     document: source.document,

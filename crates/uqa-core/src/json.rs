@@ -17,7 +17,7 @@ pub use document::{JsonDocument, JsonValue, JsonValueKind};
 mod input;
 mod lexical;
 pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
-pub use input::{JsonDiagnostic, JsonInputError};
+pub use input::{JsonDiagnostic, JsonInputError, JsonMessageFormat};
 mod object;
 mod raw;
 mod string;

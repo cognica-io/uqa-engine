@@ -15,9 +15,11 @@ use crate::{
 };
 
 mod plan;
+use crate::types::work::{checkpoint, inline, Work};
 use plan::{FinitePlan, Plan};
 
-type ParseResult = Result<Option<(DecimalValue, Option<MemoryReservation>)>, ValueRetentionError>;
+type ParseResult<E = ValueRetentionError> =
+    Result<Option<(DecimalValue, Option<MemoryReservation>)>, E>;
 
 impl DecimalValue {
     pub fn parse(input: &str) -> Option<Self> {
@@ -32,6 +34,17 @@ impl DecimalValue {
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
         parse_with(input, control.budget(), &mut || control.check())?
             .map(|(value, memory)| control.finish(value, memory))
+            .transpose()
+    }
+
+    pub(crate) async fn parse_with_work<W: Work>(
+        input: &str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<Produced<Self>>, W::Error> {
+        parse_native(input, control.budget(), &mut || control.check(), work)
+            .await?
+            .map(|(value, memory)| control.finish(value, memory).map_err(Into::into))
             .transpose()
     }
 
@@ -55,23 +68,37 @@ impl DecimalValue {
 fn parse_with(
     input: &str,
     budget: Option<&MemoryBudget>,
-    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
 ) -> ParseResult {
-    check()?;
-    let Some(plan) = Plan::parse(input, check)? else {
+    inline(parse_native(input, budget, check, &mut ()))
+}
+
+async fn parse_native<W: Work>(
+    input: &str,
+    budget: Option<&MemoryBudget>,
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+    work: &mut W,
+) -> ParseResult<W::Error> {
+    checkpoint(work, check).await?;
+    let Some(plan) = Plan::parse(input, check, work).await? else {
         return Ok(None);
     };
-    check()?;
+    checkpoint(work, check).await?;
     let bytes = match &plan {
         Plan::Special(_) => size_of::<DecimalRepr>(),
-        Plan::Finite(plan) => conversion_bytes(plan.digit_count)?,
+        Plan::Finite(plan) => {
+            conversion_bytes(plan.digit_count).map_err(ValueRetentionError::from)?
+        }
     };
-    let mut memory = budget.map(|budget| budget.reserve(bytes)).transpose()?;
+    let mut memory = budget
+        .map(|budget| budget.reserve(bytes))
+        .transpose()
+        .map_err(ValueRetentionError::from)?;
     let value = match plan {
         Plan::Special(repr) => DecimalValue::with_repr(repr),
         Plan::Finite(plan) => {
-            let coefficient = coefficient(&plan, &mut memory, check)?;
-            check()?;
+            let coefficient = coefficient(&plan, &mut memory, check, work).await?;
+            checkpoint(work, check).await?;
             // The borrowed plan has already checked the exact decimal precision and scale. Calling finite again would needlessly format the coefficient to rediscover its digit count.
             DecimalValue::with_repr(DecimalRepr::Finite {
                 coefficient,
@@ -79,7 +106,7 @@ fn parse_with(
             })
         }
     };
-    check()?;
+    checkpoint(work, check).await?;
     let retained = memory.as_mut().map(|memory| {
         let bytes = value.retained_bytes();
         assert!(bytes <= memory.bytes(), "decimal conversion envelope");
@@ -88,38 +115,46 @@ fn parse_with(
     Ok(Some((value, retained)))
 }
 
-fn coefficient(
+async fn coefficient<W: Work>(
     plan: &FinitePlan<'_>,
     memory: &mut Option<MemoryReservation>,
-    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-) -> Result<Coefficient, ValueRetentionError> {
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+    work: &mut W,
+) -> Result<Coefficient, W::Error> {
     if plan.digit_count == 0 {
         return Ok(Coefficient::ZERO);
     }
-    check()?;
+    checkpoint(work, check).await?;
     // Every text of at most 38 digits is a word, read without a digit buffer or an arbitrary-precision conversion.
     if plan.digit_count <= 38 {
-        let mut word = 0_i128;
+        let mut magnitude = 0_i128;
         for byte in plan.significand.bytes() {
             if byte != b'.' {
-                word = word * 10 + i128::from(byte - b'0');
+                magnitude = magnitude * 10 + i128::from(byte - b'0');
             }
         }
         for _ in 0..plan.trailing_zeros {
-            word *= 10;
+            magnitude *= 10;
         }
-        return Ok(Coefficient::Word(if plan.negative { -word } else { word }));
+        return Ok(Coefficient::Word(if plan.negative {
+            -magnitude
+        } else {
+            magnitude
+        }));
     }
     let mut digits = Vec::new();
     digits
         .try_reserve_exact(plan.digit_count)
-        .map_err(MemoryError::from)?;
+        .map_err(MemoryError::from)
+        .map_err(ValueRetentionError::from)?;
     if let Some(memory) = memory {
-        memory.grow(digits.capacity().saturating_sub(plan.digit_count))?;
+        memory
+            .grow(digits.capacity().saturating_sub(plan.digit_count))
+            .map_err(ValueRetentionError::from)?;
     }
     for (index, byte) in plan.significand.bytes().enumerate() {
         if index.is_multiple_of(4096) {
-            check()?;
+            checkpoint(work, check).await?;
         }
         if byte != b'.' {
             digits.push(byte - b'0');
@@ -127,19 +162,19 @@ fn coefficient(
     }
     for index in 0..plan.trailing_zeros {
         if index.is_multiple_of(4096) {
-            check()?;
+            checkpoint(work, check).await?;
         }
         digits.push(0);
     }
     debug_assert_eq!(digits.len(), plan.digit_count);
-    check()?;
+    checkpoint(work, check).await?;
     let sign = if plan.negative {
         Sign::Minus
     } else {
         Sign::Plus
     };
     let coefficient = BigInt::from_radix_be(sign, &digits, 10).expect("validated decimal digits");
-    check()?;
+    checkpoint(work, check).await?;
     Ok(Coefficient::from_big(coefficient))
 }
 

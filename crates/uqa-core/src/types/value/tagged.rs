@@ -8,8 +8,10 @@
 
 use super::{ArrayValue, BTreeMap, TemporalValue, Value};
 use crate::{
-    memory::Budgeted, CancellationToken, EnumLabelKey, EnumValue, LegacyVectorKind,
-    LegacyVectorValue, ValueRetentionError,
+    memory::{Budgeted, Produced, ProductionControl},
+    types::work::{inline, Work},
+    CancellationToken, EnumLabelKey, EnumValue, LegacyVectorKind, LegacyVectorValue,
+    ValueRetentionError,
 };
 
 mod allocation;
@@ -68,7 +70,11 @@ fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<Tem
 
 /// Consume a recognized tagged map without cloning its decoded payload. Invalid tags retain every original field and value.
 pub(super) fn value_from_tagged_map(map: BTreeMap<String, Value>) -> Result<Value, String> {
-    convert(map, &mut Workspace::unbounded()).map_err(|error| error.to_string())
+    let control = ProductionControl::uncontrolled();
+    let map = control.finish(map, None).expect("ordinary tagged map");
+    inline(value_from_tagged_fields(map, control, &mut ()))
+        .map(|value| value.into_uncontrolled().expect("ordinary tagged value"))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -85,18 +91,32 @@ pub(super) fn value_from_tagged_map_scoped(
     cancellation: &CancellationToken,
     invoking: &CancellationToken,
 ) -> Result<Budgeted<Value>, ValueRetentionError> {
-    let (map, memory) = map.into_parts();
-    let mut workspace = Workspace::bounded(memory, cancellation, invoking);
-    let value = convert(map, &mut workspace)?;
-    let retained = workspace.retained(&value)?;
-    Ok(Budgeted::new(value, retained))
+    let (map, reservation) = map.into_parts();
+    let memory = reservation.budget().clone();
+    let control = ProductionControl::new(&memory, cancellation, invoking);
+    let map = control.finish(map, Some(reservation))?;
+    inline(value_from_tagged_fields(map, control, &mut ()))
+        .map(|value| value.into_budgeted().expect("controlled tagged value"))
 }
 
-fn convert(
+pub(super) async fn value_from_tagged_fields<W: Work>(
+    map: Produced<BTreeMap<String, Value>>,
+    control: ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<Value>, W::Error> {
+    let (map, memory) = map.into_parts();
+    let mut workspace = Workspace::new(memory, control);
+    let value = convert(map, &mut workspace, work).await?;
+    let retained = workspace.retained(&value, work).await?;
+    control.finish(value, retained).map_err(Into::into)
+}
+
+async fn convert<W: Work>(
     mut map: BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<Value, ValueRetentionError> {
-    workspace.check()?;
+    work: &mut W,
+) -> Result<Value, W::Error> {
+    workspace.checkpoint(work).await?;
     let Some(Value::Str(tag)) = map.get("$uqa_type") else {
         return Ok(Value::Map(map));
     };
@@ -104,7 +124,11 @@ fn convert(
         return Ok(Value::Temporal(value));
     }
     match tag.as_str() {
-        "bit_string" => return bit_string::decode(&map, workspace).map(Value::BitString),
+        "bit_string" => {
+            return bit_string::decode(&map, workspace, work)
+                .await
+                .map(Value::BitString)
+        }
         "void" if map.len() == 1 => return Ok(Value::Void),
         "float_bits" if map.len() == 2 => {
             if let Some(Value::Str(hex)) = map.get("hex") {
@@ -115,7 +139,7 @@ fn convert(
         }
         "decimal" => {
             if let Some(Value::Str(text)) = map.get("value") {
-                if let Some(value) = workspace.decimal(text)? {
+                if let Some(value) = workspace.decimal(text, work).await? {
                     return Ok(Value::Decimal(value));
                 }
             }
@@ -135,16 +159,16 @@ fn convert(
         }
         "bytes" if map.len() == 2 => {
             if let Some(Value::Str(hex)) = map.get("hex") {
-                if let Some(bytes) = decode_hex_bytes(hex, workspace)? {
+                if let Some(bytes) = decode_hex_bytes(hex, workspace, work).await? {
                     return Ok(Value::Bytes(bytes));
                 }
             }
         }
         "datum" if map.len() == 4 || (map.len() == 5 && map.contains_key("record_fields")) => {
-            return decoded_datum(&map, workspace).map(Value::Datum);
+            return decoded_datum(&map, workspace, work).await.map(Value::Datum);
         }
         "array" if map.len() == 3 || (map.len() == 4 && map.contains_key("element_type_oid")) => {
-            if let Some(array) = decoded_array(&mut map, workspace)? {
+            if let Some(array) = decoded_array(&mut map, workspace, work).await? {
                 return Ok(Value::Array(array));
             }
         }
@@ -154,20 +178,22 @@ fn convert(
             } else {
                 LegacyVectorKind::Oid
             };
-            if let Some(vector) = decoded_legacy_vector(&mut map, kind, workspace)? {
+            if let Some(vector) = decoded_legacy_vector(&mut map, kind, workspace, work).await? {
                 return Ok(Value::LegacyVector(vector));
             }
         }
         "enum" if enum_carrier_fields(&map) => {
-            return decoded_enum(&map, workspace).map(Value::Enum);
+            return decoded_enum(&map, workspace)
+                .map(Value::Enum)
+                .map_err(Into::into);
         }
         "row" if map.len() == 2 || (map.len() == 3 && map.contains_key("field_types")) => {
-            if let Some(row) = row::decoded(&mut map, workspace)? {
+            if let Some(row) = row::decoded(&mut map, workspace, work).await? {
                 return Ok(Value::Row(row));
             }
         }
         "record" if map.len() == 2 || (map.len() == 3 && map.contains_key("type_oid")) => {
-            if let Some(record) = record::decoded(&mut map, workspace)? {
+            if let Some(record) = record::decoded(&mut map, workspace, work).await? {
                 return Ok(Value::Record(record));
             }
         }
@@ -176,10 +202,11 @@ fn convert(
     Ok(Value::Map(map))
 }
 
-fn decoded_datum(
+async fn decoded_datum<W: Work>(
     map: &BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<crate::DatumValue, ValueRetentionError> {
+    work: &mut W,
+) -> Result<crate::DatumValue, W::Error> {
     let malformed = || ValueRetentionError::Malformed {
         kind: "datum",
         reason: "invalid type OID, byte offset or backing bytes".into(),
@@ -187,40 +214,41 @@ fn decoded_datum(
     let type_oid = int_field::<u32>(map, "type_oid").ok_or_else(malformed)?;
     let offset = int_field::<u32>(map, "offset").ok_or_else(malformed)?;
     let Some(Value::Str(hex)) = map.get("hex") else {
-        return Err(malformed());
+        return Err(malformed().into());
     };
-    let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
+    let bytes = decode_hex_bytes(hex, workspace, work)
+        .await?
+        .ok_or_else(malformed)?;
     workspace.reserve(size_of::<Vec<u8>>() + 2 * size_of::<usize>())?;
     let datum = crate::DatumValue::new(type_oid, offset, bytes);
     let Some(fields) = map.get("record_fields") else {
         return Ok(datum);
     };
     let Value::List(fields) = fields else {
-        return Err(malformed());
+        return Err(malformed().into());
     };
     let mut decoded = workspace.vector(fields.len())?;
     for field in fields {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         let Value::Map(field) = field else {
-            return Err(malformed());
+            return Err(malformed().into());
         };
         let Some(Value::Bool(dropped)) = field.get("dropped") else {
-            return Err(malformed());
+            return Err(malformed().into());
         };
         if field.len() != 7 {
-            return Err(malformed());
+            return Err(malformed().into());
         }
         let type_oid = int_field(field, "type_oid").ok_or_else(malformed)?;
         let Some(Value::Str(name)) = field.get("name") else {
-            return Err(malformed());
+            return Err(malformed().into());
         };
-        workspace.reserve(name.len())?;
-        let name = name.clone();
+        let name = workspace.text(name, work).await?;
         let type_modifier = int_field(field, "type_modifier").ok_or_else(malformed)?;
         let collation_oid = match field.get("collation_oid") {
             Some(Value::Null) => None,
             Some(_) => Some(int_field(field, "collation_oid").ok_or_else(malformed)?),
-            None => return Err(malformed()),
+            None => return Err(malformed().into()),
         };
         let length = int_field(field, "length").ok_or_else(malformed)?;
         let alignment = int_field(field, "alignment").ok_or_else(malformed)?;
@@ -277,16 +305,17 @@ fn decoded_enum(
     Ok(EnumValue::new(type_oid, key).with_label_oid(label_oid))
 }
 
-fn decoded_legacy_vector(
+async fn decoded_legacy_vector<W: Work>(
     map: &mut BTreeMap<String, Value>,
     kind: LegacyVectorKind,
     workspace: &mut Workspace<'_>,
-) -> Result<Option<LegacyVectorValue>, ValueRetentionError> {
+    work: &mut W,
+) -> Result<Option<LegacyVectorValue>, W::Error> {
     let Some(Value::List(values)) = map.get("values") else {
         return Ok(None);
     };
     for value in values {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         if !kind.accepts(value) {
             return Ok(None);
         }
@@ -298,7 +327,8 @@ fn decoded_legacy_vector(
         if bounds.len() > 1 {
             return Ok(None);
         }
-        return Ok(decoded_array(map, workspace)?
+        return Ok(decoded_array(map, workspace, work)
+            .await?
             .map(|array| LegacyVectorValue::from_validated_array(kind, array)));
     }
     if map.len() != 2 {
@@ -313,10 +343,11 @@ fn decoded_legacy_vector(
     Ok(Some(LegacyVectorValue::from_validated_array(kind, array)))
 }
 
-fn decoded_array(
+async fn decoded_array<W: Work>(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<Option<ArrayValue>, ValueRetentionError> {
+    work: &mut W,
+) -> Result<Option<ArrayValue>, W::Error> {
     let element_type_oid = match map.get("element_type_oid") {
         None | Some(Value::Null) => None,
         Some(Value::Int(oid)) => match u32::try_from(*oid) {
@@ -331,12 +362,12 @@ fn decoded_array(
         return Ok(None);
     };
     for bound in bounds {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         if !matches!(bound, Value::Int(value) if i32::try_from(*value).is_ok()) {
             return Ok(None);
         }
     }
-    let Some(dimensions) = workspace.shape(values, bounds.len())? else {
+    let Some(dimensions) = workspace.shape(values, bounds.len(), work).await? else {
         return Ok(None);
     };
     if dimensions.len() != bounds.len() {
@@ -344,16 +375,19 @@ fn decoded_array(
     }
     let mut decoded_bounds = workspace.vector(bounds.len())?;
     for bound in bounds {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         let Value::Int(bound) = bound else {
             unreachable!("array lower bound was validated");
         };
         decoded_bounds.push(i32::try_from(*bound).expect("validated lower bound"));
     }
     workspace.reserve(ArrayValue::decoded_header_bytes())?;
-    let values = take_list(map, "values");
+    let mut values = take_list(map, "values");
+    workspace
+        .normalize(&mut values, dimensions.len(), work)
+        .await?;
     Ok(Some(
-        ArrayValue::from_decoded_parts(values, dimensions, decoded_bounds)
+        ArrayValue::from_copied_parts(values, dimensions, decoded_bounds)
             .with_element_type_oid(element_type_oid),
     ))
 }
@@ -365,10 +399,11 @@ fn take_list(map: &mut BTreeMap<String, Value>, key: &str) -> Vec<Value> {
     values
 }
 
-fn decode_hex_bytes(
+async fn decode_hex_bytes<W: Work>(
     hex: &str,
     workspace: &mut Workspace<'_>,
-) -> Result<Option<Vec<u8>>, ValueRetentionError> {
+    work: &mut W,
+) -> Result<Option<Vec<u8>>, W::Error> {
     fn nibble(byte: u8) -> Option<u8> {
         match byte {
             b'0'..=b'9' => Some(byte - b'0'),
@@ -383,7 +418,7 @@ fn decode_hex_bytes(
         return Ok(None);
     }
     for chunk in encoded.chunks(4096) {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         if chunk.iter().any(|byte| nibble(*byte).is_none()) {
             return Ok(None);
         }
@@ -391,7 +426,7 @@ fn decode_hex_bytes(
     let mut bytes = workspace.vector(encoded.len() / 2)?;
     for (index, pair) in encoded.as_chunks::<2>().0.iter().enumerate() {
         if index.is_multiple_of(4096) {
-            workspace.check()?;
+            workspace.checkpoint(work).await?;
         }
         let high = nibble(pair[0]).expect("validated hexadecimal digit");
         let low = nibble(pair[1]).expect("validated hexadecimal digit");

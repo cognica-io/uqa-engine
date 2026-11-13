@@ -65,7 +65,7 @@ stored_enum!(RuleEvent {
     Delete,
 });
 
-units!(TriggerDeferrability);
+units!(TriggerDeferrability { NotDeferrable => "not_deferrable", InitiallyImmediate => "initially_immediate", InitiallyDeferred => "initially_deferred" });
 
 stored_enum!(TriggerEvent {
     Insert,

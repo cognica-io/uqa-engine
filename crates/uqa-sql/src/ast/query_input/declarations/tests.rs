@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-const STATEMENTS: &[&str] = &[
+pub(in crate::ast::query_input) const STATEMENTS: &[&str] = &[
     "CREATE DOMAIN d AS integer DEFAULT 1 CHECK (VALUE > 0)",
     "ALTER DOMAIN d SET DEFAULT 2", "CREATE TYPE shell", "COMMENT ON TYPE shell IS 'x'",
     "CREATE TYPE mood AS ENUM ('a', 'b')", "CREATE TYPE pair AS (a int, b text)",

@@ -89,82 +89,14 @@ stored_struct!(LockingClause {
     relations: required
 });
 
-impl Stored for WindowSpec {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (mut definition, mut reference, mut partition_by, mut order_by, mut frame) =
-            (None, None, None, None, None);
-        let mut cursor = input.field_cursor(
-            token,
-            &[
-                "definition",
-                "reference",
-                "partition_by",
-                "order_by",
-                "frame",
-            ],
-            [12, 28],
-            false,
-        )?;
-        while let Some((index, token)) = cursor.next(input)? {
-            match index {
-                0 => definition = Some(input.stored(token, values)?),
-                1 => reference = Some(input.stored(token, values)?),
-                2 => partition_by = Some(input.stored(token, values)?),
-                3 => order_by = Some(input.stored(token, values)?),
-                _ => frame = Some(input.stored(token, values)?),
-            }
-        }
-        let mut parts = Parts::new(input.control);
-        let result = Self {
-            raw_definition: None,
-            definition: definition.and_then(|value| parts.take(value)),
-            reference: reference.and_then(|value| parts.take(value)),
-            partition_by: parts.take(partition_by.ok_or_else(invalid)?),
-            order_by: parts.take(order_by.ok_or_else(invalid)?),
-            frame: frame.and_then(|value| parts.take(value)),
-        };
-        parts.finish(result)
-    }
-}
+stored_struct!(WindowSpec {
+    definition: default(None), reference: default(None), partition_by: required,
+    order_by: required, frame: optional
+} skip { raw_definition: None });
 
-impl Stored for FrameBound {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (tag, object) = input.tag(token)?;
-        let mut parts = Parts::new(input.control);
-        let value = match tag.as_str() {
-            "Preceding" | "Following" if object => {
-                let token = input.next()?;
-                let value = parts.take(input.stored(token, values)?);
-                if tag.as_str() == "Preceding" {
-                    Self::Preceding(value)
-                } else {
-                    Self::Following(value)
-                }
-            }
-            "UnboundedPreceding" | "UnboundedFollowing" | "CurrentRow" => {
-                if object && input.next()? != JsonToken::Null {
-                    return Err(invalid());
-                }
-                match tag.as_str() {
-                    "UnboundedPreceding" => Self::UnboundedPreceding,
-                    "UnboundedFollowing" => Self::UnboundedFollowing,
-                    _ => Self::CurrentRow,
-                }
-            }
-            _ => return Err(invalid()),
-        };
-        input.close_tag(object)?;
-        parts.finish(value)
-    }
-}
+stored_enum!(FrameBound {
+    UnboundedPreceding, UnboundedFollowing, CurrentRow, Preceding(value), Following(value)
+});
 
 impl Stored for CTE {
     fn read<'a>(

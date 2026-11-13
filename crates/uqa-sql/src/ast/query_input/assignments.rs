@@ -5,13 +5,14 @@
 //
 
 use super::{
-    invalid, AssignmentStep, AssignmentTarget, AssignmentTargets, Expr, Input, InputError,
-    JsonToken, MultipleAssignmentTargets, Native, Parts, Stored, Values,
+    invalid, AssignmentStep as GenericAssignmentStep, AssignmentTarget, AssignmentTargets, Expr,
+    Input, InputError, JsonToken, MultipleAssignmentTargets as GenericMultipleAssignmentTargets,
+    Native, Parts, Stored, Values,
 };
 
-type QueryAssignmentStep = AssignmentStep<Expr>;
-type MultipleTargets = MultipleAssignmentTargets<Expr>;
-stored_struct!(MultipleTargets {
+type AssignmentStep = GenericAssignmentStep<Expr>;
+type MultipleAssignmentTargets = GenericMultipleAssignmentTargets<Expr>;
+stored_struct!(MultipleAssignmentTargets {
     targets: required,
     source_positions: required,
     source_width: required
@@ -72,39 +73,4 @@ impl Stored for AssignmentTargets {
     }
 }
 
-impl Stored for AssignmentStep<Expr> {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (tag, object) = input.tag(token)?;
-        if !object {
-            return Err(invalid());
-        }
-        let token = input.next()?;
-        let mut parts = Parts::new(input.control);
-        let result = match tag.as_str() {
-            "Field" => {
-                let value = Self::Field(parts.take(input.stored(token, values)?));
-                parts.finish(value)
-            }
-            "Index" => {
-                let value = Self::Index(parts.take(input.stored(token, values)?));
-                parts.finish(value)
-            }
-            "Slice" => fields!(
-                input,
-                token,
-                values,
-                QueryAssignmentStep::Slice {
-                    lower: optional,
-                    upper: optional
-                }
-            ),
-            _ => Err(invalid()),
-        }?;
-        input.close_tag(object)?;
-        Ok(result)
-    }
-}
+stored_enum!(AssignmentStep { Field(value), Index(value), Slice { lower: optional, upper: optional } });

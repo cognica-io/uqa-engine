@@ -77,6 +77,8 @@ enum Unexpected {
     Bool(bool),
     Signed(i64),
     Unsigned(u64),
+    WideSigned(i128),
+    WideUnsigned(u128),
     Float(f64),
     Number,
     String(Produced<String>),
@@ -92,6 +94,8 @@ impl std::fmt::Display for Unexpected {
             Self::Bool(value) => write!(f, "boolean `{value}`"),
             Self::Signed(value) => write!(f, "integer `{value}`"),
             Self::Unsigned(value) => write!(f, "integer `{value}`"),
+            Self::WideSigned(value) => write!(f, "integer `{value}` as i128"),
+            Self::WideUnsigned(value) => write!(f, "integer `{value}` as u128"),
             Self::Float(value) => {
                 f.write_str("floating point `")?;
                 serde_json::to_writer(JsonFloatWriter(f), value).map_err(|_| std::fmt::Error)?;
@@ -159,6 +163,10 @@ enum Cause {
         prefix: &'static str,
         message: &'static str,
     },
+    RetainedMessage {
+        format: &'static JsonMessageFormat,
+        text: Option<Produced<String>>,
+    },
     Field(fields::FieldFailure),
     Type {
         expected: &'static str,
@@ -168,6 +176,24 @@ enum Cause {
         expected: &'static str,
         actual: Unexpected,
     },
+}
+
+/// Static framing for one admitted diagnostic payload, including its complete redacted message.
+#[derive(Debug)]
+pub struct JsonMessageFormat {
+    prefix: &'static str,
+    suffix: &'static str,
+    redacted: &'static str,
+}
+
+impl JsonMessageFormat {
+    pub const fn new(prefix: &'static str, suffix: &'static str, redacted: &'static str) -> Self {
+        Self {
+            prefix,
+            suffix,
+            redacted,
+        }
+    }
 }
 
 /// A diagnostic owns only values needed for its original message. Sensitive image boundaries can retain the type and position while retiring those values.
@@ -242,6 +268,21 @@ impl JsonDiagnostic {
         Self {
             position,
             cause: Cause::Message { prefix, message },
+        }
+    }
+
+    /// Retain an admitted dynamic diagnostic until the owning boundary releases or redacts it. Static punctuation and a complete redacted message avoid a second formatted allocation.
+    pub fn retained_message(
+        format: &'static JsonMessageFormat,
+        text: Produced<String>,
+        position: JsonPosition,
+    ) -> Self {
+        Self {
+            position,
+            cause: Cause::RetainedMessage {
+                format,
+                text: Some(text),
+            },
         }
     }
 
@@ -332,6 +373,9 @@ impl JsonDiagnostic {
 
     /// Drop original scalar values before crossing a boundary that must not disclose input payloads. Syntax, expected type, error category and source position remain available.
     pub fn into_type_only(mut self) -> Self {
+        if let Cause::RetainedMessage { text, .. } = &mut self.cause {
+            *text = None;
+        }
         if let Cause::Field(failure) = &mut self.cause {
             failure.redact();
         }
@@ -341,6 +385,8 @@ impl JsonDiagnostic {
                 Unexpected::Signed(_) | Unexpected::Unsigned(_) => {
                     *actual = Unexpected::Type("integer");
                 }
+                Unexpected::WideSigned(_) => *actual = Unexpected::Type("integer as i128"),
+                Unexpected::WideUnsigned(_) => *actual = Unexpected::Type("integer as u128"),
                 Unexpected::String(_) => *actual = Unexpected::Type("string"),
                 Unexpected::Float(_) => *actual = Unexpected::Type("floating point"),
                 _ => (),
@@ -372,6 +418,15 @@ impl std::fmt::Display for JsonDiagnostic {
             Cause::Message { prefix, message } => {
                 f.write_str(prefix)?;
                 f.write_str(message)?;
+            }
+            Cause::RetainedMessage { format, text } => {
+                if let Some(text) = text {
+                    f.write_str(format.prefix)?;
+                    f.write_str(text)?;
+                    f.write_str(format.suffix)?;
+                } else {
+                    f.write_str(format.redacted)?;
+                }
             }
             Cause::Field(failure) => std::fmt::Display::fmt(failure, f)?,
             Cause::Type { expected, actual } => {

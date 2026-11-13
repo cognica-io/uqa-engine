@@ -66923,6 +66923,214 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_buffering_preserves_flattened_numeric_widths_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/buffered.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Compare flattened public generic-value decoding across integer widths, nonzero integers, floating estimates and JSON kinds.",
+      "invariant": "Content observation preserves numeric width selection, scalar maps and exact unlocated diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_buffering_observes_unknown_fields_before_flattened_typed_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/buffered.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Place wide numeric observations in unknown fields before and after a selected flattened scalar.",
+      "invariant": "Generic Content errors precede flattened typed-field interpretation in the same original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_buffering_adopts_native_allocations_and_preserves_scalar_maps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/buffered.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Buffer long Unicode, arbitrary-precision scalar maps and ordinary native values while measuring actual allocations.",
+      "invariant": "Original inputs retire independently; actual live and peak allocations stay within the admitted destination ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_buffering_resumes_and_retires_failed_or_cancelled_generations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/buffered.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Suspend every checkpoint, deny allocation and cancel original or invoking work during native generic buffering.",
+      "invariant": "No partial generation is published and every interrupted destination reservation retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_buffering_preserves_expanded_depth_on_the_original_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/buffered.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Expand nested raw generic input beyond physical parser depth and buffer it on a 128 KiB thread stack.",
+      "invariant": "Typed Content preparation preserves expanded logical depth through iterative native traversal without replaying JSON.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_retained_diagnostics_preserve_original_text_and_release_it_on_redaction",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/input/fields/tests.rs",
+      "capability": "Projected stored scalar input",
+      "workload": "Retain a long sensitive Unicode diagnostic at located and unlocated input boundaries, then redact it twice.",
+      "invariant": "Original text, punctuation, category and position survive until redaction releases the payload and exposes only the static message.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_native_values_match_generic_numeric_visitors_and_every_tag_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/native.rs",
+      "capability": "Native projected literal construction",
+      "workload": "Compare scalar, numeric-edge and tagged literal fixtures against public generic deserialization, including nested values.",
+      "invariant": "Native representations, diagnostic text/category/position and retained payload accounting match the independent reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_native_scalars_need_no_destination_allocation_or_retained_source",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/native.rs",
+      "capability": "Native projected literal construction",
+      "workload": "Read scalar literals under zero destination allowance and measure allocations before retiring their source.",
+      "invariant": "Scalar results require no destination allocation and retain no source generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_native_values_resume_and_retire_failed_cancelled_and_abandoned_generations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/native.rs",
+      "capability": "Native projected literal construction",
+      "workload": "Interrupt every work checkpoint in mixed native record/array construction and vary the destination allowance.",
+      "invariant": "Completed values remain exact; memory denial, both cancellation scopes, work failure and abandonment release every private owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "projected_native_literals_keep_expanded_depth_and_destruction_on_the_original_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/native.rs",
+      "capability": "Native projected literal construction",
+      "workload": "Expand two physically valid JSON inputs into 252 nested literal lists, construct and drop them on a 128 KiB thread stack.",
+      "invariant": "Logical input depth remains accepted and original admission retires without growing the execution stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_statement_input_preserves_every_statement_body_and_query_shape",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Reconstruct every existing stored-declaration fixture and query fixture, including direct CreateFunction bodies.",
+      "invariant": "Native serialization matches the public generic deserializer after the source generation is retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_statement_input_preserves_omissions_types_and_exact_diagnostic_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Remove fields and substitute incorrect shapes throughout the declaration/query fixture matrix.",
+      "invariant": "Acceptance, complete error text, category and unlocated diagnostic position match the independent generic reader.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_flattened_fields_preserve_buffering_before_selected_typed_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Inject wide numeric and malformed fields into flattened CTE, security, EXPLAIN and optional function-binding inputs.",
+      "invariant": "Generic-content observation precedes selected typed fields and preserves original alternative selection and diagnostic ordering.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_expression_input_keeps_expanded_depth_on_the_original_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Construct and drop a 250-node expression expanded from two physically valid inputs on a 128 KiB stack.",
+      "invariant": "All expression nodes survive reconstruction and independently admitted task/output ownership retires on the original stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_statement_tasks_retire_every_suspended_failed_and_cancelled_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Suspend a complete routine declaration at every external work checkpoint and exercise both cancellation scopes, work failure, abandonment and quota limits.",
+      "invariant": "Tasks preserve the exact declaration and release every private allocation on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_queries_and_column_types_share_the_original_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests.rs",
+      "capability": "Native projected SQL construction",
+      "workload": "Reconstruct 48 nested scalar subqueries and 250 nested array types expanded across raw input boundaries on a 128 KiB stack.",
+      "invariant": "Recursive query and type construction shares explicit task ownership; complete syntax and destruction retain the original stack bound.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

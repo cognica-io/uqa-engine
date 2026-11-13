@@ -23,6 +23,7 @@ use uqa_core::{json::JsonToken, memory::Produced};
 mod fields;
 mod assignments;
 mod mutations;
+mod projected;
 mod queries;
 mod sources;
 #[cfg(test)]
@@ -227,24 +228,42 @@ macro_rules! numbers {
 numbers!(u32, u64, usize, i16);
 
 macro_rules! units {
-    ($($ty:ty),* $(,)?) => {$(impl Stored for $ty {
-        fn read<'a>(input: &mut Input<'a, '_>, token: JsonToken<'a>, _: &Values<'_>) -> Result<Native<Self>, InputError> {
-            let tag = input.unit_tag(token)?;
-            Native::new(input.scalar(crate::ast::stored_input::unit(&tag)?)?, input.control)
+    ($($ty:ident { $($variant:ident => $tag:literal),* $(,)? }),* $(,)?) => {$(
+        const _: fn(&$ty) = |value| match value { $($ty::$variant => (),)* };
+        impl Stored for $ty {
+            fn read<'a>(input: &mut Input<'a, '_>, token: JsonToken<'a>, _: &Values<'_>) -> Result<Native<Self>, InputError> {
+                let tag = input.unit_tag(token)?;
+                Native::new(input.scalar(crate::ast::stored_input::unit(&tag)?)?, input.control)
+            }
         }
-    })*};
+        impl crate::ast::query_input::projected::Projected for $ty {
+            fn read_value<'i, 'a>(
+                input: crate::ast::query_input::projected::Input<'i>, work: &'a mut crate::ast::query_input::projected::Work<'i>,
+            ) -> crate::ast::query_input::projected::Result<crate::ast::query_input::projected::Read<'a, Self>> {
+                crate::ast::query_input::projected::frame(input.control, async move {
+                    let tag = input.tag(work).await?;
+                    let result = match tag.name {
+                        $($tag => $ty::$variant,)*
+                        name => return Err(input.unknown_variant(name, &[$($tag),*], work).await?),
+                    };
+                    tag.unit(input, work).await?;
+                    input.scalar(result)
+                })
+            }
+        }
+    )*};
 }
 units!(
-    NullsOrder,
-    FrameMode,
-    FrameExclusion,
-    WindowReferenceKind,
-    CteMaterialization,
-    SetOpKind,
-    JoinKind,
-    LockStrength,
-    LockWait,
-    OverridingKind
+    NullsOrder { First => "First", Last => "Last" },
+    FrameMode { Rows => "Rows", Range => "Range", Groups => "Groups" },
+    FrameExclusion { NoOthers => "NoOthers", CurrentRow => "CurrentRow", Group => "Group", Ties => "Ties" },
+    WindowReferenceKind { Direct => "Direct", Copy => "Copy" },
+    CteMaterialization { Default => "Default", Materialized => "Materialized", NotMaterialized => "NotMaterialized" },
+    SetOpKind { Union => "Union", Intersect => "Intersect", Except => "Except" },
+    JoinKind { Inner => "Inner", Left => "Left", Right => "Right", Full => "Full", Cross => "Cross" },
+    LockStrength { ForKeyShare => "ForKeyShare", ForShare => "ForShare", ForNoKeyUpdate => "ForNoKeyUpdate", ForUpdate => "ForUpdate" },
+    LockWait { Block => "Block", SkipLocked => "SkipLocked", NoWait => "NoWait" },
+    OverridingKind { SystemValue => "system_value", UserValue => "user_value" }
 );
 
 impl Stored for InternalRelationId {

@@ -38,6 +38,41 @@ enum Container {
 }
 
 impl Value {
+    pub(crate) async fn from_projected_json_fields<
+        W: crate::json::JsonReadWork<Error = JsonReadError>,
+    >(
+        fields: crate::memory::Produced<BTreeMap<String, Value>>,
+        control: ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<crate::memory::Produced<Self>, crate::types::work::JsonWorkError> {
+        super::tagged::value_from_tagged_fields(
+            fields,
+            control,
+            &mut crate::types::work::JsonWork(work),
+        )
+        .await
+    }
+
+    pub(crate) async fn from_projected_json_number<
+        W: crate::json::JsonReadWork<Error = JsonReadError>,
+    >(
+        text: &str,
+        control: ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<crate::memory::Produced<Self>>, crate::types::work::JsonWorkError> {
+        if let Some(value) = primitive_number(text) {
+            return Ok(Some(control.finish(value, control.empty_reservation())?));
+        }
+        let Some(decimal) =
+            DecimalValue::parse_with_work(text, &control, &mut crate::types::work::JsonWork(work))
+                .await?
+        else {
+            return Ok(None);
+        };
+        let (decimal, memory) = decimal.into_parts();
+        Ok(Some(control.finish(Self::Decimal(decimal), memory)?))
+    }
+
     /// Apply the ordinary JSON visitor's private-number and tagged-object rules to decoded fields. The input reservation must cover its live entries, key capacities and nested payloads; conversion retains that allowance and moves recognized buffers.
     pub fn from_json_fields_budgeted(
         fields: Budgeted<BTreeMap<String, Value>>,

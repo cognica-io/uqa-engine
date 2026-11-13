@@ -49,3 +49,53 @@ impl JsonDiagnostic {
         })
     }
 }
+
+impl JsonDiagnostic {
+    pub(in crate::json) fn wide_unsigned(value: u128, expected: &'static str) -> Self {
+        Self {
+            position: JsonPosition::unlocated(),
+            cause: Cause::Type {
+                expected,
+                actual: Unexpected::WideUnsigned(value),
+            },
+        }
+    }
+
+    pub(in crate::json) fn wide_signed(value: i128, expected: &'static str) -> Self {
+        Self {
+            position: JsonPosition::unlocated(),
+            cause: Cause::Type {
+                expected,
+                actual: Unexpected::WideSigned(value),
+            },
+        }
+    }
+
+    /// Type observation after flattened or untagged buffering retains the numeric visitor's actual classification instead of the generic value's arbitrary-precision number classification.
+    pub async fn buffered_type_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        value: JsonValue<'_>,
+        expected: &'static str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, JsonInputError> {
+        use crate::json::document::project::numbers::{observe, Observation};
+        control.check().map_err(JsonReadError::from)?;
+        work.checkpoint().await?;
+        control.check().map_err(JsonReadError::from)?;
+        let Some(text) = value.number_text() else {
+            return Self::projected_type_with_work(value, expected, control, work).await;
+        };
+        let actual = match observe(text) {
+            Observation::Unsigned(value) => Unexpected::Unsigned(value),
+            Observation::Signed(value) => Unexpected::Signed(value),
+            Observation::WideUnsigned(value) => Unexpected::WideUnsigned(value),
+            Observation::WideSigned(value) => Unexpected::WideSigned(value),
+            Observation::Float(value) => Unexpected::Float(value),
+            Observation::Map(_) => Unexpected::Map,
+        };
+        Ok(Self {
+            position: JsonPosition::unlocated(),
+            cause: Cause::Type { expected, actual },
+        })
+    }
+}

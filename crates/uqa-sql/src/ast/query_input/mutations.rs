@@ -78,131 +78,23 @@ stored_struct!(OnConflict {
     action: required
 });
 
-impl Stored for OnConflictAction {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (tag, object) = input.tag(token)?;
-        let result = match tag.as_str() {
-            "Nothing" => {
-                if object && input.next()? != JsonToken::Null {
-                    return Err(invalid());
-                }
-                Native::new(
-                    input
-                        .control
-                        .finish(Self::Nothing, input.control.empty_reservation())?,
-                    input.control,
-                )?
-            }
-            "Update" if object => {
-                let token = input.next()?;
-                fields!(
-                    input,
-                    token,
-                    values,
-                    OnConflictAction::Update {
-                        assignments: required,
-                        r#where: optional
-                    }
-                )?
-            }
-            _ => return Err(invalid()),
-        };
-        input.close_tag(object)?;
-        Ok(result)
-    }
-}
+stored_enum!(OnConflictAction { Nothing, Update { assignments: required, r#where: optional } });
 
-impl Stored for MergeWhen {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (tag, object) = input.tag(token)?;
-        if !object {
-            return Err(invalid());
-        }
-        let token = input.next()?;
-        let result = match tag.as_str() {
-            "UpdateMatched" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::UpdateMatched {
-                    condition: optional,
-                    assignments: required
-                }
-            ),
-            "UpdateNotMatchedBySource" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::UpdateNotMatchedBySource {
-                    condition: optional,
-                    assignments: required
-                }
-            ),
-            "DeleteMatched" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::DeleteMatched {
-                    condition: optional
-                }
-            ),
-            "DeleteNotMatchedBySource" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::DeleteNotMatchedBySource {
-                    condition: optional
-                }
-            ),
-            "InsertNotMatched" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::InsertNotMatched {
-                    condition: optional,
+stored_enum!(MergeWhen {
+    UpdateMatched { condition: optional,
+                    assignments: required },
+    UpdateNotMatchedBySource { condition: optional,
+                    assignments: required },
+    DeleteMatched { condition: optional },
+    DeleteNotMatchedBySource { condition: optional },
+    InsertNotMatched { condition: optional,
                     columns: required,
                     overriding: default(None),
-                    values: required
-                }
-            ),
-            "NothingMatched" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::NothingMatched {
-                    condition: optional
-                }
-            ),
-            "NothingNotMatched" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::NothingNotMatched {
-                    condition: optional
-                }
-            ),
-            "NothingNotMatchedBySource" => fields!(
-                input,
-                token,
-                values,
-                MergeWhen::NothingNotMatchedBySource {
-                    condition: optional
-                }
-            ),
-            _ => Err(invalid()),
-        }?;
-        input.close_tag(object)?;
-        Ok(result)
-    }
-}
+                    values: required },
+    NothingMatched { condition: optional },
+    NothingNotMatched { condition: optional },
+    NothingNotMatchedBySource { condition: optional },
+});
 
 impl Stored for MergeTargetColumnBinding {
     fn read<'a>(

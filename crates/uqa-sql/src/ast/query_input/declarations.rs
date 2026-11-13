@@ -39,4 +39,4 @@ mod type_privileges;
 mod api;
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

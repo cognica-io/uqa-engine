@@ -14,7 +14,7 @@ stored_struct!(AutoIncrement {
     declaration: defaulted,
 });
 
-units!(AutoIncrementKind);
+units!(AutoIncrementKind { Serial => "serial", IdentityAlways => "identity_always", IdentityByDefault => "identity_by_default", Legacy => "legacy" });
 
 stored_struct!(AutoIncrementOwner {
     table: required,

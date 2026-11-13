@@ -13,7 +13,8 @@ use crate::{
     CancellationToken,
 };
 
-mod project;
+mod native;
+pub(super) mod project;
 mod read;
 mod typed;
 mod write;
@@ -145,6 +146,16 @@ impl JsonDocument {
 }
 
 impl<'a> JsonValue<'a> {
+    /// Construct a native UQA literal directly from this generic generation. Tagged carriers share their ordinary conversion rules; admitted traversal and owner loops resume through the supplied scheduler without serializing or imposing a second physical JSON depth limit.
+    pub async fn read_native_value_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        protocol: JsonScalarProtocol,
+    ) -> Result<crate::memory::Produced<crate::Value>, JsonInputError> {
+        native::value(self, control, work, protocol).await
+    }
+
     /// Reproduce generic-value deserialization after physical input has completed. Sorted scalar-protocol fields and number visitor conversion are interpreted at this distinct boundary.
     pub async fn project_with_work<W: JsonReadWork<Error = JsonReadError>>(
         self,
@@ -153,6 +164,16 @@ impl<'a> JsonValue<'a> {
         protocol: JsonScalarProtocol,
     ) -> Result<JsonDocument, JsonInputError> {
         project::value(self, control, work, protocol).await
+    }
+
+    /// Buffer a complete generic value for flattened or untagged declarations. Numeric visitors preserve signed, unsigned and canonical finite float observations; arbitrary-precision fallback maps remain ordinary maps, and unsupported 128-bit visitors fail before typed alternatives.
+    pub async fn buffer_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        protocol: JsonScalarProtocol,
+    ) -> Result<JsonDocument, JsonInputError> {
+        project::buffered(self, control, work, protocol).await
     }
 
     fn value(self) -> &'a Value {

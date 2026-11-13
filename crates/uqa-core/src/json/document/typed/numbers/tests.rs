@@ -90,8 +90,10 @@ fn generic_document_typed_integers_preserve_each_width_and_value_diagnostics() {
         }
         compare!(u8, read_u8_with_work);
         compare!(u32, read_u32_with_work);
+        compare!(std::num::NonZeroU32, read_nonzero_u32_with_work);
         compare!(u64, read_u64_with_work);
         compare!(usize, read_usize_with_work);
+        compare!(i16, read_i16_with_work);
         compare!(i32, read_i32_with_work);
         compare!(i64, read_i64_with_work);
         drop(source);

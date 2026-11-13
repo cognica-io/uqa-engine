@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reconstruct projected statements, routine declarations and native values through retained work without serializing and reparsing their generic input. Preserve typed diagnostics, numeric visitors, flattened fields and cancellation ownership, including logical nesting beyond the physical JSON limit. Routine-catalog authority integration and Engine restoration remain in progress.
 - Resume physical, generic and raw-authority routine catalog input under its original work allowance, preserving repeated scalar projection, wrapper/version diagnostics, complete legacy ACL parsing and ordered role binding. Scalar input observes both cancellation owners after suspended work. Typed routine restoration and Engine integration remain in progress.
 - Retain complete generic JSON documents through admitted input and output, preserving duplicate fields, numeric/raw scalar values and original diagnostics. Routine-catalog integration remains in progress.
 - Construct stored statements and routine declarations with admitted native ownership, preserving original defaults, legacy fields and nested statement depth. Complete routine-catalog loading and Engine restoration remain in progress.

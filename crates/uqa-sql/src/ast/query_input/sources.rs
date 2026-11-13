@@ -27,37 +27,14 @@ stored_struct!(JoinUsing {
     alias: default(None)
 });
 
-impl Stored for FromClause {
-    fn read<'a>(
-        input: &mut Input<'a, '_>,
-        token: JsonToken<'a>,
-        values: &Values<'_>,
-    ) -> Result<Native<Self>, InputError> {
-        let (tag, object) = input.tag(token)?;
-        if !object {
-            return Err(invalid());
-        }
-        let token = input.next()?;
-        let result = match tag.as_str() {
-            "Table" => fields!(
-                input,
-                token,
-                values,
-                FromClause::Table {
-                    name: required,
+stored_enum!(FromClause {
+    Table { name: required,
                     qualifier: required,
                     alias: optional,
                     column_aliases: default(Vec::new()),
                     bound_columns: default(None),
-                    include_descendants: default(true)
-                }
-            ),
-            "Join" => fields!(
-                input,
-                token,
-                values,
-                FromClause::Join {
-                    comma: default(false),
+                    include_descendants: default(true) },
+    Join { comma: default(false),
                     left: required,
                     right: required,
                     kind: required,
@@ -66,29 +43,15 @@ impl Stored for FromClause {
                     natural: default(false),
                     alias: default(None),
                     column_aliases: default(Vec::new()),
-                    lateral: required
-                }
-            ),
-            "Values" => fields!(
-                input,
-                token,
-                values,
-                FromClause::Values {
-                    lateral: default(false),
+                    lateral: required },
+    Values { lateral: default(false),
                     rows: required,
                     alias: optional,
                     column_aliases: required,
                     internal_relation: default(None),
                     internal_column_types: default(Vec::new()),
-                    internal_column_collations: default(Vec::new())
-                }
-            ),
-            "Function" => fields!(
-                input,
-                token,
-                values,
-                FromClause::Function {
-                    name: required,
+                    internal_column_collations: default(Vec::new()) },
+    Function { name: required,
                     binding: default(None),
                     output_name: required,
                     relations: default(None),
@@ -96,34 +59,13 @@ impl Stored for FromClause {
                     alias: optional,
                     column_aliases: required,
                     ordinality: default(false),
-                    column_types: default(Vec::new())
-                }
-            ),
-            "FunctionGroup" => fields!(
-                input,
-                token,
-                values,
-                FromClause::FunctionGroup {
-                    functions: required,
+                    column_types: default(Vec::new()) },
+    FunctionGroup { functions: required,
                     alias: optional,
                     column_aliases: required,
-                    ordinality: default(false)
-                }
-            ),
-            "Subquery" => fields!(
-                input,
-                token,
-                values,
-                FromClause::Subquery {
-                    lateral: default(false),
+                    ordinality: default(false) },
+    Subquery { lateral: default(false),
                     body: required,
                     alias: optional,
-                    column_aliases: required
-                }
-            ),
-            _ => Err(invalid()),
-        }?;
-        input.close_tag(object)?;
-        Ok(result)
-    }
-}
+                    column_aliases: required },
+} skip { RetainedRows(value) });

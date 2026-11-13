@@ -6,7 +6,7 @@
 
 //! Closed field and variant diagnostics retain admitted input names until redaction.
 
-use super::{Cause, JsonDiagnostic, JsonPosition, Produced};
+use super::{Cause, JsonDiagnostic, JsonPosition, Produced, Unexpected};
 
 #[derive(Debug)]
 pub(super) enum NameKind {
@@ -36,6 +36,11 @@ pub(super) enum FieldFailure {
         actual: usize,
         expected: &'static str,
     },
+    FieldsLength {
+        actual: usize,
+        expected: &'static str,
+        fields: usize,
+    },
 }
 
 impl FieldFailure {
@@ -47,6 +52,17 @@ impl FieldFailure {
 }
 
 impl JsonDiagnostic {
+    /// A string enum tag cannot supply the payload of a non-unit variant.
+    pub fn unit_variant(expected: &'static str, position: JsonPosition) -> Self {
+        Self {
+            position,
+            cause: Cause::Type {
+                expected,
+                actual: Unexpected::Type("unit variant"),
+            },
+        }
+    }
+
     pub fn missing_field(name: &'static str, position: JsonPosition) -> Self {
         Self {
             position,
@@ -99,6 +115,23 @@ impl JsonDiagnostic {
             cause: Cause::Field(FieldFailure::Length { actual, expected }),
         }
     }
+
+    /// Retain a declaration's positional field count without formatting an allocated expected-type string.
+    pub fn invalid_field_length(
+        actual: usize,
+        expected: &'static str,
+        fields: usize,
+        position: JsonPosition,
+    ) -> Self {
+        Self {
+            position,
+            cause: Cause::Field(FieldFailure::FieldsLength {
+                actual,
+                expected,
+                fields,
+            }),
+        }
+    }
 }
 
 impl std::fmt::Display for FieldFailure {
@@ -108,6 +141,17 @@ impl std::fmt::Display for FieldFailure {
             Self::Duplicate(name) => write!(f, "duplicate field `{name}`"),
             Self::Length { actual, expected } => {
                 write!(f, "invalid length {actual}, expected {expected}")
+            }
+            Self::FieldsLength {
+                actual,
+                expected,
+                fields,
+            } => {
+                let plural = if *fields == 1 { "" } else { "s" };
+                write!(
+                    f,
+                    "invalid length {actual}, expected {expected} with {fields} element{plural}"
+                )
             }
             Self::Unknown {
                 kind,
