@@ -47,6 +47,14 @@ impl<'a> Input<'a, '_> {
         reject_unknown: bool,
         mut field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
+        if self.content_number_fields(first) {
+            // Arbitrary-precision generic content represents non-native numbers as an object with one unknown field. All declared fields must therefore be optional/defaulted; a closed struct still rejects it. This representation creates no additional JSON container.
+            return if !reject_unknown && required == 0 {
+                self.control.check().map_err(Into::into)
+            } else {
+                Err(invalid())
+            };
+        }
         self.enter()?;
         let mut seen = 0_u64;
         match first {
@@ -103,5 +111,17 @@ impl<'a> Input<'a, '_> {
         }
         self.remaining_depth += 1;
         Ok(())
+    }
+
+    fn content_number_fields(&self, token: JsonToken<'_>) -> bool {
+        let JsonToken::Number(text) = token else {
+            return false;
+        };
+        self.content_numbers
+            && if text.starts_with('-') {
+                text.len() > 20 || text.parse::<i64>().is_err()
+            } else {
+                text.len() > 20 || text.parse::<u64>().is_err()
+            }
     }
 }

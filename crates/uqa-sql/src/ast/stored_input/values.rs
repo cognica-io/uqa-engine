@@ -89,20 +89,33 @@ impl<'a> Input<'a, '_> {
         first: JsonToken<'a>,
         mut read: impl FnMut(&mut Self, JsonToken<'a>) -> Result<Produced<T>, InputError>,
     ) -> Result<Produced<Vec<T>>, InputError> {
+        let mut values = ProductionVec::new(self.control);
+        self.visit_array(first, |input, token| {
+            values.push_produced(read(input, token)?)?;
+            Ok(())
+        })?;
+        Ok(values.finish()?)
+    }
+
+    /// Validate and visit each original array item without constructing a second collection.
+    pub fn visit_array(
+        &mut self,
+        first: JsonToken<'a>,
+        mut visit: impl FnMut(&mut Self, JsonToken<'a>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
         if first != JsonToken::StartArray {
             return Err(invalid());
         }
         self.enter()?;
-        let mut values = ProductionVec::new(self.control);
         loop {
             let token = self.next()?;
             if token == JsonToken::EndArray {
                 break;
             }
-            values.push_produced(read(self, token)?)?;
+            visit(self, token)?;
         }
         self.remaining_depth += 1;
-        Ok(values.finish()?)
+        Ok(())
     }
 
     pub fn set<T: Ord>(

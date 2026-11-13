@@ -8,9 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Retain admitted GIN analyzer keys and names through field reconstruction without copying the ownership map. Suspend long key comparisons before atomic ordered-map publication, preserve original leases on replacement, and keep later field reads independent of source cancellation or quota exhaustion. Complete stored-key validation and Engine GIN scheduling remain in progress.
+- Validate complete stored index-key syntax under its original allowance, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content and untagged alternatives; GIN assembly and Engine scheduling remain in progress.
 
-- Admit stored GIN analyzer-option names and physical-field metadata successors through bounded native input. Validate overwritten and unrelated options, preserve sorted name selection and Unicode trimming, and retain preceding field generations through failure or cancellation. Complete GIN key validation and Engine integration remain in progress.
+- Retain admitted GIN analyzer keys and names through field reconstruction without copying the ownership map. Suspend long key comparisons before atomic ordered-map publication, preserve original leases on replacement, and keep later field reads independent of source cancellation or quota exhaustion. Engine GIN assembly and scheduling remain in progress.
+
+- Admit stored GIN analyzer-option names and physical-field metadata successors through bounded native input. Validate overwritten and unrelated options, preserve sorted name selection and Unicode trimming, and retain preceding field generations through failure or cancellation. Engine GIN integration remains in progress.
 
 - Move persistent GIN analyzer ownership into Execution while preserving complete key syntax, sorted analyzer-option selection and per-column publication/error order. Add retained complete index loading with native SQLite physical order and stable Key/Value relation order; GIN semantic input and Engine continuation remain in progress.
 

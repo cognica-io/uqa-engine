@@ -62,6 +62,21 @@ impl Expr {
     }
 }
 
+/// Validate one scalar constructor using the original field readers and expose its unevaluated child ranges to the complete stored-key validator. No placeholder expression escapes this boundary.
+pub(crate) fn validate_scalar_fields<'a>(
+    text: &'a str,
+    depth: usize,
+    values: &Values<'_>,
+    mut child: impl FnMut(&'a str, usize) -> Result<(), InputError>,
+) -> Result<(), InputError> {
+    let frame = Frame::read(text, depth, values)?;
+    for value in frame.children.iter() {
+        values.control().check()?;
+        child(value.text, value.depth)?;
+    }
+    Ok(())
+}
+
 fn read(text: &str, depth: usize, values: &Values<'_>) -> Result<Produced<Expr>, InputError> {
     let control = values.control();
     {

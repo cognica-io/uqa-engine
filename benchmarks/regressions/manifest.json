@@ -65515,6 +65515,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_preserve_complete_queries_windows_and_command_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Decode all stored scalar, query, source, window and command-CTE constructors, including native typed values and bound calls.",
+      "invariant": "The original Serde decoder accepts the same complete keys; only ordinary string columns survive in original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_match_original_field_defaults_types_and_nested_rejections",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Remove and mistype nested fields across fourteen query fixtures and test every prefix of a complete stored query key.",
+      "invariant": "Acceptance matches the unchanged Vec<IndexKey> decoder, including optional defaults and every rejected suffix.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_retain_only_names_and_release_interrupted_validation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Validate a one-MiB ignored field with sixteen KiB and interrupt long column copies by cancellation, quota, zero work, drop and unwind.",
+      "invariant": "Completed output retains only its exact name/vector capacities; every terminal interruption retires all unpublished storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_preserve_query_sequences_and_bound_source_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/compatibility.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Vary positional query/window struct lengths and mutate bound VALUES relation, type and collation metadata.",
+      "invariant": "Original sequence requirements, selected column types and their nested validity are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_validate_flattened_ctes_and_untagged_assignment_fallbacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/compatibility.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Vary duplicate and competing flattened CTE bodies and partially valid single/multiple assignment targets.",
+      "invariant": "First recognized CTE bodies and ordered untagged alternatives match original Serde selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_preserve_original_depth_unicode_and_number_classes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/compatibility.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Compare recursion limits, ignored nested values, escaped Unicode, numeric classes and duplicate fields; decode deep keys on a small stack.",
+      "invariant": "Complete generic grammar and numeric representation match the original decoder, without recursive query-tree retention.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_preserve_optional_command_variants_and_numeric_content",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/compatibility.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Validate every optional MERGE action, ON CONFLICT unit forms and bound table functions, including all-optional numeric content.",
+      "invariant": "Original command variants, field types and generic arbitrary-precision numeric struct behavior remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_keep_resource_failures_terminal_inside_untagged_choices",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/retention.rs",
+      "capability": "Complete stored GIN key input",
+      "workload": "Deny or cancel a native literal allocation inside a valid first assignment alternative whose second alternative is also valid.",
+      "invariant": "Resource failures remain 53200/57014 and consume every owner instead of selecting another representation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
