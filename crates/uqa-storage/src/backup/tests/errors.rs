@@ -98,3 +98,46 @@ fn backup_native_json_resources_keep_original_types_through_storage() {
         ));
     }
 }
+
+#[test]
+fn backup_descriptor_diagnostics_retire_payloads_through_the_analysis_owner() {
+    use uqa_analysis::{AnalysisError, AnalyzerResources};
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let text = format!("{{{:?}:null}}", "private descriptor field".repeat(1024));
+    let mut input =
+        ImageDecoder::<(), StorageBackendError>::new(&memory, &token, |mut reader| async move {
+            AnalyzerResources::default()
+                .restore_json_with_input(&text, &mut reader.input())
+                .await?;
+            panic!("unknown descriptor field accepted")
+        })
+        .unwrap();
+    let error = loop {
+        match input.advance(
+            &mut std::io::empty(),
+            ImageDecodeWindow { bytes: 1, steps: 1 },
+        ) {
+            Ok(None) => (),
+            Err(error) => break error,
+            Ok(Some(())) => unreachable!(),
+        }
+    };
+    drop(input);
+    let StorageBackendError::Analysis(AnalysisError::JsonDiagnostic(ref diagnostic)) = error else {
+        panic!("analysis diagnostic lost: {error}")
+    };
+    let position = diagnostic.position();
+    assert!(memory.used() >= 20_000);
+    assert!(error.to_string().contains("private descriptor field"));
+    let backup = BackupError::from(error);
+    assert_eq!(memory.used(), 0);
+    assert!(!format!("{backup:?} {backup}").contains("private descriptor field"));
+    let BackupError::Storage(StorageBackendError::Analysis(AnalysisError::JsonDiagnostic(error))) =
+        backup
+    else {
+        panic!("analysis owner lost")
+    };
+    assert!(error.is_data());
+    assert_eq!(error.position(), position);
+}

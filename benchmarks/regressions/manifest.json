@@ -66091,6 +66091,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_diagnostics_preserve_original_lexical_and_typed_wire_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests/diagnostics.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Compare independent complete duplicate-key and derived wire deserialization with ordinary and one-step retained input, including prefixes, typed fields, byte tuples and fingerprints.",
+      "invariant": "Values, first-error precedence, complete messages, categories and original byte positions agree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_pipeline_preserves_public_generic_scalar_values_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests/diagnostics.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Decode public numeric/raw scalar representations in root, nested object and array pipeline positions.",
+      "invariant": "Native pipeline values, first-key interpretation, scalar errors and locations match the installed public decoder.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_generic_raw_values_preserve_depth_and_scalar_error_precedence",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests/diagnostics.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Expand raw values around the original nesting limit with generic containers and rejected typed scalar payloads.",
+      "invariant": "Depth limits retain their original boundary and a typed scalar rejects a container before entering it.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_diagnostics_retain_original_name_ownership_until_redaction",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests/resources.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Retain an unknown Unicode field diagnostic, then abandon, cancel or deny further allocation at each pending input boundary.",
+      "invariant": "Original admitted names survive in the error until redaction; terminal input retires every unpublished owner and requires no new allocation after complete admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "descriptor_raw_value_work_failures_preserve_the_callers_original_error",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/descriptor/json/tests/resources.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Fail the enclosing work channel at every checkpoint of nested numeric/raw descriptor reconstruction.",
+      "invariant": "The exact original work error terminates reconstruction without becoming a lexical or scalar data error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_descriptor_diagnostics_retire_payloads_through_the_analysis_owner",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/errors.rs",
+      "capability": "Analyzer descriptor diagnostic ownership",
+      "workload": "Restore an actual unknown-field descriptor and convert its admitted diagnostic through Analysis and Storage into Backup.",
+      "invariant": "Protected-image errors release original field bytes while preserving the Analysis owner, category and source position.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

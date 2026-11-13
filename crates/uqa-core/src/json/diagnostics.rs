@@ -96,6 +96,25 @@ impl std::fmt::Display for JsonSyntaxError {
 impl std::error::Error for JsonSyntaxError {}
 
 impl JsonReader<'_, '_> {
+    /// Retire a struct after an unlocated visitor error. Consume only its ordinary completion boundary before the caller assigns that error's original position. The failed reader is terminal and no further value is decoded.
+    pub async fn finish_struct_error_with_work<W: super::JsonReadWork>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<JsonPosition, W::Error> {
+        let sequence = matches!(self.stack.frames().last(), Some(super::Frame::ArrayAfter));
+        self.skip_whitespace(work).await?;
+        match self.peek() {
+            Some(b']') if sequence => self.advance(work).await?,
+            Some(b'}') if !sequence => self.advance(work).await?,
+            Some(b',') if sequence => {
+                self.advance(work).await?;
+                self.skip_whitespace(work).await?;
+            }
+            _ => (),
+        }
+        Ok(self.position())
+    }
+
     /// Source position after the bytes already consumed, with one-based lines and byte columns.
     pub fn position(&self) -> JsonPosition {
         JsonPosition {

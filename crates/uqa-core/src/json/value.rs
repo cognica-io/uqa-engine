@@ -290,25 +290,39 @@ async fn number_text<W: JsonReadWork<Error = JsonReadError>>(
     control: &ProductionControl<'_>,
     work: &mut W,
 ) -> JsonResult<Option<u64>> {
+    read_json_number_text(text, control, &mut super::work::InputWork(work)).await
+}
+
+/// Validate the text supplied by a public numeric scalar representation. Original scalar suffix precedence and inner positions survive through the caller's work/error channel.
+pub async fn read_json_number_text<W: JsonReadWork>(
+    text: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<u64>, W::Error>
+where
+    W::Error: From<JsonDiagnostic>,
+{
     let mut reader = JsonReader::with_control(text, control);
     let result = match reader.peek() {
         Some(b'-' | b'0'..=b'9') => reader.number(work).await,
-        Some(_) => Err(reader.reject(JsonSyntaxKind::InvalidNumber, true)),
-        None => Err(reader.reject(JsonSyntaxKind::EndOfValue, false)),
+        Some(_) => Err(reader.reject(JsonSyntaxKind::InvalidNumber, true).into()),
+        None => Err(reader.reject(JsonSyntaxKind::EndOfValue, false).into()),
     };
-    if let Err(error) = &result {
-        if !matches!(error, JsonReadError::InvalidJson) {
-            return result.map(unsigned).map_err(Into::into);
-        }
+    if result.is_err() && reader.syntax_error().is_none() {
+        return result.map(unsigned);
     }
     // The scalar number owner checks its immediate suffix even after a number-grammar failure. Resource failures have already terminated the operation.
     if reader.peek().is_some() {
-        let error = reader.reject(JsonSyntaxKind::InvalidNumber, true);
-        return Err(JsonInputError::from_reader(&reader, error));
+        reader.reject(JsonSyntaxKind::InvalidNumber, true);
+        return Err(
+            JsonDiagnostic::from(reader.syntax_error().expect("rejected numeric suffix")).into(),
+        );
     }
-    result
-        .map(unsigned)
-        .map_err(|error| JsonInputError::from_reader(&reader, error))
+    result.map(unsigned).map_err(|error| {
+        reader
+            .syntax_error()
+            .map_or(error, |error| JsonDiagnostic::from(error).into())
+    })
 }
 
 type Raw<'a> =
@@ -367,19 +381,19 @@ fn scalar_error(error: JsonInputError) -> JsonInputError {
 
 impl JsonReader<'_, '_> {
     /// A scalar visitor has consumed its only value. Retire the object at this boundary without requesting another key or inspecting a later value.
-    async fn finish_scalar_object<W: JsonReadWork<Error = JsonReadError>>(
+    pub async fn finish_scalar_object<W: JsonReadWork>(
         &mut self,
         work: &mut W,
-    ) -> Result<(), JsonReadError> {
+    ) -> Result<(), W::Error> {
         self.skip_whitespace(work).await?;
         match self.peek() {
             Some(b'}') => {
                 self.close(JsonToken::EndObject)?;
                 Ok(())
             }
-            Some(b',') => Err(self.reject(JsonSyntaxKind::TrailingComma, true)),
-            None => Err(self.reject(JsonSyntaxKind::EndOfObject, false)),
-            _ => Err(self.reject(JsonSyntaxKind::TrailingCharacters, true)),
+            Some(b',') => Err(self.reject(JsonSyntaxKind::TrailingComma, true).into()),
+            None => Err(self.reject(JsonSyntaxKind::EndOfObject, false).into()),
+            _ => Err(self.reject(JsonSyntaxKind::TrailingCharacters, true).into()),
         }
     }
 }

@@ -200,7 +200,7 @@ fn typed_json_numeric_probe_fits_its_fixed_scratch_allowance() {
         "9".repeat(65536),
     ] {
         let measured = allocation_counter::measure(|| {
-            assert!(observe(input.as_bytes()).is_ok());
+            assert!(observe(input.as_bytes(), Width::Word).is_ok());
         });
         assert!(measured.bytes_max <= SCALAR_SCRATCH as u64, "{measured:?}");
         assert_eq!(measured.bytes_current, 0);

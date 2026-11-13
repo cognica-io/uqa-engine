@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve original analyzer descriptor syntax, typed-field diagnostics and byte-based locations through ordinary and retained input. Keep duplicate-key validation first, retain public numeric/raw JSON values, and retire admitted diagnostic payloads at the backup boundary.
+
 - Preserve complete stored analyzer-binding envelope diagnostics through retained input, including missing/duplicate/unknown fields, positional forms, unit enums and numeric versions. Original error order, numeric spelling and source positions survive work suspension; error redaction releases admitted input names.
 
 - Preserve raw analyzer descriptor spans and their original syntax diagnostics through bounded input. Strict enclosing names and fields retain their own string validation, while raw descriptors keep their original escape and nesting rules until revision validation.

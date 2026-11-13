@@ -37,6 +37,16 @@ impl Work for crate::image_io::AsyncImageInput<'_> {
     }
 }
 
+pub(super) struct InputWork<'a, W>(pub &'a mut W);
+
+impl<W: Work<Error = super::JsonReadError>> Work for InputWork<'_, W> {
+    type Error = super::JsonInputError;
+
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        self.0.checkpoint().await.map_err(Into::into)
+    }
+}
+
 pub(super) fn inline<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     match future

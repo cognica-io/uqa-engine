@@ -6,15 +6,30 @@
 
 //! Closed field and variant diagnostics retain admitted input names until redaction.
 
-use super::{Budgeted, Cause, JsonDiagnostic, JsonPosition};
+use super::{Cause, JsonDiagnostic, JsonPosition, Produced};
+
+#[derive(Debug)]
+pub(super) enum NameKind {
+    Field,
+    Variant,
+}
+
+impl std::fmt::Display for NameKind {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(match self {
+            Self::Field => "field",
+            Self::Variant => "variant",
+        })
+    }
+}
 
 #[derive(Debug)]
 pub(super) enum FieldFailure {
     Missing(&'static str),
     Duplicate(&'static str),
     Unknown {
-        kind: &'static str,
-        name: Option<Budgeted<String>>,
+        kind: NameKind,
+        name: Option<Produced<String>>,
         expected: &'static [&'static str],
     },
     Length {
@@ -47,24 +62,24 @@ impl JsonDiagnostic {
     }
 
     pub fn unknown_field(
-        name: Budgeted<String>,
+        name: impl Into<Produced<String>>,
         expected: &'static [&'static str],
         position: JsonPosition,
     ) -> Self {
-        Self::unknown_name("field", name, expected, position)
+        Self::unknown_name(NameKind::Field, name.into(), expected, position)
     }
 
     pub fn unknown_variant(
-        name: Budgeted<String>,
+        name: impl Into<Produced<String>>,
         expected: &'static [&'static str],
         position: JsonPosition,
     ) -> Self {
-        Self::unknown_name("variant", name, expected, position)
+        Self::unknown_name(NameKind::Variant, name.into(), expected, position)
     }
 
     fn unknown_name(
-        kind: &'static str,
-        name: Budgeted<String>,
+        kind: NameKind,
+        name: Produced<String>,
         expected: &'static [&'static str],
         position: JsonPosition,
     ) -> Self {

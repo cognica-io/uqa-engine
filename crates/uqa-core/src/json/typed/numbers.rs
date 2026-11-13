@@ -7,7 +7,8 @@
 //! Typed numbers preserve the public scalar parser's classifications and consumed boundary.
 
 use super::{
-    AsyncImageInput, JsonDiagnostic, JsonInputError, JsonReader, JsonSyntaxKind, ReadStep,
+    AsyncImageInput, JsonDiagnostic, JsonInputError, JsonReadError, JsonReadWork, JsonReader,
+    JsonSyntaxKind, ProductionControl, ReadStep,
 };
 use serde::{de, Deserializer};
 use std::fmt::{self, Write};
@@ -20,13 +21,13 @@ enum Number {
     Float(f64),
 }
 
-struct Observe;
+struct Observe(&'static str);
 
 impl de::Visitor<'_> for Observe {
     type Value = Number;
 
     fn expecting(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        output.write_str("u32")
+        output.write_str(self.0)
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Number, E> {
@@ -65,9 +66,35 @@ impl Write for Message {
     }
 }
 
-fn observe(input: &[u8]) -> Result<(Result<Number, Syntax>, usize), JsonInputError> {
+#[derive(Clone, Copy)]
+enum Width {
+    Byte,
+    Word,
+}
+
+impl Width {
+    fn expected(self) -> &'static str {
+        match self {
+            Self::Byte => "u8",
+            Self::Word => "u32",
+        }
+    }
+
+    fn maximum(self) -> u64 {
+        match self {
+            Self::Byte => u8::MAX.into(),
+            Self::Word => u32::MAX.into(),
+        }
+    }
+}
+
+fn observe(input: &[u8], width: Width) -> Result<(Result<Number, Syntax>, usize), JsonReadError> {
     let mut parser = serde_json::Deserializer::from_slice(input);
-    let number = parser.deserialize_u32(Observe);
+    let visitor = Observe(width.expected());
+    let number = match width {
+        Width::Byte => parser.deserialize_u8(visitor),
+        Width::Word => parser.deserialize_u32(visitor),
+    };
     let consumed = parser.into_iter::<de::IgnoredAny>().byte_offset();
     let number = match number {
         Ok(number) => Ok(number),
@@ -77,7 +104,7 @@ fn observe(input: &[u8]) -> Result<(Result<Number, Syntax>, usize), JsonInputErr
                 bytes: [0; 128],
                 length: 0,
             };
-            write!(message, "{error}").map_err(|_| JsonInputError::Invalid)?;
+            write!(message, "{error}").map_err(|_| JsonReadError::InvalidJson)?;
             let message = &message.bytes[..message.length];
             let kind = if error.is_eof() {
                 JsonSyntaxKind::EndOfValue
@@ -86,7 +113,7 @@ fn observe(input: &[u8]) -> Result<(Result<Number, Syntax>, usize), JsonInputErr
             } else if message.starts_with(JsonSyntaxKind::NumberOutOfRange.message().as_bytes()) {
                 JsonSyntaxKind::NumberOutOfRange
             } else {
-                return Err(JsonInputError::Invalid);
+                return Err(JsonReadError::InvalidJson);
             };
             Err(Syntax {
                 kind,
@@ -104,32 +131,81 @@ impl JsonReader<'_, '_> {
         &mut self,
         work: &mut AsyncImageInput<'_>,
     ) -> Result<u32, JsonInputError> {
-        if !matches!(
-            self.next_step(work, false)
-                .await
-                .map_err(|error| JsonInputError::from_reader(self, error))?,
-            ReadStep::Value
-        ) {
-            return Err(JsonInputError::Invalid);
+        let control = ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+        self.read_u32_with_work(&control, &mut super::super::work::InputWork(work))
+            .await
+            .map_err(|error| error.retain_syntax(self))
+    }
+
+    /// Read the original unsigned 32-bit scalar through the caller's work and error channels.
+    pub async fn read_u32_with_work<W: JsonReadWork>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<u32, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        let value = self
+            .read_unsigned_with_work(Width::Word, control, work)
+            .await?;
+        Ok(u32::try_from(value).expect("validated u32"))
+    }
+
+    /// Read the original unsigned byte scalar, retaining its own public scalar parser and range diagnostics.
+    pub async fn read_u8_with_work<W: JsonReadWork>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<u8, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        let value = self
+            .read_unsigned_with_work(Width::Byte, control, work)
+            .await?;
+        Ok(u8::try_from(value).expect("validated u8"))
+    }
+
+    async fn read_unsigned_with_work<W: JsonReadWork>(
+        &mut self,
+        width: Width,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<u64, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        if !matches!(self.next_step(work, false).await?, ReadStep::Value) {
+            return Err(JsonReadError::InvalidJson.into());
         }
+        let expected = width.expected();
         if !matches!(self.peek(), Some(b'-' | b'0'..=b'9')) {
-            return Err(self.type_error_from("u32", work).await?.into());
+            return Err(self
+                .type_error_with_work(expected, control, work)
+                .await?
+                .into());
         }
         let start = self.position();
-        let scratch = work.memory.reserve(SCALAR_SCRATCH)?;
-        let (number, consumed) = observe(&self.input[self.position..])?;
+        let scratch = control
+            .reserve(SCALAR_SCRATCH)
+            .map_err(JsonReadError::from)?;
+        let (number, consumed) = observe(&self.input[self.position..], width)?;
         drop(scratch);
         for _ in 0..consumed {
             self.advance(work).await?;
         }
         self.check()?;
         match number {
-            Ok(Number::Unsigned(value)) => u32::try_from(value)
-                .map_err(|_| JsonDiagnostic::invalid_unsigned(value, self.position()).into()),
-            Ok(Number::Signed(value)) => u32::try_from(value)
-                .map_err(|_| JsonDiagnostic::invalid_signed(value, self.position()).into()),
+            Ok(Number::Unsigned(value)) if value <= width.maximum() => Ok(value),
+            Ok(Number::Unsigned(value)) => {
+                Err(JsonDiagnostic::invalid_unsigned(value, expected, self.position()).into())
+            }
+            Ok(Number::Signed(value)) => {
+                Err(JsonDiagnostic::invalid_signed(value, expected, self.position()).into())
+            }
             Ok(Number::Float(value)) => {
-                Err(JsonDiagnostic::invalid_float(value, self.position()).into())
+                Err(JsonDiagnostic::invalid_float(value, expected, self.position()).into())
             }
             Err(error) => {
                 let line = start.line + error.line - 1;
@@ -141,7 +217,7 @@ impl JsonReader<'_, '_> {
                 let position = self.position();
                 let peek = position.line != line || position.column != column;
                 let error = self.reject(error.kind, peek);
-                Err(JsonInputError::from_reader(self, error))
+                Err(error.into())
             }
         }
     }

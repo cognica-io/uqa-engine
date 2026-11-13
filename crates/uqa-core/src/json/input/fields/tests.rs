@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::memory::MemoryBudget;
+use crate::memory::{Budgeted, MemoryBudget};
 use serde::de::Error as _;
 
 #[test]

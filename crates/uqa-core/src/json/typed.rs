@@ -7,14 +7,41 @@
 //! Typed array and unit-variant operations own structural admission and completion.
 
 use super::{
-    decode_json_string_from, Frame, JsonDiagnostic, JsonEvent, JsonExpected, JsonInputError,
+    decode_json_string_with_work, Frame, JsonDiagnostic, JsonEvent, JsonExpected, JsonInputError,
     JsonReadError, JsonReadWork, JsonReader, JsonSyntaxKind, JsonToken, ReadStep,
 };
 use crate::image_io::AsyncImageInput;
+use crate::memory::{Produced, ProductionControl};
 
 mod numbers;
 
 impl<'a> JsonReader<'a, '_> {
+    /// Read a typed string before admitting a rejected container. The supplied control owns the decoded result; the expected description belongs to its original scalar visitor.
+    pub async fn read_string_with_work<W: JsonReadWork>(
+        &mut self,
+        expected: &'static str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<String>, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        if !matches!(self.next_step(work, false).await?, ReadStep::Value) {
+            return Err(JsonReadError::InvalidJson.into());
+        }
+        if self.peek() != Some(b'"') {
+            return Err(self
+                .type_error_with_work(expected, control, work)
+                .await?
+                .into());
+        }
+        let event = self.value(work, false).await?;
+        let JsonToken::String(encoded) = event.token else {
+            unreachable!("validated string")
+        };
+        decode_json_string_with_work(encoded, control, work).await
+    }
+
     pub(super) async fn array_step<W: JsonReadWork>(
         &mut self,
         work: &mut W,
@@ -107,19 +134,28 @@ impl<'a> JsonReader<'a, '_> {
         variants: &'static [&'static str],
         work: &mut AsyncImageInput<'_>,
     ) -> Result<usize, JsonInputError> {
-        if !matches!(
-            self.next_step(work, false)
-                .await
-                .map_err(|error| JsonInputError::from_reader(self, error))?,
-            ReadStep::Value
-        ) {
-            return Err(JsonInputError::Invalid);
+        let control = ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+        self.read_unit_variant_with_work(variants, &control, &mut super::work::InputWork(work))
+            .await
+            .map_err(|error| error.retain_syntax(self))
+    }
+
+    /// Decode the same closed enum through the caller's original production owner and error channel.
+    pub async fn read_unit_variant_with_work<W: JsonReadWork>(
+        &mut self,
+        variants: &'static [&'static str],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<usize, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        if !matches!(self.next_step(work, false).await?, ReadStep::Value) {
+            return Err(JsonReadError::InvalidJson.into());
         }
         let object = match self.peek() {
             Some(b'{') => {
-                self.value(work, false)
-                    .await
-                    .map_err(|error| JsonInputError::from_reader(self, error))?;
+                self.value(work, false).await?;
                 self.skip_whitespace(work).await?;
                 true
             }
@@ -133,23 +169,20 @@ impl<'a> JsonReader<'a, '_> {
                     },
                     true,
                 );
-                return Err(JsonInputError::from_reader(self, error));
+                return Err(error.into());
             }
         };
         if self.peek() != Some(b'"') {
             return Err(self
-                .type_error_from("variant identifier", work)
+                .type_error_with_work("variant identifier", control, work)
                 .await?
                 .into());
         }
-        let event = self
-            .value(work, false)
-            .await
-            .map_err(|error| JsonInputError::from_reader(self, error))?;
+        let event = self.value(work, false).await?;
         let JsonToken::String(encoded) = event.token else {
             unreachable!("validated variant string")
         };
-        let name = decode_json_string_from(encoded, work).await?;
+        let name = decode_json_string_with_work(encoded, control, work).await?;
         let Some(index) = variants
             .iter()
             .position(|variant| *variant == name.as_str())
@@ -159,20 +192,16 @@ impl<'a> JsonReader<'a, '_> {
         drop(name);
         if object {
             self.replace(Frame::ObjectValue);
-            if !matches!(
-                self.next_step(work, false)
-                    .await
-                    .map_err(|error| JsonInputError::from_reader(self, error))?,
-                ReadStep::Value
-            ) {
-                return Err(JsonInputError::Invalid);
+            if !matches!(self.next_step(work, false).await?, ReadStep::Value) {
+                return Err(JsonReadError::InvalidJson.into());
             }
             if self.peek() != Some(b'n') {
-                return Err(self.type_error_from("unit", work).await?.into());
+                return Err(self
+                    .type_error_with_work("unit", control, work)
+                    .await?
+                    .into());
             }
-            self.value(work, false)
-                .await
-                .map_err(|error| JsonInputError::from_reader(self, error))?;
+            self.value(work, false).await?;
             self.skip_whitespace(work).await?;
             if self.peek() != Some(b'}') {
                 let error = self.reject(
@@ -183,7 +212,7 @@ impl<'a> JsonReader<'a, '_> {
                     },
                     false,
                 );
-                return Err(JsonInputError::from_reader(self, error));
+                return Err(error.into());
             }
             self.close(JsonToken::EndObject)?;
         }

@@ -48,6 +48,8 @@ pub enum DictionaryError {
     Utf16(#[from] std::string::FromUtf16Error),
     #[error("invalid Nori provenance manifest: {0}")]
     Manifest(#[from] serde_json::Error),
+    #[error("invalid Nori provenance manifest: {0}")]
+    ManifestDiagnostic(#[from] uqa_core::json::JsonDiagnostic),
     #[cfg(feature = "nori-tools")]
     #[error("Nori dictionary tool I/O failed: {0}")]
     Io(#[from] std::io::Error),
@@ -62,6 +64,7 @@ impl From<crate::morphology::error::DictionaryError> for DictionaryError {
         match error {
             Shared::Input(error) => Self::Input(error),
             Shared::Manifest(error) => Self::Manifest(error),
+            Shared::ManifestDiagnostic(error) => Self::ManifestDiagnostic(error),
             Shared::Version(version) => Self::Version(version),
             Shared::Checksum(section) => Self::Checksum(section),
             Shared::Invalid {

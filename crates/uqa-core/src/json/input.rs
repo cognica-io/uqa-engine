@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{Budgeted, MemoryError, ProductionControl},
+    memory::{MemoryError, Produced, ProductionControl},
     QueryCancelled,
 };
 
@@ -33,6 +33,13 @@ pub enum JsonInputError {
 }
 
 impl JsonInputError {
+    pub(super) fn retain_syntax(self, reader: &JsonReader<'_, '_>) -> Self {
+        match self {
+            Self::Invalid => Self::from_reader(reader, JsonReadError::InvalidJson),
+            error => error,
+        }
+    }
+
     pub fn from_reader(reader: &JsonReader<'_, '_>, error: JsonReadError) -> Self {
         match error {
             JsonReadError::InvalidJson => reader
@@ -71,7 +78,7 @@ enum Unexpected {
     Unsigned(u64),
     Float(f64),
     Number,
-    String(Budgeted<String>),
+    String(Produced<String>),
     Sequence,
     Map,
     Type(&'static str),
@@ -115,24 +122,22 @@ impl std::io::Write for JsonFloatWriter<'_, '_> {
 }
 
 impl JsonReader<'_, '_> {
-    /// Observe a rejected scalar type without entering a container that the typed value cannot accept.
-    pub(super) async fn type_error_from(
+    pub(super) async fn type_error_with_work<W: JsonReadWork>(
         &mut self,
         expected: &'static str,
-        work: &mut AsyncImageInput<'_>,
-    ) -> Result<JsonDiagnostic, JsonInputError> {
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<JsonDiagnostic, W::Error> {
         let actual = match self.peek() {
             Some(b'[') => Unexpected::Sequence,
             Some(b'{') => Unexpected::Map,
             _ => {
-                let event = self
-                    .value(work, false)
-                    .await
-                    .map_err(|error| JsonInputError::from_reader(self, error))?;
-                return JsonDiagnostic::invalid_type_from(
+                let event = self.value(work, false).await?;
+                return JsonDiagnostic::observe_type_with_work(
                     event.token,
                     self.position(),
                     expected,
+                    control,
                     work,
                 )
                 .await;
@@ -149,7 +154,10 @@ impl JsonReader<'_, '_> {
 enum Cause {
     Syntax(super::JsonSyntaxKind),
     DataSyntax(super::JsonSyntaxKind),
-    Message(&'static str),
+    Message {
+        prefix: &'static str,
+        message: &'static str,
+    },
     Field(fields::FieldFailure),
     Type {
         expected: &'static str,
@@ -178,40 +186,61 @@ impl From<JsonSyntaxError> for JsonDiagnostic {
 }
 
 impl JsonDiagnostic {
-    pub(super) fn invalid_unsigned(value: u64, position: JsonPosition) -> Self {
+    pub(super) fn invalid_unsigned(
+        value: u64,
+        expected: &'static str,
+        position: JsonPosition,
+    ) -> Self {
         Self {
             position,
             cause: Cause::Value {
-                expected: "u32",
+                expected,
                 actual: Unexpected::Unsigned(value),
             },
         }
     }
 
-    pub(super) fn invalid_signed(value: i64, position: JsonPosition) -> Self {
+    pub(super) fn invalid_signed(
+        value: i64,
+        expected: &'static str,
+        position: JsonPosition,
+    ) -> Self {
         Self {
             position,
             cause: Cause::Value {
-                expected: "u32",
+                expected,
                 actual: Unexpected::Signed(value),
             },
         }
     }
 
-    pub(super) fn invalid_float(value: f64, position: JsonPosition) -> Self {
+    pub(super) fn invalid_float(
+        value: f64,
+        expected: &'static str,
+        position: JsonPosition,
+    ) -> Self {
         Self {
             position,
             cause: Cause::Type {
-                expected: "u32",
+                expected,
                 actual: Unexpected::Float(value),
             },
         }
     }
 
     pub fn message(message: &'static str, position: JsonPosition) -> Self {
+        Self::prefixed_message("", message, position)
+    }
+
+    /// Preserve a caller-owned static diagnostic without allocating or including source payloads.
+    pub fn prefixed_message(
+        prefix: &'static str,
+        message: &'static str,
+        position: JsonPosition,
+    ) -> Self {
         Self {
             position,
-            cause: Cause::Message(message),
+            cause: Cause::Message { prefix, message },
         }
     }
 
@@ -242,37 +271,49 @@ impl JsonDiagnostic {
         Self::invalid_type_with_work(token, position, expected, &control, input).await
     }
 
-    /// Observe the same direct-deserializer failure with an independently retained allowance and work scheduler. String observations require an admitted control.
+    /// Observe the same direct-deserializer failure with the caller's original production ownership and work scheduler.
     pub async fn invalid_type_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        token: JsonToken<'_, &'_ [u8]>,
+        position: JsonPosition,
+        expected: &'static str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, JsonInputError> {
+        Self::observe_type_with_work(token, position, expected, control, work)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Preserve a direct typed observation through a caller-owned error channel. String values retain either their original admitted lease or the ordinary producer's ownership.
+    pub async fn observe_type_with_work<W: JsonReadWork>(
         token: JsonToken<'_, &'_ [u8]>,
         mut position: JsonPosition,
         expected: &'static str,
         control: &ProductionControl<'_>,
         work: &mut W,
-    ) -> Result<Self, JsonInputError> {
+    ) -> Result<Self, W::Error> {
         let actual = match token {
             JsonToken::Null => Unexpected::Null,
             JsonToken::Bool(value) => Unexpected::Bool(value),
             JsonToken::Number(bytes) => number(bytes),
-            JsonToken::String(bytes) | JsonToken::Key(bytes) => Unexpected::String(
-                decode_json_string_with_work(bytes, control, work)
-                    .await?
-                    .into_budgeted()
-                    .unwrap_or_else(|_| unreachable!("admitted JSON diagnostic string")),
-            ),
+            JsonToken::String(bytes) | JsonToken::Key(bytes) => {
+                Unexpected::String(decode_json_string_with_work(bytes, control, work).await?)
+            }
             JsonToken::StartArray => Unexpected::Sequence,
             JsonToken::StartObject => Unexpected::Map,
-            JsonToken::EndArray | JsonToken::EndObject => return Err(JsonInputError::Invalid),
+            JsonToken::EndArray | JsonToken::EndObject => {
+                return Err(JsonReadError::InvalidJson.into())
+            }
         };
         if matches!(actual, Unexpected::Sequence | Unexpected::Map) {
             position.byte_offset = position
                 .byte_offset
                 .checked_sub(1)
-                .ok_or(JsonInputError::Invalid)?;
+                .ok_or(JsonReadError::InvalidJson)?;
             position.column = position
                 .column
                 .checked_sub(1)
-                .ok_or(JsonInputError::Invalid)?;
+                .ok_or(JsonReadError::InvalidJson)?;
         }
         Ok(Self {
             position,
@@ -281,7 +322,7 @@ impl JsonDiagnostic {
     }
 
     /// A string-encoded scalar reports its inner parse failure as data while retaining that parse's own location and message.
-    pub(super) fn into_data(mut self) -> Self {
+    pub fn into_data(mut self) -> Self {
         if let Cause::Syntax(kind) = self.cause {
             self.cause = Cause::DataSyntax(kind);
         }
@@ -327,7 +368,10 @@ impl std::fmt::Display for JsonDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.cause {
             Cause::Syntax(kind) | Cause::DataSyntax(kind) => f.write_str(kind.message())?,
-            Cause::Message(message) => f.write_str(message)?,
+            Cause::Message { prefix, message } => {
+                f.write_str(prefix)?;
+                f.write_str(message)?;
+            }
             Cause::Field(failure) => std::fmt::Display::fmt(failure, f)?,
             Cause::Type { expected, actual } => {
                 write!(f, "invalid type: {actual}, expected {expected}")?;

@@ -40,6 +40,8 @@ pub enum AnalysisError {
     },
     #[error("invalid analyzer JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid analyzer JSON: {0}")]
+    JsonDiagnostic(#[from] uqa_core::json::JsonDiagnostic),
     #[error("analysis cancelled")]
     Cancelled,
     #[error("token contains unpaired UTF-16 surrogate {unit:#06x}; use its lossless term units")]
@@ -96,3 +98,25 @@ pub enum AnalysisError {
 }
 
 pub type AnalysisResult<T> = std::result::Result<T, AnalysisError>;
+
+impl AnalysisError {
+    /// Retire original JSON scalar and field payloads while preserving their category, expected type and position at a protected-image boundary.
+    pub fn redact_json_payloads(self) -> Self {
+        match self {
+            Self::JsonDiagnostic(error) => Self::JsonDiagnostic(error.into_type_only()),
+            #[cfg(feature = "nori")]
+            Self::Dictionary(crate::nori::DictionaryError::ManifestDiagnostic(error)) => {
+                Self::Dictionary(crate::nori::DictionaryError::ManifestDiagnostic(
+                    error.into_type_only(),
+                ))
+            }
+            #[cfg(feature = "kuromoji")]
+            Self::KuromojiDictionary(crate::kuromoji::DictionaryError::ManifestDiagnostic(
+                error,
+            )) => Self::KuromojiDictionary(crate::kuromoji::DictionaryError::ManifestDiagnostic(
+                error.into_type_only(),
+            )),
+            error => error,
+        }
+    }
+}
