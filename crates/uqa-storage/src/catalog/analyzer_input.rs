@@ -14,6 +14,8 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::memory::{Budgeted, BudgetedString};
 
+mod ordering;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CatalogAnalyzerBindingRow {
     pub table: String,

@@ -11,6 +11,7 @@ use crate::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod ordering;
 mod retirement;
 
 #[derive(Default)]

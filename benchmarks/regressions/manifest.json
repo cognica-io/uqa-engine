@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -65003,6 +65003,97 @@
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
         "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_analyzer_ordering_keeps_complete_tuples_and_resumes_common_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/analyzer_input/tests/ordering.rs",
+      "capability": "Persistent analyzer tuple order",
+      "workload": "Long shared Unicode table prefixes and duplicate complete binding/label tuples with one-step ordering windows.",
+      "invariant": "The full original tuple order and payload addresses match ordinary lexicographic sorting without copying rows; every row reservation retires after consumption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_preserves_native_phases_canonical_keys_and_gin_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests.rs",
+      "capability": "Persistent field analyzer assembly",
+      "workload": "Original phase assignments, default and GIN owners, canonical relation keys, and unmatched binding/label records.",
+      "invariant": "Complete family assembly preserves exact revisions and labels; table consumption transfers original admitted bindings and rejects all unconsumed records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_keeps_orphans_until_table_consumption_finishes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests.rs",
+      "capability": "Persistent field analyzer assembly",
+      "workload": "Original phase assignments, default and GIN owners, canonical relation keys, and unmatched binding/label records.",
+      "invariant": "Complete family assembly preserves exact revisions and labels; table consumption transfers original admitted bindings and rejects all unconsumed records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_preserves_complete_physical_and_semantic_error_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests/errors.rs",
+      "capability": "Persistent field analyzer validation order",
+      "workload": "Malformed binding JSON, invalid relations, canonical duplicates, missing/repeated labels, GIN conflicts and late malformed physical rows.",
+      "invariant": "All physical bindings precede binding semantics, all bindings precede labels, and complete label semantics precede interleaved per-field label/GIN predicates with the original first failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_keeps_binding_label_and_gin_first_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests/errors.rs",
+      "capability": "Persistent field analyzer validation order",
+      "workload": "Malformed binding JSON, invalid relations, canonical duplicates, missing/repeated labels, GIN conflicts and late malformed physical rows.",
+      "invariant": "All physical bindings precede binding semantics, all bindings precede labels, and complete label semantics precede interleaved per-field label/GIN predicates with the original first failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_retains_both_selected_families_and_original_native_payloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests/retention.rs",
+      "capability": "Persistent field analyzer ownership",
+      "workload": "Selected source removal, long admitted names, original native adoption, independent later mutations and cancellation, denial, zero-work, drop or unwind.",
+      "invariant": "Both families retain the selected view; original key and revision allocations survive catalog adoption, while each failed or abandoned unpublished owner releases its input allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_analyzer_input_retires_unpublished_families_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/input/tests/retention.rs",
+      "capability": "Persistent field analyzer ownership",
+      "workload": "Selected source removal, long admitted names, original native adoption, independent later mutations and cancellation, denial, zero-work, drop or unwind.",
+      "invariant": "Both families retain the selected view; original key and revision allocations survive catalog adoption, while each failed or abandoned unpublished owner releases its input allowance.",
+      "case_names": [
+        ""
       ]
     }
   ]

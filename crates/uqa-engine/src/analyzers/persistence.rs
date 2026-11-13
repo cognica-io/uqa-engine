@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
+use uqa_execution::catalog::analyzers::fields::{CatalogFieldBindings, GinAnalyzerOwners};
 use uqa_sql::ast::{IndexKey, RelationPersistence};
 use uqa_storage::{
     AnalyzerBindingOwner, AnalyzerPhase, CatalogFacade, FieldAnalyzerBinding, RelationIdentity,
@@ -28,8 +29,6 @@ fn canonical_table(name: &str) -> StorageBackendResult<String> {
         .map(|relation| relation.qualified_name())
         .map_err(corrupt)
 }
-
-type GinAnalyzerOwners = BTreeMap<(String, String), String>;
 
 impl Engine {
     pub(crate) fn current_field_analyzer_binding(
@@ -105,7 +104,8 @@ impl Engine {
         pending_names: Vec<(String, Arc<CompiledAnalyzer>)>,
     ) -> StorageBackendResult<()> {
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
-        let mut saved = load_field_bindings(catalog, resources, &gin_owners)?;
+        let mut saved =
+            uqa_execution::catalog::analyzers::fields::restore(catalog, resources, &gin_owners)?;
         let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
         // Every descriptor and owner is validated before rebuilding sources or publishing analyzer metadata.
         for table_name in migrations.rebuild_tables {
@@ -362,55 +362,8 @@ impl Engine {
 
 type FieldKey = (String, String);
 
-struct CatalogFieldBindings {
-    bindings: BTreeMap<FieldKey, FieldAnalyzerBinding>,
-    labels: BTreeMap<FieldKey, Vec<(String, String)>>,
-}
-
 #[derive(Default)]
 struct BindingMigrations {
     bindings: Vec<(FieldKey, FieldAnalyzerBinding)>,
     rebuild_tables: BTreeSet<String>,
-}
-
-fn load_field_bindings(
-    catalog: &dyn CatalogFacade,
-    resources: &AnalyzerResources,
-    gin_owners: &GinAnalyzerOwners,
-) -> StorageBackendResult<CatalogFieldBindings> {
-    let mut bindings = BTreeMap::new();
-    for (table, field, json) in catalog.load_table_field_analyzer_bindings()? {
-        let key = (canonical_table(&table)?, field);
-        let binding = FieldAnalyzerBinding::from_json(&json, resources)?;
-        if bindings.insert(key, binding).is_some() {
-            return Err(corrupt("duplicate durable field analyzer binding"));
-        }
-    }
-    let mut labels = BTreeMap::<(String, String), Vec<(String, String)>>::new();
-    for (table, field, phase, name) in catalog.load_table_field_analyzers()? {
-        labels
-            .entry((canonical_table(&table)?, field))
-            .or_default()
-            .push((phase, name));
-    }
-    for (key, binding) in &bindings {
-        let expected = binding
-            .last_assignment()
-            .unwrap_or_else(|| (String::new(), binding.phase_name().to_owned()));
-        if labels.get(key) != Some(&vec![(expected.1, expected.0)]) {
-            return Err(corrupt(
-                "field analyzer binding disagrees with its catalog label",
-            ));
-        }
-        if let Some(name) = gin_owners.get(key) {
-            if binding.owner != AnalyzerBindingOwner::Gin
-                || binding.index.name.as_ref() != Some(name)
-            {
-                return Err(corrupt(
-                    "GIN definition conflicts with persisted analyzer ownership",
-                ));
-            }
-        }
-    }
-    Ok(CatalogFieldBindings { bindings, labels })
 }

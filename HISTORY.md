@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Move persistent field binding and compatibility-label assembly into Execution. Preserve complete physical tuple order, canonical identity checks and interleaved label/GIN validation, while retained input transfers original admitted keys and exact revisions to the native field catalog. Retained Engine field installation remains in progress.
+
 - Restore complete named analyzer catalogs through retained physical input, exact stored revisions and native diagnostic comparison. Preserve provider result order and original validation boundaries, then publish paired runtime/image roots at the existing Engine stage with independent later mutation ownership.
 
 - Share retained generic JSON validation between catalog markers and analyzer diagnostics. Compare saved analyzer configurations with the original native public fields, preserving omitted defaults, duplicate-key semantics, raw/numeric scalar representations and bounded work without another value tree.
