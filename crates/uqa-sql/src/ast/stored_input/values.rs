@@ -103,18 +103,10 @@ impl<'a> Input<'a, '_> {
         first: JsonToken<'a>,
         mut visit: impl FnMut(&mut Self, JsonToken<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
-        if first != JsonToken::StartArray {
-            return Err(invalid());
-        }
-        self.enter()?;
-        loop {
-            let token = self.next()?;
-            if token == JsonToken::EndArray {
-                break;
-            }
+        let mut cursor = self.array_cursor(first)?;
+        while let Some(token) = cursor.next(self)? {
             visit(self, token)?;
         }
-        self.remaining_depth += 1;
         Ok(())
     }
 

@@ -8,6 +8,7 @@
 
 use super::Expr;
 use crate::{
+    ast::query_input::Native,
     ast::stored_input::{invalid, Input, InputError, Parts, Values},
     SQLError,
 };
@@ -60,6 +61,21 @@ impl Expr {
         };
         Ok(read(text, 128, &values)?)
     }
+
+    /// Decode stored expression syntax, including query, mutation-CTE and window children, without executing SQL or resolving catalog names. The returned native tree retains the supplied allocation allowance.
+    pub fn from_stored_query_json(
+        text: &str,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> Result<Produced<Self>, SQLError> {
+        let values = Values {
+            memory,
+            original,
+            invoking,
+        };
+        Ok(read_query(text, 128, &values)?.into())
+    }
 }
 
 /// Validate one scalar constructor using the original field readers and expose its unevaluated child ranges to the complete stored-key validator. No placeholder expression escapes this boundary.
@@ -101,7 +117,68 @@ fn read(text: &str, depth: usize, values: &Values<'_>) -> Result<Produced<Expr>,
     }
 }
 
+fn read_query(text: &str, depth: usize, values: &Values<'_>) -> Result<Native<Expr>, InputError> {
+    let control = values.control();
+    {
+        let mut input = Input::content_at_depth(text, control, depth);
+        let token = input.next()?;
+        input.content(token)?;
+        input.end()?;
+    }
+    let mut parents = BudgetedVec::new(values.memory);
+    let mut frame = Frame::read_query(text, depth, values)?.into_parts().0;
+    loop {
+        control.check()?;
+        if let Some(child) = frame.children.get(frame.cursor).copied() {
+            parents.push(frame)?;
+            frame = Frame::read_query(child.text, child.depth, values)?
+                .into_parts()
+                .0;
+        } else if let Some(parent) = parents.pop() {
+            frame = parent.attach(frame.expression, &control)?;
+        } else {
+            return Native::new(frame.expression, control);
+        }
+    }
+}
+
 impl<'a> Frame<'a> {
+    fn read_query(
+        text: &'a str,
+        depth: usize,
+        values: &Values<'_>,
+    ) -> Result<Native<Self>, InputError> {
+        let control = values.control();
+        let mut input = Input::content_at_depth(text, control, depth);
+        let first = input.next()?;
+        let (tag, object) = input.tag(first)?;
+        if !matches!(
+            tag.as_str(),
+            "ScalarSubquery" | "Exists" | "InSubquery" | "WindowCall"
+        ) {
+            return Native::new(
+                control.finish(
+                    Self::read(text, depth, values)?,
+                    control.empty_reservation(),
+                )?,
+                control,
+            );
+        }
+        if !object {
+            return Err(invalid());
+        }
+        let token = input.next()?;
+        let expression = input.query_payload(&tag, token, values)?.into();
+        input.close_tag(object)?;
+        input.end()?;
+        let frame = Self {
+            expression,
+            children: BudgetedVec::new(values.memory),
+            cursor: 0,
+        };
+        Native::new(control.finish(frame, control.empty_reservation())?, control)
+    }
+
     fn read(text: &'a str, depth: usize, values: &Values<'_>) -> Result<Self, InputError> {
         let mut input = Input::content_at_depth(text, values.control(), depth);
         let token = input.next()?;
@@ -189,6 +266,15 @@ impl<'a> Input<'a, '_> {
     ) -> Result<Produced<Expr>, InputError> {
         let (text, depth) = self.encoded(token)?;
         read(text, depth, values)
+    }
+
+    pub(in crate::ast) fn query_expression(
+        &mut self,
+        token: JsonToken<'a>,
+        values: &Values<'_>,
+    ) -> Result<Native<Expr>, InputError> {
+        let (text, depth) = self.encoded(token)?;
+        read_query(text, depth, values)
     }
 
     fn child(

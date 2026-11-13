@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Construct stored query expressions, windows and data-modifying CTEs as admitted native SQL syntax, preserving selected bindings, positional defaults and assignment alternatives. Complete routine-catalog input and Engine restoration remain in progress.
+
 - Validate restored routine authority through shared grant-path and role-incarnation traversal. Retained validation admits scratch and resumes through work windows; ordinary validation no longer copies role names that it immediately discards. Complete routine input and private Engine integration remain in progress.
 
 - Preserve original analyzer descriptor syntax, typed-field diagnostics and byte-based locations through ordinary and retained input. Keep duplicate-key validation first, retain public numeric/raw JSON values, and retire admitted diagnostic payloads at the backup boundary.

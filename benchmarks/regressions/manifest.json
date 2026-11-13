@@ -4,6 +4,123 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_query_input_constructs_queries_windows_and_all_mutation_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests.rs",
+      "capability": "Native stored query input",
+      "workload": "Decode stored SELECT, set operations, recursive CTEs, windows, relation sources and all mutation CTEs.",
+      "invariant": "Native syntax matches the original deserializer; the scalar schema reader still rejects query nodes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_matches_original_field_omissions_and_wrong_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests.rs",
+      "capability": "Native stored query input",
+      "workload": "Remove and replace every nested field in query and mutation fixtures.",
+      "invariant": "Acceptance and successful native output match the unchanged Serde implementation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_preserves_positional_defaults_and_internal_source_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/compatibility.rs",
+      "capability": "Native stored query input",
+      "workload": "Exercise positional truncation and excess fields, window metadata and internal row source types.",
+      "invariant": "Map and positional omissions retain their distinct original defaults and selected type identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_preserves_merge_identities_and_retired_replacements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/compatibility.rs",
+      "capability": "Native stored query input",
+      "workload": "Construct selected MERGE target identities, domain dependencies and duplicate map entries.",
+      "invariant": "Complete native metadata matches the original representation and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_preserves_flattened_body_order_and_assignment_alternatives",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/alternatives.rs",
+      "capability": "Native stored query input",
+      "workload": "Permute flattened CTE body fields and ambiguous single/multiple assignment representations.",
+      "invariant": "Original first-body selection and representation-only alternative fallback are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_preserves_optional_mutations_and_generic_numeric_content",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/alternatives.rs",
+      "capability": "Native stored query input",
+      "workload": "Decode optional MERGE variants with null, sequence, map and arbitrary-precision numeric content.",
+      "invariant": "Original scalar classes, optional fields and rejection behavior are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_preserves_depth_unknown_fields_and_invalid_unicode",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/alternatives.rs",
+      "capability": "Native stored query input",
+      "workload": "Nest query sources through the original depth boundary and vary ignored, duplicate and invalid Unicode fields.",
+      "invariant": "The complete generic-content boundary remains authoritative before native construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_retires_nested_native_allocations_on_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/resources.rs",
+      "capability": "Native stored query input",
+      "workload": "Deny allocation at multiple limits and cancel either scope after native query allocation.",
+      "invariant": "Every failure preserves its resource owner and releases the complete unfinished native tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_input_retains_only_surviving_merge_binding_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/tests/resources.rs",
+      "capability": "Native stored query input",
+      "workload": "Replace a large admitted MERGE dependency set with a small definition under the same key.",
+      "invariant": "Retained memory equals a single surviving definition and overwritten payload leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "routine_authority_input_preserves_original_owner_path_and_role_error_order",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/security/binding/tests/input.rs",

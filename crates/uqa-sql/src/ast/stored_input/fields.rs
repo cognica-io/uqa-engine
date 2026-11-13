@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, Input, InputError, JsonToken};
+use super::{Input, InputError, JsonToken};
 
 impl<'a> Input<'a, '_> {
     pub fn fields(
@@ -47,73 +47,15 @@ impl<'a> Input<'a, '_> {
         reject_unknown: bool,
         mut field: impl FnMut(&mut Self, usize, JsonToken<'a>) -> Result<(), InputError>,
     ) -> Result<(), InputError> {
-        if self.content_number_fields(first) {
-            // Arbitrary-precision generic content represents non-native numbers as an object with one unknown field. All declared fields must therefore be optional/defaulted; a closed struct still rejects it. This representation creates no additional JSON container.
-            return if !reject_unknown && required == 0 {
-                self.control.check().map_err(Into::into)
-            } else {
-                Err(invalid())
-            };
+        let mut cursor =
+            self.field_cursor(first, names, [required, sequence_required], reject_unknown)?;
+        while let Some((index, token)) = cursor.next(self)? {
+            field(self, index, token)?;
         }
-        self.enter()?;
-        let mut seen = 0_u64;
-        match first {
-            JsonToken::StartObject => loop {
-                let token = self.next()?;
-                if token == JsonToken::EndObject {
-                    break;
-                }
-                let JsonToken::Key(_) = token else {
-                    return Err(invalid());
-                };
-                let name = self.text(token)?;
-                if let Some(index) = names
-                    .iter()
-                    .position(|candidate| *candidate == name.as_str())
-                {
-                    let bit = 1 << index;
-                    if seen & bit != 0 {
-                        return Err(invalid());
-                    }
-                    seen |= bit;
-                    let token = self.next()?;
-                    field(self, index, token)?;
-                } else {
-                    if reject_unknown {
-                        return Err(invalid());
-                    }
-                    let token = self.next()?;
-                    self.skip(token)?;
-                }
-            },
-            JsonToken::StartArray => {
-                let mut index = 0;
-                loop {
-                    let token = self.next()?;
-                    if token == JsonToken::EndArray {
-                        if seen & sequence_required != sequence_required {
-                            return Err(invalid());
-                        }
-                        break;
-                    }
-                    if index == names.len() {
-                        return Err(invalid());
-                    }
-                    field(self, index, token)?;
-                    seen |= 1 << index;
-                    index += 1;
-                }
-            }
-            _ => return Err(invalid()),
-        }
-        if seen & required != required {
-            return Err(invalid());
-        }
-        self.remaining_depth += 1;
         Ok(())
     }
 
-    fn content_number_fields(&self, token: JsonToken<'_>) -> bool {
+    pub(super) fn content_number_fields(&self, token: JsonToken<'_>) -> bool {
         let JsonToken::Number(text) = token else {
             return false;
         };

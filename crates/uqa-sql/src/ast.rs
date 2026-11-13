@@ -34,6 +34,7 @@ mod namespaces;
 mod object_acl;
 mod overriding;
 mod pattern_operator;
+mod query_input;
 mod ranges;
 mod reference_name;
 mod referenced_partition;
