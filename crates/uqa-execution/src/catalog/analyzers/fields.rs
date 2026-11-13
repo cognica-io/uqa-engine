@@ -14,6 +14,7 @@ use uqa_storage::{
 };
 
 mod input;
+pub mod installation;
 pub use input::{FieldAnalyzerCatalogInput, RestoredFieldAnalyzers};
 
 pub type FieldKey = (String, String);

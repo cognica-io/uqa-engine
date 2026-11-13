@@ -16,7 +16,10 @@ use std::sync::{atomic::Ordering, Arc};
 use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_execution::{
     catalog::{
-        analyzers::named::NamedAnalyzerCatalogInput,
+        analyzers::{
+            fields::{installation::FieldAnalyzerInstallation, FieldAnalyzerCatalogInput},
+            named::NamedAnalyzerCatalogInput,
+        },
         security::roles::persistence::input::RoleCatalogInput,
     },
     schema::{
@@ -55,7 +58,9 @@ enum Stage {
     Types(PersistentTypeInput),
     Authority(PersistentAuthorityInput),
     NamedAnalyzers(NamedAnalyzers),
-    Registries(AfterNamedAnalyzers),
+    GinAnalyzers(AfterNamedAnalyzers),
+    FieldAnalyzers(FieldAnalyzers),
+    Registries(RestoredAuthorities),
     Caches,
 }
 
@@ -74,9 +79,64 @@ impl NamedAnalyzers {
         match self.input.advance(1)? {
             Some(names) => {
                 *engine.durable.named_analyzers.write() = names;
-                Ok(Stage::Registries(self.next))
+                Ok(Stage::GinAnalyzers(self.next))
             }
             None => Ok(Stage::NamedAnalyzers(self)),
+        }
+    }
+}
+
+impl AfterNamedAnalyzers {
+    fn begin_fields(
+        self,
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
+        Ok(Stage::FieldAnalyzers(FieldAnalyzers::Bindings {
+            input: engine.stored_field_analyzers_input(self.resources, limits, control)?,
+            retained: self.retained,
+        }))
+    }
+}
+
+enum FieldAnalyzers {
+    Bindings {
+        input: FieldAnalyzerCatalogInput,
+        retained: RestoredAuthorities,
+    },
+    Installation {
+        input: FieldAnalyzerInstallation,
+        retained: RestoredAuthorities,
+    },
+}
+
+impl FieldAnalyzers {
+    fn advance(self, engine: &Engine, control: &StorageReadControl) -> StorageBackendResult<Stage> {
+        match self {
+            Self::Bindings {
+                mut input,
+                retained,
+            } => match input.advance(1)? {
+                Some(saved) => Ok(Stage::FieldAnalyzers(Self::Installation {
+                    input: engine.restored_field_analyzers_installation(saved, control)?,
+                    retained,
+                })),
+                None => Ok(Stage::FieldAnalyzers(Self::Bindings { input, retained })),
+            },
+            Self::Installation {
+                mut input,
+                retained,
+            } => match input.advance(1)? {
+                Some(fields) => {
+                    *engine.durable.table_field_analyzers.write() = fields;
+                    Ok(Stage::Registries(retained))
+                }
+                None => Ok(Stage::FieldAnalyzers(Self::Installation {
+                    input,
+                    retained,
+                })),
+            },
         }
     }
 }
@@ -135,7 +195,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority and named analyzer input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/field analyzer input and field installation consume bounded native polls. GIN reconstruction and the remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -255,6 +315,8 @@ impl Candidate {
                 Stage::advance_authority(input, engine, self.limits, control)?
             }
             Stage::NamedAnalyzers(input) => input.advance(engine)?,
+            Stage::GinAnalyzers(retained) => retained.begin_fields(engine, self.limits, control)?,
+            Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
             Stage::Registries(retained) => {
                 self.session
                     .restore_remaining_registries(catalog.as_ref(), retained)?;
@@ -314,19 +376,13 @@ impl PersistentEngineState {
     fn restore_remaining_registries(
         &self,
         catalog: &dyn uqa_storage::CatalogFacade,
-        restored: AfterNamedAnalyzers,
+        restored: RestoredAuthorities,
     ) -> StorageBackendResult<()> {
-        self.engine.restore_field_analyzers_from_catalog(
-            catalog,
-            &restored.resources,
-            CatalogRestoreMode::LoadOnly,
-            Vec::new(),
-        )?;
         self.engine.restore_registries_after_analyzers(
             catalog,
             CatalogRestoreMode::LoadOnly,
-            restored.retained.domains,
-            restored.retained.routines,
+            restored.domains,
+            restored.routines,
         )?;
         uqa_execution::schema::types::relation_arrays::restoration::validate(
             &self.engine.restored_catalog_read_view(),

@@ -9,12 +9,12 @@ use super::{
     TableState,
 };
 use uqa_execution::storage_errors::storage_error;
-use uqa_sql::ast::ColumnType;
 use uqa_sql::SQLError;
 use uqa_storage::{
     AnalyzerBindingOwner, FieldAnalyzerBinding, StorageBackendError, StorageBackendResult,
 };
 
+mod field_restoration;
 mod persistence;
 
 impl Engine {
@@ -22,23 +22,10 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(StorageBackendError::Other(
-                "analyzer name cannot be empty".into(),
-            ));
-        }
-        if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
-            return Ok(analyzer.compile()?);
-        }
-        self.durable
-            .named_analyzers
-            .read()
-            .get(name)
-            .cloned()
-            .ok_or_else(|| {
-                StorageBackendError::Other(format!("analyzer `{name}` is not registered"))
-            })
+        uqa_execution::catalog::analyzers::fields::installation::resolve_analyzer_revision(
+            name,
+            |name| self.durable.named_analyzers.read().get(name).cloned(),
+        )
     }
 
     pub fn register_named_analyzer(
@@ -299,22 +286,15 @@ impl Engine {
         table: &Arc<TableState>,
         field: &str,
     ) -> Result<(), String> {
-        let column_type = table
-            .columns
-            .read()
-            .iter()
-            .find(|column| column.name == field)
-            .map(|column| column.ty.clone())
-            .ok_or_else(|| {
-                format!("set_table_analyzer: column `{table_name}`.`{field}` does not exist")
-            })?;
-        if column_type != ColumnType::Text {
-            return Err(format!(
-                "set_table_analyzer: column `{table_name}`.`{field}` must be TEXT, got {column_type:?}"
-            ));
-        }
+        uqa_sql::semantics::text_indexes::validate_analyzer_column(
+            &table.columns.read(),
+            table_name,
+            field,
+        )
+        .map_err(|error| error.to_string())?;
         if !table
-            .fts_fields()
+            .fts_fields
+            .read()
             .iter()
             .any(|candidate| candidate == field)
         {

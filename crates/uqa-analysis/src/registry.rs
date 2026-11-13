@@ -99,6 +99,14 @@ pub fn get_analyzer(name: &str) -> Result<Analyzer, RegistryError> {
     Err(RegistryError::NotFound(name.to_string()))
 }
 
+/// Observe the same custom-then-built-in membership as lookup without copying a configuration or an absent name.
+pub fn contains_analyzer(name: &str) -> bool {
+    if custom().read().contains_key(name) {
+        return true;
+    }
+    builtins().contains_key(name)
+}
+
 pub fn drop_analyzer(name: &str) -> Result<(), RegistryError> {
     if builtins().contains_key(name) {
         return Err(RegistryError::DropBuiltin(name.to_string()));
@@ -126,6 +134,29 @@ mod tests {
         for name in ["whitespace", "standard", "standard_cjk", "keyword"] {
             assert!(get_analyzer(name).is_ok(), "missing builtin: {name}");
         }
+    }
+
+    #[test]
+    fn analyzer_membership_borrows_configurations_and_absent_names() {
+        let name = "membership_without_configuration_copy";
+        register_analyzer(name, standard_analyzer("english")).unwrap();
+        assert!(contains_analyzer("standard"));
+        assert_eq!(contains_analyzer("nori"), cfg!(feature = "nori"));
+        assert_eq!(contains_analyzer("kuromoji"), cfg!(feature = "kuromoji"));
+        assert_eq!(
+            contains_analyzer("kuromoji_completion"),
+            cfg!(feature = "kuromoji")
+        );
+        let counts = allocation_counter::measure(|| {
+            assert!(contains_analyzer("standard"));
+            assert!(contains_analyzer(name));
+            assert!(!contains_analyzer(
+                "missing_membership_without_configuration_copy"
+            ));
+        });
+        assert_eq!(counts.count_total, 0);
+        drop_analyzer(name).unwrap();
+        assert!(!contains_analyzer(name));
     }
 
     #[cfg(feature = "nori")]

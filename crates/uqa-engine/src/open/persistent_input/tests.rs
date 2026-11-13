@@ -10,6 +10,7 @@ use uqa_core::Value;
 
 mod analyzers;
 mod authority;
+mod field_analyzers;
 mod graph_oids;
 mod graphs;
 mod sequences;

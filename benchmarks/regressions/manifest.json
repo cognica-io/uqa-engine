@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -65094,6 +65094,153 @@
       "invariant": "Both families retain the selected view; original key and revision allocations survive catalog adoption, while each failed or abandoned unpublished owner releases its input allowance.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "analyzer_membership_borrows_configurations_and_absent_names",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/registry.rs",
+      "capability": "Analyzer registry membership",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzer_columns_borrow_first_exact_declarations_and_original_type_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/text_indexes/analyzers.rs",
+      "capability": "Declared analyzer columns",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "analyzer_column_input_bounds_wide_search_and_preserves_first_match",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/text_indexes/analyzers.rs",
+      "capability": "Declared analyzer columns",
+      "workload": "A retained declaration scan with 4096 preceding columns, two same-name declarations with different types, single-step windows and cancellation after a partially consumed prefix.",
+      "invariant": "Column validation suspends between declarations, preserves the first exact matching type and borrowed diagnostic, and retires its private input on cancellation or completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "analyzer_assignment_normalization_preserves_aliases_case_and_untrimmed_errors",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/inverted_index/contract/tests.rs",
+      "capability": "Analyzer assignment vocabulary",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_field_installation_publishes_exact_sides_and_independent_later_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/installation/tests.rs",
+      "capability": "Persistent field installation",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_installation_preserves_physical_failure_before_later_field_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/installation/tests/ordering.rs",
+      "capability": "Persistent field installation order",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_installation_keeps_load_only_migration_and_unmatched_record_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/installation/tests/ordering.rs",
+      "capability": "Persistent field installation order",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "ordinary_field_migration_keeps_query_alias_phase_order_and_deferred_writes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/installation/tests/ordering.rs",
+      "capability": "Persistent field installation order",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "field_installation_checks_declared_types_before_names_and_preserves_unnamed_defaults",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/fields/installation/tests/columns.rs",
+      "capability": "Persistent field declaration validation",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_field_installation_keeps_selected_sides_and_writable_later_state",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/field_analyzers.rs",
+      "capability": "Persistent Engine field installation",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_field_input_and_installation_retire_private_roots_and_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/field_analyzers.rs",
+      "capability": "Persistent Engine field installation",
+      "workload": "Ordinary and retained field restoration, historical index/search sides, exact declarations and registry names, migration/error ordering, selected persistent providers and terminal ownership.",
+      "invariant": "Shared installation preserves original per-field predicates, physical failure order and deferred migrations; retained roots publish completely and remain writable after source retirement, input cancellation or exhaustion.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
       ]
     }
   ]

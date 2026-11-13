@@ -6,15 +6,15 @@
 
 //! Restore exact analyzer revisions and migrate legacy names within the owning catalog transaction.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
-use uqa_execution::catalog::analyzers::fields::{CatalogFieldBindings, GinAnalyzerOwners};
+use uqa_execution::catalog::analyzers::fields::GinAnalyzerOwners;
 use uqa_sql::ast::{IndexKey, RelationPersistence};
 use uqa_storage::{
-    AnalyzerBindingOwner, AnalyzerPhase, CatalogFacade, FieldAnalyzerBinding, RelationIdentity,
-    StorageBackendError, StorageBackendResult,
+    CatalogFacade, FieldAnalyzerBinding, RelationIdentity, StorageBackendError,
+    StorageBackendResult,
 };
 
 use crate::open::CatalogRestoreMode;
@@ -104,9 +104,10 @@ impl Engine {
         pending_names: Vec<(String, Arc<CompiledAnalyzer>)>,
     ) -> StorageBackendResult<()> {
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
-        let mut saved =
+        let saved =
             uqa_execution::catalog::analyzers::fields::restore(catalog, resources, &gin_owners)?;
-        let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
+        let migrations =
+            self.install_catalog_field_analyzers(saved, &gin_owners, mode.allows_migration())?;
         // Every descriptor and owner is validated before rebuilding sources or publishing analyzer metadata.
         for table_name in migrations.rebuild_tables {
             let table = self
@@ -127,157 +128,6 @@ impl Engine {
             self.persist_field_analyzer_binding(&table, &field, &binding)?;
         }
         Ok(())
-    }
-
-    fn install_catalog_field_analyzers(
-        &self,
-        saved: &mut CatalogFieldBindings,
-        gin_owners: &GinAnalyzerOwners,
-        mode: CatalogRestoreMode,
-    ) -> StorageBackendResult<BindingMigrations> {
-        let tables = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .filter(|(_, table)| table.persistence != RelationPersistence::Temporary)
-            .map(|(name, table)| (name.qualified_name(), table.clone()))
-            .collect::<Vec<_>>();
-        let mut migrations = BindingMigrations::default();
-        for (table_name, table) in &tables {
-            for field in table.fts_fields() {
-                let key = (table_name.clone(), field.clone());
-                let binding = if let Some(binding) = saved.bindings.remove(&key) {
-                    saved.labels.remove(&key);
-                    binding
-                } else {
-                    if !mode.allows_migration() {
-                        return Err(corrupt(
-                            "field analyzer catalog requires an initial migration",
-                        ));
-                    }
-                    let binding = self.legacy_field_analyzer_binding(
-                        table_name,
-                        table,
-                        &field,
-                        saved.labels.remove(&key).unwrap_or_default(),
-                        gin_owners.get(&key),
-                    )?;
-                    migrations.bindings.push((key, binding.clone()));
-                    migrations.rebuild_tables.insert(table_name.clone());
-                    binding
-                };
-                // Default document fields index only stored strings, even when a declared column has another type.
-                // Named field assignments on declared SQL tables retain the stricter column contract.
-                // GIN-owned bindings are checked with their GIN definitions, and document tables have no declared columns; their physical FTS field above owns the binding.
-                if binding.owner == AnalyzerBindingOwner::Field
-                    && *table.columns_declared.read()
-                    && (binding.index.name.is_some() || binding.search.name.is_some())
-                {
-                    Self::validate_table_analyzer_field(table_name, table, &field)
-                        .map_err(corrupt)?;
-                }
-                for side in [&binding.index, &binding.search] {
-                    if let Some(name) = &side.name {
-                        if !self.durable.named_analyzers.read().contains_key(name)
-                            && crate::analyzer_registry::get_analyzer(name).is_err()
-                        {
-                            return Err(corrupt(format!(
-                                "field analyzer binding references missing name `{name}`"
-                            )));
-                        }
-                    }
-                }
-                let mut bindings = self.durable.table_field_analyzers.read().clone();
-                bindings.insert(
-                    &(table_name.clone(), field.clone()),
-                    binding.clone(),
-                    table.persistence == RelationPersistence::Temporary,
-                    &uqa_core::CancellationToken::new(),
-                )?;
-                binding.install(&field, table.inverted_index.write().as_mut())?;
-                *self.durable.table_field_analyzers.write() = bindings;
-            }
-            if table.inverted_index.read().source_rebuild_required()? {
-                if !mode.allows_migration() {
-                    return Err(corrupt(
-                        "positional index requires an initial source migration",
-                    ));
-                }
-                migrations.rebuild_tables.insert(table_name.clone());
-            }
-        }
-        if !saved.bindings.is_empty() || !saved.labels.is_empty() {
-            return Err(corrupt(
-                "table-field analyzer references a missing table, column, or physical FTS field",
-            ));
-        }
-        Ok(migrations)
-    }
-
-    fn legacy_field_analyzer_binding(
-        &self,
-        table_name: &str,
-        table: &TableState,
-        field: &str,
-        labels: Vec<(String, String)>,
-        gin_owner: Option<&String>,
-    ) -> StorageBackendResult<FieldAnalyzerBinding> {
-        let mut old = Vec::new();
-        let mut seen = BTreeSet::new();
-        for (phase, name) in labels {
-            let (phase_name, phase) = crate::normalize_analyzer_phase(&phase).map_err(corrupt)?;
-            if !seen.insert(phase_name) {
-                return Err(corrupt("ambiguous legacy analyzer phases"));
-            }
-            old.push((phase, name));
-        }
-        old.sort_by_key(|(phase, _)| match phase {
-            AnalyzerPhase::Both => 0,
-            AnalyzerPhase::Index => 1,
-            AnalyzerPhase::Search => 2,
-        });
-        let explicit_base = gin_owner.map(String::as_str).or_else(|| {
-            old.iter()
-                .find(|(phase, _)| {
-                    *phase == AnalyzerPhase::Both
-                        || (*phase == AnalyzerPhase::Index && seen.contains("search"))
-                })
-                .map(|(_, name)| name.as_str())
-        });
-        let mut binding = if let Some(name) = explicit_base {
-            let revision = self.resolve_analyzer_revision(name)?;
-            FieldAnalyzerBinding::unassigned(revision.clone(), revision)
-        } else {
-            let binding = self.current_field_analyzer_binding(table_name, table, field)?;
-            *table.analyzer.write() = uqa_analysis::AnalyzerDefinition::new(
-                binding.index.compiled.descriptor().configuration()?,
-            );
-            binding
-        };
-        for (phase, name) in old {
-            let compiled = self.resolve_analyzer_revision(&name)?;
-            binding = binding.assigned(&name, compiled, phase, AnalyzerBindingOwner::Field);
-        }
-        if let Some(name) = gin_owner {
-            if binding.index.name.is_some()
-                && (binding.index.name.as_ref() != Some(name)
-                    || binding.search.name.as_ref() != Some(name)
-                    || binding.last_phase != AnalyzerPhase::Both)
-            {
-                return Err(corrupt(
-                    "legacy GIN and field assignments have competing analyzer owners",
-                ));
-            }
-            let compiled = self.resolve_analyzer_revision(name)?;
-            binding = binding.assigned(
-                name,
-                compiled,
-                AnalyzerPhase::Both,
-                AnalyzerBindingOwner::Gin,
-            );
-        }
-        Ok(binding)
     }
 
     pub(crate) fn initialize_table_analyzer_bindings(
@@ -313,7 +163,7 @@ impl Engine {
         Ok(bindings)
     }
 
-    fn restore_gin_analyzer_owners(
+    pub(super) fn restore_gin_analyzer_owners(
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<GinAnalyzerOwners> {
@@ -358,12 +208,4 @@ impl Engine {
         }
         Ok(owners)
     }
-}
-
-type FieldKey = (String, String);
-
-#[derive(Default)]
-struct BindingMigrations {
-    bindings: Vec<(FieldKey, FieldAnalyzerBinding)>,
-    rebuild_tables: BTreeSet<String>,
 }

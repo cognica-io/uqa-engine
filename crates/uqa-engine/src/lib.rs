@@ -831,13 +831,7 @@ fn parse_analyzer_config(name: &str, config_json: &str) -> std::result::Result<A
 }
 
 fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, AnalyzerPhase), String> {
-    let phase = AnalyzerPhase::parse(&phase.to_ascii_lowercase())?;
-    let normalized = match phase {
-        AnalyzerPhase::Index => "index",
-        AnalyzerPhase::Search => "search",
-        AnalyzerPhase::Both => "both",
-    };
-    Ok((normalized.to_string(), phase))
+    AnalyzerPhase::normalize(phase)
 }
 
 impl Drop for Engine {

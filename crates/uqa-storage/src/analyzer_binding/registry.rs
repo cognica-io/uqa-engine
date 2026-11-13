@@ -105,6 +105,10 @@ impl FieldAnalyzerCatalog {
         }
     }
 
+    pub fn budget(&self) -> &MemoryBudget {
+        self.durable.budget()
+    }
+
     pub fn len(&self) -> usize {
         self.durable.len() + self.temporary.len()
     }
