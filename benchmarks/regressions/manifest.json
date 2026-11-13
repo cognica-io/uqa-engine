@@ -2,6 +2,71 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_input_preserves_original_owner_path_and_role_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/input.rs",
+      "capability": "Retained routine authority",
+      "workload": "Compare original dependency collection with ordinary and retained validation over valid, absent, empty, revoked, malformed and multiply-invalid authority.",
+      "invariant": "Original owner, grant-path and role errors match exactly across work windows; successful input is immutable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_input_bounds_grant_and_role_work_without_copying_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/input.rs",
+      "capability": "Retained routine authority",
+      "workload": "Validate a reversed grant chain at one, seven and 64 steps; compare short and wide role names against the original dependency collector.",
+      "invariant": "Work and admitted scratch advance within each window, and validation allocations do not grow with unused role-name bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_input_keeps_selected_roles_across_later_renames_and_replacements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/input.rs",
+      "capability": "Retained routine authority",
+      "workload": "Retain the selected role generation, rename a role and replace its object identity in a later generation.",
+      "invariant": "Selected incarnations remain valid, renames preserve authority and replacement incarnations are rejected.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_input_retires_every_cancelled_and_abandoned_boundary",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/input/resources.rs",
+      "capability": "Retained routine authority",
+      "workload": "Cancel either owner, provide zero work or abandon input at every pending grant and role boundary.",
+      "invariant": "No continuation survives terminal failure and every scratch reservation retires without affecting a sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_authority_input_preserves_admission_failure_and_unwind_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/security/binding/tests/input/resources.rs",
+      "capability": "Retained routine authority",
+      "workload": "Exhaust the original allowance during grant closure and unwind while the same private validation is pending.",
+      "invariant": "Admission reports the original memory error and both failure paths retire all private scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "native_framed_children_preserve_canonical_boundaries_and_parent_byte_windows",
@@ -21092,7 +21157,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]

@@ -18,6 +18,9 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
+mod validation;
+pub use validation::{validate_routine_authority, validate_routine_authority_from_input};
+
 /// Only the initial catalog converter may interpret named routine authority.
 #[derive(Deserialize)]
 pub struct LegacyRoutineAclEntry {
@@ -111,13 +114,6 @@ pub fn routine_role_dependencies(
                 .ok_or_else(|| invalid("missing role incarnation"))
         })
         .collect()
-}
-
-pub fn validate_routine_authority(
-    definition: &CreateFunction,
-    roles: &RoleDefinitions,
-) -> Result<(), SQLError> {
-    routine_role_dependencies(definition, roles).map(|_| ())
 }
 
 pub fn bind_routine_grantees(

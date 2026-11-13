@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use uqa_core::{catalog_acl::AclGrantee, catalog_role::RoleIdentity};
 
 mod validation;
-pub(in crate::catalog::security) use validation::{collect_roles_from, validate_acl_from};
+pub(crate) use validation::{collect_roles_from, validate_acl_from};
 
 /// Whether a role holding `has_role` memberships may use the object, or grant it when `grant_option` is set.
 pub fn privilege_allowed(

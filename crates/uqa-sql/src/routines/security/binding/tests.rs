@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
 
+mod input;
+
 fn roles() -> RoleDefinitions {
     RoleDefinitions::try_from_iter(
         ["owner", "delegate", "recipient"]

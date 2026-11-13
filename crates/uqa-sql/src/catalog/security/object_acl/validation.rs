@@ -13,7 +13,7 @@ use uqa_core::memory::{ProductionControl, ProductionMap};
 
 type GrantPath = (Option<RoleIdentity>, RoleIdentity);
 
-pub(in crate::catalog::security) trait Set<K: Copy + Ord> {
+pub(crate) trait Set<K: Copy + Ord> {
     fn contains(&self, value: &K) -> bool;
     fn insert(&mut self, value: K) -> Result<bool, SQLError>;
 }
@@ -100,7 +100,7 @@ pub(super) async fn validate_with<S: Set<RoleIdentity>, P: Set<GrantPath>>(
     Ok(())
 }
 
-pub(in crate::catalog::security) async fn validate_acl_from(
+pub(crate) async fn validate_acl_from(
     owner: RoleIdentity,
     acl: Option<&[ObjectAclEntry]>,
     object_kind: &str,
@@ -118,7 +118,7 @@ pub(in crate::catalog::security) async fn validate_acl_from(
     .await
 }
 
-pub(in crate::catalog::security) async fn collect_roles_from(
+pub(crate) async fn collect_roles_from(
     owner: RoleIdentity,
     acl: Option<&[ObjectAclEntry]>,
     identities: &mut impl Set<RoleIdentity>,
