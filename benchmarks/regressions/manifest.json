@@ -64519,6 +64519,110 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_preparation_resumes_and_shares_one_completed_cache_identity",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/restoration/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_analyzer_preparation_keeps_validation_before_cache_and_retires_terminal_input",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/restoration/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_korean_preparation_restores_exact_resources_and_native_user_rules",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/restoration/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "stored_japanese_preparation_restores_exact_resources_and_native_user_rules",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/resources/restoration/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_input_preserves_closed_struct_forms_and_original_revision_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_input_adopts_names_and_retires_failures_before_returning_allowance",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_publication_preserves_native_buffers_both_roots_and_independent_mutation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_input_keeps_envelope_errors_before_revision_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests.rs",
+      "capability": "Stored analyzer and field revision restoration",
+      "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
+      "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

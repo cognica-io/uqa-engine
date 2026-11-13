@@ -17,6 +17,7 @@ use crate::{
 
 mod image;
 pub use image::AnalyzerResourceInput;
+mod restoration;
 
 struct Inner {
     limits: AnalyzerLimits,
@@ -174,33 +175,7 @@ impl AnalyzerResources {
         &self,
         descriptor: Arc<AnalyzerDescriptor>,
     ) -> AnalysisResult<Arc<CompiledAnalyzer>> {
-        descriptor.validate_limits(self.0.limits)?;
-        if let Some(compiled) = self.0.cache.lock().get(&descriptor.fingerprint()) {
-            return Ok(compiled);
-        }
-        #[cfg(any(feature = "nori", feature = "kuromoji"))]
-        let mut config = descriptor.configuration()?;
-        #[cfg(feature = "nori")]
-        let nori = {
-            crate::nori::pipeline::check_resolved(&config)?;
-            crate::nori::pipeline::ResolvedNoriPipeline::resolve(&mut config, &self.0.nori)?
-        };
-        #[cfg(feature = "kuromoji")]
-        let kuromoji = {
-            crate::kuromoji::pipeline::check_resolved(&config)?;
-            crate::kuromoji::pipeline::ResolvedKuromojiPipeline::resolve(
-                &mut config,
-                &self.0.kuromoji,
-                self.0.limits,
-            )?
-        };
-        self.publish(
-            descriptor,
-            #[cfg(feature = "nori")]
-            nori,
-            #[cfg(feature = "kuromoji")]
-            kuromoji,
-        )
+        crate::work::inline(self.restore_with(descriptor, &mut ()))
     }
 
     fn publish(

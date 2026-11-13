@@ -159,6 +159,25 @@ impl FieldAnalyzerCatalog {
         self.images = self.images.into_mutation_budget(memory);
         self
     }
+
+    /// Adopt a native stored binding and prepare its encoded projection through the same work channel. Names and revision handles move unchanged, while paired catalog roots publish only after both encoded sides are complete.
+    pub async fn insert_restored_from(
+        self,
+        key: Budgeted<(String, String)>,
+        value: Budgeted<FieldAnalyzerBinding>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let control = StorageReadControl::new(input.memory, input.cancellation);
+        let key_bytes = self.validate_image_admission(&key, &value, &control)?;
+        let image = ImageBinding::prepare_restored(&value, input).await?;
+        let table = input.copy_text(&key.0).await?;
+        let field = input.copy_text(&key.1).await?;
+        let (table, mut memory) = table.into_parts();
+        let (field, field_memory) = field.into_parts();
+        memory.absorb(field_memory);
+        let image_key = StoredKey(Budgeted::new((table, field), memory).into());
+        self.publish_image(key, value, image_key, image, key_bytes, &control)
+    }
 }
 
 fn invalid(message: &'static str) -> StorageBackendError {

@@ -52,6 +52,20 @@ fn copy_name(
 }
 
 impl ImageBinding {
+    pub(super) async fn prepare_restored(
+        value: &FieldAnalyzerBinding,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Arc<Produced<Self>>> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        let index_name = copy_name_from(value.index.name.as_deref(), input).await?;
+        let index_image = value.index.compiled.image_source_with_input(input).await?;
+        let index = Self::side(index_name, index_image, &control)?;
+        let search_name = copy_name_from(value.search.name.as_deref(), input).await?;
+        let search_image = value.search.compiled.image_source_with_input(input).await?;
+        let search = Self::side(search_name, search_image, &control)?;
+        Self::finish(index, search, value.owner, value.last_phase, &control)
+    }
+
     pub(super) fn prepare(
         value: &FieldAnalyzerBinding,
         control: &ProductionControl<'_>,

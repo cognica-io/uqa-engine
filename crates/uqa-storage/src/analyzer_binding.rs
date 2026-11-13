@@ -17,6 +17,7 @@ use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendRes
 pub mod capture;
 mod image;
 pub mod registry;
+mod stored;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
