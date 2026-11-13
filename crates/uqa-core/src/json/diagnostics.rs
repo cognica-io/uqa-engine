@@ -15,6 +15,17 @@ pub struct JsonPosition {
     pub column: usize,
 }
 
+impl JsonPosition {
+    /// Typed observations of an already decoded value have no physical source location.
+    pub const fn unlocated() -> Self {
+        Self {
+            byte_offset: 0,
+            line: 0,
+            column: 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JsonSyntaxKind {
     EndOfValue,

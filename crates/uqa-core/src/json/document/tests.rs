@@ -8,6 +8,7 @@ use super::*;
 use crate::json::JsonInputError;
 
 mod output;
+mod projection;
 mod resources;
 
 fn protocol() -> JsonScalarProtocol {

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Resume physical and generic routine catalog input under its original work allowance, preserving repeated scalar projection and wrapper/version diagnostics. Typed routine restoration and Engine integration remain in progress.
 - Retain complete generic JSON documents through admitted input and output, preserving duplicate fields, numeric/raw scalar values and original diagnostics. Routine-catalog integration remains in progress.
 - Construct stored statements and routine declarations with admitted native ownership, preserving original defaults, legacy fields and nested statement depth. Complete routine-catalog loading and Engine restoration remain in progress.
 - Construct stored query expressions, windows and data-modifying CTEs as admitted native SQL syntax, preserving selected bindings, positional defaults and assignment alternatives. Complete routine-catalog input and Engine restoration remain in progress.

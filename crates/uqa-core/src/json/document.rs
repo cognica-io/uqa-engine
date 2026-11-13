@@ -13,6 +13,7 @@ use crate::{
     CancellationToken,
 };
 
+mod project;
 mod read;
 mod write;
 
@@ -143,6 +144,42 @@ impl JsonDocument {
 }
 
 impl<'a> JsonValue<'a> {
+    /// Reproduce generic-value deserialization after physical input has completed. Sorted scalar-protocol fields and number visitor conversion are interpreted at this distinct boundary.
+    pub async fn project_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        protocol: JsonScalarProtocol,
+    ) -> Result<JsonDocument, JsonInputError> {
+        project::value(self, control, work, protocol).await
+    }
+
+    /// Read a typed unsigned field from a complete generic value, retaining its unlocated numeric/type diagnostics.
+    pub async fn read_u32_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<u32, JsonInputError> {
+        control.check().map_err(JsonReadError::from)?;
+        work.checkpoint().await?;
+        if let Some(text) = self.number_text() {
+            if text.len() <= 10 {
+                if let Ok(value) = text.parse() {
+                    return Ok(value);
+                }
+            }
+            return Err(super::JsonDiagnostic::from(super::JsonSyntaxError {
+                kind: super::JsonSyntaxKind::InvalidNumber,
+                position: super::JsonPosition::unlocated(),
+            })
+            .into());
+        }
+        Err(
+            super::JsonDiagnostic::projected_type_with_work(self, "u32", control, work)
+                .await?
+                .into(),
+        )
+    }
     fn value(self) -> &'a Value {
         &self
             .document

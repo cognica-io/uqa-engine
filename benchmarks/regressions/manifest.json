@@ -4,6 +4,136 @@
     {
       "package": "uqa-core",
       "kind": "lib",
+      "test": "generic_document_projection_preserves_sorted_scalar_fields_and_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/projection.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Observe numeric/raw scalar fields after sorted generic input.",
+      "invariant": "Repeated value conversion preserves scalar interpretation, map completion and diagnostic precedence.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_projection_preserves_integer_widths_and_float_visitor_spelling",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/projection.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Project integer boundaries, extreme floating representations and fixed independent bit patterns.",
+      "invariant": "Generic number visitation preserves original conversion and canonical output without unbounded numeric scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_typed_unsigned_preserves_unlocated_value_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/projection.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Read unsigned fields from complete generic values of every JSON kind.",
+      "invariant": "Typed conversion preserves negative-zero projection and original unlocated messages and categories.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_projection_accounts_for_actual_owned_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/projection.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Observe actual allocations while independently projecting retained Unicode values.",
+      "invariant": "Every output and scratch allocation is admitted and source retirement does not invalidate projected values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_document_preserves_wrapper_shape_versions_and_migration_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Decode legacy and versioned routine catalogs with invalid field shapes, versions and missing/unknown fields.",
+      "invariant": "Complete wrapper conversion precedes version checks and migration admission in the original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_document_preserves_complete_input_and_repeated_generic_projection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Decode overwritten fields, truncated input and scalar-protocol fields inside routine definitions.",
+      "invariant": "Complete physical input and repeated generic conversion preserve original accepted values and errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_input_retains_the_selected_record_through_projection_and_source_changes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests/resources.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Resume a selected persistent routine record with long Unicode names while replacing and retiring its source.",
+      "invariant": "The original record and exact projected definitions survive current work windows and later source changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_input_retires_cancelled_denied_and_abandoned_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests/resources.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Interrupt physical/generic input, deny allocation and physical record size, and reject zero work windows.",
+      "invariant": "Failure consumes the private continuation and retires every admitted source and projected value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_input_retains_only_admitted_unknown_field_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests/resources.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Reject a long unknown wrapper name after complete physical input.",
+      "invariant": "Only the original admitted diagnostic payload survives failure; redaction releases it without losing type information.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "routine_catalog_document_preserves_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/tests/resources.rs",
+      "capability": "Retained routine catalog projection",
+      "workload": "Cancel original or invoking ownership during retained routine catalog decoding.",
+      "invariant": "Both cancellation scopes terminate construction and release its original reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
       "test": "native_json_document_output_retires_each_interrupted_or_denied_generation",
       "cases": 1,
       "source": "crates/uqa-core/src/json/document/tests/output.rs",

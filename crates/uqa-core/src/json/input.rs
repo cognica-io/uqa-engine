@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod fields;
+mod projected;
 
 #[derive(Debug, thiserror::Error)]
 pub enum JsonInputError {
@@ -380,11 +381,15 @@ impl std::fmt::Display for JsonDiagnostic {
                 write!(f, "invalid value: {actual}, expected {expected}")?;
             }
         }
-        write!(
-            f,
-            " at line {} column {}",
-            self.position.line, self.position.column
-        )
+        if self.position.line == 0 {
+            Ok(())
+        } else {
+            write!(
+                f,
+                " at line {} column {}",
+                self.position.line, self.position.column
+            )
+        }
     }
 }
 

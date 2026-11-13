@@ -64,21 +64,12 @@ pub(crate) fn decode(
     let (format, mut definitions) = if value.get("routine_catalog_format").is_some() {
         let catalog: RoutineCatalog<BTreeMap<String, Vec<serde_json::Value>>> =
             serde_json::from_value(value)?;
-        if !matches!(catalog.routine_catalog_format, 1..=3) {
-            return Err(StorageBackendError::Other(format!(
-                "unknown routine catalog format {}",
-                catalog.routine_catalog_format
-            )));
-        }
+        validate_format(catalog.routine_catalog_format)?;
         (catalog.routine_catalog_format, catalog.definitions)
     } else {
         (0, serde_json::from_value(value)?)
     };
-    if format != 3 && !allows_migration {
-        return Err(StorageBackendError::Other(
-            "routine authority requires initial catalog migration".into(),
-        ));
-    }
+    validate_migration(format, allows_migration)?;
     for definition in definitions.values_mut().flatten() {
         if format >= 2 {
             if definition.get("owner").is_none() || definition.get("execute_acl").is_none() {
@@ -108,6 +99,24 @@ pub(crate) fn decode(
         }
     }
     Ok((definitions, format != 3))
+}
+
+pub(super) fn validate_format(format: u32) -> StorageBackendResult<()> {
+    if matches!(format, 1..=3) {
+        return Ok(());
+    }
+    Err(StorageBackendError::Other(format!(
+        "unknown routine catalog format {format}"
+    )))
+}
+
+pub(super) fn validate_migration(format: u32, allows_migration: bool) -> StorageBackendResult<()> {
+    if format == 3 || allows_migration {
+        return Ok(());
+    }
+    Err(StorageBackendError::Other(
+        "routine authority requires initial catalog migration".into(),
+    ))
 }
 
 fn bind_legacy_definition(

@@ -201,7 +201,7 @@ async fn next<'a, W: JsonReadWork<Error = JsonReadError>>(
         .ok_or(JsonInputError::Invalid)
 }
 
-async fn number_text<W: JsonReadWork<Error = JsonReadError>>(
+pub(super) async fn number_text<W: JsonReadWork<Error = JsonReadError>>(
     text: &[u8],
     control: &ProductionControl<'_>,
     work: &mut W,
@@ -248,9 +248,9 @@ fn raw<'a, W: JsonReadWork<Error = JsonReadError> + 'a>(
     Ok(Budgeted::new(Box::pin(future), memory))
 }
 
-struct Comparison<'a, 'c, W> {
-    control: &'a ProductionControl<'c>,
-    work: &'a mut W,
+pub(super) struct Comparison<'a, 'c, W> {
+    pub(super) control: &'a ProductionControl<'c>,
+    pub(super) work: &'a mut W,
 }
 impl<W: JsonReadWork<Error = JsonReadError>> MapKeyInput<String> for Comparison<'_, '_, W> {
     type Error = JsonInputError;
