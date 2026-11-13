@@ -1,0 +1,128 @@
+{
+  "postgresql": "18.4",
+  "cases": [
+    {
+      "sql": "BEGIN",
+      "rows": []
+    },
+    {
+      "sql": "CREATE ROLE uqa_backup_shadow_reader LOGIN CREATEDB NOINHERIT CONNECTION LIMIT 7",
+      "rows": []
+    },
+    {
+      "sql": "CREATE ROLE uqa_backup_shadow_observer",
+      "rows": []
+    },
+    {
+      "sql": "SELECT usename, usecreatedb, usesuper, userepl, usebypassrls, passwd, valuntil, useconfig FROM pg_catalog.pg_shadow WHERE usename='uqa_backup_shadow_reader'",
+      "rows": [
+        {
+          "usename": "uqa_backup_shadow_reader",
+          "usecreatedb": true,
+          "usesuper": false,
+          "userepl": false,
+          "usebypassrls": false,
+          "passwd": null,
+          "valuntil": null,
+          "useconfig": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT usesysid=to_regrole('uqa_backup_shadow_reader')::oid AS matches FROM pg_catalog.pg_shadow WHERE usename='uqa_backup_shadow_reader'",
+      "rows": [
+        {
+          "matches": true
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS count FROM pg_catalog.pg_shadow WHERE usename='uqa_backup_shadow_observer'",
+      "rows": [
+        {
+          "count": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT passwd FROM pg_catalog.pg_user WHERE usename='uqa_backup_shadow_reader'",
+      "rows": [
+        {
+          "passwd": "********"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT has_column_privilege('uqa_backup_shadow_observer','pg_catalog.pg_shadow','usename','SELECT') AS permitted",
+      "rows": [
+        {
+          "permitted": false
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT(usename) ON pg_catalog.pg_shadow TO uqa_backup_shadow_observer",
+      "rows": []
+    },
+    {
+      "sql": "SET ROLE uqa_backup_shadow_observer",
+      "rows": []
+    },
+    {
+      "sql": "SELECT usename FROM pg_catalog.pg_shadow WHERE usename='uqa_backup_shadow_reader'",
+      "rows": [
+        {
+          "usename": "uqa_backup_shadow_reader"
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT denied",
+      "rows": []
+    },
+    {
+      "sql": "SELECT passwd FROM pg_catalog.pg_shadow",
+      "sqlstate": "42501"
+    },
+    {
+      "sql": "ROLLBACK TO denied",
+      "rows": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "rows": []
+    },
+    {
+      "sql": "SAVEPOINT original_acl",
+      "rows": []
+    },
+    {
+      "sql": "REVOKE SELECT(usename) ON pg_catalog.pg_shadow FROM uqa_backup_shadow_observer",
+      "rows": []
+    },
+    {
+      "sql": "SELECT has_column_privilege('uqa_backup_shadow_observer','pg_catalog.pg_shadow','usename','SELECT') AS permitted",
+      "rows": [
+        {
+          "permitted": false
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO original_acl",
+      "rows": []
+    },
+    {
+      "sql": "SELECT has_column_privilege('uqa_backup_shadow_observer','pg_catalog.pg_shadow','usename','SELECT') AS permitted",
+      "rows": [
+        {
+          "permitted": true
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "rows": []
+    }
+  ]
+}

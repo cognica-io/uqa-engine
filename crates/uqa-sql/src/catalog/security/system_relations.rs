@@ -7,10 +7,7 @@
 //! System relation ACL defaults, persistence validation and effective privilege rules.
 
 use super::{
-    table::{
-        role_has_privilege, validate_table_security_invariants, TableAclPrivilege,
-        TablePrivilegeCheck,
-    },
+    table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
     BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
@@ -20,7 +17,10 @@ use std::ops::Deref;
 use uqa_core::{memory::OwnedMap, RelationIdentity};
 
 mod registry;
+pub mod stored;
+mod validation;
 pub use registry::{CapturedSystemRelationSecurities, SystemRelationSecurities};
+pub use validation::validate_security;
 
 /// One catalog tuple ACL and its replacement identity. Equal ACL values can still be different committed tuples.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -82,22 +82,6 @@ pub fn metadata_key(relation: SystemRelation, column: Option<&str>) -> String {
         relation.qualified_name(),
         column.unwrap_or("")
     )
-}
-
-pub fn validate_security(
-    relation: SystemRelation,
-    security: &TableSecurity,
-    roles: &RoleDefinitions,
-) -> Result<(), String> {
-    if super::role_bindings::bind_role(roles, &security.role_owner, "system relation")?
-        != crate::catalog::roles::RoleIdentity::BOOTSTRAP
-    {
-        return Err(format!(
-            "system relation `{}` has an invalid owner",
-            relation.qualified_name()
-        ));
-    }
-    validate_table_security_invariants(security, Some(&relation.column_names()), roles)
 }
 
 fn masks_table_write(

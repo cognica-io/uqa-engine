@@ -34,7 +34,7 @@ pub(super) fn resolve<'a>(
     inline(resolve_from(owner, acl, columns, roles, control, &mut ()))
 }
 
-pub(super) async fn resolve_from<'a>(
+pub(in crate::catalog::security) async fn resolve_from<'a>(
     owner: RoleIdentity,
     acl: Option<&[BoundTableAclEntry]>,
     columns: impl Iterator<Item = (&'a String, &'a Vec<BoundTableAclEntry>)>,

@@ -12,6 +12,7 @@ mod authority;
 mod graph_oids;
 mod graphs;
 mod sequences;
+mod system_authority;
 mod types;
 mod watermarks;
 

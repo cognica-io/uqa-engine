@@ -49,9 +49,7 @@ pub(super) fn bind_role(
     let role = roles
         .get(name)
         .ok_or_else(|| format!("persisted {catalog} privileges reference missing role `{name}`"))?;
-    RoleBinding::from_definition(role)
-        .map(|binding| binding.identity())
-        .map_err(|error| error.to_string())
+    RoleBinding::identity_from_definition(role).map_err(|error| error.to_string())
 }
 
 pub(super) fn role_name<'a>(

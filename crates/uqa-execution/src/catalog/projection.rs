@@ -142,6 +142,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
+        VirtualRelation::PgShadow => pg_catalog::build_pg_shadow(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
         VirtualRelation::PgCursors => cursors::rows(session),

@@ -12,6 +12,7 @@ use uqa_execution::{
     catalog::{
         domain::DomainRestoreState, security::builtin_routines::input::BuiltinRoutineCatalogInput,
         security::database_lifecycle::input::DatabaseCatalogInput,
+        security::system_relations::input::SystemRelationCatalogInput,
     },
     routines::restoration::PendingSQLFunctionRestore,
 };
@@ -25,7 +26,11 @@ pub(super) struct RestoredAuthorities {
 }
 
 pub(super) enum PersistentAuthorityInput {
-    System(DomainRestoreState),
+    Begin(DomainRestoreState),
+    System {
+        input: SystemRelationCatalogInput,
+        domains: DomainRestoreState,
+    },
     Database {
         input: DatabaseCatalogInput,
         domains: DomainRestoreState,
@@ -44,7 +49,7 @@ pub(super) enum AuthorityProgress {
 
 impl PersistentAuthorityInput {
     pub(super) fn new(domains: DomainRestoreState) -> Self {
-        Self::System(domains)
+        Self::Begin(domains)
     }
 
     /// The owning Engine candidate retires its complete private session on any failure or unwind. Later registry compilation retains domain completion and pending routine definitions.
@@ -57,24 +62,32 @@ impl PersistentAuthorityInput {
         control.check()?;
         let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
         let next = match self {
-            Self::System(domains) => {
-                *engine.durable.system_relation_security.write() =
-                    uqa_execution::catalog::security::system_relations::restore(
-                        catalog.as_ref(),
-                        &engine.durable.roles.read(),
-                        false,
-                    )?;
-                Self::Database {
-                    input: DatabaseCatalogInput::new(
-                        Arc::clone(catalog),
-                        engine.durable.roles.read().clone(),
-                        limits,
-                        engine.durable.database_security.read().budget(),
-                        control,
-                    )?,
-                    domains,
+            Self::Begin(domains) => Self::System {
+                input: SystemRelationCatalogInput::new(
+                    Arc::clone(catalog),
+                    engine.durable.roles.read().clone(),
+                    limits,
+                    engine.durable.system_relation_security.read().budget(),
+                    control,
+                )?,
+                domains,
+            },
+            Self::System { mut input, domains } => match input.advance(1)? {
+                None => Self::System { input, domains },
+                Some(value) => {
+                    *engine.durable.system_relation_security.write() = value;
+                    Self::Database {
+                        input: DatabaseCatalogInput::new(
+                            Arc::clone(catalog),
+                            engine.durable.roles.read().clone(),
+                            limits,
+                            engine.durable.database_security.read().budget(),
+                            control,
+                        )?,
+                        domains,
+                    }
                 }
-            }
+            },
             Self::Database { mut input, domains } => match input.advance(1)? {
                 Some(value) => {
                     *engine.durable.database_security.write() = value;

@@ -7,17 +7,12 @@
 //! Versioned system ACL tuples retain incarnations; only initial restoration binds legacy names.
 
 use super::SystemAcl;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::{BoundTableSecurity, TableAclEntry};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredSystemAcl<T> {
-    system_acl_format: u32,
-    entry: T,
-}
+use uqa_sql::catalog::security::system_relations::stored::StoredSystemAcl;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

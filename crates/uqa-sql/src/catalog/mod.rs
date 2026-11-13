@@ -650,7 +650,7 @@ impl VirtualRelation {
                 "rolconfig" => Array(ColumnType::Text),
                 "oid" => Inline(ColumnType::Oid),
             ],
-            Self::PgUser => columns![
+            Self::PgUser | Self::PgShadow => columns![
                 "usename" => Inline(ColumnType::Name),
                 "usesysid" => Inline(ColumnType::Oid),
                 "usecreatedb" => Inline(ColumnType::Boolean),

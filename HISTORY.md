@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Persistent system-relation authority restoration now retains independent table and column ACL tuples through complete physical input and original role/grant validation, adopts native buffers and preserves private transaction cleanup.
+
 - Restore persistent database authority through admitted generic JSON field projection and the existing owner/ACL validation order. Preserve sorted last-value fields and installed numeric/raw scalar representations, and transfer native ACL buffers into the private Engine before routine restoration.
 
 - Restore current built-in routine ACL records through retained physical input and shared native field/authority validation, transferring decoded buffers into the private Engine generation at its original position after routine placeholders. Preserve the selected transaction and independent later mutation allowance.
@@ -411,6 +413,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
 

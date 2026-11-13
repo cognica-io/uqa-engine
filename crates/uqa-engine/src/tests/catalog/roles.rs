@@ -29,6 +29,7 @@ mod session_identity;
 mod settings;
 mod snapshots;
 mod system_security;
+mod system_shadow;
 mod tuple_changes;
 mod view_publication;
 

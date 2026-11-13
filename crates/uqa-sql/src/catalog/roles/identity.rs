@@ -227,6 +227,16 @@ impl RoleBinding {
         Ok(Self::new(role.name.clone(), oid, role.object_id))
     }
 
+    /// Validate a role incarnation without constructing an owned display-name binding.
+    pub(crate) fn identity_from_definition(
+        role: &RoleDefinition,
+    ) -> Result<RoleIdentity, SQLError> {
+        Ok(RoleIdentity {
+            oid: i64::from(Self::validated_oid(role)?),
+            object_id: role.object_id,
+        })
+    }
+
     fn validated_oid(role: &RoleDefinition) -> Result<u32, SQLError> {
         if role.oid <= 0 {
             return Err(SQLError::Internal("invalid role OID".into()));

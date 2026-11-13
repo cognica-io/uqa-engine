@@ -69,7 +69,6 @@ macro_rules! system_relations {
 
 system_relations! {
     PgDbRoleSetting => ("pg_catalog", "pg_db_role_setting", 2964, "table"),
-    PgShadow => ("pg_catalog", "pg_shadow", 12005, "view"),
     PgTablespace => ("pg_catalog", "pg_tablespace", 1213, "table"),
     PgCollation => ("pg_catalog", "pg_collation", 3456, "table"),
     PgSequence => ("pg_catalog", "pg_sequence", 2224, "table"),
@@ -134,7 +133,7 @@ impl SystemRelation {
         };
         let count = if matches!(
             self,
-            Self::PgShadow
+            Self::Projected(VirtualRelation::PgShadow)
                 | Self::Projected(
                     VirtualRelation::PgAuthid | VirtualRelation::AgGraph | VirtualRelation::AgLabel
                 )
@@ -224,11 +223,11 @@ impl SystemRelation {
                 P(PgNamespace),
                 Self::PgTablespace,
             ],
-            P(VirtualRelation::PgRoles) | Self::PgShadow => &[
+            P(VirtualRelation::PgRoles) | Self::Projected(VirtualRelation::PgShadow) => &[
                 Self::Projected(VirtualRelation::PgAuthid),
                 Self::PgDbRoleSetting,
             ],
-            P(VirtualRelation::PgUser) => &[Self::PgShadow],
+            P(VirtualRelation::PgUser) => &[Self::Projected(VirtualRelation::PgShadow)],
             P(VirtualRelation::PgSequences) => &[Self::PgSequence, P(PgClass), P(PgNamespace)],
             Self::InformationEnabledRoles => &[Self::Projected(VirtualRelation::PgAuthid)],
             _ => &[],

@@ -64395,6 +64395,130 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_system_authority_preserves_projected_defaults_duplicates_and_positional_shapes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/system_relations/stored/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_system_authority_adopts_last_native_buffers_and_independent_mutation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/system_relations/stored/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_system_authority_matches_generic_fields_and_whole_family_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/input/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_system_authority_preserves_scalar_representations_and_grant_failures",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/input/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_system_authority_bounds_role_and_grant_work_and_retains_later_mutations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/input/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "persistent_system_authority_retires_partial_groups_and_pending_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/security/system_relations/input/tests.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_system_authority_keeps_selected_tuples_and_later_sql_mutations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/system_authority.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_system_authority_retires_private_roots_and_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/system_authority.rs",
+      "capability": "Persistent system relation authority restoration",
+      "workload": "Generic stored field projection, complete physical families, independent relation and column tuples, selected persistent snapshots and terminal retirement.",
+      "invariant": "Original row and sorted-relation validation order is preserved; native last-write ACL buffers retain admission and independent mutation ownership.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_login_catalog_matches_postgresql_rows_and_column_authority",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/roles/system_shadow.rs",
+      "capability": "Private login catalog projection",
+      "workload": "Independently captured PostgreSQL 18.4 login rows, password masking, login filtering, column grants, denied reads and savepoint rollback on all four providers.",
+      "invariant": "pg_shadow remains the private login view of role state with its original relation identity and grant checks; pg_user retains masking.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

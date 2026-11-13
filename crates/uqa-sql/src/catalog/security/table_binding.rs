@@ -13,7 +13,7 @@ use uqa_core::catalog_role::BoundAclEntry;
 use uqa_core::memory::OwnedMap;
 
 mod production;
-mod resolution;
+pub(super) mod resolution;
 mod validation;
 pub use production::{CapturedTablePrivileges, CapturedTableSecurity};
 

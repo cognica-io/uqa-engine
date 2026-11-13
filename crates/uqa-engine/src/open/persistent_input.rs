@@ -102,7 +102,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, database and built-in routine authority input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database and built-in routine authority input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,

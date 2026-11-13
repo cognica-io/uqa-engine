@@ -18,6 +18,7 @@ use uqa_sql::catalog::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+pub mod input;
 mod persistence;
 
 pub trait SystemRelationSecurityState: SystemRelationSecurityCatalog {
