@@ -61,7 +61,12 @@ fn compare(catalog: Arc<dyn CatalogFacade>, resources: Arc<AnalyzerResources>) {
             assert!(expected.pending.is_empty());
             drop(actual);
         }
-        (Err(StorageBackendError::Serde(_)), Err(StorageBackendError::Serde(_))) => (),
+        (Err(StorageBackendError::Serde(expected)), Err(StorageBackendError::Json(actual))) => {
+            assert_eq!(actual.to_string(), expected.to_string());
+            assert_eq!(actual.is_data(), expected.is_data());
+            assert_eq!(actual.is_syntax(), expected.is_syntax());
+            assert_eq!(actual.is_eof(), expected.is_eof());
+        }
         (Err(expected), Err(actual)) => assert_eq!(actual.to_string(), expected.to_string()),
         _ => panic!("named analyzer result differs from ordinary restoration"),
     }
@@ -193,6 +198,37 @@ fn named_analyzer_input_preserves_generic_diagnostic_fields_before_native_public
 }
 
 #[test]
+fn named_analyzer_input_keeps_original_diagnostic_failures_before_publication() {
+    let resources = Arc::new(AnalyzerResources::default());
+    let (_, configuration, descriptor) = revision(&resources);
+    let (_, catalog) = catalog();
+    let keys = uqa_core::json::JsonScalarProtocol::from_values(
+        &serde_json::Number::from(1u8),
+        serde_json::value::RawValue::NULL,
+    )
+    .unwrap();
+    for key in [keys.number, keys.raw] {
+        for payload in [
+            "null", "true", "1.2", "[]", "{}", "\"01\"", "\"[1,]\"", "\"1\"",
+        ] {
+            for suffix in ["}", ",\"later\":invalid}", "\n false}", ""] {
+                let text =
+                    format!("{{\n\"earlier\":\"한🙂\",\n\"value\":{{{key:?}:{payload}{suffix}}}");
+                assert!(serde_json::from_str::<serde_json::Value>(&text).is_err() || suffix == "}");
+                catalog
+                    .save_analyzer_revision("custom", &text, &descriptor)
+                    .unwrap();
+                compare(catalog.clone(), resources.clone());
+            }
+        }
+    }
+    catalog
+        .save_analyzer_revision("custom", &configuration, &descriptor)
+        .unwrap();
+    compare(catalog, resources);
+}
+
+#[test]
 fn named_analyzer_input_adopts_original_names_and_independent_mutation_allowances() {
     let resources = Arc::new(AnalyzerResources::default());
     let (compiled, configuration, descriptor) = revision(&resources);
@@ -272,7 +308,14 @@ fn named_analyzer_input_retires_selected_rows_and_unpublished_revisions_on_termi
                 );
             } else {
                 if terminal != "drop" {
-                    assert!(finish(&mut input, usize::from(terminal != "zero")).is_err());
+                    let error = finish(&mut input, usize::from(terminal != "zero"))
+                        .err()
+                        .expect("terminal named analyzer input");
+                    match terminal {
+                        "cancel" => assert!(matches!(error, StorageBackendError::Cancelled(_))),
+                        "memory" => assert!(matches!(error, StorageBackendError::Memory(_))),
+                        _ => (),
+                    }
                     assert!(input.advance(1).is_err());
                 }
                 drop(input);

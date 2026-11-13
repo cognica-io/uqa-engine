@@ -39,7 +39,6 @@ fn oracle(text: &str) -> StorageBackendResult<()> {
 fn observation(result: &StorageBackendResult<()>) -> String {
     match result {
         Ok(()) => "valid".into(),
-        Err(StorageBackendError::Serde(_)) => "JSON error".into(),
         Err(error) => error.to_string(),
     }
 }
@@ -87,6 +86,7 @@ fn compare(text: &str) {
     let mut input = input(text.into(), &memory, &token, &token);
     let actual = finish(&mut input, 1).map(|_| ());
     assert_eq!(observation(&actual), expected, "retained: {text}");
+    drop(actual);
     assert_eq!(memory.used(), 0);
     assert!(finish(&mut input, 1).is_err());
 }
@@ -179,6 +179,7 @@ fn retained_type_markers_validate_truncation_depth_and_all_discarded_tokens() {
     for text in [
         "[]",
         "null",
+        "\"한🙂\\n\"",
         "1",
         "{}",
         "{\"format\":1} false",

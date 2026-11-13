@@ -136,12 +136,23 @@ fn persistent_type_input_finishes_both_physical_families_before_marker_and_defin
             ..LIMITS
         },
     );
-    assert!(!matches!(error, StorageBackendError::Serde(_)), "{error}");
+    assert!(
+        !matches!(
+            error,
+            StorageBackendError::Serde(_) | StorageBackendError::Json(_)
+        ),
+        "{error}"
+    );
     catalog.delete_metadata(&later_claim).unwrap();
-    assert!(matches!(
-        failure::<StoredEnum>(Arc::clone(&catalog), LIMITS),
-        StorageBackendError::Serde(_)
-    ));
+    let error = failure::<StoredEnum>(Arc::clone(&catalog), LIMITS);
+    let StorageBackendError::Json(actual) = error else {
+        panic!("native marker diagnostic: {error}");
+    };
+    let expected =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>("bad marker JSON")
+            .unwrap_err();
+    assert_eq!(actual.to_string(), expected.to_string());
+    assert_eq!(actual.is_syntax(), expected.is_syntax());
     catalog
         .set_metadata(format.format_key, &format.marker())
         .unwrap();

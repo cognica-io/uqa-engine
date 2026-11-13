@@ -41,10 +41,15 @@ fn compare_projection(text: &str) {
     let actual = project(text.into(), 1).map(|(value, _)| value);
     match expected {
         Ok(expected) => assert_eq!(actual.unwrap(), expected, "{text}"),
-        Err(_) => assert!(
-            matches!(actual, Err(StorageBackendError::Serde(_))),
-            "{text}: {actual:?}"
-        ),
+        Err(expected) => {
+            let Err(StorageBackendError::Json(actual)) = actual else {
+                panic!("{text}: {actual:?}");
+            };
+            assert_eq!(actual.to_string(), expected.to_string(), "{text}");
+            assert_eq!(actual.is_data(), expected.is_data(), "{text}");
+            assert_eq!(actual.is_syntax(), expected.is_syntax(), "{text}");
+            assert_eq!(actual.is_eof(), expected.is_eof(), "{text}");
+        }
     }
 }
 

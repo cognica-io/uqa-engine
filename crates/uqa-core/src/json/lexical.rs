@@ -160,7 +160,10 @@ impl<'a> JsonReader<'a, '_> {
             }
             Some(b'1'..=b'9') => self.digits(work).await?,
             None => return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into()),
-            _ => return Err(self.reject(JsonSyntaxKind::InvalidNumber, true).into()),
+            _ => {
+                self.advance(work).await?;
+                return Err(self.reject(JsonSyntaxKind::InvalidNumber, false).into());
+            }
         }
         if self.peek() == Some(b'.') {
             self.advance(work).await?;
@@ -171,7 +174,14 @@ impl<'a> JsonReader<'a, '_> {
             if self.peek().is_some_and(|byte| matches!(byte, b'+' | b'-')) {
                 self.advance(work).await?;
             }
-            self.digits(work).await?;
+            match self.peek() {
+                Some(b'0'..=b'9') => self.digits(work).await?,
+                Some(_) => {
+                    self.advance(work).await?;
+                    return Err(self.reject(JsonSyntaxKind::InvalidNumber, false).into());
+                }
+                None => return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into()),
+            }
         }
         Ok(&self.input[start..self.position])
     }

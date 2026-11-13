@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
-    json::{JsonReadError, JsonScalarProtocol},
+    json::{JsonInputError, JsonScalarProtocol},
     memory::MemoryBudget,
     CancellationToken,
 };
@@ -26,7 +26,7 @@ fn input(
     text: Arc<str>,
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
-) -> ImageDecoder<bool, JsonReadError> {
+) -> ImageDecoder<bool, JsonInputError> {
     ImageDecoder::new(memory, cancellation, |mut reader| async move {
         let mut work = reader.input();
         let saved = AnalyzerDiagnostic::read_from(&text, &mut work).await?;
@@ -36,9 +36,9 @@ fn input(
 }
 
 fn finish(
-    input: &mut ImageDecoder<bool, JsonReadError>,
+    input: &mut ImageDecoder<bool, JsonInputError>,
     steps: usize,
-) -> Result<(bool, usize), JsonReadError> {
+) -> Result<(bool, usize), JsonInputError> {
     for polls in 1..1_000_000 {
         if let Some(value) = input.advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps })? {
             return Ok((value, polls));
@@ -60,7 +60,12 @@ fn compare(configuration: &Analyzer, text: &str) {
     );
     match (expected, finish(&mut input, 1)) {
         (Ok(expected), Ok((actual, _))) => assert_eq!(actual, expected, "{text}"),
-        (Err(_), Err(JsonReadError::InvalidJson)) => (),
+        (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
+            assert_eq!(actual.to_string(), expected.to_string(), "{text}");
+            assert_eq!(actual.is_data(), expected.is_data(), "{text}");
+            assert_eq!(actual.is_syntax(), expected.is_syntax(), "{text}");
+            assert_eq!(actual.is_eof(), expected.is_eof(), "{text}");
+        }
         (expected, actual) => panic!("{text}: {expected:?} / {actual:?}"),
     }
     assert_eq!(memory.used(), 0);
@@ -258,10 +263,13 @@ fn analyzer_diagnostic_comparison_retires_cancelled_denied_and_abandoned_native_
                 );
             } else {
                 if mode != "drop" {
-                    assert!(
-                        finish(&mut input, if mode == "zero" { 0 } else { steps }).is_err(),
-                        "{mode}"
-                    );
+                    let error =
+                        finish(&mut input, if mode == "zero" { 0 } else { steps }).unwrap_err();
+                    match mode {
+                        "cancel" => assert!(matches!(error, JsonInputError::Cancelled(_))),
+                        "memory" => assert!(matches!(error, JsonInputError::Memory(_))),
+                        _ => (),
+                    }
                     assert!(finish(&mut input, 1).is_err());
                 }
                 drop(input);

@@ -65883,6 +65883,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_diagnostics_preserve_scalar_visitor_boundaries_and_nested_locations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Stored generic JSON diagnostics",
+      "workload": "Invalid scalar types, malformed inner number/raw text, nested wrappers, later invalid fields and byte-based multiline locations.",
+      "invariant": "The original public value parser determines the same first message, data/syntax/EOF category and location without inspecting a later scalar field.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_diagnostics_match_original_truncation_and_syntax_locations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Stored generic JSON diagnostics",
+      "workload": "Truncate every UTF-8 boundary of ordinary and scalar-wrapped values and append malformed suffixes.",
+      "invariant": "Native validation preserves the original lexical failure and exact source location before field projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_scalar_errors_keep_resources_terminal_at_every_work_boundary",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Stored generic JSON diagnostics",
+      "workload": "Inject admission failure or cancellation at every observed work boundary of nested raw and long numeric scalar input.",
+      "invariant": "The first resource failure retains its original type, prevents later work and retires every temporary allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_analyzer_input_keeps_original_diagnostic_failures_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/named/tests.rs",
+      "capability": "Stored generic JSON diagnostics",
+      "workload": "Restore persisted malformed scalar diagnostics through bounded catalog work, then restore an independently corrected selected catalog.",
+      "invariant": "Native restoration matches ordinary parser messages, categories and locations before publication and leaves no retained failed candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_json_scalar_type_errors_precede_generic_container_depth",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/value/tests.rs",
+      "capability": "Stored generic JSON diagnostics",
+      "workload": "Wrong scalar-value types and valid scalar strings at each side of the generic depth boundary, including enclosing fields and nested raw values.",
+      "invariant": "Typed scalar rejection precedes generic container-depth admission, with the original message, category and source position.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

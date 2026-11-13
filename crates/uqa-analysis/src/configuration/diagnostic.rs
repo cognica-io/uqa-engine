@@ -12,8 +12,8 @@ use std::{future::Future, pin::Pin};
 use uqa_core::{
     image_io::AsyncImageInput,
     json::{
-        decode_json_string_from, observe_json_text, JsonObjectProjection, JsonReadError,
-        JsonReader, JsonScalarProtocol, JsonToken,
+        decode_json_string_from, observe_json_text, JsonInputError, JsonObjectProjection,
+        JsonReadError, JsonReader, JsonScalarProtocol, JsonToken,
     },
     memory::{Budgeted, ProductionControl},
 };
@@ -28,7 +28,10 @@ pub struct AnalyzerDiagnostic<'a> {
 
 impl<'a> AnalyzerDiagnostic<'a> {
     /// Validate every original value, including overwritten fields and public scalar representations, before any native configuration comparison.
-    pub async fn read_from(text: &'a str, input: &mut AsyncImageInput<'_>) -> Result<Self> {
+    pub async fn read_from(
+        text: &'a str,
+        input: &mut AsyncImageInput<'_>,
+    ) -> std::result::Result<Self, JsonInputError> {
         let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
         let protocol = {
             let _memory = input.memory.reserve(128)?;
@@ -47,7 +50,7 @@ impl<'a> AnalyzerDiagnostic<'a> {
         &self,
         configuration: &Analyzer,
         input: &mut AsyncImageInput<'_>,
-    ) -> Result<bool> {
+    ) -> std::result::Result<bool, JsonInputError> {
         compare(
             View::Analyzer(configuration),
             self.text.as_bytes(),
@@ -55,6 +58,7 @@ impl<'a> AnalyzerDiagnostic<'a> {
             input,
         )
         .await
+        .map_err(Into::into)
     }
 }
 

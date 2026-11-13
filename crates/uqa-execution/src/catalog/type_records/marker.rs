@@ -9,7 +9,10 @@
 use super::TypeRecordFormat;
 use uqa_core::{
     image_io::AsyncImageInput,
-    json::{decode_json_string_with_work, JsonReadError, JsonReadWork, JsonReader, JsonToken},
+    json::{
+        decode_json_string_with_work, observe_json_text, JsonDiagnostic, JsonInputError,
+        JsonReadError, JsonReadWork, JsonReader, JsonToken,
+    },
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
@@ -31,20 +34,7 @@ pub(crate) async fn field_from(
     work: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<FieldProjection> {
     let keys = protocol::keys(control)?;
-    let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
-    let first = next(&mut reader, work).await?;
-    let value = value::observe(first, &mut reader, control, work, keys, Some(field))
-        .await
-        .map_err(json_error)?;
-    if reader
-        .next_event_with_work(work)
-        .await
-        .map_err(json_error)?
-        .is_some()
-    {
-        return Err(invalid());
-    }
-    control.check()?;
+    let value = observe_json_text(text.as_bytes(), control, work, keys, Some(field)).await?;
     Ok(value.field())
 }
 
@@ -83,9 +73,18 @@ async fn check_with_work<W: JsonReadWork<Error = JsonReadError>>(
     work: &mut W,
 ) -> StorageBackendResult<()> {
     let keys = protocol::keys(control)?;
-    let mut reader = JsonReader::with_control(text, control).with_depth_limit(127);
-    if next(&mut reader, work).await? != JsonToken::StartObject {
-        return Err(invalid());
+    let mut reader = JsonReader::with_control(text, control);
+    let first = next(&mut reader, work).await?;
+    if first != JsonToken::StartObject {
+        return Err(JsonDiagnostic::invalid_type_with_work(
+            first,
+            reader.position(),
+            "a map",
+            control,
+            work,
+        )
+        .await?
+        .into());
     }
     let mut seen = false;
     let mut foreign = false;
@@ -100,13 +99,11 @@ async fn check_with_work<W: JsonReadWork<Error = JsonReadError>>(
         };
         let name = decode_json_string_with_work(encoded, control, work)
             .await
-            .map_err(json_error)?;
+            .map_err(JsonInputError::from)?;
         let matches = name.as_str() == format.format_field;
         drop(name);
         let token = next(&mut reader, work).await?;
-        let scalar = value::read(token, &mut reader, control, work, keys)
-            .await
-            .map_err(json_error)?;
+        let scalar = value::read(token, &mut reader, control, work, keys).await?;
         if matches {
             seen = true;
             version = scalar;
@@ -117,7 +114,7 @@ async fn check_with_work<W: JsonReadWork<Error = JsonReadError>>(
     if reader
         .next_event_with_work(work)
         .await
-        .map_err(json_error)?
+        .map_err(|error| JsonInputError::from_reader(&reader, error))?
         .is_some()
     {
         return Err(invalid());
@@ -142,7 +139,7 @@ async fn next<'a, W: JsonReadWork<Error = JsonReadError>>(
     reader
         .next_event_with_work(work)
         .await
-        .map_err(json_error)?
+        .map_err(|error| JsonInputError::from_reader(reader, error))?
         .map(|event| event.token)
         .ok_or_else(invalid)
 }
@@ -151,11 +148,4 @@ fn invalid() -> StorageBackendError {
     StorageBackendError::Serde(<serde_json::Error as serde::de::Error>::custom(
         "invalid type catalog format JSON",
     ))
-}
-fn json_error(error: JsonReadError) -> StorageBackendError {
-    match error {
-        JsonReadError::Memory(error) => error.into(),
-        JsonReadError::Cancelled(error) => error.into(),
-        _ => invalid(),
-    }
 }

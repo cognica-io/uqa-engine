@@ -10,6 +10,18 @@ use std::fmt::Write;
 mod domains;
 mod structured;
 
+fn assert_marker_error(error: StorageBackendError, text: &str) {
+    let expected =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text).unwrap_err();
+    let StorageBackendError::Json(actual) = error else {
+        panic!("native type marker diagnostic: {error}");
+    };
+    assert_eq!(actual.to_string(), expected.to_string());
+    assert_eq!(actual.is_data(), expected.is_data());
+    assert_eq!(actual.is_syntax(), expected.is_syntax());
+    assert_eq!(actual.is_eof(), expected.is_eof());
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Enum,
@@ -213,7 +225,7 @@ fn persistent_type_input_retires_both_private_roots_and_the_selected_transaction
         loop {
             match input.advance(64) {
                 Err(error) => {
-                    assert!(matches!(error, StorageBackendError::Serde(_)), "{error}");
+                    assert_marker_error(error, "{bad marker JSON");
                     break;
                 }
                 Ok(None) => (),

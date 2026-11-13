@@ -7,11 +7,12 @@
 //! Typed input failures retain native diagnostics and original resource owners.
 
 use super::{
-    decode_json_string_from, JsonPosition, JsonReadError, JsonReader, JsonSyntaxError, JsonToken,
+    decode_json_string_with_work, JsonPosition, JsonReadError, JsonReadWork, JsonReader,
+    JsonSyntaxError, JsonToken,
 };
 use crate::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{Budgeted, MemoryError},
+    memory::{Budgeted, MemoryError, ProductionControl},
     QueryCancelled,
 };
 
@@ -92,6 +93,7 @@ impl std::fmt::Display for Unexpected {
 #[derive(Debug)]
 enum Cause {
     Syntax(super::JsonSyntaxKind),
+    DataSyntax(super::JsonSyntaxKind),
     Message(&'static str),
     Type {
         expected: &'static str,
@@ -142,17 +144,32 @@ impl JsonDiagnostic {
     /// Observe a validated token at its original direct-deserializer boundary. Containers fail before their opening delimiter; native scalars fail after their complete token.
     pub async fn invalid_type_from(
         token: JsonToken<'_, &'_ [u8]>,
-        mut position: JsonPosition,
+        position: JsonPosition,
         expected: &'static str,
         input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self, JsonInputError> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        Self::invalid_type_with_work(token, position, expected, &control, input).await
+    }
+
+    /// Observe the same direct-deserializer failure with an independently retained allowance and work scheduler. String observations require an admitted control.
+    pub async fn invalid_type_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        token: JsonToken<'_, &'_ [u8]>,
+        mut position: JsonPosition,
+        expected: &'static str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<Self, JsonInputError> {
         let actual = match token {
             JsonToken::Null => Unexpected::Null,
             JsonToken::Bool(value) => Unexpected::Bool(value),
             JsonToken::Number(bytes) => number(bytes),
-            JsonToken::String(bytes) | JsonToken::Key(bytes) => {
-                Unexpected::String(decode_json_string_from(bytes, input).await?)
-            }
+            JsonToken::String(bytes) | JsonToken::Key(bytes) => Unexpected::String(
+                decode_json_string_with_work(bytes, control, work)
+                    .await?
+                    .into_budgeted()
+                    .unwrap_or_else(|_| unreachable!("admitted JSON diagnostic string")),
+            ),
             JsonToken::StartArray => Unexpected::Sequence,
             JsonToken::StartObject => Unexpected::Map,
             JsonToken::EndArray | JsonToken::EndObject => return Err(JsonInputError::Invalid),
@@ -171,6 +188,14 @@ impl JsonDiagnostic {
             position,
             cause: Cause::Type { expected, actual },
         })
+    }
+
+    /// A string-encoded scalar reports its inner parse failure as data while retaining that parse's own location and message.
+    pub(super) fn into_data(mut self) -> Self {
+        if let Cause::Syntax(kind) = self.cause {
+            self.cause = Cause::DataSyntax(kind);
+        }
+        self
     }
 
     /// Drop original scalar values before crossing a boundary that must not disclose input payloads. Syntax, expected type, error category and source position remain available.
@@ -207,7 +232,7 @@ fn number(bytes: &[u8]) -> Unexpected {
 impl std::fmt::Display for JsonDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.cause {
-            Cause::Syntax(kind) => f.write_str(kind.message())?,
+            Cause::Syntax(kind) | Cause::DataSyntax(kind) => f.write_str(kind.message())?,
             Cause::Message(message) => f.write_str(message)?,
             Cause::Type { expected, actual } => {
                 write!(f, "invalid type: {actual}, expected {expected}")?;

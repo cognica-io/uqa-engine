@@ -120,7 +120,7 @@ fn persistent_domains_retire_private_roots_and_selected_transactions(#[case] pro
             Ok(Some(_)) => panic!("corrupt domain marker published"),
         }
     };
-    assert!(matches!(error, StorageBackendError::Serde(_)), "{error}");
+    assert_marker_error(error, "{bad JSON");
     assert!(!backend.in_transaction());
     assert!(input.advance(1).is_err());
     assert_eq!(control.memory().used(), 0);

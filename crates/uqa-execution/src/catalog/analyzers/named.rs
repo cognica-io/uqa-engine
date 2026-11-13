@@ -10,7 +10,6 @@ use std::sync::Arc;
 use uqa_analysis::{AnalyzerDiagnostic, AnalyzerResources, CompiledAnalyzer};
 use uqa_core::{
     image_io::{AsyncImageInput, ImageDecodeWindow, ImageDecoder},
-    json::JsonReadError,
     memory::{Budgeted, MemoryBudget, OwnedMap, Produced},
 };
 use uqa_storage::{
@@ -90,18 +89,12 @@ impl NamedAnalyzerCatalogInput {
                             .restore_json_with_input(&descriptor, &mut work)
                             .await?;
                         drop(descriptor);
-                        let saved = AnalyzerDiagnostic::read_from(&row.value, &mut work)
-                            .await
-                            .map_err(json_error)?;
+                        let saved = AnalyzerDiagnostic::read_from(&row.value, &mut work).await?;
                         let configuration = compiled
                             .descriptor()
                             .configuration_with_input(&mut work)
                             .await?;
-                        if !saved
-                            .matches_from(&configuration, &mut work)
-                            .await
-                            .map_err(json_error)?
-                        {
+                        if !saved.matches_from(&configuration, &mut work).await? {
                             return Err(corrupt("named analyzer descriptor disagrees with its diagnostic configuration"));
                         }
                         drop(configuration);
@@ -187,15 +180,5 @@ fn validate_definition_name(name: &str) -> StorageBackendResult<()> {
 fn corrupt(message: impl Into<String>) -> StorageBackendError {
     StorageBackendError::Other(message.into())
 }
-fn json_error(error: JsonReadError) -> StorageBackendError {
-    match error {
-        JsonReadError::Memory(error) => error.into(),
-        JsonReadError::Cancelled(error) => error.into(),
-        _ => StorageBackendError::Serde(<serde_json::Error as serde::de::Error>::custom(
-            "invalid named analyzer diagnostic JSON",
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests;

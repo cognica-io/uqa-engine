@@ -176,7 +176,7 @@ fn persistent_structured_types_retire_private_roots_and_selected_transactions(
         loop {
             match input.advance(64) {
                 Err(error) => {
-                    assert!(matches!(error, StorageBackendError::Serde(_)), "{error}");
+                    assert_marker_error(error, "{bad JSON");
                     break;
                 }
                 Ok(None) => (),

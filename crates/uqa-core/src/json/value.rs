@@ -6,14 +6,17 @@
 
 //! Generic value validation retains unsigned scalars and an optional field observation of the root object.
 
-use super::{decode_json_string_with_work, JsonReadError, JsonReadWork, JsonReader, JsonToken};
+use super::{
+    decode_json_string_with_work, JsonDiagnostic, JsonInputError, JsonReadError, JsonReadWork,
+    JsonReader, JsonSyntaxError, JsonSyntaxKind, JsonToken,
+};
 use crate::memory::{Budgeted, BudgetedVec, ProductionControl};
 use std::{future::Future, pin::Pin};
 
 mod protocol;
 pub use protocol::JsonScalarProtocol;
 
-type JsonResult<T> = Result<T, JsonReadError>;
+type JsonResult<T> = Result<T, JsonInputError>;
 type Token<'a> = JsonToken<'a, &'a [u8]>;
 
 #[derive(Clone, Copy)]
@@ -64,7 +67,19 @@ enum Frame {
         kind: Kind,
         projected: bool,
     },
-    ScalarValue(JsonValueObservation),
+}
+
+impl Frame {
+    fn enter(self, reader: &mut JsonReader<'_, '_>) -> JsonResult<Self> {
+        if reader.stack.frames().len() > 127 {
+            return Err(JsonDiagnostic::from(JsonSyntaxError {
+                kind: JsonSyntaxKind::DepthLimit,
+                position: reader.position(),
+            })
+            .into());
+        }
+        Ok(self)
+    }
 }
 
 /// Validate one generic value, including every overwritten child, and return its unsigned scalar observation. The reader's enclosing owner checks trailing input; the control must carry allocation admission.
@@ -91,37 +106,41 @@ pub async fn observe_json_value<'a, W: JsonReadWork<Error = JsonReadError>>(
 ) -> JsonResult<JsonValueObservation> {
     let mut frames = BudgetedVec::new(control.budget().expect("admitted generic JSON input"));
     loop {
-        control.check()?;
+        control.check().map_err(JsonReadError::from)?;
         let pending = match frames.last() {
             Some(Frame::Scalar { kind, projected }) => Some((*kind, *projected)),
             _ => None,
         };
         let completed = if let Some((kind, projected)) = pending {
-            let JsonToken::String(encoded) = token else {
-                return Err(invalid());
-            };
-            let text = decode_json_string_with_work(encoded, control, work).await?;
-            let value = match kind {
-                Kind::Number => {
-                    JsonValueObservation::from_unsigned(number_text(&text, control, work).await?)
-                }
-                Kind::Raw => raw(&text, *control, work, keys, field.filter(|_| projected))?.await?,
-            };
+            let value = scalar(
+                kind,
+                token,
+                reader,
+                control,
+                work,
+                keys,
+                field.filter(|_| projected),
+            )
+            .await?;
+            frames.pop();
             Some(value)
         } else {
             match token {
                 JsonToken::StartArray => {
-                    frames.push(Frame::Array)?;
+                    frames.push(Frame::Array.enter(reader)?)?;
                     None
                 }
                 JsonToken::StartObject => {
                     let projection =
                         (frames.is_empty() && field.is_some()).then(JsonFieldProjection::default);
-                    frames.push(Frame::Object {
-                        first: true,
-                        selected: false,
-                        projection,
-                    })?;
+                    frames.push(
+                        Frame::Object {
+                            first: true,
+                            selected: false,
+                            projection,
+                        }
+                        .enter(reader)?,
+                    )?;
                     None
                 }
                 JsonToken::Key(encoded) => {
@@ -146,7 +165,6 @@ pub async fn observe_json_value<'a, W: JsonReadWork<Error = JsonReadError>>(
                     Some(Frame::Object { projection, .. }) => {
                         projection.map_or(JsonValueObservation::Other, JsonValueObservation::Object)
                     }
-                    Some(Frame::ScalarValue(value)) => value,
                     _ => return Err(invalid()),
                 }),
                 JsonToken::Number(bytes) => {
@@ -161,18 +179,59 @@ pub async fn observe_json_value<'a, W: JsonReadWork<Error = JsonReadError>>(
             if frames.is_empty() {
                 return Ok(value);
             }
-            match frames.last_mut() {
-                Some(frame @ Frame::Scalar { .. }) => *frame = Frame::ScalarValue(value),
-                Some(Frame::Object {
-                    selected: true,
-                    projection: Some(projection),
-                    ..
-                }) => projection.unsigned = value.unsigned(),
-                _ => (),
+            if let Some(Frame::Object {
+                selected: true,
+                projection: Some(projection),
+                ..
+            }) = frames.last_mut()
+            {
+                projection.unsigned = value.unsigned();
             }
         }
         token = next(reader, work).await?;
     }
+}
+
+async fn scalar<'a, W: JsonReadWork<Error = JsonReadError>>(
+    kind: Kind,
+    token: Token<'a>,
+    reader: &mut JsonReader<'a, '_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    keys: JsonScalarProtocol,
+    field: Option<&'static str>,
+) -> JsonResult<JsonValueObservation> {
+    let JsonToken::String(encoded) = token else {
+        let expected = match kind {
+            Kind::Number => "string containing a number",
+            Kind::Raw => "raw value",
+        };
+        return Err(JsonDiagnostic::invalid_type_with_work(
+            token,
+            reader.position(),
+            expected,
+            control,
+            work,
+        )
+        .await?
+        .into());
+    };
+    let text = decode_json_string_with_work(encoded, control, work).await?;
+    let value = match kind {
+        Kind::Number => JsonValueObservation::from_unsigned(
+            number_text(&text, control, work)
+                .await
+                .map_err(scalar_error)?,
+        ),
+        Kind::Raw => raw(&text, *control, work, keys, field)?
+            .await
+            .map_err(scalar_error)?,
+    };
+    reader
+        .finish_scalar_object(work)
+        .await
+        .map_err(|error| JsonInputError::from_reader(reader, error))?;
+    Ok(value)
 }
 
 async fn key<W: JsonReadWork<Error = JsonReadError>>(
@@ -232,17 +291,24 @@ async fn number_text<W: JsonReadWork<Error = JsonReadError>>(
     work: &mut W,
 ) -> JsonResult<Option<u64>> {
     let mut reader = JsonReader::with_control(text, control);
-    let event = reader
-        .next_event_with_work(work)
-        .await?
-        .ok_or_else(invalid)?;
-    let JsonToken::Number(bytes) = event.token else {
-        return Err(invalid());
+    let result = match reader.peek() {
+        Some(b'-' | b'0'..=b'9') => reader.number(work).await,
+        Some(_) => Err(reader.reject(JsonSyntaxKind::InvalidNumber, true)),
+        None => Err(reader.reject(JsonSyntaxKind::EndOfValue, false)),
     };
-    if event.range.start != 0 || event.range.end != text.len() {
-        return Err(invalid());
+    if let Err(error) = &result {
+        if !matches!(error, JsonReadError::InvalidJson) {
+            return result.map(unsigned).map_err(Into::into);
+        }
     }
-    Ok(unsigned(bytes))
+    // The scalar number owner checks its immediate suffix even after a number-grammar failure. Resource failures have already terminated the operation.
+    if reader.peek().is_some() {
+        let error = reader.reject(JsonSyntaxKind::InvalidNumber, true);
+        return Err(JsonInputError::from_reader(&reader, error));
+    }
+    result
+        .map(unsigned)
+        .map_err(|error| JsonInputError::from_reader(&reader, error))
 }
 
 type Raw<'a> =
@@ -256,10 +322,15 @@ fn raw<'a, W: JsonReadWork<Error = JsonReadError> + 'a>(
     field: Option<&'static str>,
 ) -> JsonResult<Raw<'a>> {
     let future = async move {
-        let mut reader = JsonReader::with_control(text, &control).with_depth_limit(127);
+        let mut reader = JsonReader::with_control(text, &control);
         let first = next(&mut reader, work).await?;
         let value = observe_json_value(first, &mut reader, &control, work, keys, field).await?;
-        if reader.next_event_with_work(work).await?.is_some() {
+        if reader
+            .next_event_with_work(work)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&reader, error))?
+            .is_some()
+        {
             return Err(invalid());
         }
         Ok(value)
@@ -277,13 +348,40 @@ async fn next<'a, W: JsonReadWork<Error = JsonReadError>>(
 ) -> JsonResult<Token<'a>> {
     reader
         .next_event_with_work(work)
-        .await?
+        .await
+        .map_err(|error| JsonInputError::from_reader(reader, error))?
         .map(|event| event.token)
         .ok_or_else(invalid)
 }
 
-fn invalid() -> JsonReadError {
-    JsonReadError::InvalidJson
+fn invalid() -> JsonInputError {
+    JsonInputError::Invalid
+}
+
+fn scalar_error(error: JsonInputError) -> JsonInputError {
+    match error {
+        JsonInputError::Diagnostic(error) => error.into_data().into(),
+        error => error,
+    }
+}
+
+impl JsonReader<'_, '_> {
+    /// A scalar visitor has consumed its only value. Retire the object at this boundary without requesting another key or inspecting a later value.
+    async fn finish_scalar_object<W: JsonReadWork<Error = JsonReadError>>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<(), JsonReadError> {
+        self.skip_whitespace(work).await?;
+        match self.peek() {
+            Some(b'}') => {
+                self.close(JsonToken::EndObject)?;
+                Ok(())
+            }
+            Some(b',') => Err(self.reject(JsonSyntaxKind::TrailingComma, true)),
+            None => Err(self.reject(JsonSyntaxKind::EndOfObject, false)),
+            _ => Err(self.reject(JsonSyntaxKind::TrailingCharacters, true)),
+        }
+    }
 }
 
 /// Validate a complete generic JSON text with the ordinary container-depth limit and no ignored suffix. The supplied control must retain an allocation allowance through all raw-scalar expansions.
@@ -294,14 +392,19 @@ pub async fn observe_json_text<W: JsonReadWork<Error = JsonReadError>>(
     protocol: JsonScalarProtocol,
     field: Option<&'static str>,
 ) -> JsonResult<JsonValueObservation> {
-    let mut reader = JsonReader::from_slice_with_control(text, control).with_depth_limit(127);
+    let mut reader = JsonReader::from_slice_with_control(text, control);
     let first = next(&mut reader, work).await?;
     let observation =
         observe_json_value(first, &mut reader, control, work, protocol, field).await?;
-    if reader.next_event_with_work(work).await?.is_some() {
+    if reader
+        .next_event_with_work(work)
+        .await
+        .map_err(|error| JsonInputError::from_reader(&reader, error))?
+        .is_some()
+    {
         return Err(invalid());
     }
-    control.check()?;
+    control.check().map_err(JsonReadError::from)?;
     Ok(observation)
 }
 
