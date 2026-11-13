@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -64620,6 +64620,162 @@
       "capability": "Stored analyzer and field revision restoration",
       "workload": "Original stored envelopes, exact resource revisions, interleaved cache publication, native paired catalog roots, and terminal input retirement.",
       "invariant": "Stored descriptors retain original revision validation and historical sides; only complete native roots publish and later mutations use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_analyzer_input_bounds_slots_and_preserves_the_binding_semantic_boundary",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_analyzer_rows_admit_original_text_before_copying_and_keep_exact_capacities",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_analyzer_input_retires_both_families_on_every_terminal_path",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/analyzer_input/tests/retirement.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "catalog_analyzer_input_rejects_partial_construction_and_encoded_limits_without_leaks",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/analyzer_input/tests/retirement.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_analyzer_input_preserves_original_keys_text_and_trailing_key_rules",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "key_value_analyzer_input_retains_no_failed_or_cancelled_row_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_analyzer_input_preserves_object_owned_fields_and_absent_binding_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_analyzer_input_keeps_original_record_validation_before_field_projection",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_analyzer_input_admits_native_fields_and_retires_partial_conversion",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/analyzer_input/tests.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_analyzer_input_preserves_bindings_labels_and_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_analyzer_input_preserves_bindings_labels_and_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_analyzer_input_preserves_bindings_labels_and_selected_generations",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Retained physical field analyzer catalogs",
+      "workload": "Original binding and label fields, selected native SQLite/SQLite KV/redb views, bounded physical slots and terminal input retirement.",
+      "invariant": "Both physical families retain one selected generation, preserve original record validation and binding-before-label ordering, and release all unpublished owners on terminal paths.",
       "case_names": [
         ""
       ]

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+pub mod analyzer_input;
 mod cache_revisions;
 pub mod capture;
 pub mod foreign_load;
@@ -262,6 +263,18 @@ pub trait CatalogFacade: Send + Sync {
         control.check()?;
         Err(StorageBackendError::Other(
             "retained catalog text input is not supported".into(),
+        ))
+    }
+
+    /// Retain field binding envelopes and compatibility labels from one provider view. Complete physical bindings precede labels; the consumer owns ordering and semantic interpretation at that boundary.
+    fn begin_analyzer_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<analyzer_input::CatalogAnalyzerInput> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog analyzer input is not supported".into(),
         ))
     }
 

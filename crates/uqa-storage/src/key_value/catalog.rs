@@ -36,6 +36,7 @@ use super::{
     TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX, TAG_VIEW,
 };
 
+mod analyzer_input;
 mod analyzers;
 pub(super) mod diskann;
 mod foreign;
@@ -105,6 +106,14 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn begin_analyzer_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::analyzer_input::CatalogAnalyzerInput> {
+        self.analyzer_input(limits, control)
+    }
+
     fn begin_foreign_table_load(
         &self,
         limits: crate::catalog::input::CatalogInputLimits,

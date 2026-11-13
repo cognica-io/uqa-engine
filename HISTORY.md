@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain field analyzer bindings and compatibility labels from one selected native SQLite, SQLite KV or redb catalog view. Bound physical reads, preserve original field bytes and the binding-before-label validation boundary, and retire both streams together on failure or cancellation.
+
 - Resume stored analyzer and field revision preparation through the original work channel, preserving exact descriptor/resource validation, historical index/search sides, admitted names and complete paired catalog publication.
 
 - Persistent system-relation authority restoration now retains independent table and column ACL tuples through complete physical input and original role/grant validation, adopts native buffers and preserves private transaction cleanup.

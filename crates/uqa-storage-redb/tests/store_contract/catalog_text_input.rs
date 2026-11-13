@@ -7,6 +7,16 @@
 use super::*;
 
 #[test]
+fn redb_analyzer_input_preserves_bindings_labels_and_selected_generations() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("analyzer-input.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_analyzer_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn redb_foreign_table_input_preserves_private_rows_acls_and_retirement() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("foreign-input.redb")).unwrap();

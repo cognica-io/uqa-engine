@@ -8,6 +8,24 @@ use crate::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
 use uqa_storage::PersistentStorageProvider;
 
 #[test]
+fn sqlite_native_analyzer_input_preserves_bindings_labels_and_selected_generations() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    uqa_storage::key_value::conformance::verify_catalog_analyzer_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn sqlite_key_value_analyzer_input_preserves_bindings_labels_and_selected_generations() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    uqa_storage::key_value::conformance::verify_catalog_analyzer_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn sqlite_native_graph_name_input_preserves_private_membership_and_retirement() {
     let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
     uqa_storage::key_value::conformance::verify_catalog_graph_name_input(
