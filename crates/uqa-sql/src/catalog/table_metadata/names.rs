@@ -7,9 +7,8 @@
 //! A new physical field detaches its metadata generation through admitted native copies.
 
 use super::{SharedTableMetadata, TableMetadata};
-use crate::SQLError;
 use uqa_core::{
-    image_io::AsyncImageInput,
+    image_io::{AsyncImageInput, ImageIoError},
     memory::{Budgeted, BudgetedVec, MemoryError},
 };
 
@@ -19,7 +18,7 @@ impl SharedTableMetadata<Vec<String>> {
         &self,
         name: &str,
         input: &mut AsyncImageInput<'_>,
-    ) -> Result<TableMetadata<Vec<String>>, SQLError> {
+    ) -> Result<TableMetadata<Vec<String>>, ImageIoError> {
         input.checkpoint().await?;
         let mut names = BudgetedVec::new(input.memory);
         names.reserve(self.len().checked_add(1).ok_or(MemoryError::SizeOverflow)?)?;

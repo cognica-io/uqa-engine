@@ -12,7 +12,7 @@ use uqa_core::{
     CancellationToken,
 };
 
-type Input = ImageDecoder<Option<GinAnalyzerParameter>, JsonReadError>;
+type Input = ImageDecoder<Option<GinAnalyzerParameter>, JsonInputError>;
 
 fn input(text: Arc<str>, memory: &MemoryBudget, token: &CancellationToken) -> Input {
     ImageDecoder::new(memory, token, |mut reader| async move {
@@ -21,7 +21,7 @@ fn input(text: Arc<str>, memory: &MemoryBudget, token: &CancellationToken) -> In
     .unwrap()
 }
 
-fn finish(input: &mut Input, steps: usize) -> Result<Option<GinAnalyzerParameter>, JsonReadError> {
+fn finish(input: &mut Input, steps: usize) -> Result<Option<GinAnalyzerParameter>, JsonInputError> {
     for _ in 0..100_000 {
         if let Some(value) =
             input.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
@@ -49,7 +49,14 @@ fn equivalent(text: &str) {
                 "{text}"
             );
         }
-        (Err(_), Err(JsonReadError::InvalidJson)) => (),
+        (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
+            assert_eq!(actual.to_string(), expected.to_string(), "{text}");
+            assert_eq!(actual.position().line, expected.line(), "{text}");
+            assert_eq!(actual.position().column, expected.column(), "{text}");
+            assert_eq!(actual.is_syntax(), expected.is_syntax(), "{text}");
+            assert_eq!(actual.is_eof(), expected.is_eof(), "{text}");
+            assert_eq!(actual.is_data(), expected.is_data(), "{text}");
+        }
         (expected, actual) => panic!("{text}: expected {expected:?}, success={}", actual.is_ok()),
     }
     assert!(read

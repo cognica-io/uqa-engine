@@ -155,7 +155,7 @@ impl<T: GinAnalyzerInputTables> Restoration for Native<'_, '_, T> {
     async fn columns(&mut self, text: &str) -> StorageBackendResult<NativeColumns> {
         let columns = IndexKey::read_stored_columns_from(text, self.input)
             .await
-            .map_err(|error| StorageBackendError::backend("stored GIN keys", error))?;
+            .map_err(StorageBackendError::from)?;
         let (items, memory) = columns.into_parts();
         Ok(NativeColumns {
             items: items.into_iter(),
@@ -165,7 +165,7 @@ impl<T: GinAnalyzerInputTables> Restoration for Native<'_, '_, T> {
     async fn parameter(&mut self, text: &str) -> StorageBackendResult<Self::Parameter> {
         GinAnalyzerParameter::read_from(text, self.input)
             .await
-            .map_err(|error| StorageBackendError::backend("stored GIN parameters", error))
+            .map_err(StorageBackendError::from)
     }
     async fn equal(&mut self, left: &str, right: &str) -> StorageBackendResult<bool> {
         Ok(owners::compare(left, right, self.input).await? == Ordering::Equal)

@@ -7,6 +7,31 @@
 use super::*;
 use serde_json::{json, Value};
 
+#[test]
+fn stored_index_columns_keep_untagged_locations_after_enclosing_sequence_retirement() {
+    for value in ["null", "42", "false", "{}", r#"{"Param":0.0}"#] {
+        for suffix in [
+            "]",
+            " ]",
+            "\n]\n",
+            ", ",
+            " , \n\t \"later\"]",
+            ",]",
+            "x",
+            "\n",
+            "",
+            "] true",
+        ] {
+            assert!(!compare(&format!("[\n{value}{suffix}")));
+        }
+    }
+    assert!(!compare(&format!(
+        "[{{}}{} , {} \"ignored\"]",
+        " \n".repeat(32768),
+        "\t\n".repeat(32768)
+    )));
+}
+
 // These field orders are taken from the original stored AST declarations. The oracle below is their unchanged Serde implementation, independently of the retained reader's grammar table.
 const SELECT_FIELDS: &str = "windows projections values from where group_by grouping_sets group_distinct having order_by limit with_ties offset with set_op distinct distinct_on locking";
 

@@ -12,8 +12,10 @@ use crate::{
 };
 
 mod diagnostics;
+mod input;
 mod lexical;
 pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
+pub use input::{JsonDiagnostic, JsonInputError};
 mod object;
 mod string;
 mod value;

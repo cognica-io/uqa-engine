@@ -60,6 +60,8 @@ pub enum StorageBackendError {
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("payload serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("payload serialization failed: {0}")]
+    Json(#[from] uqa_core::json::JsonDiagnostic),
     #[error("{backend} storage failed: {source}")]
     Backend {
         backend: &'static str,
@@ -90,6 +92,19 @@ impl From<uqa_core::ValueRetentionError> for StorageBackendError {
             error @ uqa_core::ValueRetentionError::Malformed { .. } => {
                 Self::backend("value", error)
             }
+        }
+    }
+}
+
+impl From<uqa_core::json::JsonInputError> for StorageBackendError {
+    fn from(error: uqa_core::json::JsonInputError) -> Self {
+        use uqa_core::json::JsonInputError;
+        match error {
+            JsonInputError::Diagnostic(error) => Self::Json(error),
+            JsonInputError::Memory(error) => Self::Memory(error),
+            JsonInputError::Cancelled(error) => Self::Cancelled(error),
+            JsonInputError::Image(error) => error.into(),
+            JsonInputError::Invalid => Self::Other("invalid JSON input".into()),
         }
     }
 }

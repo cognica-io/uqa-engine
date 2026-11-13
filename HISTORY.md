@@ -8,11 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Retain native JSON syntax causes and byte-based line/column positions through bounded input, preserving malformed Unicode, delimiter and EOF diagnostics without reparsing. Stored-owner error conversion remains in progress.
+- Preserve native GIN key and option diagnostics, including original type messages, byte-based positions and syntax/EOF classification. Retain memory and cancellation error types through field reconstruction; remove original scalar values at the backup error boundary. Other stored-owner diagnostic conversion remains in progress.
 
 - Restore persistent GIN analyzer ownership through bounded native input on native SQLite, SQLite Key/Value and redb. Share ordinary validation order, retain selected exact revisions, publish complete private field generations and transfer admitted ownership directly to field reconstruction. Interrupted reconstruction retires its private transaction; later writes use independent admission.
 
-- Validate complete stored index-key syntax, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content, untagged alternatives, sorted analyzer options and Unicode trimming. Exact detailed stored-parser diagnostics remain in progress.
+- Validate complete stored index-key syntax, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content, untagged alternatives, sorted analyzer options and Unicode trimming. GIN diagnostics retain their original parser observations; conversion of other stored owners remains in progress.
 
 - Share ordered field analyzer installation between ordinary reopening and retained backup reconstruction. Preserve historical index/search revisions, exact column and name checks, legacy migrations and first physical failures; publish complete private field catalogs with independent later mutation ownership.
 

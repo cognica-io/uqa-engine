@@ -21092,7 +21092,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -65763,6 +65763,123 @@
       "capability": "Retained JSON syntax diagnostics",
       "workload": "Deny nesting admission and cancel input before its next event.",
       "invariant": "Memory and cancellation remain typed resource failures and do not fabricate a syntax cause.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_type_diagnostics_match_direct_deserializer_values_and_positions",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/input.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Direct invalid-type inputs include scalar limits, arbitrary-precision numbers, Unicode strings and incomplete containers.",
+      "invariant": "Native data diagnostics preserve the original expected type, value, byte-based position and category.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_type_diagnostics_own_admitted_strings_until_redaction",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/input.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Decode a long escaped private string through one-step input windows and retain its resulting diagnostic.",
+      "invariant": "The original decoded allocation remains admitted until type-only conversion releases it without changing the category or location.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_diagnostic_input_keeps_admission_and_cancellation_terminal",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/input.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Deny diagnostic-string admission or cancel during bounded lexical input.",
+      "invariant": "Native memory/cancellation types survive and terminal decoding releases all partial ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_native_json_boundary_retires_payloads_and_preserves_diagnostic_identity",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/errors.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Convert actual value-bearing, syntax and EOF errors from native JSON through Storage into Backup.",
+      "invariant": "Backup diagnostics retire scalar payloads before Display/Debug exposure while retaining type, category and position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "backup_native_json_resources_keep_original_types_through_storage",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/tests/errors.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Forward original and image-wrapped memory/cancellation through JSON, Storage and Backup.",
+      "invariant": "Each boundary preserves the original resource error type without an opaque backend wrapper.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_input_preserves_original_json_diagnostics_before_field_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests/input.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Load malformed keys and options through the actual GIN owner and compare ordinary reopening diagnostics.",
+      "invariant": "The first original diagnostic precedes field publication, including competing later semantic failures; terminal input retires ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "gin_field_publication_preserves_native_resource_errors_and_selected_generation",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/analyzers/field_restoration/tests.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Interrupt actual Engine field successor preparation with memory denial or cancellation.",
+      "invariant": "Typed resource errors reach Backup, the selected generation is unchanged and later writes keep independent ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_columns_keep_untagged_locations_after_enclosing_sequence_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/indexes/input/tests/compatibility.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Reject scalar and object keys with closing delimiters, commas, trailing text, EOF and long multiline whitespace.",
+      "invariant": "The earlier untagged data error keeps its original location after bounded enclosing sequence retirement and is never replaced by later syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "native_json_diagnostics_survive_provider_transaction_and_backup_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/connection/tests.rs",
+      "capability": "Native GIN diagnostic ownership",
+      "workload": "Round-trip a native syntax diagnostic through SQLite, transaction and backup adapters.",
+      "invariant": "The original message, location and EOF category survive every ownership boundary without conversion to an opaque provider error.",
       "case_names": [
         ""
       ]

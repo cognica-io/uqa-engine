@@ -9,9 +9,9 @@
 use crate::{
     ast::{ColumnDef, ColumnType},
     catalog::work::{inline, Work},
-    SQLError,
 };
 use std::fmt;
+use uqa_core::image_io::ImageIoError;
 
 /// The original declaration diagnostic borrows its selected type and names; controlled consumers own any eventual formatting.
 #[derive(Debug)]
@@ -53,7 +53,7 @@ pub async fn validate_analyzer_column_from<'a>(
     table: &'a str,
     field: &'a str,
     input: &mut uqa_core::image_io::AsyncImageInput<'_>,
-) -> Result<Result<(), AnalyzerColumnError<'a>>, SQLError> {
+) -> Result<Result<(), AnalyzerColumnError<'a>>, ImageIoError> {
     validate(columns, table, field, input).await
 }
 
@@ -62,7 +62,7 @@ async fn validate<'a>(
     table: &'a str,
     field: &'a str,
     work: &mut (impl Work + Send),
-) -> Result<Result<(), AnalyzerColumnError<'a>>, SQLError> {
+) -> Result<Result<(), AnalyzerColumnError<'a>>, ImageIoError> {
     let mut ty = None;
     for column in columns {
         work.checkpoint().await?;
@@ -144,7 +144,7 @@ mod tests {
             ]);
             let memory = MemoryBudget::new(1 << 20);
             let cancellation = CancellationToken::new();
-            let mut input = ImageDecoder::<String, SQLError>::new(
+            let mut input = ImageDecoder::<String, ImageIoError>::new(
                 &memory,
                 &cancellation,
                 |mut reader| async move {
@@ -164,7 +164,10 @@ mod tests {
             }
             if cancelled {
                 cancellation.cancel();
-                assert!(input.advance(&mut std::io::empty(), window).is_err());
+                assert!(matches!(
+                    input.advance(&mut std::io::empty(), window),
+                    Err(ImageIoError::Cancelled(_))
+                ));
             } else {
                 let message = loop {
                     if let Some(message) = input.advance(&mut std::io::empty(), window).unwrap() {

@@ -108,6 +108,23 @@ impl JsonReader<'_, '_> {
         self.syntax_error
     }
 
+    /// Retire a sequence after its typed element failed. The enclosing decoder observes whitespace, a closing delimiter or a comma and following whitespace before assigning a location to the original unlocated data error. It never parses another element or replaces that error with a later syntax failure.
+    pub async fn finish_sequence_error_from(
+        mut self,
+        work: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<JsonPosition, JsonReadError> {
+        self.skip_whitespace(work).await?;
+        match self.peek() {
+            Some(b']') => self.advance(work).await?,
+            Some(b',') => {
+                self.advance(work).await?;
+                self.skip_whitespace(work).await?;
+            }
+            _ => (),
+        }
+        Ok(self.position())
+    }
+
     pub(super) fn reject(&mut self, kind: JsonSyntaxKind, peek: bool) -> JsonReadError {
         let mut position = self.position();
         if peek {

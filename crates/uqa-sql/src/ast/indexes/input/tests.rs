@@ -16,7 +16,7 @@ use uqa_core::{
 mod compatibility;
 mod retention;
 
-type Decoder = ImageDecoder<BudgetedVec<Budgeted<String>>, SQLError>;
+type Decoder = ImageDecoder<BudgetedVec<Budgeted<String>>, JsonInputError>;
 
 fn input(text: Arc<str>, memory: &MemoryBudget, token: &CancellationToken) -> Decoder {
     ImageDecoder::new(memory, token, |mut reader| async move {
@@ -25,7 +25,10 @@ fn input(text: Arc<str>, memory: &MemoryBudget, token: &CancellationToken) -> De
     .unwrap()
 }
 
-fn finish(input: &mut Decoder, steps: usize) -> Result<BudgetedVec<Budgeted<String>>, SQLError> {
+fn finish(
+    input: &mut Decoder,
+    steps: usize,
+) -> Result<BudgetedVec<Budgeted<String>>, JsonInputError> {
     for _ in 0..1_000_000 {
         if let Some(value) =
             input.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
@@ -48,21 +51,32 @@ fn compare(text: &str) -> bool {
         "{text}: actual={actual:?}, expected={expected:?}"
     );
     let valid = expected.is_ok();
-    if let (Ok(actual), Ok(expected)) = (actual, expected) {
-        let expected = expected
-            .iter()
-            .filter_map(IndexKey::column)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual.iter().map(|name| name.as_str()).collect::<Vec<_>>(),
-            expected,
-            "{text}"
-        );
-        assert_eq!(
-            memory.used(),
-            actual.capacity() * size_of::<Budgeted<String>>()
-                + actual.iter().map(|name| name.capacity()).sum::<usize>()
-        );
+    match (actual, expected) {
+        (Ok(actual), Ok(expected)) => {
+            let expected = expected
+                .iter()
+                .filter_map(IndexKey::column)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual.iter().map(|name| name.as_str()).collect::<Vec<_>>(),
+                expected,
+                "{text}"
+            );
+            assert_eq!(
+                memory.used(),
+                actual.capacity() * size_of::<Budgeted<String>>()
+                    + actual.iter().map(|name| name.capacity()).sum::<usize>()
+            );
+        }
+        (Err(JsonInputError::Diagnostic(actual)), Err(expected)) => {
+            assert_eq!(actual.to_string(), expected.to_string(), "{text}");
+            assert_eq!(actual.position().line, expected.line(), "{text}");
+            assert_eq!(actual.position().column, expected.column(), "{text}");
+            assert_eq!(actual.is_syntax(), expected.is_syntax(), "{text}");
+            assert_eq!(actual.is_eof(), expected.is_eof(), "{text}");
+            assert_eq!(actual.is_data(), expected.is_data(), "{text}");
+        }
+        (actual, expected) => panic!("{text}: actual={actual:?}, expected={expected:?}"),
     }
     assert!(input
         .advance(

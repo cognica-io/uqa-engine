@@ -5,9 +5,9 @@
 //
 
 use super::*;
-use crate::{catalog::table_metadata::SharedTableMetadata, SQLError};
+use crate::catalog::table_metadata::SharedTableMetadata;
 use uqa_core::{
-    image_io::{ImageDecodeWindow, ImageDecoder},
+    image_io::{ImageDecodeWindow, ImageDecoder, ImageIoError},
     memory::{Budgeted, BudgetedString, BudgetedVec},
 };
 
@@ -16,7 +16,7 @@ fn input(
     name: &str,
     memory: &MemoryBudget,
     token: &CancellationToken,
-) -> ImageDecoder<TableMetadata<Vec<String>>, SQLError> {
+) -> ImageDecoder<TableMetadata<Vec<String>>, ImageIoError> {
     let name = name.to_owned();
     ImageDecoder::new(memory, token, |mut reader| async move {
         selected
@@ -27,9 +27,9 @@ fn input(
 }
 
 fn finish(
-    input: &mut ImageDecoder<TableMetadata<Vec<String>>, SQLError>,
+    input: &mut ImageDecoder<TableMetadata<Vec<String>>, ImageIoError>,
     steps: usize,
-) -> Result<TableMetadata<Vec<String>>, SQLError> {
+) -> Result<TableMetadata<Vec<String>>, ImageIoError> {
     for _ in 0..100_000 {
         if let Some(value) =
             input.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
@@ -146,10 +146,13 @@ fn admitted_field_append_retires_partial_copies_without_changing_selected_names(
             );
         } else {
             if outcome != "drop" {
-                assert!(
-                    finish(&mut read, usize::from(outcome != "zero")).is_err(),
-                    "{outcome}"
-                );
+                let error = finish(&mut read, usize::from(outcome != "zero")).unwrap_err();
+                match outcome {
+                    "cancel" => assert!(matches!(error, ImageIoError::Cancelled(_))),
+                    "memory" => assert!(matches!(error, ImageIoError::Memory(_))),
+                    "zero" => assert!(matches!(error, ImageIoError::Invalid)),
+                    _ => unreachable!(),
+                }
                 assert!(read
                     .advance(
                         &mut std::io::empty(),

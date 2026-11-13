@@ -7,16 +7,16 @@
 //! Complete original key validation precedes projection of ordinary column names.
 
 use super::IndexKey;
-use crate::{
-    ast::{
-        expressions::validate_scalar_fields,
-        stored_input::{invalid, number, unit, Input, InputError, Values},
-    },
-    SQLError,
+use crate::ast::{
+    expressions::validate_scalar_fields,
+    stored_input::{invalid, number, unit, Input, InputError, Values},
 };
 use uqa_core::{
     image_io::AsyncImageInput,
-    json::{decode_json_string_from, JsonReadError, JsonReader, JsonToken},
+    json::{
+        decode_json_string_from, JsonDiagnostic, JsonInputError, JsonReadError, JsonReader,
+        JsonToken,
+    },
     memory::{Budgeted, BudgetedVec},
 };
 
@@ -29,22 +29,38 @@ impl IndexKey {
     pub async fn read_stored_columns_from(
         text: &str,
         work: &mut AsyncImageInput<'_>,
-    ) -> Result<BudgetedVec<Budgeted<String>>, SQLError> {
-        Ok(read(text, work).await?)
+    ) -> Result<BudgetedVec<Budgeted<String>>, JsonInputError> {
+        read(text, work).await
     }
 }
 
 async fn read(
     text: &str,
     work: &mut AsyncImageInput<'_>,
-) -> Result<BudgetedVec<Budgeted<String>>, InputError> {
+) -> Result<BudgetedVec<Budgeted<String>>, JsonInputError> {
     let mut reader = JsonReader::new(text, work.memory, work.cancellation).with_depth_limit(127);
-    if reader.next_event_from(work).await?.map(|event| event.token) != Some(JsonToken::StartArray) {
-        return Err(invalid());
+    let first = reader
+        .next_event_from(work)
+        .await
+        .map_err(|error| JsonInputError::from_reader(&reader, error))?
+        .ok_or(JsonInputError::Invalid)?;
+    if first.token != JsonToken::StartArray {
+        return Err(JsonDiagnostic::invalid_type_from(
+            first.token,
+            reader.position(),
+            "a sequence",
+            work,
+        )
+        .await?
+        .into());
     }
     let mut columns = BudgetedVec::new(work.memory);
     loop {
-        let first = reader.next_event_from(work).await?.ok_or_else(invalid)?;
+        let first = reader
+            .next_event_from(work)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&reader, error))?
+            .ok_or(JsonInputError::Invalid)?;
         if first.token == JsonToken::EndArray {
             break;
         }
@@ -59,7 +75,11 @@ async fn read(
             JsonToken::StartArray | JsonToken::StartObject
         ));
         while depth != 0 {
-            let event = reader.next_event_from(work).await?.ok_or_else(invalid)?;
+            let event = reader
+                .next_event_from(work)
+                .await
+                .map_err(|error| JsonInputError::from_reader(&reader, error))?
+                .ok_or(JsonInputError::Invalid)?;
             match event.token {
                 JsonToken::StartArray | JsonToken::StartObject => depth += 1,
                 JsonToken::EndArray | JsonToken::EndObject => depth -= 1,
@@ -67,12 +87,31 @@ async fn read(
             }
             end = event.range.end;
         }
-        validate(&text[start..end], work).await?;
+        if let Err(error) = validate(&text[start..end], work).await {
+            use uqa_core::ValueRetentionError;
+            return Err(match error {
+                InputError::Resource(ValueRetentionError::Memory(error)) => error.into(),
+                InputError::Resource(ValueRetentionError::Cancelled(error)) => error.into(),
+                InputError::Invalid
+                | InputError::Resource(ValueRetentionError::Malformed { .. }) => {
+                    JsonDiagnostic::message(
+                        "data did not match any variant of untagged enum IndexKey",
+                        reader.finish_sequence_error_from(work).await?,
+                    )
+                    .into()
+                }
+            });
+        }
     }
-    if reader.next_event_from(work).await?.is_some() {
-        return Err(invalid());
+    if reader
+        .next_event_from(work)
+        .await
+        .map_err(|error| JsonInputError::from_reader(&reader, error))?
+        .is_some()
+    {
+        return Err(JsonInputError::Invalid);
     }
-    work.checkpoint().await.map_err(JsonReadError::from)?;
+    work.checkpoint().await?;
     Ok(columns)
 }
 

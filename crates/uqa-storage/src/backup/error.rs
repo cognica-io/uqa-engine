@@ -74,6 +74,9 @@ impl From<crate::StorageBackendError> for BackupError {
         match error {
             crate::StorageBackendError::Memory(error) => Self::Memory(error),
             crate::StorageBackendError::Cancelled(error) => Self::Cancelled(error),
+            crate::StorageBackendError::Json(error) => {
+                Self::Storage(crate::StorageBackendError::Json(error.into_type_only()))
+            }
             error => Self::Storage(error),
         }
     }

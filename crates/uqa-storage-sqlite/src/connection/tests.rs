@@ -61,6 +61,33 @@ fn resource_failures_keep_their_types_across_provider_and_transaction_boundaries
 }
 
 #[test]
+fn native_json_diagnostics_survive_provider_transaction_and_backup_boundaries() {
+    use uqa_core::json::{JsonDiagnostic, JsonPosition, JsonSyntaxError, JsonSyntaxKind};
+    use uqa_storage::{backup::BackupError, StorageBackendError, TransactionError};
+    let original = JsonDiagnostic::from(JsonSyntaxError {
+        kind: JsonSyntaxKind::EndOfValue,
+        position: JsonPosition {
+            byte_offset: 9,
+            line: 2,
+            column: 3,
+        },
+    });
+    let position = original.position();
+    let expected = original.to_string();
+    let error = SQLiteError::from(StorageBackendError::from(original));
+    let TransactionError::Storage(error) = TransactionError::from(error) else {
+        panic!("native JSON storage diagnostic lost")
+    };
+    let BackupError::Storage(StorageBackendError::Json(error)) = BackupError::from(error) else {
+        panic!("native JSON backup diagnostic lost")
+    };
+    assert_eq!(error.position(), position);
+    assert_eq!(error.to_string(), expected);
+    assert!(error.is_eof());
+    assert!(!error.is_data());
+}
+
+#[test]
 fn provider_error_round_trip_preserves_sqlite_diagnostics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     connection

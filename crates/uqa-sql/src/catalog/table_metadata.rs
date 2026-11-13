@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
 };
 use uqa_core::{
+    image_io::ImageIoError,
     memory::{Budgeted, MemoryError, Produced, ProductionControl},
     CancellationToken,
 };
@@ -104,7 +105,7 @@ impl<T: TableMetadataValue> TableMetadata<T> {
     pub(crate) fn from_decoded(
         value: Budgeted<T>,
         cancellation: &CancellationToken,
-    ) -> Result<Self, SQLError>
+    ) -> Result<Self, ImageIoError>
     where
         T: DecodedTableMetadataValue,
     {

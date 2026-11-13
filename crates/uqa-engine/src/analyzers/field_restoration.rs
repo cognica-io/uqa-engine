@@ -88,7 +88,7 @@ impl GinAnalyzerInputTable for Table {
             .fields()
             .with_appended_name_from(field, input)
             .await
-            .map_err(|error| StorageBackendError::backend("GIN field metadata", error))?;
+            .map_err(StorageBackendError::from)?;
         let generation = CatalogGeneration::with_budget(fields, input.memory)?;
         input.checkpoint().await?;
         self.0.fts_fields.restore(&generation);

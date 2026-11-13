@@ -101,7 +101,7 @@ impl Work for AsyncImageInput<'_> {
     ) -> StorageBackendResult<()> {
         text_indexes::validate_analyzer_column_from(columns, table, field, self)
             .await
-            .map_err(|error| StorageBackendError::backend("analyzer column input", error))?
+            .map_err(StorageBackendError::from)?
             .map_err(|error| self.error(format_args!("{error}")))
     }
     async fn name(

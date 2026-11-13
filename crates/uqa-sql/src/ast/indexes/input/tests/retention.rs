@@ -27,10 +27,10 @@ fn stored_index_columns_keep_resource_failures_terminal_inside_untagged_choices(
         } else {
             finish(&mut read, 1).unwrap_err()
         };
-        assert_eq!(
-            error.sqlstate(),
-            Some(if cancelled { "57014" } else { "53200" })
-        );
+        assert!(matches!(
+            (cancelled, error),
+            (true, JsonInputError::Cancelled(_)) | (false, JsonInputError::Memory(_))
+        ));
         assert_eq!(memory.used(), 0);
         assert!(read
             .advance(

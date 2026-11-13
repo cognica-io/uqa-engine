@@ -905,6 +905,7 @@ impl From<uqa_storage::StorageBackendError> for SQLiteError {
             StorageBackendError::Cancelled(error) => Self::Cancelled(error),
             StorageBackendError::Analysis(error) => Self::Analysis(error),
             StorageBackendError::Serde(error) => Self::Serde(error),
+            error @ StorageBackendError::Json(_) => Self::StorageSource(Box::new(error)),
             StorageBackendError::Backend { backend, source } => match source.downcast::<Self>() {
                 Ok(error) => *error,
                 Err(source) => {

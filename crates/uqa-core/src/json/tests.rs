@@ -7,6 +7,7 @@
 use super::*;
 
 mod diagnostics;
+mod input;
 mod resumable;
 
 fn valid(input: &str, depth: Option<usize>) -> bool {

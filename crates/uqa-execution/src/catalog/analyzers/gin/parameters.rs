@@ -9,7 +9,10 @@
 use std::ops::Range;
 use uqa_core::{
     image_io::AsyncImageInput,
-    json::{decode_json_string_from, JsonReadError, JsonReader, JsonToken},
+    json::{
+        decode_json_string_from, JsonDiagnostic, JsonInputError, JsonReadError, JsonReader,
+        JsonToken,
+    },
     memory::Budgeted,
 };
 
@@ -24,36 +27,52 @@ impl GinAnalyzerParameter {
     pub async fn read_from(
         text: &str,
         input: &mut AsyncImageInput<'_>,
-    ) -> Result<Option<Self>, JsonReadError> {
+    ) -> Result<Option<Self>, JsonInputError> {
         let mut reader = JsonReader::new(text, input.memory, input.cancellation);
-        if reader
+        let first = reader
             .next_event_from(input)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&reader, error))?
+            .ok_or(JsonInputError::Invalid)?;
+        if first.token != JsonToken::StartObject {
+            return Err(JsonDiagnostic::invalid_type_from(
+                first.token,
+                reader.position(),
+                "a map",
+                input,
+            )
             .await?
-            .map(|event| event.token)
-            != Some(JsonToken::StartObject)
-        {
-            return Err(JsonReadError::InvalidJson);
+            .into());
         }
         let mut selected: Option<([u8; 8], Budgeted<String>)> = None;
         loop {
             let event = reader
                 .next_event_from(input)
-                .await?
-                .ok_or(JsonReadError::InvalidJson)?;
+                .await
+                .map_err(|error| JsonInputError::from_reader(&reader, error))?
+                .ok_or(JsonInputError::Invalid)?;
             if event.token == JsonToken::EndObject {
                 break;
             }
             let JsonToken::Key(key) = event.token else {
-                return Err(JsonReadError::InvalidJson);
+                return Err(JsonInputError::Invalid);
             };
             let key = decode_json_string_from(key, input).await?;
             let event = reader
                 .next_event_from(input)
-                .await?
-                .ok_or(JsonReadError::InvalidJson)?;
+                .await
+                .map_err(|error| JsonInputError::from_reader(&reader, error))?
+                .ok_or(JsonInputError::Invalid)?;
             // The strict reader validates every original string before it can be discarded, including escaped Unicode in overwritten and unrelated values.
             let JsonToken::String(value) = event.token else {
-                return Err(JsonReadError::InvalidJson);
+                return Err(JsonDiagnostic::invalid_type_from(
+                    event.token,
+                    reader.position(),
+                    "a string",
+                    input,
+                )
+                .await?
+                .into());
             };
             if key.eq_ignore_ascii_case("analyzer") {
                 let key: [u8; 8] = key
@@ -68,8 +87,13 @@ impl GinAnalyzerParameter {
                 }
             }
         }
-        if reader.next_event_from(input).await?.is_some() {
-            return Err(JsonReadError::InvalidJson);
+        if reader
+            .next_event_from(input)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&reader, error))?
+            .is_some()
+        {
+            return Err(JsonInputError::Invalid);
         }
         let Some((_, text)) = selected else {
             return Ok(None);

@@ -23,7 +23,7 @@ impl GinAnalyzerInputTable for Table {
             .fields()
             .with_appended_name_from(field, input)
             .await
-            .map_err(|error| StorageBackendError::backend("test GIN fields", error))?;
+            .map_err(StorageBackendError::from)?;
         input.checkpoint().await?;
         *self.fields.lock() = next;
         Ok(())
@@ -237,6 +237,47 @@ fn gin_input_preserves_complete_physical_before_semantic_and_per_field_error_ord
 }
 
 #[test]
+fn gin_input_preserves_original_json_diagnostics_before_field_publication() {
+    for (keys, parameters) in [
+        ("null", "{"),
+        ("\n {}", "{}"),
+        ("[\n 42]", "false"),
+        (r#"["body",{"Invalid":null}]"#, "{}"),
+        ("[\"body\",]", "{}"),
+        ("[\"body\"", "{}"),
+        (r#"["body"]"#, "\n ["),
+        (r#"["body"]"#, r#""private\u0000value""#),
+        (r#"["count"]"#, r#"{"analyzer":"first","invalid":false}"#),
+        (r#"["body"]"#, r#"{"analyzer":18446744073709551616}"#),
+        (r#"["body"]"#, r#"{"analyzer":"\ud800"}"#),
+        (r#"["body"]"#, "{\"analyzer\":\"first\",}"),
+    ] {
+        let catalog = catalog(&[row(keys, parameters)]);
+        let plain = tables();
+        let expected = restore(&catalog, &plain).unwrap_err();
+        let tables = Arc::new(tables());
+        let control = StorageReadControl::with_limit(8 << 20);
+        let mut input =
+            GinAnalyzerCatalogInput::new(&catalog, tables.clone(), LIMITS, &control).unwrap();
+        let actual = finish(&mut input).err().unwrap();
+        assert_eq!(
+            actual.to_string(),
+            expected.to_string(),
+            "keys={keys}, parameters={parameters}"
+        );
+        assert!(matches!(actual, StorageBackendError::Json(_)));
+        assert_eq!(
+            tables.table.fields().as_slice(),
+            plain.table.fields().as_slice()
+        );
+        assert!(tables.table.fields().is_empty());
+        assert!(input.advance(1).is_err());
+        drop((actual, input, tables));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn gin_input_retires_partial_maps_and_field_generations_on_terminal_input() {
     let long = "field".repeat(32768);
     let keys = serde_json::to_string(&["body", long.as_str()]).unwrap();
@@ -276,7 +317,12 @@ fn gin_input_retires_partial_maps_and_field_generations_on_terminal_input() {
             if terminal == "zero" {
                 assert!(input.advance(0).is_err());
             } else if terminal != "drop" {
-                assert!(finish(&mut input).is_err());
+                let error = finish(&mut input).err().unwrap();
+                assert!(matches!(
+                    (terminal, error),
+                    ("cancel", StorageBackendError::Cancelled(_))
+                        | ("memory", StorageBackendError::Memory(_))
+                ));
             }
             drop(input);
         }

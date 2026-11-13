@@ -12,12 +12,12 @@ use std::{
     task::{Context, Poll, Waker},
 };
 use uqa_core::{
-    image_io::AsyncImageInput,
+    image_io::{AsyncImageInput, ImageIoError},
     memory::{Produced, ProductionControl, ProductionString},
 };
 
 pub(crate) trait Work {
-    fn checkpoint(&mut self) -> impl Future<Output = Result<(), SQLError>> + Send;
+    fn checkpoint(&mut self) -> impl Future<Output = Result<(), ImageIoError>> + Send;
 
     fn text(
         &mut self,
@@ -27,7 +27,7 @@ pub(crate) trait Work {
 }
 
 impl Work for () {
-    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+    async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
         Ok(())
     }
 
@@ -41,8 +41,8 @@ impl Work for () {
 }
 
 impl Work for AsyncImageInput<'_> {
-    async fn checkpoint(&mut self) -> Result<(), SQLError> {
-        Ok(AsyncImageInput::checkpoint(self).await?)
+    async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
+        AsyncImageInput::checkpoint(self).await
     }
 
     async fn text(

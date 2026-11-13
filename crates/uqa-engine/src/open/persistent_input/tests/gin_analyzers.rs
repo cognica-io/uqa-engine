@@ -141,7 +141,19 @@ fn persistent_gin_input_retires_private_transaction_after_terminal_failure(
             if terminal != "drop" {
                 loop {
                     match input.advance(usize::from(terminal != "zero")) {
-                        Err(_) => break,
+                        Err(error) => {
+                            match terminal {
+                                "cancel" => {
+                                    assert!(matches!(error, StorageBackendError::Cancelled(_)));
+                                }
+                                "memory" => {
+                                    assert!(matches!(error, StorageBackendError::Memory(_)));
+                                }
+                                "zero" => (),
+                                _ => unreachable!(),
+                            }
+                            break;
+                        }
                         Ok(None) => (),
                         Ok(Some(_)) => panic!("interrupted GIN restoration completed"),
                     }
