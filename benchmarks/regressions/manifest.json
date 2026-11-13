@@ -65714,6 +65714,58 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_diagnostics_preserve_original_syntax_messages_positions_and_eof",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/diagnostics.rs",
+      "capability": "Retained JSON syntax diagnostics",
+      "workload": "Malformed delimiters, literals, numbers, escapes, surrogate pairs, control characters and nesting boundaries.",
+      "invariant": "Lexical errors retain the original message, byte-based line/column and EOF classification.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_diagnostics_match_truncated_mutated_and_multibyte_inputs",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/diagnostics.rs",
+      "capability": "Retained JSON syntax diagnostics",
+      "workload": "Every prefix and six byte replacements at every position of nested ASCII/Unicode fixtures, including malformed UTF-8 and incomplete hex escapes.",
+      "invariant": "Original accepted values remain accepted and each rejected input matches the independent public parser diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_diagnostics_retain_locations_across_bounded_input_without_replay",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/diagnostics.rs",
+      "capability": "Retained JSON syntax diagnostics",
+      "workload": "Read a long multiline and multibyte value through one-step work windows with a source that rejects all reads.",
+      "invariant": "The original source position survives suspension without replay or population-sized diagnostic storage; completion retires all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_json_resource_failures_do_not_become_syntax_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/tests/diagnostics.rs",
+      "capability": "Retained JSON syntax diagnostics",
+      "workload": "Deny nesting admission and cancel input before its next event.",
+      "invariant": "Memory and cancellation remain typed resource failures and do not fabricate a syntax cause.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

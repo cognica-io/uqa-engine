@@ -6,7 +6,7 @@
 
 //! Token scanning borrows input and validates escapes without decoder scratch.
 
-use super::{work::Work, JsonReadError, JsonReader};
+use super::{work::Work, JsonReader, JsonSyntaxKind};
 
 impl<'a> JsonReader<'a, '_> {
     pub(super) fn peek(&self) -> Option<u8> {
@@ -14,23 +14,16 @@ impl<'a> JsonReader<'a, '_> {
     }
 
     pub(super) async fn advance<W: Work>(&mut self, work: &mut W) -> Result<(), W::Error> {
+        if self.peek() == Some(b'\n') {
+            self.line += 1;
+            self.line_start = self.position + 1;
+        }
         self.position += 1;
         if self.position.is_multiple_of(4096) {
             self.check()?;
             work.checkpoint().await?;
         }
         Ok(())
-    }
-
-    pub(super) async fn consume<W: Work>(
-        &mut self,
-        expected: u8,
-        work: &mut W,
-    ) -> Result<(), W::Error> {
-        if self.peek() != Some(expected) {
-            return Err(JsonReadError::InvalidJson.into());
-        }
-        self.advance(work).await
     }
 
     pub(super) async fn skip_whitespace<W: Work>(&mut self, work: &mut W) -> Result<(), W::Error> {
@@ -49,29 +42,40 @@ impl<'a> JsonReader<'a, '_> {
         work: &mut W,
     ) -> Result<(), W::Error> {
         for &byte in keyword {
-            self.consume(byte, work).await?;
+            if self.peek() != Some(byte) {
+                let kind = if self.peek().is_none() {
+                    JsonSyntaxKind::EndOfValue
+                } else {
+                    JsonSyntaxKind::ExpectedIdentifier
+                };
+                return Err(self.reject(kind, true).into());
+            }
+            self.advance(work).await?;
         }
         Ok(())
     }
 
     pub(super) async fn string<W: Work>(&mut self, work: &mut W) -> Result<&'a [u8], W::Error> {
         let start = self.position;
-        self.consume(b'"', work).await?;
+        self.advance(work).await?;
         while let Some(byte) = self.peek() {
             self.advance(work).await?;
             match byte {
                 b'"' => {
                     let encoded = &self.input[start..self.position];
-                    if !self.ignored_string_escapes && !self.validated_utf8 {
-                        validate_utf8(encoded, work).await?;
+                    if !self.ignored_string_escapes
+                        && !self.validated_utf8
+                        && !validate_utf8(encoded, work).await?
+                    {
+                        return Err(self.reject(JsonSyntaxKind::InvalidUnicode, false).into());
                     }
                     return Ok(encoded);
                 }
-                b'\\' => match self.peek().ok_or(JsonReadError::InvalidJson)? {
-                    b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
+                b'\\' => match self.peek() {
+                    Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => {
                         self.advance(work).await?;
                     }
-                    b'u' => {
+                    Some(b'u') => {
                         self.advance(work).await?;
                         let unit = self.hex_quad(work).await?;
                         if self.ignored_string_escapes {
@@ -79,36 +83,65 @@ impl<'a> JsonReader<'a, '_> {
                         }
                         match unit {
                             0xD800..=0xDBFF => {
-                                self.consume(b'\\', work).await?;
-                                self.consume(b'u', work).await?;
+                                for expected in [b'\\', b'u'] {
+                                    if self.peek() != Some(expected) {
+                                        let kind = if self.peek().is_none() {
+                                            JsonSyntaxKind::EndOfString
+                                        } else {
+                                            JsonSyntaxKind::IncompleteSurrogate
+                                        };
+                                        return Err(self.reject(kind, true).into());
+                                    }
+                                    self.advance(work).await?;
+                                }
                                 if !(0xDC00..=0xDFFF).contains(&self.hex_quad(work).await?) {
-                                    return Err(JsonReadError::InvalidJson.into());
+                                    return Err(self
+                                        .reject(JsonSyntaxKind::InvalidSurrogate, false)
+                                        .into());
                                 }
                             }
-                            0xDC00..=0xDFFF => return Err(JsonReadError::InvalidJson.into()),
+                            0xDC00..=0xDFFF => {
+                                return Err(self
+                                    .reject(JsonSyntaxKind::InvalidSurrogate, false)
+                                    .into())
+                            }
                             _ => {}
                         }
                     }
-                    _ => return Err(JsonReadError::InvalidJson.into()),
+                    None => return Err(self.reject(JsonSyntaxKind::EndOfString, false).into()),
+                    _ => return Err(self.reject(JsonSyntaxKind::InvalidEscape, true).into()),
                 },
-                0..=31 => return Err(JsonReadError::InvalidJson.into()),
+                0..=31 => return Err(self.reject(JsonSyntaxKind::ControlCharacter, false).into()),
                 _ => {}
             }
         }
-        Err(JsonReadError::InvalidJson.into())
+        Err(self.reject(JsonSyntaxKind::EndOfString, false).into())
     }
 
     async fn hex_quad<W: Work>(&mut self, work: &mut W) -> Result<u16, W::Error> {
+        if self.input.len() - self.position < 4 {
+            while self.peek().is_some() {
+                self.advance(work).await?;
+            }
+            return Err(self.reject(JsonSyntaxKind::EndOfString, false).into());
+        }
         let mut result = 0;
+        let mut valid = true;
         for _ in 0..4 {
-            let digit = match self.peek().ok_or(JsonReadError::InvalidJson)? {
+            let digit = match self.peek().expect("complete four-byte escape") {
                 byte @ b'0'..=b'9' => byte - b'0',
                 byte @ b'a'..=b'f' => byte - b'a' + 10,
                 byte @ b'A'..=b'F' => byte - b'A' + 10,
-                _ => return Err(JsonReadError::InvalidJson.into()),
+                _ => {
+                    valid = false;
+                    0
+                }
             };
             result = (result << 4) | u16::from(digit);
             self.advance(work).await?;
+        }
+        if !valid {
+            return Err(self.reject(JsonSyntaxKind::InvalidEscape, false).into());
         }
         Ok(result)
     }
@@ -118,15 +151,16 @@ impl<'a> JsonReader<'a, '_> {
         if self.peek() == Some(b'-') {
             self.advance(work).await?;
         }
-        match self.peek().ok_or(JsonReadError::InvalidJson)? {
-            b'0' => {
+        match self.peek() {
+            Some(b'0') => {
                 self.advance(work).await?;
                 if self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                    return Err(JsonReadError::InvalidJson.into());
+                    return Err(self.reject(JsonSyntaxKind::InvalidNumber, true).into());
                 }
             }
-            b'1'..=b'9' => self.digits(work).await?,
-            _ => return Err(JsonReadError::InvalidJson.into()),
+            Some(b'1'..=b'9') => self.digits(work).await?,
+            None => return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into()),
+            _ => return Err(self.reject(JsonSyntaxKind::InvalidNumber, true).into()),
         }
         if self.peek() == Some(b'.') {
             self.advance(work).await?;
@@ -148,13 +182,18 @@ impl<'a> JsonReader<'a, '_> {
             self.advance(work).await?;
         }
         if self.position == start {
-            return Err(JsonReadError::InvalidJson.into());
+            let kind = if self.peek().is_none() {
+                JsonSyntaxKind::EndOfValue
+            } else {
+                JsonSyntaxKind::InvalidNumber
+            };
+            return Err(self.reject(kind, true).into());
         }
         Ok(())
     }
 }
 
-async fn validate_utf8<W: Work>(mut bytes: &[u8], work: &mut W) -> Result<(), W::Error> {
+async fn validate_utf8<W: Work>(mut bytes: &[u8], work: &mut W) -> Result<bool, W::Error> {
     while !bytes.is_empty() {
         work.checkpoint().await?;
         let length = bytes.len().min(4096);
@@ -163,9 +202,9 @@ async fn validate_utf8<W: Work>(mut bytes: &[u8], work: &mut W) -> Result<(), W:
             Err(error) if error.error_len().is_none() && length < bytes.len() => {
                 error.valid_up_to()
             }
-            Err(_) => return Err(JsonReadError::InvalidJson.into()),
+            Err(_) => return Ok(false),
         };
         bytes = &bytes[consumed..];
     }
-    Ok(())
+    Ok(true)
 }

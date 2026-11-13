@@ -11,7 +11,9 @@ use crate::{
     CancellationToken, QueryCancelled,
 };
 
+mod diagnostics;
 mod lexical;
+pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
 mod object;
 mod string;
 mod value;
@@ -125,6 +127,9 @@ impl Stack {
 pub struct JsonReader<'a, 'c> {
     input: &'a [u8],
     position: usize,
+    line: usize,
+    line_start: usize,
+    syntax_error: Option<JsonSyntaxError>,
     stack: Stack,
     cancellation: Option<&'c CancellationToken>,
     production: Option<ProductionControl<'c>>,
@@ -152,6 +157,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Bounded(BudgetedSmallVec::new(memory)),
             cancellation: Some(cancellation),
             production: None,
@@ -167,6 +175,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input: input.as_bytes(),
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Unbounded(Vec::new()),
             cancellation: None,
             production: None,
@@ -191,6 +202,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: control.budget().map_or_else(
                 || Stack::Unbounded(Vec::new()),
                 |budget| Stack::Bounded(BudgetedSmallVec::new(budget)),
@@ -262,10 +276,13 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 return if self.position == self.input.len() {
                     Ok(None)
                 } else {
-                    Err(JsonReadError::InvalidJson.into())
+                    Err(self.reject(JsonSyntaxKind::TrailingCharacters, true).into())
                 };
             }
             None => self.root_started = true,
+            Some(Frame::ArrayFirst) if self.peek().is_none() => {
+                return Err(self.reject(JsonSyntaxKind::EndOfArray, false).into())
+            }
             Some(Frame::ArrayFirst) if self.peek() == Some(b']') => {
                 return self.close(JsonToken::EndArray).map_err(Into::into)
             }
@@ -280,7 +297,12 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     self.replace(Frame::ArrayValue);
                     self.expected = JsonExpected::Value;
                 }
-                _ => return Err(JsonReadError::InvalidJson.into()),
+                None => return Err(self.reject(JsonSyntaxKind::EndOfArray, false).into()),
+                _ => {
+                    return Err(self
+                        .reject(JsonSyntaxKind::ExpectedArraySeparator, true)
+                        .into())
+                }
             },
             Some(Frame::ObjectAfter) => match self.peek() {
                 Some(b'}') => return self.close(JsonToken::EndObject).map_err(Into::into),
@@ -290,22 +312,35 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     self.replace(Frame::ObjectKey);
                     self.expected = JsonExpected::Key;
                 }
-                _ => return Err(JsonReadError::InvalidJson.into()),
+                None => return Err(self.reject(JsonSyntaxKind::EndOfObject, false).into()),
+                _ => {
+                    return Err(self
+                        .reject(JsonSyntaxKind::ExpectedObjectSeparator, true)
+                        .into())
+                }
             },
             _ => {}
         }
         match self.stack.frames().last().copied() {
             Some(Frame::ObjectFirst | Frame::ObjectKey) => {
-                let start = self.position;
-                let key = self.string(work).await?;
-                self.replace(Frame::ObjectValue);
-                return Ok(Some(self.event(start, JsonToken::Key(key))));
+                return self.key(work).await.map(Some);
             }
             Some(Frame::ObjectValue) => {
-                self.consume(b':', work).await?;
+                if self.peek() != Some(b':') {
+                    let kind = if self.peek().is_none() {
+                        JsonSyntaxKind::EndOfObject
+                    } else {
+                        JsonSyntaxKind::ExpectedColon
+                    };
+                    return Err(self.reject(kind, true).into());
+                }
+                self.advance(work).await?;
                 self.skip_whitespace(work).await?;
                 self.replace(Frame::ObjectAfter);
                 self.expected = JsonExpected::Value;
+            }
+            Some(Frame::ArrayValue) if self.peek() == Some(b']') => {
+                return Err(self.reject(JsonSyntaxKind::TrailingComma, true).into());
             }
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}
@@ -313,9 +348,28 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         self.value(work).await.map(Some)
     }
 
+    async fn key<W: Work>(&mut self, work: &mut W) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+        if self.peek() != Some(b'"') {
+            let kind = match self.peek() {
+                None if self.expected == JsonExpected::Key => JsonSyntaxKind::EndOfValue,
+                None => JsonSyntaxKind::EndOfObject,
+                Some(b'}') => JsonSyntaxKind::TrailingComma,
+                _ => JsonSyntaxKind::ExpectedKey,
+            };
+            return Err(self.reject(kind, true).into());
+        }
+        let start = self.position;
+        let key = self.string(work).await?;
+        self.replace(Frame::ObjectValue);
+        Ok(self.event(start, JsonToken::Key(key)))
+    }
+
     async fn value<W: Work>(&mut self, work: &mut W) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
         let start = self.position;
-        let token = match self.peek().ok_or(JsonReadError::InvalidJson)? {
+        let Some(byte) = self.peek() else {
+            return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into());
+        };
+        let token = match byte {
             b'n' => {
                 self.keyword(b"null", work).await?;
                 JsonToken::Null
@@ -335,7 +389,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     .depth_limit
                     .is_some_and(|limit| self.stack.frames().len() >= limit)
                 {
-                    return Err(JsonReadError::InvalidJson.into());
+                    return Err(self.reject(JsonSyntaxKind::DepthLimit, true).into());
                 }
                 let array = self.peek() == Some(b'[');
                 self.stack.push(if array {
@@ -350,7 +404,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     JsonToken::StartObject
                 }
             }
-            _ => return Err(JsonReadError::InvalidJson.into()),
+            _ => return Err(self.reject(JsonSyntaxKind::ExpectedValue, true).into()),
         };
         self.check()?;
         Ok(self.event(start, token))
