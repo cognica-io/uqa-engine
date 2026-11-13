@@ -65619,6 +65619,101 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_input_preserves_complete_key_parameter_and_field_observations",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests/input.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Complete physical GIN/non-GIN rows, ignored expressions, repeated columns, sorted options and Unicode trimming.",
+      "invariant": "Original ordinary restoration and retained input produce the same field sequence and owner map; non-GIN payloads remain uninterpreted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_input_preserves_complete_physical_before_semantic_and_per_field_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests/input.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Late physical size failure, missing selected tables, malformed complete keys/options, invalid declared columns and conflicting owners.",
+      "invariant": "Complete physical input precedes semantics, keys and options precede publication, and each original field publication precedes its type or competing-owner error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_input_retires_partial_maps_and_field_generations_on_terminal_input",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests/input.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Interrupt after the first field publication using cancellation, quota denial, zero work, abandonment and unwinding.",
+      "invariant": "Completed private predecessors remain intact until their owner retires; every unfinished map, field successor and original admission is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "gin_table_lookup_preserves_quoted_names_and_suspends_long_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/gin/tests/input.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Look up quoted schemas, doubled quotes, default schema names and long multibyte prefixes in the selected native map.",
+      "invariant": "Bounded borrowed comparisons choose the original exact relation without allocating another decoded identity or changing the map.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_gin_field_publication_keeps_predecessors_and_independent_later_writes",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/analyzers/field_restoration/tests.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Publish an admitted native field generation, retain its predecessor, then mutate after exhausting and cancelling the input allowance.",
+      "invariant": "Only complete field successors publish; old snapshots remain immutable and later writes use independent admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_gin_input_keeps_selected_owner_and_writable_field_generations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/gin_analyzers.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Restore selected native SQLite, SQLite KV and redb catalogs while the source analyzer changes, then write, roll back and search after input retirement.",
+      "invariant": "The private Engine retains the selected exact GIN revision and complete writable field state, independent of later source changes and input controls.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_gin_input_retires_private_transaction_after_terminal_failure",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/gin_analyzers.rs",
+      "capability": "Retained GIN analyzer reconstruction",
+      "workload": "Interrupt each persistent provider during the real GIN stage by cancellation, memory denial, zero work, drop and unwind.",
+      "invariant": "Every terminal path consumes the unpublished candidate and its read transaction without changing source metadata or preventing later writes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }

@@ -5,8 +5,11 @@
 //
 
 use super::*;
+
+mod input;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
+use uqa_sql::ast::IndexKey;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType, Expr, WindowCallModifiers, WindowSpec},
     catalog::{
@@ -14,6 +17,7 @@ use uqa_sql::{
         table_metadata::{SharedTableMetadata, TableMetadata},
     },
 };
+use uqa_storage::{CatalogIndexRow, RelationIdentity};
 
 #[derive(Clone)]
 struct Table {

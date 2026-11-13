@@ -8,13 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Validate complete stored index-key syntax under its original allowance, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content and untagged alternatives; GIN assembly and Engine scheduling remain in progress.
+- Restore persistent GIN analyzer ownership through bounded native input on native SQLite, SQLite Key/Value and redb. Share ordinary validation order, retain selected exact revisions, publish complete private field generations and transfer admitted ownership directly to field reconstruction. Interrupted reconstruction retires its private transaction; later writes use independent admission.
 
-- Retain admitted GIN analyzer keys and names through field reconstruction without copying the ownership map. Suspend long key comparisons before atomic ordered-map publication, preserve original leases on replacement, and keep later field reads independent of source cancellation or quota exhaustion. Engine GIN assembly and scheduling remain in progress.
-
-- Admit stored GIN analyzer-option names and physical-field metadata successors through bounded native input. Validate overwritten and unrelated options, preserve sorted name selection and Unicode trimming, and retain preceding field generations through failure or cancellation. Engine GIN integration remains in progress.
-
-- Move persistent GIN analyzer ownership into Execution while preserving complete key syntax, sorted analyzer-option selection and per-column publication/error order. Add retained complete index loading with native SQLite physical order and stable Key/Value relation order; GIN semantic input and Engine continuation remain in progress.
+- Validate complete stored index-key syntax, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content, untagged alternatives, sorted analyzer options and Unicode trimming. Exact detailed stored-parser diagnostics remain in progress.
 
 - Share ordered field analyzer installation between ordinary reopening and retained backup reconstruction. Preserve historical index/search revisions, exact column and name checks, legacy migrations and first physical failures; publish complete private field catalogs with independent later mutation ownership.
 

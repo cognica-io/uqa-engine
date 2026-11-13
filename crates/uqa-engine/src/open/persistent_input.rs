@@ -18,6 +18,7 @@ use uqa_execution::{
     catalog::{
         analyzers::{
             fields::{installation::FieldAnalyzerInstallation, FieldAnalyzerCatalogInput},
+            gin::{GinAnalyzerCatalogInput, RetainedGinAnalyzerOwners},
             named::NamedAnalyzerCatalogInput,
         },
         security::roles::persistence::input::RoleCatalogInput,
@@ -58,7 +59,7 @@ enum Stage {
     Types(PersistentTypeInput),
     Authority(PersistentAuthorityInput),
     NamedAnalyzers(NamedAnalyzers),
-    GinAnalyzers(AfterNamedAnalyzers),
+    GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
     Registries(RestoredAuthorities),
     Caches,
@@ -75,13 +76,40 @@ struct NamedAnalyzers {
 }
 
 impl NamedAnalyzers {
-    fn advance(mut self, engine: &Engine) -> StorageBackendResult<Stage> {
+    fn advance(
+        mut self,
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
         match self.input.advance(1)? {
             Some(names) => {
                 *engine.durable.named_analyzers.write() = names;
-                Ok(Stage::GinAnalyzers(self.next))
+                Ok(Stage::GinAnalyzers(GinAnalyzers {
+                    input: engine.stored_gin_analyzers_input(limits, control)?,
+                    next: self.next,
+                }))
             }
             None => Ok(Stage::NamedAnalyzers(self)),
+        }
+    }
+}
+
+struct GinAnalyzers {
+    input: GinAnalyzerCatalogInput,
+    next: AfterNamedAnalyzers,
+}
+
+impl GinAnalyzers {
+    fn advance(
+        mut self,
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
+        match self.input.advance(1)? {
+            Some(gin) => self.next.begin_fields(engine, gin, limits, control),
+            None => Ok(Stage::GinAnalyzers(self)),
         }
     }
 }
@@ -90,11 +118,12 @@ impl AfterNamedAnalyzers {
     fn begin_fields(
         self,
         engine: &Engine,
+        gin: RetainedGinAnalyzerOwners,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Stage> {
         Ok(Stage::FieldAnalyzers(FieldAnalyzers::Bindings {
-            input: engine.stored_field_analyzers_input(self.resources, limits, control)?,
+            input: engine.stored_field_analyzers_input(self.resources, gin, limits, control)?,
             retained: self.retained,
         }))
     }
@@ -195,7 +224,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/field analyzer input and field installation consume bounded native polls. GIN reconstruction and the remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input and field installation consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -314,8 +343,8 @@ impl Candidate {
             Stage::Authority(input) => {
                 Stage::advance_authority(input, engine, self.limits, control)?
             }
-            Stage::NamedAnalyzers(input) => input.advance(engine)?,
-            Stage::GinAnalyzers(retained) => retained.begin_fields(engine, self.limits, control)?,
+            Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
+            Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
             Stage::Registries(retained) => {
                 self.session

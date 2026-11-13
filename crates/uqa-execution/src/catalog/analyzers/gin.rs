@@ -10,11 +10,15 @@ use super::fields::{
     installation::{validate_declared_field, AnalyzerTableDefinition},
     GinAnalyzerOwners,
 };
-use std::collections::BTreeMap;
-use uqa_sql::ast::IndexKey;
-use uqa_storage::{
-    CatalogFacade, CatalogIndexRow, RelationIdentity, StorageBackendError, StorageBackendResult,
-};
+use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
+
+mod input;
+pub use input::{GinAnalyzerCatalogInput, GinAnalyzerInputTable, GinAnalyzerInputTables};
+mod tables;
+pub use tables::lookup_table_from;
+mod ordinary;
+mod restoration;
+use ordinary::restore_rows;
 
 mod parameters;
 pub use parameters::GinAnalyzerParameter;
@@ -27,7 +31,7 @@ pub trait GinAnalyzerTable: AnalyzerTableDefinition {
 }
 
 /// State adapters preserve ordinary table resolution without exposing the enclosing Engine.
-pub trait GinAnalyzerTables {
+pub trait GinAnalyzerTables: Sync {
     type Table: GinAnalyzerTable;
     fn table(&self, name: &str) -> StorageBackendResult<Option<Self::Table>>;
 }
@@ -37,47 +41,6 @@ pub fn restore(
     tables: &impl GinAnalyzerTables,
 ) -> StorageBackendResult<GinAnalyzerOwners> {
     restore_rows(catalog.load_catalog_indexes()?, tables)
-}
-
-fn restore_rows(
-    rows: Vec<CatalogIndexRow>,
-    tables: &impl GinAnalyzerTables,
-) -> StorageBackendResult<GinAnalyzerOwners> {
-    let mut owners = GinAnalyzerOwners::new();
-    for row in rows {
-        if !row.index_type.eq_ignore_ascii_case("gin") {
-            continue;
-        }
-        let name = RelationIdentity::from_legacy_name(&row.table_name)
-            .map(|relation| relation.qualified_name())
-            .map_err(corrupt)?;
-        let table = tables
-            .table(&name)?
-            .ok_or_else(|| corrupt("GIN analyzer owner references a missing table"))?;
-        let keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)?;
-        let parameters: BTreeMap<String, String> = serde_json::from_str(&row.parameters_json)?;
-        let analyzer = parameters
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case("analyzer"))
-            .map(|(_, name)| name.trim());
-        for field in keys.iter().filter_map(IndexKey::column) {
-            if !table.fields().iter().any(|current| current == field) {
-                table.register_field(field)?;
-            }
-            if table.columns_declared() {
-                validate_declared_field(&table, &name, field)?;
-            }
-            if let Some(analyzer) = analyzer {
-                if owners
-                    .insert((name.clone(), field.to_owned()), analyzer.to_owned())
-                    .is_some_and(|previous| previous != analyzer)
-                {
-                    return Err(corrupt("GIN definitions have competing analyzer owners"));
-                }
-            }
-        }
-    }
-    Ok(owners)
 }
 
 fn corrupt(message: impl Into<String>) -> StorageBackendError {

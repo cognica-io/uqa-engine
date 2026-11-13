@@ -6,10 +6,13 @@
 
 //! Retained table generations and field-root publication adapt the shared installation owner.
 
-use crate::{state::TableRegistryMap, Engine, TableState};
+use crate::{
+    state::{CatalogGeneration, TableRegistryMap},
+    Engine, TableState,
+};
 use std::sync::Arc;
 use uqa_analysis::{AnalyzerDefinition, AnalyzerResources, CompiledAnalyzer};
-use uqa_core::{memory::RetainedValue, RelationIdentity};
+use uqa_core::{image_io::AsyncImageInput, memory::RetainedValue, RelationIdentity};
 use uqa_execution::catalog::analyzers::fields::{
     installation::{
         self, AnalyzerCatalogState, AnalyzerTable, AnalyzerTableDefinition, AnalyzerTables,
@@ -17,14 +20,18 @@ use uqa_execution::catalog::analyzers::fields::{
     },
     CatalogFieldBindings, FieldAnalyzerCatalogInput, GinAnalyzerOwners, RestoredFieldAnalyzers,
 };
-use uqa_execution::catalog::analyzers::gin::{self, GinAnalyzerTable, GinAnalyzerTables};
+use uqa_execution::catalog::analyzers::gin::{
+    self, GinAnalyzerCatalogInput, GinAnalyzerInputTable, GinAnalyzerInputTables, GinAnalyzerTable,
+    GinAnalyzerTables, RetainedGinAnalyzerOwners,
+};
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
     catalog::{table_definition::SharedTableDefinition, table_metadata::SharedTableMetadata},
 };
 use uqa_storage::{
     analyzer_binding::registry::FieldAnalyzerCatalog, catalog::input::CatalogInputLimits,
-    read_control::StorageReadControl, CatalogFacade, FieldAnalyzerBinding, StorageBackendResult,
+    read_control::StorageReadControl, CatalogFacade, FieldAnalyzerBinding, StorageBackendError,
+    StorageBackendResult,
 };
 
 #[derive(Clone)]
@@ -71,6 +78,24 @@ impl GinAnalyzerTable for Table {
     }
 }
 
+impl GinAnalyzerInputTable for Table {
+    async fn register_field_from(
+        &self,
+        field: &str,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<()> {
+        let fields = self
+            .fields()
+            .with_appended_name_from(field, input)
+            .await
+            .map_err(|error| StorageBackendError::backend("GIN field metadata", error))?;
+        let generation = CatalogGeneration::with_budget(fields, input.memory)?;
+        input.checkpoint().await?;
+        self.0.fts_fields.restore(&generation);
+        Ok(())
+    }
+}
+
 struct GinTables<'a>(&'a Engine);
 
 impl GinAnalyzerTables for GinTables<'_> {
@@ -88,6 +113,19 @@ impl AnalyzerTables for Tables {
         self.0
             .iter()
             .map(|(name, table)| (name, Table(Arc::clone(table))))
+    }
+}
+
+impl GinAnalyzerInputTables for Tables {
+    type Table = Table;
+    async fn table_from(
+        &self,
+        name: &str,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Option<Table>> {
+        Ok(gin::lookup_table_from(&self.0, name, input)
+            .await?
+            .map(|table| Table(Arc::clone(table))))
     }
 }
 
@@ -137,15 +175,29 @@ impl Engine {
         )
     }
 
+    pub(crate) fn stored_gin_analyzers_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<GinAnalyzerCatalogInput> {
+        let catalog = self.storage.catalog.as_ref().expect("persistent catalog");
+        GinAnalyzerCatalogInput::new(
+            catalog.as_ref(),
+            Tables(self.storage.tables.live_snapshot()),
+            limits,
+            control,
+        )
+    }
+
     pub(crate) fn stored_field_analyzers_input(
         &self,
         resources: Arc<AnalyzerResources>,
+        gin: RetainedGinAnalyzerOwners,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<FieldAnalyzerCatalogInput> {
         let catalog = self.storage.catalog.as_ref().expect("persistent catalog");
-        let gin = self.restore_gin_analyzer_owners(catalog.as_ref())?;
-        FieldAnalyzerCatalogInput::new(catalog.as_ref(), resources, limits, Arc::new(gin), control)
+        FieldAnalyzerCatalogInput::new(catalog.as_ref(), resources, limits, gin, control)
     }
 
     pub(crate) fn restored_field_analyzers_installation(
@@ -162,3 +214,6 @@ impl Engine {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

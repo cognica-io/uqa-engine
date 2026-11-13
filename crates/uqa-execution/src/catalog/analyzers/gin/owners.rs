@@ -94,7 +94,7 @@ impl MapKeyInput<FieldKey> for Comparison<'_, '_> {
     }
 }
 
-async fn compare(
+pub(super) async fn compare(
     left: &str,
     right: &str,
     input: &mut AsyncImageInput<'_>,

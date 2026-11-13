@@ -153,6 +153,16 @@ pub fn validate_declared_field(
     work::inline(validate_declared_field_with(table, name, field, &mut ()))
 }
 
+/// Retained GIN reconstruction shares the original declared-column and physical-membership predicates.
+pub async fn validate_declared_field_from(
+    table: &impl AnalyzerTableDefinition,
+    name: &str,
+    field: &str,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> StorageBackendResult<()> {
+    validate_declared_field_with(table, name, field, input).await
+}
+
 async fn validate_declared_field_with(
     table: &impl AnalyzerTableDefinition,
     name: &str,
