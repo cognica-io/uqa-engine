@@ -12,7 +12,10 @@ use serde::de::DeserializeOwned;
 use uqa_analysis::AnalyzerResources;
 use uqa_core::{
     image_io::AsyncImageInput,
-    json::{decode_json_string_from, JsonEvent, JsonReadError, JsonReader, JsonToken},
+    json::{
+        decode_json_string_from, JsonDiagnostic, JsonEvent, JsonInputError, JsonReadError,
+        JsonReader, JsonToken,
+    },
     memory::Budgeted,
 };
 
@@ -63,27 +66,18 @@ impl<'a> Input<'a, '_> {
         self.reader
             .next_event_from(work)
             .await
-            .map_err(json_error)?
+            .map_err(|error| JsonInputError::from_reader(&self.reader, error))?
             .ok_or_else(invalid)
     }
 
     async fn raw(&mut self, work: &mut AsyncImageInput<'_>) -> StorageBackendResult<&'a str> {
-        let first = self.next(work).await?;
-        let start = first.range.start;
-        let mut end = first.range.end;
-        let mut depth = usize::from(matches!(
-            first.token,
-            JsonToken::StartObject | JsonToken::StartArray
-        ));
-        while depth != 0 {
-            let event = self.next(work).await?;
-            end = event.range.end;
-            match event.token {
-                JsonToken::StartObject | JsonToken::StartArray => depth += 1,
-                JsonToken::EndObject | JsonToken::EndArray => depth -= 1,
-                _ => (),
-            }
-        }
+        let bytes = self
+            .reader
+            .read_raw_value_with_work(work)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&self.reader, error))?;
+        let end = self.reader.position().byte_offset;
+        let start = end - bytes.len();
         Ok(&self.text[start..end])
     }
 
@@ -91,15 +85,29 @@ impl<'a> Input<'a, '_> {
         &mut self,
         work: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<T> {
-        Ok(serde_json::from_str(self.raw(work).await?)?)
+        let bytes = self
+            .reader
+            .read_value_span_with_work(work)
+            .await
+            .map_err(|error| JsonInputError::from_reader(&self.reader, error))?;
+        let end = self.reader.position().byte_offset;
+        Ok(serde_json::from_str(&self.text[end - bytes.len()..end])?)
     }
 
     async fn text(
         &mut self,
         work: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<Budgeted<String>> {
-        let JsonToken::String(bytes) = self.next(work).await?.token else {
-            return Err(invalid());
+        let token = self.next(work).await?.token;
+        let JsonToken::String(bytes) = token else {
+            return Err(JsonDiagnostic::invalid_type_from(
+                token,
+                self.reader.position(),
+                "a string",
+                work,
+            )
+            .await?
+            .into());
         };
         decode_json_string_from(bytes, work)
             .await
@@ -117,7 +125,14 @@ impl<'a> Input<'a, '_> {
                     .await
                     .map_err(json_error)?,
             )),
-            _ => Err(invalid()),
+            token => Err(JsonDiagnostic::invalid_type_from(
+                token,
+                self.reader.position(),
+                "a string",
+                work,
+            )
+            .await?
+            .into()),
         }
     }
 
@@ -188,7 +203,7 @@ impl<'a> Input<'a, '_> {
             .reader
             .next_event_from(work)
             .await
-            .map_err(json_error)?
+            .map_err(|error| JsonInputError::from_reader(&self.reader, error))?
             .is_some()
         {
             return Err(invalid());
@@ -259,8 +274,7 @@ impl FieldAnalyzerBinding {
         let mut memory = work.memory.reserve(size_of::<Self>())?;
         let saved = Input {
             text: json,
-            reader: JsonReader::new(json, work.memory, work.cancellation)
-                .with_ignored_string_escapes(),
+            reader: JsonReader::new(json, work.memory, work.cancellation),
         }
         .binding(work)
         .await?;

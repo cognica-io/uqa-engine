@@ -65948,6 +65948,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "raw_json_spans_preserve_original_skip_grammar_diagnostics_and_unlimited_nesting",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/raw/tests.rs",
+      "capability": "Raw descriptor and envelope input",
+      "workload": "Public raw-value comparisons exercise every truncation, per-byte structural mutations, opaque surrogate escapes and nesting beyond typed limits.",
+      "invariant": "Borrowed spans retain exact bytes and original syntax/EOF messages and positions without a decoded value tree.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "raw_json_completion_restores_enclosing_typed_string_and_depth_rules",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/raw/tests.rs",
+      "capability": "Raw descriptor and envelope input",
+      "workload": "Read raw values inside typed containers, then encounter strict strings and typed depth boundaries.",
+      "invariant": "Raw traversal leaves the original enclosing string and depth policies intact; ordinary spans preserve typed numeric and delimiter errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "raw_json_work_windows_keep_admission_cancellation_and_retirement_terminal",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/raw/tests.rs",
+      "capability": "Raw descriptor and envelope input",
+      "workload": "Read long raw strings and deep containers with one-step windows; cancel or abandon at every pending boundary and deny frame growth.",
+      "invariant": "No source reread occurs; raw traversal yields within long tokens and native resource failures retire every unpublished frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_binding_envelope_preserves_strict_string_and_raw_descriptor_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/stored/tests.rs",
+      "capability": "Raw descriptor and envelope input",
+      "workload": "Compare original closed binding envelopes with strict names/keys, raw descriptor failures and every truncated prefix.",
+      "invariant": "Native lexical and string-type diagnostics retain original messages, categories and positions before descriptor restoration.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

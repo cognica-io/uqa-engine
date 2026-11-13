@@ -17,6 +17,7 @@ mod lexical;
 pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
 pub use input::{JsonDiagnostic, JsonInputError};
 mod object;
+mod raw;
 mod string;
 mod value;
 pub use value::{
@@ -259,6 +260,14 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         &mut self,
         work: &mut W,
     ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        self.next_event_with_policy(work, false).await
+    }
+
+    async fn next_event_with_policy<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
         work.checkpoint().await?;
         self.check()?;
         self.skip_whitespace(work).await?;
@@ -325,7 +334,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         }
         match self.stack.frames().last().copied() {
             Some(Frame::ObjectFirst | Frame::ObjectKey) => {
-                return self.key(work).await.map(Some);
+                return self.key(work, raw).await.map(Some);
             }
             Some(Frame::ObjectValue) => {
                 if self.peek() != Some(b':') {
@@ -342,31 +351,46 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 self.expected = JsonExpected::Value;
             }
             Some(Frame::ArrayValue) if self.peek() == Some(b']') => {
-                return Err(self.reject(JsonSyntaxKind::TrailingComma, true).into());
+                let kind = if raw {
+                    JsonSyntaxKind::ExpectedValue
+                } else {
+                    JsonSyntaxKind::TrailingComma
+                };
+                return Err(self.reject(kind, true).into());
             }
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}
         }
-        self.value(work).await.map(Some)
+        self.value(work, raw).await.map(Some)
     }
 
-    async fn key<W: Work>(&mut self, work: &mut W) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+    async fn key<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
         if self.peek() != Some(b'"') {
             let kind = match self.peek() {
-                None if self.expected == JsonExpected::Key => JsonSyntaxKind::EndOfValue,
+                None if self.expected == JsonExpected::Key && !raw => JsonSyntaxKind::EndOfValue,
                 None => JsonSyntaxKind::EndOfObject,
-                Some(b'}') => JsonSyntaxKind::TrailingComma,
+                Some(b'}') if !raw => JsonSyntaxKind::TrailingComma,
                 _ => JsonSyntaxKind::ExpectedKey,
             };
             return Err(self.reject(kind, true).into());
         }
         let start = self.position;
-        let key = self.string(work).await?;
+        let key = self
+            .string(work, raw || self.ignored_string_escapes)
+            .await?;
         self.replace(Frame::ObjectValue);
         Ok(self.event(start, JsonToken::Key(key)))
     }
 
-    async fn value<W: Work>(&mut self, work: &mut W) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+    async fn value<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
         let start = self.position;
         let Some(byte) = self.peek() else {
             return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into());
@@ -384,12 +408,16 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 self.keyword(b"false", work).await?;
                 JsonToken::Bool(false)
             }
-            b'"' => JsonToken::String(self.string(work).await?),
-            b'-' | b'0'..=b'9' => JsonToken::Number(self.number(work).await?),
+            b'"' => JsonToken::String(
+                self.string(work, raw || self.ignored_string_escapes)
+                    .await?,
+            ),
+            b'-' | b'0'..=b'9' => JsonToken::Number(self.number_with_policy(work, raw).await?),
             b'[' | b'{' => {
-                if self
-                    .depth_limit
-                    .is_some_and(|limit| self.stack.frames().len() >= limit)
+                if !raw
+                    && self
+                        .depth_limit
+                        .is_some_and(|limit| self.stack.frames().len() >= limit)
                 {
                     return Err(self.reject(JsonSyntaxKind::DepthLimit, true).into());
                 }

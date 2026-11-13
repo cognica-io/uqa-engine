@@ -19,6 +19,75 @@ impl std::io::Read for NoRead {
     }
 }
 
+fn compare_diagnostic(text: &str) {
+    let expected = serde_json::from_str::<super::super::StoredBinding>(text)
+        .err()
+        .expect("invalid original envelope");
+    let memory = MemoryBudget::new(8 << 20);
+    let mut input = decoder(text, &memory, &CancellationToken::new());
+    let error = complete(&mut input, 1).unwrap_err();
+    let StorageBackendError::Json(actual) = error else {
+        panic!("native diagnostic missing for {text:?}: {error}; expected {expected}");
+    };
+    assert_eq!(actual.to_string(), expected.to_string(), "{text:?}");
+    assert_eq!(actual.position().line, expected.line());
+    assert_eq!(actual.position().column, expected.column());
+    assert_eq!(actual.is_data(), expected.is_data());
+    assert_eq!(actual.is_eof(), expected.is_eof());
+    assert_eq!(actual.is_syntax(), expected.is_syntax());
+    drop((actual, input));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn stored_binding_envelope_preserves_strict_string_and_raw_descriptor_diagnostics() {
+    for value in [
+        r#""\ud800""#,
+        r#""\udc00""#,
+        r#""\u0z00""#,
+        r#""\q""#,
+        "true",
+        "1.5",
+        "1e99999",
+        "[",
+        "{",
+    ] {
+        compare_diagnostic(&format!("{{\n \"format\": {value}"));
+        compare_diagnostic(&format!("{{\n \"index\": {{\"name\": {value}"));
+        compare_diagnostic(&format!(
+            "{{\n \"search\": {{\"descriptor\":\"\\ud800\",\"name\": {value}"
+        ));
+    }
+    for key in [r#""\ud800""#, r#""\udc00""#, r#""\u0z00""#, r#""\q""#] {
+        compare_diagnostic(&format!("{{\n {key}:null}}"));
+        compare_diagnostic(&format!(
+            "{{\"index\":{{\"descriptor\":\"\\ud800\",\n {key}:null}}}}"
+        ));
+    }
+    for raw in [
+        "[1,]",
+        "[1 2]",
+        "{\"a\":}",
+        "{\"a\" 1}",
+        r#""\q""#,
+        "1.e",
+        "01",
+        "\"a\nb\"",
+    ] {
+        compare_diagnostic(&format!("{{\n \"index\":{{\"descriptor\": {raw}}}}}"));
+    }
+    let text = binding().to_json().unwrap();
+    for end in 0..text.len() {
+        let prefix = &text[..end];
+        let expected = serde_json::from_str::<super::super::StoredBinding>(prefix)
+            .err()
+            .expect("truncated envelope");
+        if expected.is_syntax() || expected.is_eof() {
+            compare_diagnostic(prefix);
+        }
+    }
+}
+
 fn binding() -> FieldAnalyzerBinding {
     let owner = AnalyzerResources::new(AnalyzerLimits::default());
     let index = owner.compile(&Analyzer::default()).unwrap();

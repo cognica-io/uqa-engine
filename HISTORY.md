@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve raw analyzer descriptor spans and their original syntax diagnostics through bounded input. Strict enclosing names and fields retain their own string validation, while raw descriptors keep their original escape and nesting rules until revision validation.
+
 - Preserve native GIN key and option diagnostics, including original type messages, byte-based positions and syntax/EOF classification. Retain memory and cancellation error types through field reconstruction; remove original scalar values at the backup error boundary. Other stored-owner diagnostic conversion remains in progress.
 
 - Restore persistent GIN analyzer ownership through bounded native input on native SQLite, SQLite Key/Value and redb. Share ordinary validation order, retain selected exact revisions, publish complete private field generations and transfer admitted ownership directly to field reconstruction. Interrupted reconstruction retires its private transaction; later writes use independent admission.

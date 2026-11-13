@@ -44,12 +44,18 @@ fn failure(
         Ok(_) => panic!("retained input accepted corrupt records"),
         Err(error) => error,
     };
-    if expected == "serde" {
-        assert!(
-            matches!(ordinary, StorageBackendError::Serde(_)),
-            "{ordinary}"
-        );
-        assert!(matches!(actual, StorageBackendError::Serde(_)), "{actual}");
+    if expected == "json" {
+        let (StorageBackendError::Serde(reference), StorageBackendError::Json(observed)) =
+            (&ordinary, &actual)
+        else {
+            panic!("original and retained JSON diagnostics differ: {ordinary}; {actual}");
+        };
+        assert_eq!(observed.to_string(), reference.to_string());
+        assert_eq!(observed.position().line, reference.line());
+        assert_eq!(observed.position().column, reference.column());
+        assert_eq!(observed.is_data(), reference.is_data());
+        assert_eq!(observed.is_syntax(), reference.is_syntax());
+        assert_eq!(observed.is_eof(), reference.is_eof());
     } else {
         assert_eq!(actual.to_string(), ordinary.to_string());
         assert!(actual.to_string().contains(expected), "{actual}");
@@ -64,7 +70,7 @@ fn field_analyzer_input_preserves_complete_physical_and_semantic_error_boundarie
     let resources = Arc::new(AnalyzerResources::default());
     let original = binding(&resources);
     for (scenario, expected) in [
-        ("json", "serde"),
+        ("json", "json"),
         ("table", "relation"),
         ("duplicate", "duplicate durable field analyzer binding"),
         (
@@ -141,7 +147,7 @@ fn field_analyzer_input_keeps_binding_label_and_gin_first_error_order() {
     let original = binding(&resources);
     for (scenario, expected) in [
         ("binding_physical", "invalid utf-8 value"),
-        ("binding_semantic", "serde"),
+        ("binding_semantic", "json"),
         ("label_physical", "invalid utf-8 value"),
         ("label_semantic", "relation"),
         (

@@ -55,15 +55,22 @@ impl<'a> JsonReader<'a, '_> {
         Ok(())
     }
 
-    pub(super) async fn string<W: Work>(&mut self, work: &mut W) -> Result<&'a [u8], W::Error> {
+    pub(super) async fn string<W: Work>(
+        &mut self,
+        work: &mut W,
+        ignored_escapes: bool,
+    ) -> Result<&'a [u8], W::Error> {
         let start = self.position;
         self.advance(work).await?;
         while let Some(byte) = self.peek() {
+            if ignored_escapes && byte <= 31 {
+                return Err(self.reject(JsonSyntaxKind::ControlCharacter, false).into());
+            }
             self.advance(work).await?;
             match byte {
                 b'"' => {
                     let encoded = &self.input[start..self.position];
-                    if !self.ignored_string_escapes
+                    if !ignored_escapes
                         && !self.validated_utf8
                         && !validate_utf8(encoded, work).await?
                     {
@@ -78,7 +85,7 @@ impl<'a> JsonReader<'a, '_> {
                     Some(b'u') => {
                         self.advance(work).await?;
                         let unit = self.hex_quad(work).await?;
-                        if self.ignored_string_escapes {
+                        if ignored_escapes {
                             continue;
                         }
                         match unit {
@@ -147,6 +154,14 @@ impl<'a> JsonReader<'a, '_> {
     }
 
     pub(super) async fn number<W: Work>(&mut self, work: &mut W) -> Result<&'a [u8], W::Error> {
+        self.number_with_policy(work, false).await
+    }
+
+    pub(super) async fn number_with_policy<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<&'a [u8], W::Error> {
         let start = self.position;
         if self.peek() == Some(b'-') {
             self.advance(work).await?;
@@ -158,8 +173,8 @@ impl<'a> JsonReader<'a, '_> {
                     return Err(self.reject(JsonSyntaxKind::InvalidNumber, true).into());
                 }
             }
-            Some(b'1'..=b'9') => self.digits(work).await?,
-            None => return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into()),
+            Some(b'1'..=b'9') => self.digits(work, raw).await?,
+            None => return Err(self.reject(number_eof(raw), false).into()),
             _ => {
                 self.advance(work).await?;
                 return Err(self.reject(JsonSyntaxKind::InvalidNumber, false).into());
@@ -167,7 +182,7 @@ impl<'a> JsonReader<'a, '_> {
         }
         if self.peek() == Some(b'.') {
             self.advance(work).await?;
-            self.digits(work).await?;
+            self.digits(work, raw).await?;
         }
         if self.peek().is_some_and(|byte| matches!(byte, b'e' | b'E')) {
             self.advance(work).await?;
@@ -175,31 +190,39 @@ impl<'a> JsonReader<'a, '_> {
                 self.advance(work).await?;
             }
             match self.peek() {
-                Some(b'0'..=b'9') => self.digits(work).await?,
+                Some(b'0'..=b'9') => self.digits(work, raw).await?,
                 Some(_) => {
                     self.advance(work).await?;
                     return Err(self.reject(JsonSyntaxKind::InvalidNumber, false).into());
                 }
-                None => return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into()),
+                None => return Err(self.reject(number_eof(raw), false).into()),
             }
         }
         Ok(&self.input[start..self.position])
     }
 
-    async fn digits<W: Work>(&mut self, work: &mut W) -> Result<(), W::Error> {
+    async fn digits<W: Work>(&mut self, work: &mut W, raw: bool) -> Result<(), W::Error> {
         let start = self.position;
         while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             self.advance(work).await?;
         }
         if self.position == start {
             let kind = if self.peek().is_none() {
-                JsonSyntaxKind::EndOfValue
+                number_eof(raw)
             } else {
                 JsonSyntaxKind::InvalidNumber
             };
             return Err(self.reject(kind, true).into());
         }
         Ok(())
+    }
+}
+
+fn number_eof(raw: bool) -> JsonSyntaxKind {
+    if raw {
+        JsonSyntaxKind::InvalidNumber
+    } else {
+        JsonSyntaxKind::EndOfValue
     }
 }
 
