@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Construct stored statements and routine declarations with admitted native ownership, preserving original defaults, legacy fields and nested statement depth. Complete routine-catalog loading and Engine restoration remain in progress.
 - Construct stored query expressions, windows and data-modifying CTEs as admitted native SQL syntax, preserving selected bindings, positional defaults and assignment alternatives. Complete routine-catalog input and Engine restoration remain in progress.
 
 - Validate restored routine authority through shared grant-path and role-incarnation traversal. Retained validation admits scratch and resumes through work windows; ordinary validation no longer copies role names that it immediately discards. Complete routine input and private Engine integration remain in progress.

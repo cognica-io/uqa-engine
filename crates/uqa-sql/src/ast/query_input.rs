@@ -230,7 +230,7 @@ macro_rules! units {
     ($($ty:ty),* $(,)?) => {$(impl Stored for $ty {
         fn read<'a>(input: &mut Input<'a, '_>, token: JsonToken<'a>, _: &Values<'_>) -> Result<Native<Self>, InputError> {
             let tag = input.unit_tag(token)?;
-            Native::new(input.scalar(super::stored_input::unit(&tag)?)?, input.control)
+            Native::new(input.scalar(crate::ast::stored_input::unit(&tag)?)?, input.control)
         }
     })*};
 }
@@ -259,3 +259,5 @@ impl Stored for InternalRelationId {
         )
     }
 }
+
+mod declarations;

@@ -78,6 +78,24 @@ impl<'a, 'c> Input<'a, 'c> {
         input
     }
 
+    /// Revisit a borrowed field while retaining its original number projection and nesting allowance.
+    pub fn replay_at(&self, text: &'a str, remaining_depth: usize) -> Self {
+        let mut input = Self::new(text, self.control);
+        input.content_numbers = self.content_numbers;
+        input.remaining_depth = remaining_depth;
+        input
+    }
+
+    /// Untagged representations inspect generic content before selecting their typed form.
+    pub fn content_child(&mut self, token: JsonToken<'a>) -> Result<Self, InputError> {
+        let (text, depth) = self.encoded(token)?;
+        let mut input = Self::content_at_depth(text, self.control, depth);
+        let token = input.next()?;
+        input.content(token)?;
+        input.end()?;
+        Ok(Self::content_at_depth(text, self.control, depth))
+    }
+
     /// Child syntax borrows its original range and the parent's remaining typed-container allowance.
     pub fn encoded(&mut self, first: JsonToken<'a>) -> Result<(&'a str, usize), InputError> {
         let start = self.range.start;

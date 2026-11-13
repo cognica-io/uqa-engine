@@ -21,6 +21,7 @@ pub(crate) struct FieldCursor<'n> {
     required: [u64; 2],
     seen: u64,
     reject_unknown: bool,
+    content_unknown: bool,
     container: FieldContainer,
 }
 
@@ -75,6 +76,7 @@ impl<'a> Input<'a, '_> {
             required,
             seen: 0,
             reject_unknown,
+            content_unknown: false,
             container,
         })
     }
@@ -128,6 +130,15 @@ impl ObjectCursor {
 }
 
 impl FieldCursor<'_> {
+    /// Flattened structs accept maps and collect unknown values as generic content.
+    pub(crate) fn with_flattened(mut self, flattened: bool) -> Result<Self, InputError> {
+        if flattened && !matches!(self.container, FieldContainer::Object(_)) {
+            return Err(invalid());
+        }
+        self.content_unknown = flattened;
+        Ok(self)
+    }
+
     pub(crate) fn next<'a>(
         &mut self,
         input: &mut Input<'a, '_>,
@@ -156,7 +167,11 @@ impl FieldCursor<'_> {
                         return Err(invalid());
                     }
                     let token = input.next()?;
-                    input.skip(token)?;
+                    if self.content_unknown {
+                        input.content(token)?;
+                    } else {
+                        input.skip(token)?;
+                    }
                 }
                 FieldContainer::Array(cursor, index) => {
                     let Some(token) = cursor.next(input)? else {

@@ -73,7 +73,7 @@ fn stored_query_input_constructs_queries_windows_and_all_mutation_ctes() {
     }
 }
 
-fn mutate(value: &Value, visit: &mut dyn FnMut(Value)) {
+pub(super) fn mutate(value: &Value, visit: &mut dyn FnMut(Value)) {
     match value {
         Value::Object(fields) => {
             for (name, original) in fields {

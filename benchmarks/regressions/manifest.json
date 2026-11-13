@@ -4,6 +4,84 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_statement_input_retains_queries_declarations_and_routine_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Decode query, utility, declaration and routine statement fixtures.",
+      "invariant": "Native construction preserves the original statement and body representation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_input_preserves_omissions_and_field_type_acceptance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Remove and replace nested fields across stored statement declarations.",
+      "invariant": "Accepted representations and successful output match the original deserializer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_input_preserves_tagged_and_legacy_roles",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Decode named, session and PUBLIC roles in tagged, positional and legacy forms.",
+      "invariant": "Role identity spelling, required content and unknown-field rejection remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_input_preserves_flattened_authority_and_estimates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Decode routine authority, estimates, complete statement bodies and legacy EXPLAIN fields.",
+      "invariant": "Flattened conversion, numeric content and discarded options preserve their original meaning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_input_releases_admitted_declarations_on_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Observe retained and peak allocations, deny admission and cancel both input owners.",
+      "invariant": "Every native allocation is admitted and terminal failure releases all partial owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_input_preserves_positional_and_nested_statement_forms",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/declarations/tests.rs",
+      "capability": "Native stored statement input",
+      "workload": "Decode positional forms, aliases, legacy sequence input and deeply nested EXPLAIN.",
+      "invariant": "Native syntax preserves the original accepted depth and rejects malformed alternatives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_query_input_constructs_queries_windows_and_all_mutation_ctes",
       "cases": 1,
       "source": "crates/uqa-sql/src/ast/query_input/tests.rs",
