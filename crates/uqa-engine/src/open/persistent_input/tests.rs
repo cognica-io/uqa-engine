@@ -8,6 +8,7 @@ use super::*;
 use crate::tests::providers::Provider;
 use uqa_core::Value;
 
+mod analyzers;
 mod authority;
 mod graph_oids;
 mod graphs;

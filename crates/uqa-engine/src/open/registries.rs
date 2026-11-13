@@ -103,6 +103,18 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog, mode)?;
+        self.restore_registries_after_analyzers(catalog, mode, domains, pending_sql_functions)
+    }
+
+    pub(super) fn restore_registries_after_analyzers(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+        pending_sql_functions: Option<
+            uqa_execution::routines::restoration::PendingSQLFunctionRestore,
+        >,
+    ) -> StorageBackendResult<()> {
         self.restore_foreign_registries_from_catalog(catalog, mode)?;
         // Stored view plans are rebound only after every row-producing
         // relation kind is present. Legacy unqualified sources may refer to a

@@ -130,6 +130,19 @@ impl CatalogFacade for KeyValueCatalog {
         self.index_input(limits, control)
     }
 
+    fn begin_text_load(
+        &self,
+        family: crate::catalog::text_input::CatalogTextFamily,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::StorageBackendResult<crate::catalog::text_load::CatalogTextLoad> {
+        crate::catalog::text_load::CatalogTextLoad::new(
+            self.text_input(family, limits, control)?,
+            crate::catalog::text_load::CatalogTextOrder::Name,
+            control,
+        )
+    }
+
     fn begin_text_input(
         &self,
         family: crate::catalog::text_input::CatalogTextFamily,

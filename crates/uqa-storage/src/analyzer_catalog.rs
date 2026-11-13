@@ -38,6 +38,11 @@ impl AnalyzerCatalog {
         }
     }
 
+    /// Allowance used for future membership mutations; retained predecessors keep their original owners.
+    pub fn budget(&self) -> &MemoryBudget {
+        self.revisions.budget()
+    }
+
     pub fn get(&self, name: &str) -> Option<&Arc<CompiledAnalyzer>> {
         self.revisions.get(name)
     }

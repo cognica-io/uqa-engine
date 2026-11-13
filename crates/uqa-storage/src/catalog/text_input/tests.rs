@@ -7,6 +7,7 @@
 use super::*;
 
 mod keys;
+mod load;
 use crate::{
     key_value::KeyValueRead,
     key_value::{KeyValueReadRevision, RecordKeyReadVisitor},

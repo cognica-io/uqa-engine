@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore complete named analyzer catalogs through retained physical input, exact stored revisions and native diagnostic comparison. Preserve provider result order and original validation boundaries, then publish paired runtime/image roots at the existing Engine stage with independent later mutation ownership.
+
 - Share retained generic JSON validation between catalog markers and analyzer diagnostics. Compare saved analyzer configurations with the original native public fields, preserving omitted defaults, duplicate-key semantics, raw/numeric scalar representations and bounded work without another value tree.
 
 - Retain field analyzer bindings and compatibility labels from one selected native SQLite, SQLite KV or redb catalog view. Bound physical reads, preserve original field bytes and the binding-before-label validation boundary, and retire both streams together on failure or cancellation.

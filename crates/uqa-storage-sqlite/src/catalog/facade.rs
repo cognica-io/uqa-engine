@@ -65,6 +65,19 @@ impl CatalogFacade for Catalog {
         self.native_index_input(limits, control)
     }
 
+    fn begin_text_load(
+        &self,
+        family: uqa_storage::catalog::text_input::CatalogTextFamily,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::catalog::text_load::CatalogTextLoad> {
+        uqa_storage::catalog::text_load::CatalogTextLoad::new(
+            self.native_text_input(family, limits, control)?,
+            uqa_storage::catalog::text_load::CatalogTextOrder::Physical,
+            control,
+        )
+    }
+
     fn begin_text_input(
         &self,
         family: uqa_storage::catalog::text_input::CatalogTextFamily,

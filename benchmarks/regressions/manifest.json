@@ -64883,6 +64883,127 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_catalog_text_load_preserves_physical_and_stable_name_order_without_copying_values",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests/load.rs",
+      "capability": "Complete catalog text order",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_catalog_text_load_resumes_long_name_comparisons_and_retires_terminal_scratch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests/load.rs",
+      "capability": "Complete catalog text order",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "complete_catalog_text_load_rejects_foreign_control_and_late_physical_failures",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/text_input/tests/load.rs",
+      "capability": "Complete catalog text order",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_analyzer_input_preserves_complete_family_order_and_native_revision_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/named/tests.rs",
+      "capability": "Persistent named analyzer assembly",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_analyzer_input_preserves_generic_diagnostic_fields_before_native_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/named/tests.rs",
+      "capability": "Persistent named analyzer assembly",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_analyzer_input_adopts_original_names_and_independent_mutation_allowances",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/named/tests.rs",
+      "capability": "Persistent named analyzer assembly",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "named_analyzer_input_retires_selected_rows_and_unpublished_revisions_on_terminal_paths",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/analyzers/named/tests.rs",
+      "capability": "Persistent named analyzer assembly",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_named_analyzers_keep_selected_revisions_and_allow_later_mutations",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/analyzers.rs",
+      "capability": "Persistent Engine named analyzer input",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_named_analyzers_retire_private_publication_and_selected_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/analyzers.rs",
+      "capability": "Persistent Engine named analyzer input",
+      "workload": "Complete original physical families, provider result order, immutable revisions, bounded work and terminal allocation/transaction cleanup.",
+      "invariant": "Named analyzer validation and complete paired publication preserve the selected catalog, semantic error order and later independent mutations without replaying physical input.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }

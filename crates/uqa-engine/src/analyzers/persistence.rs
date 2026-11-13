@@ -87,10 +87,25 @@ impl Engine {
         mode: CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         let resources = AnalyzerResources::default();
-        let names = load_named_revisions(catalog, &resources, mode)?;
+        let names = uqa_execution::catalog::analyzers::named::restore(
+            catalog,
+            &resources,
+            mode.allows_migration(),
+            crate::parse_analyzer_config,
+        )?;
         self.durable.named_analyzers.write().extend(names.current)?;
+        self.restore_field_analyzers_from_catalog(catalog, &resources, mode, names.pending)
+    }
+
+    pub(crate) fn restore_field_analyzers_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+        resources: &AnalyzerResources,
+        mode: CatalogRestoreMode,
+        pending_names: Vec<(String, Arc<CompiledAnalyzer>)>,
+    ) -> StorageBackendResult<()> {
         let gin_owners = self.restore_gin_analyzer_owners(catalog)?;
-        let mut saved = load_field_bindings(catalog, &resources, &gin_owners)?;
+        let mut saved = load_field_bindings(catalog, resources, &gin_owners)?;
         let migrations = self.install_catalog_field_analyzers(&mut saved, &gin_owners, mode)?;
         // Every descriptor and owner is validated before rebuilding sources or publishing analyzer metadata.
         for table_name in migrations.rebuild_tables {
@@ -100,7 +115,7 @@ impl Engine {
             Self::rebuild_fts_index(&table)?;
             self.try_save_table_schema(&table_name, &table)?;
         }
-        for (name, compiled) in names.pending {
+        for (name, compiled) in pending_names {
             let configuration = serde_json::to_string(&compiled.descriptor().configuration()?)?;
             catalog.save_analyzer_revision(
                 &name,
@@ -347,11 +362,6 @@ impl Engine {
 
 type FieldKey = (String, String);
 
-struct NamedAnalyzerRevisions {
-    current: BTreeMap<String, Arc<CompiledAnalyzer>>,
-    pending: Vec<(String, Arc<CompiledAnalyzer>)>,
-}
-
 struct CatalogFieldBindings {
     bindings: BTreeMap<FieldKey, FieldAnalyzerBinding>,
     labels: BTreeMap<FieldKey, Vec<(String, String)>>,
@@ -361,66 +371,6 @@ struct CatalogFieldBindings {
 struct BindingMigrations {
     bindings: Vec<(FieldKey, FieldAnalyzerBinding)>,
     rebuild_tables: BTreeSet<String>,
-}
-
-fn load_named_revisions(
-    catalog: &dyn CatalogFacade,
-    resources: &AnalyzerResources,
-    mode: CatalogRestoreMode,
-) -> StorageBackendResult<NamedAnalyzerRevisions> {
-    let mut descriptors = BTreeMap::new();
-    for (name, descriptor) in catalog.load_analyzer_descriptors()? {
-        if crate::analyzer_registry::is_builtin_analyzer(&name) {
-            return Err(corrupt(format!(
-                "catalog analyzer `{name}` conflicts with a built-in analyzer"
-            )));
-        }
-        if descriptors.insert(name, descriptor).is_some() {
-            return Err(corrupt("duplicate named analyzer descriptor"));
-        }
-    }
-    let mut names = BTreeMap::<String, Arc<CompiledAnalyzer>>::new();
-    let mut migrate_names = Vec::new();
-    for (name, configuration) in catalog.load_analyzers()? {
-        if name.is_empty() || name.trim() != name {
-            return Err(corrupt("catalog analyzer has an invalid name"));
-        }
-        if crate::analyzer_registry::is_builtin_analyzer(&name) {
-            return Err(corrupt(format!(
-                "catalog analyzer `{name}` conflicts with a built-in analyzer"
-            )));
-        }
-        let compiled = if let Some(descriptor) = descriptors.remove(&name) {
-            let compiled = resources.restore_json(&descriptor)?;
-            let saved: serde_json::Value = serde_json::from_str(&configuration)?;
-            if saved != serde_json::to_value(compiled.descriptor().configuration()?)? {
-                return Err(corrupt(
-                    "named analyzer descriptor disagrees with its diagnostic configuration",
-                ));
-            }
-            compiled
-        } else {
-            if !mode.allows_migration() {
-                return Err(corrupt("analyzer catalog requires an initial migration"));
-            }
-            let config = crate::parse_analyzer_config(&name, &configuration).map_err(corrupt)?;
-            let compiled = resources.compile(&config)?;
-            migrate_names.push((name.clone(), compiled.clone()));
-            compiled
-        };
-        if names.insert(name, compiled).is_some() {
-            return Err(corrupt("duplicate catalog analyzer definition"));
-        }
-    }
-    if !descriptors.is_empty() {
-        return Err(corrupt(
-            "analyzer descriptor references a missing named definition",
-        ));
-    }
-    Ok(NamedAnalyzerRevisions {
-        current: names,
-        pending: migrate_names,
-    })
 }
 
 fn load_field_bindings(

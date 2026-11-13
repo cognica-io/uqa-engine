@@ -34,6 +34,7 @@ mod relation_security;
 pub mod schema;
 pub mod scoring_params;
 mod sequence;
+pub mod text_load;
 pub use sequence::{SequenceOptions, SequenceRow};
 pub use uqa_core::catalog_sequence::{
     SequenceAclEntry, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
@@ -263,6 +264,19 @@ pub trait CatalogFacade: Send + Sync {
         control.check()?;
         Err(StorageBackendError::Other(
             "retained catalog text input is not supported".into(),
+        ))
+    }
+
+    /// Read a complete named family and apply the provider's original result order before semantic interpretation.
+    fn begin_text_load(
+        &self,
+        _family: text_input::CatalogTextFamily,
+        _limits: text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<text_load::CatalogTextLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained ordered catalog text is not supported".into(),
         ))
     }
 

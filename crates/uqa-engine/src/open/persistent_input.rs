@@ -14,6 +14,16 @@ use super::{
 };
 use std::sync::{atomic::Ordering, Arc};
 use uqa_core::memory::{Budgeted, MemoryBudget};
+use uqa_execution::{
+    catalog::{
+        analyzers::named::NamedAnalyzerCatalogInput,
+        security::roles::persistence::input::RoleCatalogInput,
+    },
+    schema::{
+        constraints::restoration::input::ConstraintCatalogInput,
+        namespaces::restoration::input::SchemaCatalogInput,
+    },
+};
 use uqa_storage::{
     catalog::input::CatalogInputLimits, key_value::KeyValueReadRevision,
     read_control::StorageReadControl, CatalogCacheRevisions, PersistentStorageProvider,
@@ -33,9 +43,9 @@ struct Candidate {
 
 enum Stage {
     Metadata,
-    Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput),
-    Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput),
-    Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput),
+    Constraints(ConstraintCatalogInput),
+    Roles(RoleCatalogInput),
+    Schemas(SchemaCatalogInput),
     Tables(PersistentTableInput),
     Watermarks(crate::hierarchy::watermarks::Input),
     WatermarkPublication(crate::hierarchy::watermarks::Plan),
@@ -44,8 +54,31 @@ enum Stage {
     GraphOids(uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput),
     Types(PersistentTypeInput),
     Authority(PersistentAuthorityInput),
-    Registries(RestoredAuthorities),
+    NamedAnalyzers(NamedAnalyzers),
+    Registries(AfterNamedAnalyzers),
     Caches,
+}
+
+struct AfterNamedAnalyzers {
+    resources: Arc<uqa_analysis::AnalyzerResources>,
+    retained: RestoredAuthorities,
+}
+
+struct NamedAnalyzers {
+    input: NamedAnalyzerCatalogInput,
+    next: AfterNamedAnalyzers,
+}
+
+impl NamedAnalyzers {
+    fn advance(mut self, engine: &Engine) -> StorageBackendResult<Stage> {
+        match self.input.advance(1)? {
+            Some(names) => {
+                *engine.durable.named_analyzers.write() = names;
+                Ok(Stage::Registries(self.next))
+            }
+            None => Ok(Stage::NamedAnalyzers(self)),
+        }
+    }
 }
 
 /// The complete private catalog still owns its read transaction. Closing or dropping this owner releases that transaction before the provider can publish its files.
@@ -102,7 +135,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database and built-in routine authority input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority and named analyzer input consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -138,12 +171,10 @@ impl Candidate {
         let catalog = Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog"));
         self.stage = match self.stage {
             Stage::Metadata => {
-                Stage::Constraints(uqa_execution::schema::constraints::restoration::input::ConstraintCatalogInput::new(
-                    catalog, self.limits, control,
-                )?)
+                Stage::Constraints(ConstraintCatalogInput::new(catalog, self.limits, control)?)
             }
             Stage::Constraints(mut input) => match input.advance(1)? {
-                Some(()) => Stage::Roles(uqa_execution::catalog::security::roles::persistence::input::RoleCatalogInput::new(
+                Some(()) => Stage::Roles(RoleCatalogInput::new(
                     catalog,
                     self.limits,
                     engine.durable.roles.read().budget(),
@@ -155,7 +186,7 @@ impl Candidate {
                 Some(values) => {
                     *engine.durable.roles.write() = values.roles;
                     *engine.durable.role_memberships.write() = values.memberships;
-                    Stage::Schemas(uqa_execution::schema::namespaces::restoration::input::SchemaCatalogInput::new(
+                    Stage::Schemas(SchemaCatalogInput::new(
                         catalog,
                         engine.durable.roles.read().clone(),
                         self.limits,
@@ -192,7 +223,10 @@ impl Candidate {
             },
             Stage::Graphs(mut input) => match input.advance(1)? {
                 Some(graphs) => {
-                    engine.durable.graphs.restore(&crate::state::CatalogGeneration::new(graphs));
+                    engine
+                        .durable
+                        .graphs
+                        .restore(&crate::state::CatalogGeneration::new(graphs));
                     Stage::Sequences(engine.sequence_input(self.limits, control)?)
                 }
                 None => Stage::Graphs(input),
@@ -213,37 +247,86 @@ impl Candidate {
             },
             Stage::Types(input) => match input.advance(engine, self.limits, control)? {
                 TypeProgress::Pending(input) => Stage::Types(input),
-                TypeProgress::Complete(domains) => Stage::Authority(PersistentAuthorityInput::new(domains)),
+                TypeProgress::Complete(domains) => {
+                    Stage::Authority(PersistentAuthorityInput::new(domains))
+                }
             },
-            Stage::Authority(input) => match input.advance(engine, self.limits, control)? {
-                AuthorityProgress::Pending(input) => Stage::Authority(input),
-                AuthorityProgress::Complete(retained) => Stage::Registries(retained),
-            },
+            Stage::Authority(input) => {
+                Stage::advance_authority(input, engine, self.limits, control)?
+            }
+            Stage::NamedAnalyzers(input) => input.advance(engine)?,
             Stage::Registries(retained) => {
-                self.session.restore_remaining_registries(catalog.as_ref(), retained)?;
+                self.session
+                    .restore_remaining_registries(catalog.as_ref(), retained)?;
                 Stage::Caches
             }
-            Stage::Caches => {
-                engine.restore_model_caches(catalog.as_ref())?;
-                control.check()?;
-                return Ok(Progress::Complete(self.session));
-            }
+            Stage::Caches => return self.session.complete_catalog(control),
         };
         Ok(Progress::Pending(self))
     }
 }
 
+impl Stage {
+    fn advance_authority(
+        input: PersistentAuthorityInput,
+        engine: &Engine,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        match input.advance(engine, limits, control)? {
+            AuthorityProgress::Pending(input) => Ok(Self::Authority(input)),
+            AuthorityProgress::Complete(retained) => {
+                engine.restore_schema_routine_identities(CatalogRestoreMode::LoadOnly)?;
+                let resources = Arc::new(uqa_analysis::AnalyzerResources::default());
+                let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
+                let input = NamedAnalyzerCatalogInput::new(
+                    Arc::clone(catalog),
+                    Arc::clone(&resources),
+                    limits,
+                    engine.durable.named_analyzers.read().budget(),
+                    control,
+                )?;
+                Ok(Self::NamedAnalyzers(NamedAnalyzers {
+                    input,
+                    next: AfterNamedAnalyzers {
+                        resources,
+                        retained,
+                    },
+                }))
+            }
+        }
+    }
+}
+
 impl PersistentEngineState {
+    fn complete_catalog(self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
+        let catalog = self
+            .engine
+            .storage
+            .catalog
+            .as_ref()
+            .expect("persistent catalog");
+        self.engine.restore_model_caches(catalog.as_ref())?;
+        control.check()?;
+        Ok(Progress::Complete(self))
+    }
+
     fn restore_remaining_registries(
         &self,
         catalog: &dyn uqa_storage::CatalogFacade,
-        retained: RestoredAuthorities,
+        restored: AfterNamedAnalyzers,
     ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_builtin_authority(
+        self.engine.restore_field_analyzers_from_catalog(
+            catalog,
+            &restored.resources,
+            CatalogRestoreMode::LoadOnly,
+            Vec::new(),
+        )?;
+        self.engine.restore_registries_after_analyzers(
             catalog,
             CatalogRestoreMode::LoadOnly,
-            retained.domains,
-            retained.routines,
+            restored.retained.domains,
+            restored.retained.routines,
         )?;
         uqa_execution::schema::types::relation_arrays::restoration::validate(
             &self.engine.restored_catalog_read_view(),

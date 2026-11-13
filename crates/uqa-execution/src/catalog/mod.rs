@@ -11,6 +11,7 @@ use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::catalog::table_metadata::SharedTableMetadata;
+pub mod analyzers;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
