@@ -67131,6 +67131,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_routine_authority_preserves_native_buffers_field_order_and_nested_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests/authority.rs",
+      "capability": "Prepared routine authority input",
+      "workload": "Compare native overrides with public generic field replacement across null/empty/explicit ACLs, recursive malformed fields, unknown numeric content and nested routine declarations.",
+      "invariant": "Only the outer authority changes; complete syntax and first diagnostics match, and the original ACL buffer address survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projected_routine_authority_retires_every_suspended_transfer_and_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/query_input/projected/tests/authority.rs",
+      "capability": "Prepared routine authority input",
+      "workload": "Interrupt every externally suspended native authority transfer by abandonment, either cancellation owner or work failure, then exercise denied and sufficient memory.",
+      "invariant": "No partial owner survives a terminal path; successful output owns its original reservations and preserves exact syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_routine_catalog_preserves_current_and_legacy_definitions_and_empty_groups",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/definitions/tests.rs",
+      "capability": "Typed routine catalog input",
+      "workload": "Decode all four catalog formats with absent, null, empty and explicit ACLs and malformed declaration fields against ordinary catalog decoding.",
+      "invariant": "Ordered groups, complete definitions, migration flags and first errors equal the existing decoder, including empty groups.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_routine_catalog_finishes_all_raw_authority_and_bodies_before_semantic_validation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/definitions/tests.rs",
+      "capability": "Typed routine catalog input",
+      "workload": "Combine malformed early/later bodies with missing owners and object identities in every stored catalog format.",
+      "invariant": "All raw authority precedes every typed body; all typed bodies precede authority and object-identity semantic checks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_routine_catalog_retains_selected_roles_and_retires_terminal_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/definitions/tests.rs",
+      "capability": "Typed routine catalog input",
+      "workload": "Advance current work windows after replacing the external role registry, then abandon, cancel either owner or invalidate windows at suspended boundaries.",
+      "invariant": "Selected role incarnations and complete independent definitions survive; terminal input is consumed and every private reservation retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_routine_catalog_retains_missing_identity_diagnostics_until_redaction",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/definitions/tests.rs",
+      "capability": "Typed routine catalog input",
+      "workload": "Reject a current routine with a long Unicode name and missing identity, release all source state, then cross the backup error boundary.",
+      "invariant": "The exact ordinary diagnostic retains only its admitted name/header until redaction, which removes stored text and releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "typed_routine_catalog_admission_failures_retire_partial_groups",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/definitions/tests.rs",
+      "capability": "Typed routine catalog input",
+      "workload": "Restore all four stored formats with zero, partial and sufficient native-construction allowances around measured peak usage.",
+      "invariant": "Denied admission destroys complete and incomplete groups; successful output is unchanged and every allocation stays within its original allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

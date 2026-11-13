@@ -14,6 +14,8 @@ use std::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod authority;
+
 fn protocol() -> JsonScalarProtocol {
     JsonScalarProtocol::from_values(
         &serde_json::Number::from(1u8),

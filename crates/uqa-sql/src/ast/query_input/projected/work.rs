@@ -27,6 +27,8 @@ struct Queue<'a> {
 
 type Shared<T> = Arc<Produced<Mutex<T>>>;
 type Output<T> = Shared<Option<Result<Native<T>>>>;
+pub(in crate::ast::query_input) type Constructor<'i, A, T> =
+    for<'a> fn(Input<'i>, A, &'a mut Work<'i>) -> Result<Read<'a, T>>;
 
 /// Only the enclosing driver owns the queue. Task handles cannot retain a cycle or keep an abandoned constructor alive.
 #[derive(Clone)]
@@ -45,23 +47,23 @@ fn shared<T>(value: T, control: ProductionControl<'_>) -> Result<Shared<T>> {
 
 impl<'a> Work<'a> {
     pub(super) fn submit<T: Projected>(&mut self, input: Input<'a>) -> Result<Output<T>> {
+        self.submit_with(input, (), projected::<T>)
+    }
+
+    fn submit_with<T: Send + 'static, A: Send + 'a>(
+        &mut self,
+        input: Input<'a>,
+        argument: A,
+        constructor: Constructor<'a, A, T>,
+    ) -> Result<Output<T>> {
         let output = shared(None, self.control)?;
         let returned = Arc::clone(&output);
         let mut work = self.clone();
         let future = async move {
-            let result = async {
-                if T::BUFFERED && !input.buffered {
-                    let prepared = input.buffer(&mut work).await?;
-                    let result = input
-                        .buffered_value(prepared.as_ref())
-                        .run::<T, _>(&mut work)?
-                        .await;
-                    result
-                } else {
-                    T::read_value(input, &mut work)?.await
-                }
-            }
-            .await;
+            let result = match constructor(input, argument, &mut work) {
+                Ok(future) => future.await,
+                Err(error) => Err(error),
+            };
             *output.lock().expect("private constructor output") = Some(result);
         };
         let memory = self
@@ -80,6 +82,25 @@ impl<'a> Work<'a> {
         );
         queue.child = Some(task);
         Ok(returned)
+    }
+}
+
+fn projected<'i, 'a, T: Projected>(
+    input: Input<'i>,
+    (): (),
+    work: &'a mut Work<'i>,
+) -> Result<Read<'a, T>> {
+    if T::BUFFERED && !input.buffered {
+        frame(input.control, async move {
+            let prepared = input.buffer(work).await?;
+            let result = input
+                .buffered_value(prepared.as_ref())
+                .run::<T, _>(work)?
+                .await;
+            result
+        })
+    } else {
+        T::read_value(input, work)
     }
 }
 
@@ -166,6 +187,24 @@ pub(super) fn run<'a, 'w, T: Projected, W: JsonReadWork<Error = JsonReadError> +
 where
     'a: 'w,
 {
+    run_with(input, (), work, projected::<T>)
+}
+
+pub(in crate::ast::query_input) fn run_with<
+    'a,
+    'w,
+    T: Send + 'static,
+    A: Send + 'a,
+    W: JsonReadWork<Error = JsonReadError> + 'w,
+>(
+    input: Input<'a>,
+    argument: A,
+    work: &'w mut W,
+    constructor: Constructor<'a, A, T>,
+) -> Result<Read<'w, T>>
+where
+    'a: 'w,
+{
     frame(input.control, async move {
         let queue = shared(
             Queue {
@@ -178,7 +217,7 @@ where
             queue: Arc::downgrade(&queue),
             control: input.control,
         };
-        let output = owner.submit::<T>(input)?;
+        let output = owner.submit_with(input, argument, constructor)?;
         let mut tasks = Tasks::new(input.control);
         let first = queue
             .lock()

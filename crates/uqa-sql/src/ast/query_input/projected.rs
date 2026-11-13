@@ -17,6 +17,7 @@ use uqa_core::{
 };
 
 mod work;
+pub(in crate::ast::query_input) use work::run_with;
 pub(super) use work::Work;
 mod fields;
 mod flatten;

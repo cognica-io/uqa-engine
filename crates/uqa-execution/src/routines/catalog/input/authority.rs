@@ -24,6 +24,7 @@ use uqa_sql::{
 pub struct RoutineCatalogAuthority {
     catalog: RoutineCatalogDocument,
     legacy: BudgetedVec<Produced<BoundRoutineAuthority>>,
+    roles: RoleDefinitions,
 }
 
 impl RoutineCatalogAuthority {
@@ -34,6 +35,16 @@ impl RoutineCatalogAuthority {
     /// Legacy overrides follow the original ordered group/overload traversal. Current formats have no override; empty groups remain in the original catalog for later name/schema validation.
     pub fn legacy_authorities(&self) -> impl ExactSizeIterator<Item = &BoundRoutineAuthority> {
         self.legacy.iter().map(|value| &**value)
+    }
+
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        RoutineCatalogDocument,
+        BudgetedVec<Produced<BoundRoutineAuthority>>,
+        RoleDefinitions,
+    ) {
+        (self.catalog, self.legacy, self.roles)
     }
 }
 
@@ -92,11 +103,12 @@ impl RoutineCatalogDocument {
         Ok(RoutineCatalogAuthority {
             catalog: self,
             legacy,
+            roles: roles.clone(),
         })
     }
 }
 
-fn binding_error(error: SQLError) -> StorageBackendError {
+pub(super) fn binding_error(error: SQLError) -> StorageBackendError {
     match error {
         SQLError::Cancelled(error) => error.into(),
         SQLError::RetainedRoutine(source) => StorageBackendError::RetainedDiagnostic(source),

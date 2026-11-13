@@ -40,16 +40,31 @@ pub(super) fn encode(definitions: Definitions) -> StorageBackendResult<String> {
 }
 
 fn validate_object_identity(definition: &CreateFunction) -> StorageBackendResult<()> {
-    if definition
-        .object_id
-        .is_none_or(|identity| identity == [0; 16])
-    {
-        return Err(StorageBackendError::Other(format!(
-            "routine `{}` has no catalog object identity",
-            definition.name
-        )));
+    if let Some(error) = missing_object_identity(definition) {
+        return Err(StorageBackendError::Other(error.to_string()));
     }
     Ok(())
+}
+
+pub(super) fn missing_object_identity(
+    definition: &CreateFunction,
+) -> Option<MissingObjectIdentity<'_>> {
+    definition
+        .object_id
+        .is_none_or(|identity| identity == [0; 16])
+        .then_some(MissingObjectIdentity(&definition.name))
+}
+
+pub(super) struct MissingObjectIdentity<'a>(pub &'a str);
+
+impl std::fmt::Display for MissingObjectIdentity<'_> {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            output,
+            "routine `{}` has no catalog object identity",
+            self.0
+        )
+    }
 }
 
 pub(crate) fn decode(
