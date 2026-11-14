@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share inline and retained type-copy construction for routine restoration, with bounded name copying, constant-stack array/domain traversal and complete partial-output retirement. Native routine body finalization remains in progress.
+
 - Share complete catalog read construction between ordinary Engine capture and retained input. Preserve immutable definition roots, prepared catalog handles, selected table metadata and temporary namespace identity through admitted membership/header construction. Native routine finalization and complete backup restoration remain in progress.
 - Share routine declaration validation between inline execution and retained input, admitting type names and yielding across every parameter visit without reading source bodies. Correct PostgreSQL diagnostic precedence for polymorphic and `internal` results, inferred output types and language-specific pseudo-types. Native body finalization and complete backup restoration remain in progress.
 - Retain original table array-name metadata owners in catalog snapshots and construct table membership through shared inline and retained input. Preserve decoded identity order, replacement semantics, native key/node admission and source-independent metadata lifetime. Complete routine restore integration remains in progress.

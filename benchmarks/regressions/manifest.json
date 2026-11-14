@@ -68339,6 +68339,58 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_copy_preserves_complete_metadata_and_native_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/input/tests.rs",
+      "capability": "Retained routine type copying",
+      "workload": "Copy nested array/domain types and long Unicode catalog names through one-step native windows; exercise both cancellation owners, every partial prefix, memory refusal and a 10,000-node chain on a 256 KiB stack.",
+      "invariant": "Native and inline construction preserve every type field and original source, admit payloads before allocation and retire partial outputs without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_copy_retires_each_suspended_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/input/tests.rs",
+      "capability": "Retained routine type copying",
+      "workload": "Copy nested array/domain types and long Unicode catalog names through one-step native windows; exercise both cancellation owners, every partial prefix, memory refusal and a 10,000-node chain on a 256 KiB stack.",
+      "invariant": "Native and inline construction preserve every type field and original source, admit payloads before allocation and retire partial outputs without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_copy_admits_payloads_before_construction_and_keeps_scalar_zero_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/input/tests.rs",
+      "capability": "Retained routine type copying",
+      "workload": "Copy nested array/domain types and long Unicode catalog names through one-step native windows; exercise both cancellation owners, every partial prefix, memory refusal and a 10,000-node chain on a 256 KiB stack.",
+      "invariant": "Native and inline construction preserve every type field and original source, admit payloads before allocation and retire partial outputs without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_deep_type_copy_uses_constant_stack_and_retires_partial_chains",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/production/input/tests.rs",
+      "capability": "Retained routine type copying",
+      "workload": "Copy nested array/domain types and long Unicode catalog names through one-step native windows; exercise both cancellation owners, every partial prefix, memory refusal and a 10,000-node chain on a 256 KiB stack.",
+      "invariant": "Native and inline construction preserve every type field and original source, admit payloads before allocation and retire partial outputs without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
