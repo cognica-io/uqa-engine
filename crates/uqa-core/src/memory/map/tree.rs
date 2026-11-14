@@ -147,6 +147,23 @@ pub(super) fn into_entry<K, V>(node: OwnedNode<K, V>) -> (K, V) {
     entry
 }
 
+pub(super) fn into_retained_entry<K, V>(node: OwnedNode<K, V>) -> (crate::memory::Produced<K>, V) {
+    use crate::memory::{Budgeted, ProductionControl};
+    let (node, memory) = node.into_parts();
+    let (key, value) = unbox_entry(node);
+    // Unboxing has freed this node. Its attached payload lease continues with the original key.
+    let key = match memory {
+        Some(mut memory) => {
+            drop(memory.split(size_of::<Node<K, V>>()));
+            Budgeted::new(key, memory).into()
+        }
+        None => ProductionControl::uncontrolled()
+            .finish(key, None)
+            .expect("moving an ordinary key has no fallible admission"),
+    };
+    (key, value)
+}
+
 #[expect(
     clippy::boxed_local,
     reason = "Consume and free the node allocation before the caller releases its reservation."

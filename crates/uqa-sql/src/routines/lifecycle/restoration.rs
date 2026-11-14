@@ -22,8 +22,9 @@ pub use types::{
 mod input;
 pub use input::{
     persisted_registry_relation_from_input, validate_persisted_routine_schema_from_input,
-    CanonicalRoutineDefinitions, RetainedRoutineRestoreBuilder, RoutineRestoreDiagnostic,
-    RoutineRestoreInputError,
+    CanonicalRoutineDefinitions, CanonicalRoutineGroup, CanonicalRoutineGroups,
+    PendingRoutineDefinitions, RetainedRoutineRestoreBuilder, RoutineRestoreDiagnostic,
+    RoutineRestoreInputError, RoutineRestorePlaceholders,
 };
 
 pub fn persisted_registry_relation(stored_name: &str) -> Result<RelationIdentity, String> {

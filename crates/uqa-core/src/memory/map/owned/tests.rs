@@ -18,6 +18,7 @@ use std::{
 mod admission;
 mod ranges;
 mod serialization;
+mod transfer;
 
 #[test]
 fn extracting_and_restoring_preserves_node_identity_and_admission_without_allocation() {

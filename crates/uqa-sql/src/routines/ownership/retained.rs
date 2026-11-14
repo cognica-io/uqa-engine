@@ -46,18 +46,18 @@ impl<T> RetainedRoutineValue<T> {
         }
     }
 
-    pub(super) fn native(
+    pub(in crate::routines) fn native(
         value: Produced<T>,
         control: &ProductionControl<'_>,
-    ) -> Result<Arc<Self>, SQLError> {
+    ) -> Result<Arc<Self>, uqa_core::ValueRetentionError> {
         Self::native_with_children(value, 0, control)
     }
 
-    pub(super) fn native_with_children(
+    pub(in crate::routines) fn native_with_children(
         value: Produced<T>,
         children: usize,
         control: &ProductionControl<'_>,
-    ) -> Result<Arc<Self>, SQLError> {
+    ) -> Result<Arc<Self>, uqa_core::ValueRetentionError> {
         let header = control.reserve(size_of::<Self>())?;
         let (value, memory) = value.into_parts();
         let value = control.finish(value, control.combine(memory, header))?;

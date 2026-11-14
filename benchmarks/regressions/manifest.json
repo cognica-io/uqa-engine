@@ -67937,6 +67937,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_map_transfer_preserves_original_key_allocations_and_releases_only_tree_nodes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/transfer.rs",
+      "capability": "Native consuming map ownership",
+      "workload": "Consume admitted and ordinary keys with a full allowance, abandon every prefix, and retain yielded native allocations.",
+      "invariant": "Only freed map nodes release their reservations; original key allocations and separately funded values keep their owners without copying or allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_map_transfer_retires_pending_nodes_without_releasing_yielded_keys",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/transfer.rs",
+      "capability": "Native consuming map ownership",
+      "workload": "Consume admitted and ordinary keys with a full allowance, abandon every prefix, and retain yielded native allocations.",
+      "invariant": "Only freed map nodes release their reservations; original key allocations and separately funded values keep their owners without copying or allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_map_transfer_keeps_ordinary_keys_uncontrolled_and_values_move_only",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/tests/transfer.rs",
+      "capability": "Native consuming map ownership",
+      "workload": "Consume admitted and ordinary keys with a full allowance, abandon every prefix, and retain yielded native allocations.",
+      "invariant": "Only freed map nodes release their reservations; original key allocations and separately funded values keep their owners without copying or allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_insertion_preserves_order_snapshots_and_exact_footprints_without_ordinary_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/input/tests/insertion.rs",
+      "capability": "Retained immutable map insertion",
+      "workload": "Insert and replace through suspended comparisons against an independent ordered map; retain snapshots, deny path admission and abandon every pending boundary.",
+      "invariant": "Ordinary comparison is never invoked; shared and private insertion use the same admission and publication kernel, preserving preceding roots and cached capture footprints on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_insertion_failure_and_each_suspended_retirement_preserve_original_generations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/shared/input/tests/insertion.rs",
+      "capability": "Retained immutable map insertion",
+      "workload": "Insert and replace through suspended comparisons against an independent ordered map; retain snapshots, deny path admission and abandon every pending boundary.",
+      "invariant": "Ordinary comparison is never invoked; shared and private insertion use the same admission and publication kernel, preserving preceding roots and cached capture footprints on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_routine_group_transfer_preserves_native_names_overloads_and_declarations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/transfer.rs",
+      "capability": "Native canonical routine group transfer",
+      "workload": "Consume canonical groups after filling the original allowance and cancelling completed input, retaining exact names, vectors and declaration pointers.",
+      "invariant": "Completed output transfers without allocation or re-admission and keeps each original lease independently of pending groups.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_placeholders_preserve_native_declarations_finalization_order_and_temporary_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Retained routine placeholder construction",
+      "workload": "Prepare source and SQL-standard declarations, compare original overload sorting, preserve temporary generations, and exercise long signatures, both cancellation owners and every pending retirement boundary.",
+      "invariant": "Placeholders share original native declarations with pending finalization in its original order; complete private publication preserves ordinary placeholder form and leaves previous namespaces unchanged on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_placeholders_cancel_or_abandon_at_every_pending_boundary_without_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Retained routine placeholder construction",
+      "workload": "Prepare source and SQL-standard declarations, compare original overload sorting, preserve temporary generations, and exercise long signatures, both cancellation owners and every pending retirement boundary.",
+      "invariant": "Placeholders share original native declarations with pending finalization in its original order; complete private publication preserves ordinary placeholder form and leaves previous namespaces unchanged on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_placeholders_preserve_long_signature_order_and_reject_native_admission_pressure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Retained routine placeholder construction",
+      "workload": "Prepare source and SQL-standard declarations, compare original overload sorting, preserve temporary generations, and exercise long signatures, both cancellation owners and every pending retirement boundary.",
+      "invariant": "Placeholders share original native declarations with pending finalization in its original order; complete private publication preserves ordinary placeholder form and leaves previous namespaces unchanged on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_routine_placeholder_input_preserves_complete_canonical_validation_and_deferred_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests/placeholders.rs",
+      "capability": "Stored routine placeholder input",
+      "workload": "Read physical metadata through complete authority, syntax, schema and type canonicalization before preparing a private routine namespace.",
+      "invariant": "Original validation and diagnostics precede publication, source bodies remain deferred, typed declarations retain native admission, and failed or completed input retires its work state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_routine_placeholder_input_rejects_original_errors_before_publishing_any_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests/placeholders.rs",
+      "capability": "Stored routine placeholder input",
+      "workload": "Read physical metadata through complete authority, syntax, schema and type canonicalization before preparing a private routine namespace.",
+      "invariant": "Original validation and diagnostics precede publication, source bodies remain deferred, typed declarations retain native admission, and failed or completed input retires its work state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_placeholders_preserve_temporary_replacement_and_empty_catalog_semantics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Retained routine placeholder construction",
+      "workload": "Prepare source and SQL-standard declarations, compare original overload sorting, preserve temporary generations, and exercise long signatures, both cancellation owners and every pending retirement boundary.",
+      "invariant": "Placeholders share original native declarations with pending finalization in its original order; complete private publication preserves ordinary placeholder form and leaves previous namespaces unchanged on failure.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

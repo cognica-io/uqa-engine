@@ -12,6 +12,8 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+mod insertion;
+
 struct Query(usize);
 struct Input {
     visited: usize,
@@ -39,7 +41,7 @@ impl MapKeyInput<Query, usize> for Input {
     }
 
     async fn compare(&mut self, query: &Query, stored: &usize) -> Result<Ordering, usize> {
-        self.checkpoint().await?;
+        <Self as MapKeyInput<Query, usize>>::checkpoint(self).await?;
         Ok(query.0.cmp(stored))
     }
 }

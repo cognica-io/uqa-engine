@@ -194,6 +194,35 @@ impl<K: Ord, V> RetainedMap<K, V> {
         })
     }
 
+    /// Select the previous footprint and complete insertion through retained comparisons. The exclusive borrow fixes both the root and cached footprint until infallible publication or abandonment.
+    pub async fn prepare_insert_from<C>(
+        &mut self,
+        key: K,
+        payload_bytes: usize,
+        input: &mut C,
+    ) -> Result<PreparedRetainedMapInsert<'_, K, V>, C::Error>
+    where
+        C: super::MapKeyInput<K>,
+        C::Error: From<MemoryError>,
+    {
+        let previous = self
+            .values
+            .get_from(&key, input)
+            .await?
+            .map_or(0, |entry| entry.payload_bytes);
+        let total = self
+            .payload_bytes
+            .checked_sub(previous)
+            .and_then(|bytes| bytes.checked_add(payload_bytes))
+            .ok_or(MemoryError::SizeOverflow)?;
+        Ok(PreparedRetainedMapInsert {
+            insertion: self.values.prepare_insert_from(key, input).await?,
+            footprint: &mut self.payload_bytes,
+            payload_bytes,
+            total,
+        })
+    }
+
     pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> Result<bool, MemoryError>
     where
         K: Borrow<Q>,

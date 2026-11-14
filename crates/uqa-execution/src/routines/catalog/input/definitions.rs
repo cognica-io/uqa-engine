@@ -17,6 +17,7 @@ use uqa_sql::{
 };
 
 mod canonical;
+pub(super) use canonical::restore_error;
 
 struct DefinitionGroup {
     name: Budgeted<String>,

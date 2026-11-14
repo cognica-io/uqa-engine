@@ -401,6 +401,11 @@ pub struct OwnedMapIntoIter<K, V> {
 }
 
 impl<K, V> OwnedMapIntoIter<K, V> {
+    /// Move the next entry while preserving any key-payload lease attached by admitted-key insertion. The freed tree node releases only its own layout; the original key keeps its remaining reservation. Values and separately funded payloads retain their existing owners. Ordinary entries remain explicitly uncontrolled. No key/value copy, comparison or allocation occurs.
+    pub fn next_retained(&mut self) -> Option<(crate::memory::Produced<K>, V)> {
+        self.next_node().map(tree::into_retained_entry)
+    }
+
     fn push_left(&mut self, mut link: Link<K, V>) {
         while let Some(mut node) = link {
             link = node.value.left.take();

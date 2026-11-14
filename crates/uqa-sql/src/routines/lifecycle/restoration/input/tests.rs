@@ -8,6 +8,9 @@ use super::*;
 use crate::ast::{FunctionBody, FunctionParamMode};
 use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder, ImageIoError};
 
+mod placeholders;
+mod transfer;
+
 type Groups = Vec<(String, bool, Vec<CreateFunction>)>;
 type NativeGroups = Vec<(String, bool, Vec<Produced<CreateFunction>>)>;
 type Decoder = ImageDecoder<CanonicalRoutineDefinitions, RoutineRestoreInputError>;

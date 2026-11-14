@@ -126,3 +126,30 @@ impl MapKeyInput<String> for Comparison<'_, '_, '_> {
         compare(query, stored, &self.control, self.input).await
     }
 }
+
+impl MapKeyInput<(Vec<String>, bool)> for Comparison<'_, '_, '_> {
+    type Error = RoutineRestoreInputError;
+
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        checkpoint(&self.control, self.input).await
+    }
+
+    async fn compare(
+        &mut self,
+        query: &(Vec<String>, bool),
+        stored: &(Vec<String>, bool),
+    ) -> Result<Ordering, Self::Error> {
+        checkpoint(&self.control, self.input).await?;
+        for (left, right) in query.0.iter().zip(&stored.0) {
+            let order = compare(left, right, &self.control, self.input).await?;
+            if order.is_ne() {
+                return Ok(order);
+            }
+        }
+        Ok(query
+            .0
+            .len()
+            .cmp(&stored.0.len())
+            .then_with(|| query.1.cmp(&stored.1)))
+    }
+}
