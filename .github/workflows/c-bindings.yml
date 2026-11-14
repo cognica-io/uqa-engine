@@ -6,6 +6,18 @@ on:
     types: [ready_for_review]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to qualify; automatic and release runs retain both.
+        type: choice
+        default: all
+        options: [all, ubuntu-24.04, macos-26-arm64]
+      group:
+        description: Complete configuration group to qualify.
+        type: choice
+        default: all
+        options: [all, core, duckdb, sanitizers]
   workflow_call:
     inputs:
       force_all:
@@ -17,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: c-bindings-${{ github.event.pull_request.number || github.ref }}
+  group: c-bindings-${{ github.event.pull_request.number || github.ref }}${{ inputs.group && format('-{0}-{1}', inputs.platform, inputs.group) || '' }}
   # Only a completed replacement PR candidate supersedes the previous source.
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
 
@@ -26,6 +38,8 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
+  # Each consumer owns its database and temporary directory on both platforms.
+  RUST_TEST_THREADS: "4"
 
 jobs:
   scope:
@@ -54,15 +68,15 @@ jobs:
 
   consumers:
     needs: scope
-    if: needs.scope.outputs.required == 'true'
+    if: needs.scope.outputs.required == 'true' && inputs.group != 'sanitizers'
     name: C and C++ (${{ matrix.os }}, ${{ matrix.group }})
     runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26-arm64]
-        group: [core, duckdb]
+        os: ${{ fromJSON(inputs.platform == 'ubuntu-24.04' && '["ubuntu-24.04"]' || inputs.platform == 'macos-26-arm64' && '["macos-26-arm64"]' || '["ubuntu-24.04","macos-26-arm64"]') }}
+        group: ${{ fromJSON(inputs.group == 'core' && '["core"]' || inputs.group == 'duckdb' && '["duckdb"]' || '["core","duckdb"]') }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
@@ -92,14 +106,14 @@ jobs:
 
   native-sanitizers:
     needs: scope
-    if: needs.scope.outputs.required == 'true'
+    if: needs.scope.outputs.required == 'true' && inputs.group != 'core' && inputs.group != 'duckdb'
     name: Native ASan (${{ matrix.os }})
     runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26-arm64]
+        os: ${{ fromJSON(inputs.platform == 'ubuntu-24.04' && '["ubuntu-24.04"]' || inputs.platform == 'macos-26-arm64' && '["macos-26-arm64"]' || '["ubuntu-24.04","macos-26-arm64"]') }}
     env:
       CC: ${{ github.workspace }}/.github/scripts/c-sanitizer-cc.sh
       CXX: clang++
