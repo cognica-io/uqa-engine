@@ -173,7 +173,7 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
     }
 
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
-        Some(self.session.state.read().search_path.clone())
+        Some(self.session.state.read().search_path.to_vec())
     }
 
     fn notification_subscriptions_required(&self) -> bool {

@@ -32,7 +32,7 @@ impl RoutineNameCatalog for Engine {
         let role = state.authorization.current();
         let mut path = uqa_core::memory::ProductionVec::new(*control);
         path.reserve(state.search_path.len())?;
-        for entry in &state.search_path {
+        for entry in state.search_path.iter() {
             path.push_produced(control.copy_text(if entry == "$user" {
                 &role.name
             } else {

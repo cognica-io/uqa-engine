@@ -444,7 +444,7 @@ struct SessionStateSnapshot {
     command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
-    search_path: Vec<String>,
+    search_path: Arc<Vec<String>>,
     /// The OIDs of the session's temporary namespace and its TOAST namespace once its first temporary object created them; a rollback past that creation forgets them.
     temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     session_vars: BTreeMap<String, String>,

@@ -7,7 +7,11 @@
 //! Session captures admit each owned namespace buffer before copying borrowed state.
 
 use super::{RelationLookupMode, RelationNameResolution, RoleReference};
-use crate::SQLError;
+use crate::{
+    catalog::work::{inline, Work},
+    SQLError,
+};
+use uqa_core::image_io::AsyncImageInput;
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 impl RelationNameResolution {
@@ -20,14 +24,57 @@ impl RelationNameResolution {
         lookup_mode: RelationLookupMode,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, SQLError> {
+        inline(Self::capture(
+            search_path,
+            temporary_schema,
+            temporary_namespace_allocated,
+            current_user,
+            lookup_mode,
+            control,
+            &mut (),
+        ))
+    }
+
+    /// Copy a selected immutable session generation with bounded namespace and role-name work. The caller retains that generation until this continuation completes or retires.
+    pub async fn from_inputs_with_work<'a>(
+        search_path: impl IntoIterator<Item = &'a str>,
+        temporary_schema: Produced<String>,
+        temporary_namespace_allocated: bool,
+        current_user: &RoleReference,
+        lookup_mode: RelationLookupMode,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        Self::capture(
+            search_path,
+            temporary_schema,
+            temporary_namespace_allocated,
+            current_user,
+            lookup_mode,
+            control,
+            input,
+        )
+        .await
+    }
+
+    async fn capture<'a>(
+        search_path: impl IntoIterator<Item = &'a str>,
+        temporary_schema: Produced<String>,
+        temporary_namespace_allocated: bool,
+        current_user: &RoleReference,
+        lookup_mode: RelationLookupMode,
+        control: &ProductionControl<'_>,
+        work: &mut impl Work,
+    ) -> Result<Produced<Self>, SQLError> {
         control.check()?;
         let mut path = ProductionVec::new(*control);
         for name in search_path {
-            path.push_produced(control.copy_text(name)?)?;
+            work.checkpoint().await?;
+            path.push_produced(work.text(name, control).await?)?;
         }
         let role = match current_user {
             RoleReference::Named(name) => {
-                let (name, memory) = control.copy_text(name)?.into_parts();
+                let (name, memory) = work.text(name, control).await?.into_parts();
                 control.finish(RoleReference::Named(name), memory)?
             }
             RoleReference::Bound(binding) => control.finish(

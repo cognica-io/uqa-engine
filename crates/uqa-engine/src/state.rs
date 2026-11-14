@@ -27,6 +27,7 @@ mod generation_sources;
 pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
+mod session_namespace;
 mod table_assembly;
 mod table_capture;
 pub(crate) use table_assembly::TableContents;
@@ -490,7 +491,7 @@ pub(super) enum RuntimeParameterValue {
     Setting(Option<String>),
     SearchPath {
         setting: Option<String>,
-        path: Vec<String>,
+        path: Arc<Vec<String>>,
     },
     Role(Option<Arc<uqa_sql::catalog::roles::identity::RoleBinding>>),
     SessionAuthorization(Arc<uqa_sql::catalog::roles::identity::RoleBinding>),
@@ -504,7 +505,7 @@ impl SessionContext {
         let state = super::SessionStateSnapshot {
             command_overlays: Vec::new(),
             graph_overlay: None,
-            search_path: crate::session::default_search_path(),
+            search_path: crate::session::default_search_path().into(),
             temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),

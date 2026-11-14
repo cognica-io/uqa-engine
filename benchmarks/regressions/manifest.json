@@ -21807,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -68092,6 +68092,77 @@
       "invariant": "Placeholders share original native declarations with pending finalization in its original order; complete private publication preserves ordinary placeholder form and leaves previous namespaces unchanged on failure.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_namespace_capture_matches_inline_order_role_identity_and_exact_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution/production/tests/input.rs",
+      "capability": "Retained session namespace input",
+      "workload": "Compare inline and retained namespace capture with wide Unicode names, empty paths, both cancellation owners, admission denial and every suspended retirement boundary.",
+      "invariant": "Original namespace order, role identity and exact native ownership survive bounded work; failures retire partial output without consuming sibling leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_namespace_capture_retires_every_suspended_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution/production/tests/input.rs",
+      "capability": "Retained session namespace input",
+      "workload": "Compare inline and retained namespace capture with wide Unicode names, empty paths, both cancellation owners, admission denial and every suspended retirement boundary.",
+      "invariant": "Original namespace order, role identity and exact native ownership survive bounded work; failures retire partial output without consuming sibling leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_namespace_capture_bounds_wide_payloads_and_rejects_unadmitted_copies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution/production/tests/input.rs",
+      "capability": "Retained session namespace input",
+      "workload": "Compare inline and retained namespace capture with wide Unicode names, empty paths, both cancellation owners, admission denial and every suspended retirement boundary.",
+      "invariant": "Original namespace order, role identity and exact native ownership survive bounded work; failures retire partial output without consuming sibling leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_session_namespace_survives_setting_role_and_source_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/session_namespace/tests.rs",
+      "capability": "Session namespace generations",
+      "workload": "Select one namespace without copying names, then change settings and roles, retire the Engine, and exercise savepoints, rollback, routine configuration, RESET and DISCARD on all four providers.",
+      "invariant": "Retained consumers keep their selected path, role incarnation and temporary-namespace state while later session transitions retain their original public behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_search_path_generation_preserves_transaction_and_routine_scope",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/session_namespace/tests.rs",
+      "capability": "Session namespace generations",
+      "workload": "Select one namespace without copying names, then change settings and roles, retire the Engine, and exercise savepoints, rollback, routine configuration, RESET and DISCARD on all four providers.",
+      "invariant": "Retained consumers keep their selected path, role incarnation and temporary-namespace state while later session transitions retain their original public behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     }
   ]

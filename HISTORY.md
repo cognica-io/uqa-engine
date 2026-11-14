@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain one immutable session search-path and role generation before producing catalog namespace inputs. Preserve setting, rollback and routine-configuration behavior while copying retained namespace names through bounded work with native admission and cancellation. Complete routine restore integration remains in progress.
+
 - Prepare stored routine placeholders through retained input, moving original declaration and name allocations into a private namespace. Preserve signature-sorted lookup, original finalization order, existing temporary routines and failure retirement. Engine publication and body finalization remain in progress.
 
 - Canonicalize stored routine declarations through one retained physical-input, authority, syntax, schema-membership and signature-binding operation. Preserve original type-identity grammar, object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Resolve native catalog type identities and usable namespaces with the original lookup and privilege order, without copying complete type descriptors. Failed candidates retire atomically; Engine capture, placeholder/finalization integration and complete restoration remain in progress.

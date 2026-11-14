@@ -26,7 +26,7 @@ pub(crate) struct RoutineSessionStateGuard<'a> {
 }
 
 struct RoutineParameterSnapshot {
-    search_path: Vec<String>,
+    search_path: std::sync::Arc<Vec<String>>,
     session_vars: BTreeMap<String, String>,
     authorization: SessionAuthorization,
     parameter_scopes: ParameterScopes<crate::state::RuntimeParameterValue>,
