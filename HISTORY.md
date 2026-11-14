@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Construct retained SQL routine parameter namespaces with bounded name comparison and type copying. Preserve visible and internal slots, duplicate-name ambiguity, empty relation namespaces and immutable ownership after cancellation or source retirement. Complete native routine body finalization remains in progress.
+
 - Share inline and retained type-copy construction for routine restoration, with bounded name copying, constant-stack array/domain traversal and complete partial-output retirement. Native routine body finalization remains in progress.
 
 - Share complete catalog read construction between ordinary Engine capture and retained input. Preserve immutable definition roots, prepared catalog handles, selected table metadata and temporary namespace identity through admitted membership/header construction. Native routine finalization and complete backup restoration remain in progress.

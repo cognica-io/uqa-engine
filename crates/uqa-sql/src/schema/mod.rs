@@ -9,7 +9,7 @@
 use crate::ast::{ColumnType, InternalColumnRef};
 use std::collections::{HashMap, HashSet};
 
-/// Lookup maps keyed by column names and identities. Name binding constructs and probes these maps for every column of every bound schema, so they hash with `ahash` instead of the standard library's `SipHash` default.
+/// Lookup maps keyed by column names and identities. Ordinary binding uses `ahash`; retained parameter input freezes sorted admitted entries so name comparison can suspend during construction.
 pub(crate) use lookup_map::SchemaMap;
 pub(crate) use lookup_set::SchemaSet;
 use std::sync::Arc;

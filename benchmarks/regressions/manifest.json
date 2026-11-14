@@ -21807,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -68388,6 +68388,84 @@
       "capability": "Retained routine type copying",
       "workload": "Copy nested array/domain types and long Unicode catalog names through one-step native windows; exercise both cancellation owners, every partial prefix, memory refusal and a 10,000-node chain on a 256 KiB stack.",
       "invariant": "Native and inline construction preserve every type field and original source, admit payloads before allocation and retire partial outputs without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_layout_preserves_native_names_duplicates_types_and_empty_namespaces",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/input/tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_layout_retires_every_pending_index_and_preserves_sibling_allowances",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/input/tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_layout_admits_all_native_buffers_and_indexes_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/input/tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_layout_accounts_for_wide_comparisons_and_every_parameter_visit",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/input/tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_scope_preserves_original_name_resolution_and_shares_its_final_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/routine_parameters/production/input_tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_parameter_scope_retires_schema_and_name_prefixes_before_terminal_reuse",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/routine_parameters/production/input_tests.rs",
+      "capability": "Retained routine parameter namespaces",
+      "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
+      "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
       "case_names": [
         ""
       ]
