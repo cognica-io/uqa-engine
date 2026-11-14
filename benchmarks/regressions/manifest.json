@@ -21807,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -67219,6 +67219,175 @@
       "capability": "Typed routine catalog input",
       "workload": "Restore all four stored formats with zero, partial and sufficient native-construction allowances around measured peak usage.",
       "invariant": "Denied admission destroys complete and incomplete groups; successful output is unchanged and every allocation stays within its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_reference_names_match_original_parser_results_and_exact_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/borrowed/input/tests.rs",
+      "capability": "Retained relation reference parsing",
+      "workload": "Replay 745 names and diagnostics captured from the unchanged parser through ordinary and retained work windows.",
+      "invariant": "Quoted components, schema boundaries, invalid references and complete diagnostic text preserve the original parser observations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_reference_names_bound_quoted_and_unquoted_work_without_allocating_names",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/borrowed/input/tests.rs",
+      "capability": "Retained relation reference parsing",
+      "workload": "Parse large quoted and unquoted Unicode components one work step at a time while measuring allocations.",
+      "invariant": "Native reference parsing reads no source bytes, copies no names and bounds lexical work in every continuation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_reference_names_retire_every_pending_parse_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/borrowed/input/tests.rs",
+      "capability": "Retained relation reference parsing",
+      "workload": "Drop or cancel each suspended borrowed reference parse through either cancellation owner.",
+      "invariant": "Terminal work retires its continuation without publishing a partial reference or retaining its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_identity_preserves_default_schema_escaped_components_and_native_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Retained relation identity construction",
+      "workload": "Parse and decode explicit/default schema names with escaped quotes and large Unicode components.",
+      "invariant": "Decoded identities equal ordinary construction and retain exact native buffers independently of the retired input and cancellation scopes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_identity_retires_every_partial_parse_or_component_transfer",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Retained relation identity construction",
+      "workload": "Interrupt each lexical and component-construction boundary and exercise denied and sufficient allocation limits.",
+      "invariant": "Partial schema/name buffers release on every terminal path; successful identity output remains within its original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_names_preserve_aliases_quotes_modifiers_and_array_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests/input.rs",
+      "capability": "Retained routine type normalization",
+      "workload": "Normalize builtin aliases, quoted catalog names, Unicode whitespace, typmods and repeated array suffixes through different work windows.",
+      "invariant": "Ordinary and retained constructors preserve identical native type spelling and exact output allocation ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_names_bound_whitespace_modifiers_quotes_and_suffix_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests/input.rs",
+      "capability": "Retained routine type normalization",
+      "workload": "Normalize large whitespace-only runs, discarded modifiers, escaped quoted identifiers and repeated array suffixes.",
+      "invariant": "Every input-dependent scan consumes bounded work, including discarded input; normalization reads no source bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_names_retire_every_pending_transfer_and_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/overload_resolution/type_names/tests/input.rs",
+      "capability": "Retained routine type normalization",
+      "workload": "Cancel or abandon each suspended normalization and exercise adaptive native buffer growth under tight memory.",
+      "invariant": "Typed memory/cancellation causes survive and every private scratch/output buffer retires after terminal work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_signatures_preserve_declared_identity_order_for_functions_and_procedures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/names_production/tests.rs",
+      "capability": "Retained routine identity signatures",
+      "workload": "Construct mixed IN, OUT, INOUT, TABLE and VARIADIC identities for functions and procedures.",
+      "invariant": "Identity follows the shared declared-parameter predicate and original order; source definitions stay unchanged and native outputs retain exact reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_signatures_bound_output_only_parameters_and_keep_empty_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/names_production/tests.rs",
+      "capability": "Retained routine identity signatures",
+      "workload": "Traverse 4096 output-only parameters through a one-step work window.",
+      "invariant": "Excluded parameters still consume work without entering or allocating an identity signature.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_signatures_retire_each_partial_parameter_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/names_production/tests.rs",
+      "capability": "Retained routine identity signatures",
+      "workload": "Interrupt all pending parameter/name boundaries and exercise denied and sufficient memory.",
+      "invariant": "Partial signatures retire completely; successful output preserves original identities under the receiving allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_empty_relation_identity_observes_cancelled_input_admission",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Retained empty identity admission",
+      "workload": "Cancel the native work channel immediately before constructing an empty output under an independent active production scope.",
+      "invariant": "The constructor owns work admission and rejects cancelled input before publishing an empty identity or signature.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_empty_routine_signatures_observe_cancelled_input_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/names_production/tests.rs",
+      "capability": "Retained empty identity admission",
+      "workload": "Cancel the native work channel immediately before constructing an empty output under an independent active production scope.",
+      "invariant": "The constructor owns work admission and rejects cancelled input before publishing an empty identity or signature.",
       "case_names": [
         ""
       ]

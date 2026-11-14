@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Resume native relation-name parsing, decoded identity construction and routine-signature normalization through retained work. Preserve original quoting, schema defaults, aliases, modifiers, array identity and diagnostics while retaining typed memory/cancellation failures and exact native output ownership. Routine catalog canonicalization and complete Engine restoration remain in progress.
+
 - Complete typed routine catalog input through the original retained work channel. Move prepared legacy ACL buffers into outer declarations, preserve empty groups and migration flags, and validate all bodies before authority and object identities against the selected role generation. Canonicalization, placeholders and complete Engine restoration remain in progress.
 - Reconstruct projected statements, routine declarations and native values through retained work without serializing and reparsing their generic input. Preserve typed diagnostics, numeric visitors, flattened fields and cancellation ownership, including logical nesting beyond the physical JSON limit. Routine canonicalization and complete Engine restoration remain in progress.
 - Resume physical, generic and raw-authority routine catalog input under its original work allowance, preserving repeated scalar projection, wrapper/version diagnostics, complete legacy ACL parsing and ordered role binding. Scalar input observes both cancellation owners after suspended work. Routine canonicalization and Engine integration remain in progress.

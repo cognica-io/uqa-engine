@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 mod borrowed;
 mod production;
-pub use borrowed::{RelationName, RelationReference, RelationReferenceError};
+pub use borrowed::{
+    RelationName, RelationReference, RelationReferenceError, RelationReferenceInputError,
+};
 #[cfg(test)]
 mod tests;
 

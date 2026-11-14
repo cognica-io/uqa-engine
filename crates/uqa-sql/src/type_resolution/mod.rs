@@ -79,8 +79,11 @@ pub use operators::comparison::{
     type_supports_ordering, ComparisonKeySupport,
 };
 mod overload_resolution;
-pub use overload_resolution::canonical_routine_type_name_with_control;
 pub(crate) use overload_resolution::resolve_local_builtin_call_with_control;
+pub use overload_resolution::{
+    canonical_routine_type_name_from_input, canonical_routine_type_name_with_control,
+    RoutineSignatureInputError,
+};
 mod qualified_column;
 mod range;
 mod range_offsets;

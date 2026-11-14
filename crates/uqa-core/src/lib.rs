@@ -41,6 +41,7 @@ pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::{
     RelationIdentity, RelationName, RelationReference, RelationReferenceError,
+    RelationReferenceInputError,
 };
 pub use types::value_image;
 pub use types::{

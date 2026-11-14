@@ -8,7 +8,7 @@
 
 use crate::ast::ColumnType;
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl},
     ValueRetentionError,
 };
 
@@ -21,138 +21,30 @@ pub fn canonical_routine_type_name(type_name: &str) -> String {
         .expect("ordinary routine type normalization has no reservation")
 }
 
+mod input;
+pub use input::RoutineSignatureInputError;
+
 pub fn canonical_routine_type_name_with_control(
     type_name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
-    let mut compact = ProductionString::new(*control);
-    for (index, word) in type_name.split_whitespace().enumerate() {
-        if index > 0 {
-            compact.push(' ')?;
-        }
-        for character in word.chars() {
-            compact.push(character.to_ascii_lowercase())?;
-        }
-    }
-    let compact = compact.finish()?;
-    if let Some(element) = array_element_spelling(&compact, control)? {
-        let element = canonical_routine_type_name_with_control(element, control)?;
-        return control.format(format_args!("{}[]", element.as_str()));
-    }
-    let without_catalog = compact
-        .strip_prefix("pg_catalog.")
-        .or_else(|| compact.strip_prefix("\"pg_catalog\"."))
-        .unwrap_or(&compact);
-    let base = strip_type_modifiers(without_catalog, control)?;
-    let base = if compact.starts_with("pg_catalog.") || compact.starts_with("\"pg_catalog\".") {
-        match base
-            .strip_prefix('"')
-            .and_then(|name| name.strip_suffix('"'))
-            .and_then(crate::catalog::type_metadata::builtin_scalar_type_by_name)
-        {
-            Some(ty) => ty.regtype_name_with_control(control)?,
-            None => base,
-        }
-    } else {
-        base
-    };
-    let canonical = match base.as_str() {
-        "smallint" | "int2" => "int2",
-        "integer" | "int" | "int4" | "serial" | "serial4" => "int4",
-        "bigint" | "int8" | "bigserial" | "serial8" => "int8",
-        "real" | "float4" => "float4",
-        "double" | "double precision" | "float8" => "float8",
-        "decimal" | "numeric" => "numeric",
-        "character varying" | "varchar" => "varchar",
-        "character" | "char" | "bpchar" => "bpchar",
-        "bit" | "\"bit\"" => "bit",
-        "bit varying" | "varbit" => "varbit",
-        "bool" | "boolean" => "bool",
-        "timestamp without time zone" | "timestamp" => "timestamp",
-        "timestamp with time zone" | "timestamptz" => "timestamptz",
-        "time without time zone" | "time" => "time",
-        "time with time zone" | "timetz" => "timetz",
-        other => other,
-    };
-    if canonical == base.as_str() {
-        Ok(base)
-    } else {
-        control.copy_text(canonical)
-    }
+    crate::catalog::work::inline(input::normalize(type_name, control, &mut ()))
+}
+
+/// Normalize a retained signature through its original input work channel. The native output owns the supplied production allowance independently of that channel.
+pub async fn canonical_routine_type_name_from_input(
+    type_name: &str,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<Produced<String>, RoutineSignatureInputError> {
+    input::normalize(type_name, control, input).await
 }
 
 fn array_element_spelling<'a>(
     name: &'a str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<&'a str>, ValueRetentionError> {
-    let Some(mut element) = name.strip_suffix("[]") else {
-        return Ok(None);
-    };
-    loop {
-        control.check()?;
-        element = element.trim_end();
-        let Some(inner) = element.strip_suffix("[]") else {
-            return Ok(Some(element));
-        };
-        element = inner;
-    }
-}
-
-fn strip_type_modifiers(
-    type_name: &str,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<String>, ValueRetentionError> {
-    let mut stripped = ProductionString::new(*control);
-    let mut pending_space = false;
-    let mut modifier_depth = 0usize;
-    let mut quoted = false;
-    let mut characters = type_name.chars().peekable();
-    while let Some(character) = characters.next() {
-        control.check()?;
-        if character == '"' && modifier_depth == 0 {
-            push_compacted(&mut stripped, character, &mut pending_space)?;
-            if quoted && characters.peek() == Some(&'"') {
-                push_compacted(
-                    &mut stripped,
-                    characters.next().expect("peeked quoted identifier escape"),
-                    &mut pending_space,
-                )?;
-            } else {
-                quoted = !quoted;
-            }
-            continue;
-        }
-        if !quoted {
-            if character == '(' {
-                modifier_depth += 1;
-                continue;
-            }
-            if character == ')' && modifier_depth > 0 {
-                modifier_depth -= 1;
-                continue;
-            }
-        }
-        if modifier_depth == 0 {
-            push_compacted(&mut stripped, character, &mut pending_space)?;
-        }
-    }
-    stripped.finish()
-}
-
-fn push_compacted(
-    output: &mut ProductionString<'_>,
-    character: char,
-    pending_space: &mut bool,
-) -> Result<(), ValueRetentionError> {
-    if character.is_whitespace() {
-        *pending_space = !output.is_empty();
-        return Ok(());
-    }
-    if *pending_space {
-        output.push(' ')?;
-        *pending_space = false;
-    }
-    output.push(character)
+    crate::catalog::work::inline(input::array_element_spelling(name, control, &mut ()))
 }
 
 #[must_use]
