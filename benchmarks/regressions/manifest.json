@@ -68587,7 +68587,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/backup/restore/tests/index_bindings/typed_rows.rs",
       "capability": "Restored index expression binding",
-      "workload": "Build partial indexes over nested boolean domains and named table rows, rename their types/functions/tables, restore actual archives on all four providers, then insert, update and roll back.",
+      "workload": "Build partial indexes over nested boolean domains, qualified columns and named table rows, rename their types/functions/tables, move schemas, restore actual archives on all four providers, then insert, update and roll back.",
       "invariant": "Declared whole-row types and boolean-domain predicates survive source retirement and restoration; exact index metadata and unique enforcement remain intact without retained input reservations.",
       "case_names": [
         "case_1_memory",
@@ -68603,8 +68603,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/index/stored/tests.rs",
       "capability": "Restored index expression binding",
-      "workload": "Rename an indexed relation with a same-named column and whole-row key/predicate arguments.",
-      "invariant": "Only bound relation references change; key display names and included columns remain intact.",
+      "workload": "Rename an indexed relation with a same-named column, qualified columns and whole-row key/predicate arguments across ordinary and quoted destination names.",
+      "invariant": "Bound column and whole-row references retain the destination's decoded local range name; key display names and included columns remain intact.",
       "case_names": [
         ""
       ]

@@ -16,6 +16,7 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
     let repository = repository(&directory.path().join("repository"));
     let source = provider.open(&directory.path().join("source"));
     source.sql("CREATE DOMAIN truth AS boolean; CREATE DOMAIN nested_truth AS truth; CREATE TABLE flags(id integer, enabled nested_truth); CREATE TABLE items(id integer, enabled nested_truth); INSERT INTO flags VALUES(1,true),(-1,false); INSERT INTO items VALUES(1,true),(-1,false); CREATE FUNCTION row_key(x items) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).id $$; CREATE FUNCTION row_enabled(x items) RETURNS nested_truth LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).enabled $$; CREATE UNIQUE INDEX flag_saved ON flags(id) WHERE enabled; CREATE UNIQUE INDEX row_saved ON items(row_key(items)) WHERE row_enabled(items)", &[]).unwrap();
+    source.sql("CREATE TABLE qualified_flags(id integer, enabled nested_truth); INSERT INTO qualified_flags VALUES(1,true),(-1,false); CREATE UNIQUE INDEX qualified_saved ON qualified_flags((qualified_flags.id + 0)) WHERE qualified_flags.enabled", &[]).unwrap();
     assert_eq!(
         source
             .sql(
@@ -40,6 +41,12 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
         )
         .unwrap();
     source.sql("ALTER DOMAIN truth RENAME TO renamed_truth; ALTER DOMAIN nested_truth RENAME TO renamed_nested_truth; ALTER FUNCTION row_key(items) RENAME TO renamed_key; ALTER FUNCTION row_enabled(items) RENAME TO renamed_enabled; ALTER TABLE flags RENAME TO renamed_flags; ALTER TABLE items RENAME TO renamed_items", &[]).unwrap();
+    source
+        .sql(
+            "ALTER TABLE qualified_flags RENAME TO renamed_qualified_flags",
+            &[],
+        )
+        .unwrap();
     source.sql("CREATE SCHEMA moved", &[]).unwrap();
     let before_move = format!(
         "{:?}",
@@ -63,7 +70,7 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
         ),
         before_move
     );
-    source.sql("ALTER TABLE renamed_flags SET SCHEMA moved; ALTER TABLE renamed_items SET SCHEMA moved; ALTER SCHEMA moved RENAME TO retained", &[]).unwrap();
+    source.sql("ALTER TABLE renamed_flags SET SCHEMA moved; ALTER TABLE renamed_qualified_flags SET SCHEMA moved; ALTER TABLE renamed_items SET SCHEMA moved; ALTER SCHEMA moved RENAME TO retained", &[]).unwrap();
     let source = if matches!(provider, Provider::Memory) {
         source
     } else {
@@ -113,7 +120,11 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
         ),
         format!("{indexes:?}"),
     );
-    for table in ["retained.renamed_flags", "retained.renamed_items"] {
+    for table in [
+        "retained.renamed_flags",
+        "retained.renamed_qualified_flags",
+        "retained.renamed_items",
+    ] {
         assert_eq!(
             restored
                 .sql(&format!("SELECT id FROM {table} ORDER BY id"), &[])
