@@ -420,6 +420,30 @@ struct Preparation<'a> {
     bound_condition_queries: Option<&'a super::type_resolution::BoundConditionQueries<'a>>,
 }
 
+/// Inspect an existing scalar in its original row scope without applying inferred coercions, reading type-input functions or publishing a rewritten expression.
+pub(crate) fn analyze_stored_scalar_with_control(
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    input: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut scope,
+        parameters: ParameterTypes::fixed_with_control(&[], control)?,
+        schema_expression: None,
+        bound_condition_queries: None,
+    };
+    let value = analysis.expression(expression, input, &[])?;
+    analysis
+        .parameters
+        .collations
+        .validate_expression(expression)?;
+    value.ty.map(|ty| ty.into_produced(control)).transpose()
+}
+
 /// Share expression analysis with ordinary output binding while borrowing its lexical scope and fixed parameters.
 pub(super) fn projection_metadata(
     scope: &mut SchemaScope,

@@ -1,0 +1,12 @@
+retained_index|t|1|3|t
+duplicate_key 23505
+later_rows|4|2
+renamed_type|t|t
+missing_column 42703
+predicate_type 42804
+predicate_child 42804
+predicate_literal 22P02
+aggregate_key 42803
+set_key 0A000
+window_key 42P20
+nested_condition 42804

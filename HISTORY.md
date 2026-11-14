@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate restored index keys and predicates against their original row layouts, routine bindings and native type identities before private candidate activation. Preserve stored expressions, renamed objects, legacy absent type metadata and later index enforcement across memory, native SQLite, SQLite Key/Value and redb. Complete public backup restoration remains in progress.
+
 - Construct retained SQL routine parameter namespaces with bounded name comparison and type copying. Preserve visible and internal slots, duplicate-name ambiguity, empty relation namespaces and immutable ownership after cancellation or source retirement. Complete native routine body finalization remains in progress.
 
 - Share inline and retained type-copy construction for routine restoration, with bounded name copying, constant-stack array/domain traversal and complete partial-output retirement. Native routine body finalization remains in progress.

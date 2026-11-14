@@ -299,4 +299,5 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
     assert_eq!(denied.memory().used(), 0);
 }
 
+mod index_bindings;
 mod persistent;
