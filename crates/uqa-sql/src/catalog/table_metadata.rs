@@ -33,6 +33,13 @@ impl TableMetadataValue for Vec<crate::ast::ForeignKey> {}
 impl TableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
 impl TableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
 
+/// Stored constraint fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
+pub(crate) trait DecodedTableMetadataValue: TableMetadataValue {}
+impl DecodedTableMetadataValue for Option<String> {}
+impl DecodedTableMetadataValue for Vec<crate::ast::ForeignKey> {}
+impl DecodedTableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
+impl DecodedTableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
+
 /// One immutable native metadata generation. Capture admits the original capacities without visiting or copying its population; mutation detaches before changing a shared generation.
 #[derive(Debug, Clone)]
 pub struct TableMetadata<T: TableMetadataValue> {
@@ -88,6 +95,36 @@ impl<T: TableMetadataValue> TableMetadata<T> {
             changed: false,
         }
     }
+}
+
+impl<T: TableMetadataValue> TableMetadata<T> {
+    /// Adopt an exclusively owned decoded field without revisiting its payload. Its exact reservation and newly admitted shared header are the complete native footprint.
+    pub(crate) fn from_decoded(
+        value: Budgeted<T>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError>
+    where
+        T: DecodedTableMetadataValue,
+    {
+        cancellation.check()?;
+        let value = value.into_shared()?;
+        let bytes = Some(value.reserved_bytes());
+        cancellation.check()?;
+        Ok(Self {
+            value: SharedTableMetadata::admitted(value),
+            bytes,
+        })
+    }
+}
+
+#[cfg(test)]
+thread_local! { static PAYLOAD_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+#[cfg(test)]
+pub(crate) fn count_payload_visits<T>(call: impl FnOnce() -> T) -> (T, usize) {
+    let before = PAYLOAD_VISITS.get();
+    let value = call();
+    (value, PAYLOAD_VISITS.get() - before)
 }
 
 impl<T: TableMetadataValue> Deref for TableMetadata<T> {

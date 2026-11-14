@@ -8,6 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod input;
+pub use input::{read_stored_columns_json, read_stored_table_constraints_json};
+pub(crate) use input::{read_stored_table_constraint_fields_json, ParsedTableConstraints};
+
 use super::{
     deserialize_auto_increment, AutoIncrement, ColumnType, Expr, GeneratedColumn, OnCommitAction,
     PartitionBound, PartitionSpec, RelationPersistence, TableHierarchy,

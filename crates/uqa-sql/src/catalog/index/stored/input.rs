@@ -13,6 +13,9 @@ use uqa_core::{
     memory::{Produced, ProductionControl},
 };
 
+mod definition;
+pub use definition::definition;
+
 mod json;
 use json::{fields, object_id, read_error, FieldSet};
 

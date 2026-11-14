@@ -10,8 +10,8 @@ use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::{
     json::JsonReadError,
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation},
-    CancellationToken, Value,
+    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, ProductionControl},
+    Value,
 };
 
 pub(super) struct ArrayBuffer {
@@ -88,14 +88,14 @@ impl FieldBuffer {
 
     pub(super) fn finish(
         mut self,
-        cancellation: &CancellationToken,
+        control: &ProductionControl<'_>,
     ) -> Result<Budgeted<BTreeMap<String, Value>>, JsonReadError> {
         let mut output = Fields {
             values: BTreeMap::new(),
             memory: self.memory.budget().empty_reservation(),
         };
         while let Some((name, value)) = self.fields.pop_first() {
-            cancellation.check()?;
+            control.check()?;
             output.memory.grow(size_of::<(String, Value)>())?;
             output.memory.absorb(self.memory.split(name.capacity()));
             let (value, memory) = value.into_parts();

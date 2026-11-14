@@ -16,7 +16,10 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod constraints;
 mod image;
+mod stored;
+pub use constraints::{NativeTableConstraints, StoredKeyLocation, StoredTableConstraints};
 
 mod sealed {
     pub trait Definition {}
@@ -72,6 +75,15 @@ impl<T: TableDefinitionValue> TableDefinition<T> {
         let value = value
             .into_budgeted()
             .unwrap_or_else(|_| unreachable!("admitted table definition"));
+        Self::from_decoded_parts(value, children, control)
+    }
+
+    fn from_decoded_parts(
+        value: Budgeted<T>,
+        children: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
         let value = value.into_shared()?;
         let bytes = value
             .reserved_bytes()

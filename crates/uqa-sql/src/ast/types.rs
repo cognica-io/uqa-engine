@@ -11,6 +11,7 @@ use super::{IntervalFields, RangeSubtype};
 mod catalog_names;
 mod display;
 mod identity;
+mod input;
 mod modifiers;
 mod names;
 mod ownership;

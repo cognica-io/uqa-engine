@@ -6,22 +6,29 @@
 
 //! Key structure belongs to the table declaration; each key's current name belongs to its owned index.
 
-use std::collections::BTreeMap;
-use uqa_core::RelationIdentity;
+use uqa_core::{
+    memory::{MemoryBudget, MemoryReservation, OwnedMap, Produced, ProductionControl},
+    CancellationToken, RelationIdentity,
+};
+
+mod input;
+pub use input::KeyConstraintNameInput;
 use uqa_sql::ast::{TableConstraintSet, TableKeyConstraint};
+use uqa_sql::catalog::table_definition::{StoredKeyLocation, StoredTableConstraints};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult, TableSchema};
 
 pub const REGISTRY_VERSION: &str = "sql_index_registry_version";
 
 /// One command snapshot's owned index names, shared by every table decoder in that restore.
 pub struct KeyConstraintNames {
-    names: Option<BTreeMap<[u8; 16], KeyName>>,
+    names: Option<OwnedMap<[u8; 16], KeyName>>,
 }
 
 struct KeyName {
     table: RelationIdentity,
     table_object_id: [u8; 16],
     name: String,
+    _memory: Option<MemoryReservation>,
 }
 
 /// A structural DDL candidate must not restore an independently renamed index's old name.
@@ -61,7 +68,9 @@ impl KeyConstraintNames {
         if !index_owns_names(catalog)? {
             return Ok(Self { names: None });
         }
-        let mut names = BTreeMap::new();
+        let mut result = Self {
+            names: Some(OwnedMap::new()),
+        };
         for row in catalog.load_catalog_indexes()? {
             let definition = crate::catalog::index::index_definition(&row)?;
             let Some(owner) = definition.relationships.owning_constraint else {
@@ -71,54 +80,153 @@ impl KeyConstraintNames {
                 .catalog
                 .ok_or_else(|| invalid("owned index has no catalog identity"))?;
             let table = RelationIdentity::from_legacy_name(&row.table_name).map_err(invalid)?;
-            if row.relation.schema != table.schema
-                || names
-                    .insert(
-                        owner,
-                        KeyName {
-                            table,
-                            table_object_id: identity.table_object_id,
-                            name: row.relation.name,
-                        },
-                    )
-                    .is_some()
-            {
-                return Err(invalid("invalid or duplicate key constraint name owner"));
-            }
+            result.insert(
+                owner,
+                &row.relation.schema,
+                KeyName {
+                    table,
+                    table_object_id: identity.table_object_id,
+                    name: row.relation.name,
+                    _memory: None,
+                },
+                &ProductionControl::uncontrolled(),
+            )?;
         }
-        Ok(Self { names: Some(names) })
+        Ok(result)
+    }
+
+    fn insert(
+        &mut self,
+        owner: [u8; 16],
+        index_schema: &str,
+        name: KeyName,
+        control: &ProductionControl<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        if index_schema != name.table.schema {
+            return Err(invalid("invalid or duplicate key constraint name owner"));
+        }
+        let names = self.names.as_mut().expect("index-owned key names");
+        let previous = if let Some(memory) = control.budget() {
+            names.insert_budgeted(owner, name, memory)?
+        } else {
+            names.insert(owner, name)
+        };
+        if previous.is_some() {
+            return Err(invalid("invalid or duplicate key constraint name owner"));
+        }
+        Ok(())
     }
 
     pub fn decode(&self, schema: &TableSchema) -> StorageBackendResult<TableConstraintSet> {
-        let mut constraints: TableConstraintSet = if schema.constraints_json.is_empty() {
+        let constraints = if schema.constraints_json.is_empty() {
             TableConstraintSet::default()
         } else {
             serde_json::from_str(&schema.constraints_json)?
         };
-        let Some(names) = &self.names else {
-            return Ok(constraints);
+        let control = ProductionControl::uncontrolled();
+        Ok(self
+            .restore_names(schema, control.finish(constraints, None)?, &control)?
+            .into_uncontrolled()
+            .expect("ordinary table input retains no allowance"))
+    }
+
+    /// Retain native table metadata and current index-owned key names under the same original allowance. Names are copied only after their stored constraint and table identities match.
+    pub fn decode_with_control(
+        &self,
+        schema: &TableSchema,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> StorageBackendResult<Produced<TableConstraintSet>> {
+        let control = ProductionControl::new(memory, original, invoking);
+        let constraints = if schema.constraints_json.is_empty() {
+            control.finish(TableConstraintSet::default(), control.empty_reservation())?
+        } else {
+            uqa_sql::ast::read_stored_table_constraints_json(
+                &schema.constraints_json,
+                memory,
+                original,
+                invoking,
+            )
+            .map_err(input::sql_error)?
         };
-        for key in constraints.key_constraints.iter_mut().chain(
-            constraints
-                .hierarchy
-                .partition_inherited_key_constraints
-                .iter_mut(),
-        ) {
-            if key.name.is_some() {
-                return Err(invalid("stored key name must be owned by its index"));
+        self.restore_names(schema, constraints, &control)
+    }
+
+    /// Keep independently admitted table fields through current-name restoration. The complete unpublished declaration remains available for borrowed semantic validation before native publication.
+    pub fn decode_stored_with_control(
+        &self,
+        schema: &TableSchema,
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> StorageBackendResult<StoredTableConstraints> {
+        let text = if schema.constraints_json.is_empty() {
+            "{}"
+        } else {
+            &schema.constraints_json
+        };
+        let mut constraints =
+            StoredTableConstraints::read_stored_json(text, memory, original, invoking)
+                .map_err(input::sql_error)?;
+        let control = ProductionControl::new(memory, original, invoking);
+        if let Some(names) = &self.names {
+            for inherited in [false, true] {
+                let count = if inherited {
+                    constraints
+                        .hierarchy
+                        .partition_inherited_key_constraints
+                        .len()
+                } else {
+                    constraints.key_constraints.len()
+                };
+                for index in 0..count {
+                    let (key, location) = if inherited {
+                        (
+                            &constraints.hierarchy.partition_inherited_key_constraints[index],
+                            StoredKeyLocation::Inherited(index),
+                        )
+                    } else {
+                        (
+                            &constraints.key_constraints[index],
+                            StoredKeyLocation::Declared(index),
+                        )
+                    };
+                    let name = restored_key_name(names, schema, key, &control)?;
+                    constraints
+                        .replace_key_name(location, name)
+                        .map_err(input::sql_error)?;
+                }
             }
-            let owner = key
-                .catalog_identity
-                .ok_or_else(|| invalid("key name has no constraint identity"))?;
-            let name = names
-                .get(&owner.object_id)
-                .ok_or_else(|| invalid("key constraint has no owned index name"))?;
-            if name.table != schema.relation || name.table_object_id != schema.object_id {
-                return Err(invalid("key constraint name belongs to a different table"));
-            }
-            key.name = Some(name.name.clone());
         }
         Ok(constraints)
+    }
+
+    fn restore_names(
+        &self,
+        schema: &TableSchema,
+        constraints: Produced<TableConstraintSet>,
+        control: &ProductionControl<'_>,
+    ) -> StorageBackendResult<Produced<TableConstraintSet>> {
+        let mut memory = control.empty_reservation();
+        let mut constraints = {
+            let (value, owned) = constraints.into_parts();
+            memory = control.combine(memory, owned);
+            value
+        };
+        if let Some(names) = &self.names {
+            for key in constraints
+                .key_constraints
+                .iter_mut()
+                .chain(&mut constraints.hierarchy.partition_inherited_key_constraints)
+            {
+                let (name, owned) = restored_key_name(names, schema, key, control)?.into_parts();
+                key.name = Some(name);
+                memory = control.combine(memory, owned);
+            }
+        }
+        Ok(control.finish(constraints, memory)?)
     }
 
     /// Registry-only changes must also refresh retained table generations whose structural record did not change.
@@ -174,33 +282,61 @@ impl KeyConstraintNames {
     }
 }
 
+fn restored_key_name(
+    names: &OwnedMap<[u8; 16], KeyName>,
+    schema: &TableSchema,
+    key: &TableKeyConstraint,
+    control: &ProductionControl<'_>,
+) -> StorageBackendResult<Produced<String>> {
+    control.check()?;
+    if key.name.is_some() {
+        return Err(invalid("stored key name must be owned by its index"));
+    }
+    let name = current_name(names, &schema.relation, schema.object_id, key)?;
+    Ok(control.copy_text(name)?)
+}
+
 /// Validate every owner even when its name is unchanged, and copy only a changed key collection.
 fn project_keys(
-    names: &BTreeMap<[u8; 16], KeyName>,
+    names: &OwnedMap<[u8; 16], KeyName>,
     relation: &RelationIdentity,
     table_object_id: [u8; 16],
     keys: &[TableKeyConstraint],
 ) -> StorageBackendResult<Option<Vec<TableKeyConstraint>>> {
     let mut projected = None;
     for (index, key) in keys.iter().enumerate() {
-        let owner = key
-            .catalog_identity
-            .ok_or_else(|| invalid("key name has no constraint identity"))?;
-        let name = names
-            .get(&owner.object_id)
-            .ok_or_else(|| invalid("key constraint has no owned index name"))?;
-        if &name.table != relation || name.table_object_id != table_object_id {
-            return Err(invalid("key constraint name belongs to a different table"));
-        }
-        if key.name.as_ref() != Some(&name.name) {
-            projected.get_or_insert_with(|| keys.to_vec())[index].name = Some(name.name.clone());
+        let name = current_name(names, relation, table_object_id, key)?;
+        if key.name.as_deref() != Some(name) {
+            projected.get_or_insert_with(|| keys.to_vec())[index].name = Some(name.to_owned());
         }
     }
     Ok(projected)
 }
 
+fn current_name<'a>(
+    names: &'a OwnedMap<[u8; 16], KeyName>,
+    relation: &RelationIdentity,
+    table_object_id: [u8; 16],
+    key: &TableKeyConstraint,
+) -> StorageBackendResult<&'a str> {
+    let owner = key
+        .catalog_identity
+        .ok_or_else(|| invalid("key name has no constraint identity"))?;
+    let name = names
+        .get(&owner.object_id)
+        .ok_or_else(|| invalid("key constraint has no owned index name"))?;
+    if &name.table != relation || name.table_object_id != table_object_id {
+        return Err(invalid("key constraint name belongs to a different table"));
+    }
+    Ok(&name.name)
+}
+
 fn index_owns_names(catalog: &dyn CatalogFacade) -> StorageBackendResult<bool> {
-    match catalog.get_metadata(REGISTRY_VERSION)?.as_deref() {
+    registry_owns_names(catalog.get_metadata(REGISTRY_VERSION)?.as_deref())
+}
+
+fn registry_owns_names(version: Option<&str>) -> StorageBackendResult<bool> {
+    match version {
         None | Some("1") => Ok(false),
         Some("2") => Ok(true),
         _ => Err(invalid("unsupported index registry format")),

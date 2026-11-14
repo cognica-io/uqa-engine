@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_core::Value;
 
 mod image;
+mod stored;
 
 #[derive(Debug)]
 struct Source(Arc<AtomicUsize>);

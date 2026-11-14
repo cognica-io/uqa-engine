@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{EnumFunctionOperation, RangeSubtype};
 
+mod input;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {
     /// Stable identity of a bound user routine. Built-ins and unbound calls leave this unset.

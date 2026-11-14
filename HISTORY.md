@@ -8,6 +8,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Publish stored table constraints as independent native field owners, retaining their original payload allowances and exact capture footprints through current key-name restoration and publication without revisiting their entries. Failed construction retires every unpublished field.
+
+- Publish stored column declarations directly into native immutable definitions, retaining their original payload allowances through shared snapshots, backup capture and later schema changes.
+
+- Decode complete stored index definitions and restore index-owned constraint names under their original allowance and cancellation owners. Preserve legacy versions, current names, table incarnations and ordered local/inherited key structure; failed name input retires its entire prefix.
+
+- Decode stored table constraints and hierarchy under their original allowance and cancellation owners. Preserve CHECK and key definitions, foreign-key families, dropped attributes, partition bounds and identity overrides without evaluating expressions or rebuilding catalog identities.
+
+- Decode complete stored column declarations under their original allowance and cancellation owners. Retain defaults, generated expressions, checks, identity provenance, physical column identities and foreign-key metadata without evaluation or catalog rebinding.
+
+- Decode stored schema expressions under their original memory allowance and both cancellation owners. Preserve scalar syntax, selected call bindings and native constants without execution; explicit admitted parent frames support deep input and failure cleanup.
+
+- Decode stored SQL function bindings under their original allowance and both cancellation owners. Preserve selected routine identities, native dispatch, invocation types, composite/assignment metadata and deferred errors without rebinding names or executing routines.
+
+- Preserve independent original and invoking cancellation during retained JSON value input, including tagged conversions, decimal parsing, array shape checks and final payload accounting. Completed values keep their existing ownership after either caller cancels.
+
+- Decode stored SQL column types under the original memory allowance and cancellation owners, preserving complete type identities and existing JSON forms. Names and nested type nodes retain their admitted allocations through completion or failure.
+
 - Assemble admitted persistent table catalogs from original definitions, owner bindings and ordered ACL replacements. Native SQLite, SQLite Key/Value and redb preserve existing ordering and error precedence; cancellation or failure retires incomplete catalogs without publication. Assembly preserves the original control context, and failed authority construction frees native values before releasing their allowance.
 
 - Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.

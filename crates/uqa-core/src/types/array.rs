@@ -76,6 +76,14 @@ impl ArrayValue {
         shape::budgeted(elements, Some(bound_count), memory, cancellation)
     }
 
+    pub(super) fn decoded_shape_with_control(
+        elements: &[Value],
+        bound_count: usize,
+        control: &crate::memory::ProductionControl<'_>,
+    ) -> Result<Option<crate::memory::Produced<Vec<usize>>>, super::ValueRetentionError> {
+        shape::produced(elements, Some(bound_count), control)
+    }
+
     /// Reserve this exact boxed layout before consuming validated decoded buffers.
     pub(super) const fn decoded_header_bytes() -> usize {
         size_of::<ArrayStorage>()

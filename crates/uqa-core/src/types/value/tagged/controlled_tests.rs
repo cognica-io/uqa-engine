@@ -7,6 +7,8 @@
 use super::*;
 use crate::memory::{MemoryBudget, MemoryError};
 
+mod owners;
+
 fn tagged(
     tag: &str,
     fields: impl IntoIterator<Item = (&'static str, Value)>,
