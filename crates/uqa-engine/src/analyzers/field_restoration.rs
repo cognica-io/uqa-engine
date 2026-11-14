@@ -11,28 +11,37 @@ use crate::{
     Engine, TableState,
 };
 use std::sync::Arc;
-use uqa_analysis::{AnalyzerDefinition, AnalyzerResources, CompiledAnalyzer};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_analysis::AnalyzerResources;
+use uqa_analysis::{AnalyzerDefinition, CompiledAnalyzer};
 use uqa_core::{image_io::AsyncImageInput, memory::RetainedValue, RelationIdentity};
 use uqa_execution::catalog::analyzers::fields::{
     installation::{
         self, AnalyzerCatalogState, AnalyzerTable, AnalyzerTableDefinition, AnalyzerTables,
-        BindingMigrations, FieldAnalyzerInstallation,
+        BindingMigrations,
     },
-    CatalogFieldBindings, FieldAnalyzerCatalogInput, GinAnalyzerOwners, RestoredFieldAnalyzers,
+    CatalogFieldBindings, GinAnalyzerOwners,
 };
 use uqa_execution::catalog::analyzers::gin::{
-    self, GinAnalyzerCatalogInput, GinAnalyzerInputTable, GinAnalyzerInputTables, GinAnalyzerTable,
-    GinAnalyzerTables, RetainedGinAnalyzerOwners,
+    self, GinAnalyzerInputTable, GinAnalyzerInputTables, GinAnalyzerTable, GinAnalyzerTables,
+};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_execution::catalog::analyzers::{
+    fields::{
+        installation::FieldAnalyzerInstallation, FieldAnalyzerCatalogInput, RestoredFieldAnalyzers,
+    },
+    gin::{GinAnalyzerCatalogInput, RetainedGinAnalyzerOwners},
 };
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
     catalog::{table_definition::SharedTableDefinition, table_metadata::SharedTableMetadata},
 };
 use uqa_storage::{
-    analyzer_binding::registry::FieldAnalyzerCatalog, catalog::input::CatalogInputLimits,
-    read_control::StorageReadControl, CatalogFacade, FieldAnalyzerBinding, StorageBackendError,
-    StorageBackendResult,
+    analyzer_binding::registry::FieldAnalyzerCatalog, CatalogFacade, FieldAnalyzerBinding,
+    StorageBackendError, StorageBackendResult,
 };
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_storage::{catalog::input::CatalogInputLimits, read_control::StorageReadControl};
 
 #[derive(Clone)]
 struct Table(Arc<TableState>);
@@ -174,7 +183,10 @@ impl Engine {
             migrate,
         )
     }
+}
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+impl Engine {
     pub(crate) fn stored_gin_analyzers_input(
         &self,
         limits: CatalogInputLimits,

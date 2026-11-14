@@ -132,6 +132,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         )
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn capture_resource_with_control(
         value: impl Into<CatalogGeneration<T>>,
         registry: &MemoryCaptureRegistry,

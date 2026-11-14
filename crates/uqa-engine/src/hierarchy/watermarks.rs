@@ -14,7 +14,9 @@ use uqa_sql::{
     ast::{ColumnDef, TableHierarchy},
     catalog::table_definition::SharedTableDefinition,
 };
-use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use uqa_storage::read_control::StorageReadControl;
+use uqa_storage::StorageBackendResult;
 
 use crate::{state::TableRegistryMap, Engine, TableState};
 
@@ -67,7 +69,9 @@ impl WatermarkTables for Tables {
     }
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) type Input = watermarks::WatermarkInput<Table>;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) type Plan = watermarks::WatermarkPlan<Table>;
 
 impl Engine {
@@ -82,6 +86,7 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn partition_watermark_input(
         &self,
         control: &StorageReadControl,

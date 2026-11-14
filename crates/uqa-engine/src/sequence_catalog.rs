@@ -10,6 +10,7 @@ use super::{CatalogFacade, Engine, RelationIdentity, StorageBackendResult};
 use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) fn sequence_input(
         &self,
         limits: uqa_storage::catalog::input::CatalogInputLimits,

@@ -6,6 +6,7 @@
 
 use super::*;
 use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+use uqa_storage::read_control::StorageReadControl;
 
 #[test]
 fn gin_field_publication_preserves_native_resource_errors_and_selected_generation() {

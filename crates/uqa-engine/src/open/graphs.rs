@@ -10,6 +10,7 @@ use super::{BTreeMap, CatalogFacade, Engine, StorageBackendError, StorageBackend
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 impl Engine {
     pub(super) fn graph_oid_input(
         &self,
@@ -37,7 +38,9 @@ impl Engine {
             control,
         )
     }
+}
 
+impl Engine {
     pub(crate) fn new_graph_store(&self) -> StorageBackendResult<uqa_graph::GraphStoreHandle> {
         match (&self.storage.catalog, &self.storage.backend) {
             (Some(catalog), Some(backend)) => Ok(uqa_graph::GraphStoreHandle::from_catalog(
