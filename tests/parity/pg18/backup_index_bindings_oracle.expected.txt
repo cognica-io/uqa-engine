@@ -12,6 +12,8 @@ window_key 42P20
 nested_condition 42804
 domain_index_created 00000
 whole_row_index_created 00000
+move_rollback|t|t
+moved_bindings|t|t|t
 domain_index_duplicate 23505
 whole_row_index_duplicate 23505
 whole_row_index_update 23505

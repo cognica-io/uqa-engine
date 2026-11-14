@@ -793,7 +793,7 @@ ALTER INDEX orders_state_idx RENAME TO orders_state_lookup;
 DROP INDEX orders_state_lookup;
 ```
 
-Expression keys and predicates see the indexed table's columns and named whole row. A table name used as an argument denotes its composite row unless a column has that same name. Partial-index predicates accept boolean values and domains over boolean, including values returned by declared routines. These row and type identities remain attached to the stored definition through type, routine and table renames.
+Expression keys and predicates see the indexed table's columns and named whole row. A table name used as an argument denotes its composite row unless a column has that same name. Partial-index predicates accept boolean values and domains over boolean, including values returned by declared routines. These row and type identities remain attached to the stored definition through type, routine and table renames, table schema moves and schema renames. Rolling back those changes restores the preceding index names and bound row references.
 
 Each B-tree key column or expression requires a default operator class for its resolved SQL type. Types such as `json`, `xid`, `refcursor` and `aclitem` report `42704`, including domains over such types; the diagnostic retains the declared domain's visible name. Arrays and composite records have generic operator classes, so their declaration does not require a scalar class for every element or field, although comparing actual values can still fail. `INCLUDE` values require no key operator class. The same rule applies to PRIMARY KEY and UNIQUE declarations and to affected indexes when `ALTER COLUMN TYPE` changes their input types; a rejected alteration preserves the original schema and data.
 

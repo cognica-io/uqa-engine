@@ -40,6 +40,30 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
         )
         .unwrap();
     source.sql("ALTER DOMAIN truth RENAME TO renamed_truth; ALTER DOMAIN nested_truth RENAME TO renamed_nested_truth; ALTER FUNCTION row_key(items) RENAME TO renamed_key; ALTER FUNCTION row_enabled(items) RENAME TO renamed_enabled; ALTER TABLE flags RENAME TO renamed_flags; ALTER TABLE items RENAME TO renamed_items", &[]).unwrap();
+    source.sql("CREATE SCHEMA moved", &[]).unwrap();
+    let before_move = format!(
+        "{:?}",
+        source
+            .durable
+            .catalog_indexes
+            .read()
+            .values()
+            .collect::<Vec<_>>()
+    );
+    source.sql("BEGIN; ALTER TABLE renamed_items SET SCHEMA moved; ALTER SCHEMA moved RENAME TO rolled_back_schema; ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        format!(
+            "{:?}",
+            source
+                .durable
+                .catalog_indexes
+                .read()
+                .values()
+                .collect::<Vec<_>>()
+        ),
+        before_move
+    );
+    source.sql("ALTER TABLE renamed_flags SET SCHEMA moved; ALTER TABLE renamed_items SET SCHEMA moved; ALTER SCHEMA moved RENAME TO retained", &[]).unwrap();
     let source = if matches!(provider, Provider::Memory) {
         source
     } else {
@@ -48,7 +72,7 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
     };
     assert_eq!(
         source
-            .sql("INSERT INTO renamed_items VALUES(1,true)", &[])
+            .sql("INSERT INTO retained.renamed_items VALUES(1,true)", &[])
             .unwrap_err()
             .sqlstate(),
         Some("23505")
@@ -89,7 +113,7 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
         ),
         format!("{indexes:?}"),
     );
-    for table in ["renamed_flags", "renamed_items"] {
+    for table in ["retained.renamed_flags", "retained.renamed_items"] {
         assert_eq!(
             restored
                 .sql(&format!("SELECT id FROM {table} ORDER BY id"), &[])
@@ -126,7 +150,7 @@ fn restored_index_bindings_preserve_boolean_domains_and_named_rows(#[case] provi
             .rows
             .is_empty());
     }
-    assert_eq!(restored.sql("SELECT renamed_key(renamed_items) + 0 AS id FROM renamed_items WHERE renamed_enabled(renamed_items) ORDER BY id", &[]).unwrap().rows.iter().map(|row|row["id"].clone()).collect::<Vec<_>>(), [Value::Int(1),Value::Int(2)]);
+    assert_eq!(restored.sql("SELECT renamed_key(renamed_items) + 0 AS id FROM retained.renamed_items WHERE renamed_enabled(renamed_items) ORDER BY id", &[]).unwrap().rows.iter().map(|row|row["id"].clone()).collect::<Vec<_>>(), [Value::Int(1),Value::Int(2)]);
     drop((restored, job));
     assert_eq!(control.memory().used(), 0);
 }

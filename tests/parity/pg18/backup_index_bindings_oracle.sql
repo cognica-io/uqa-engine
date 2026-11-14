@@ -51,27 +51,41 @@ CREATE INDEX bad ON backup_items((CASE WHEN id THEN label ELSE 'x' END));
 \echo nested_condition :SQLSTATE
 ROLLBACK TO bad_expression;
 \set ON_ERROR_STOP on
-CREATE DOMAIN pg_temp.backup_truth AS boolean;
-CREATE DOMAIN pg_temp.backup_nested_truth AS pg_temp.backup_truth;
-CREATE TEMP TABLE backup_flags(id integer, enabled pg_temp.backup_nested_truth);
-CREATE TEMP TABLE backup_rows(id integer, enabled pg_temp.backup_nested_truth);
+CREATE SCHEMA backup_owner;
+SET LOCAL search_path = backup_owner, public, pg_temp;
+CREATE DOMAIN backup_owner.backup_truth AS boolean;
+CREATE DOMAIN backup_owner.backup_nested_truth AS backup_owner.backup_truth;
+CREATE TABLE backup_flags(id integer, enabled backup_owner.backup_nested_truth);
+CREATE TABLE backup_rows(id integer, enabled backup_owner.backup_nested_truth);
 INSERT INTO backup_flags VALUES(1,true),(-1,false);
 INSERT INTO backup_rows VALUES(1,true),(-1,false);
-CREATE FUNCTION pg_temp.backup_row_key(x backup_rows) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).id $$;
-CREATE FUNCTION pg_temp.backup_row_enabled(x backup_rows) RETURNS pg_temp.backup_nested_truth LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).enabled $$;
+CREATE FUNCTION backup_owner.backup_row_key(x backup_rows) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).id $$;
+CREATE FUNCTION backup_owner.backup_row_enabled(x backup_rows) RETURNS backup_owner.backup_nested_truth LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).enabled $$;
 CREATE UNIQUE INDEX backup_flag_saved ON backup_flags(id) WHERE enabled;
 \echo domain_index_created :SQLSTATE
-CREATE UNIQUE INDEX backup_row_saved ON backup_rows(pg_temp.backup_row_key(backup_rows)) WHERE pg_temp.backup_row_enabled(backup_rows);
+CREATE UNIQUE INDEX backup_row_saved ON backup_rows(backup_owner.backup_row_key(backup_rows)) WHERE backup_owner.backup_row_enabled(backup_rows);
 \echo whole_row_index_created :SQLSTATE
 SAVEPOINT rename_rollback;
 ALTER TABLE backup_rows RENAME TO backup_rolled_back_rows;
 ROLLBACK TO rename_rollback;
-ALTER DOMAIN pg_temp.backup_truth RENAME TO backup_renamed_truth;
-ALTER DOMAIN pg_temp.backup_nested_truth RENAME TO backup_renamed_nested_truth;
-ALTER FUNCTION pg_temp.backup_row_key(backup_rows) RENAME TO backup_renamed_key;
-ALTER FUNCTION pg_temp.backup_row_enabled(backup_rows) RENAME TO backup_renamed_enabled;
+ALTER DOMAIN backup_owner.backup_truth RENAME TO backup_renamed_truth;
+ALTER DOMAIN backup_owner.backup_nested_truth RENAME TO backup_renamed_nested_truth;
+ALTER FUNCTION backup_owner.backup_row_key(backup_rows) RENAME TO backup_renamed_key;
+ALTER FUNCTION backup_owner.backup_row_enabled(backup_rows) RENAME TO backup_renamed_enabled;
 ALTER TABLE backup_flags RENAME TO backup_renamed_flags;
 ALTER TABLE backup_rows RENAME TO backup_renamed_rows;
+CREATE TEMP TABLE backup_binding_identity AS SELECT 'backup_renamed_rows'::regclass::oid AS table_oid, 'backup_row_saved'::regclass::oid AS index_oid, 'backup_renamed_rows'::regtype::oid AS row_type_oid;
+CREATE SCHEMA backup_moved;
+SAVEPOINT move_rollback;
+ALTER TABLE backup_renamed_rows SET SCHEMA backup_moved;
+ALTER SCHEMA backup_moved RENAME TO backup_rolled_back;
+ROLLBACK TO move_rollback;
+SELECT 'move_rollback', 'backup_renamed_rows'::regclass::oid = table_oid, 'backup_row_saved'::regclass::oid = index_oid FROM backup_binding_identity;
+ALTER TABLE backup_renamed_flags SET SCHEMA backup_moved;
+ALTER TABLE backup_renamed_rows SET SCHEMA backup_moved;
+ALTER SCHEMA backup_moved RENAME TO backup_retained;
+SET LOCAL search_path = backup_retained, backup_owner, public, pg_temp;
+SELECT 'moved_bindings', 'backup_renamed_rows'::regclass::oid = table_oid, 'backup_row_saved'::regclass::oid = index_oid, 'backup_renamed_rows'::regtype::oid = row_type_oid FROM backup_binding_identity;
 SAVEPOINT typed_duplicate;
 \set ON_ERROR_STOP off
 INSERT INTO backup_renamed_flags VALUES(1,true);
@@ -90,6 +104,6 @@ UPDATE backup_renamed_rows SET id=1 WHERE id=2;
 ROLLBACK TO typed_update;
 \set ON_ERROR_STOP on
 SELECT 'domain_index_rows', count(*), count(*) FILTER (WHERE enabled) FROM backup_renamed_flags;
-SELECT 'whole_row_index_rows', count(*), count(*) FILTER (WHERE pg_temp.backup_renamed_enabled(backup_renamed_rows)) FROM backup_renamed_rows;
-SELECT 'whole_row_values', pg_temp.backup_renamed_key(backup_renamed_rows) FROM backup_renamed_rows WHERE pg_temp.backup_renamed_enabled(backup_renamed_rows) ORDER BY 2;
+SELECT 'whole_row_index_rows', count(*), count(*) FILTER (WHERE backup_owner.backup_renamed_enabled(backup_renamed_rows)) FROM backup_renamed_rows;
+SELECT 'whole_row_values', backup_owner.backup_renamed_key(backup_renamed_rows) FROM backup_renamed_rows WHERE backup_owner.backup_renamed_enabled(backup_renamed_rows) ORDER BY 2;
 ROLLBACK;

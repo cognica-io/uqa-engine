@@ -203,7 +203,7 @@ impl SchemaMemberRelocation for Engine {
             SchemaRelationKind::Table => {
                 let indexes = self.prepare_catalog_index_relocation(&relation.identity, &to)?;
                 let moved = self
-                    .try_rename_table_inner(&from, &to.qualified_name())
+                    .try_rename_table_inner(&relation.identity, &to, indexes)
                     .map_err(|error| {
                         SQLError::Internal(format!(
                             "move table `{from}` to schema `{schema}`: {error}"
@@ -214,7 +214,7 @@ impl SchemaMemberRelocation for Engine {
                         "table `{from}` disappeared while its schema was renamed"
                     )));
                 }
-                indexes.publish(self)
+                Ok(())
             }
             SchemaRelationKind::View => uqa_execution::schema::view_alteration::relocate_view(
                 &self.view_alter_context(),

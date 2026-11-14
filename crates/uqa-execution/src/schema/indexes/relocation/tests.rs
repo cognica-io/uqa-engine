@@ -73,46 +73,53 @@ impl IndexRegistryPublication for Publication {
 
 #[test]
 fn prepared_namespace_publication_preserves_index_metadata_without_reloading_tables() {
-    let previous = CatalogIndexRow {
-        relation: RelationIdentity::new("before", "items_key"),
-        index_type: "btree".into(),
-        table_name: "before.items".into(),
-        columns_json: "[\"id\"]".into(),
-        parameters_json: "{}".into(),
-        definition_json: Some("retained semantic definition and identity".into()),
-    };
-    let mut renamed = previous.clone();
-    renamed.relation.schema = "after".into();
-    renamed.table_name = "after.items".into();
-    let publication = Publication::default();
-    publication
-        .rows
-        .borrow_mut()
-        .insert(
-            previous.clone(),
-            uqa_sql::ast::RelationPersistence::Permanent,
-        )
+    for schema in ["before", "after"] {
+        let previous = CatalogIndexRow {
+            relation: RelationIdentity::new("before", "items_key"),
+            index_type: "btree".into(),
+            table_name: "before.items".into(),
+            columns_json: "[\"id\"]".into(),
+            parameters_json: "{}".into(),
+            definition_json: Some("retained semantic definition and identity".into()),
+        };
+        let mut renamed = previous.clone();
+        renamed.relation.schema = schema.into();
+        renamed.table_name = format!("{schema}.renamed_items");
+        let publication = Publication::default();
+        publication
+            .rows
+            .borrow_mut()
+            .insert(
+                previous.clone(),
+                uqa_sql::ast::RelationPersistence::Permanent,
+            )
+            .unwrap();
+        PreparedIndexRelocations {
+            rows: vec![(previous.clone(), renamed)],
+        }
+        .publish(&publication)
         .unwrap();
-    PreparedIndexRelocations {
-        rows: vec![(previous.clone(), renamed)],
-    }
-    .publish(&publication)
-    .unwrap();
-    assert_eq!(
-        publication.removed.borrow().as_slice(),
-        std::slice::from_ref(&previous.relation)
-    );
-    assert!(!publication.rows.borrow().contains_key(&previous.relation));
-    for rows in [&publication.persisted, &publication.published] {
-        let rows = rows.borrow();
-        assert_eq!(rows.len(), 1);
-        let row = &rows[0];
-        assert_eq!(row.relation, RelationIdentity::new("after", "items_key"));
-        assert_eq!(row.table_name, "after.items");
-        assert_eq!(row.index_type, previous.index_type);
-        assert_eq!(row.columns_json, previous.columns_json);
-        assert_eq!(row.parameters_json, previous.parameters_json);
-        assert_eq!(row.definition_json, previous.definition_json);
+        if schema == "before" {
+            assert!(publication.removed.borrow().is_empty());
+            assert!(publication.rows.borrow().contains_key(&previous.relation));
+        } else {
+            assert_eq!(
+                publication.removed.borrow().as_slice(),
+                std::slice::from_ref(&previous.relation)
+            );
+            assert!(!publication.rows.borrow().contains_key(&previous.relation));
+        }
+        for rows in [&publication.persisted, &publication.published] {
+            let rows = rows.borrow();
+            assert_eq!(rows.len(), 1);
+            let row = &rows[0];
+            assert_eq!(row.relation, RelationIdentity::new(schema, "items_key"));
+            assert_eq!(row.table_name, format!("{schema}.renamed_items"));
+            assert_eq!(row.index_type, previous.index_type);
+            assert_eq!(row.columns_json, previous.columns_json);
+            assert_eq!(row.parameters_json, previous.parameters_json);
+            assert_eq!(row.definition_json, previous.definition_json);
+        }
     }
 }
 

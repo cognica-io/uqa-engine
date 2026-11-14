@@ -34,33 +34,34 @@ fn table_rename_prepares_whole_row_bindings_without_changing_the_live_registry()
     let mut rows = CatalogIndexes::default();
     rows.insert(original.clone(), RelationPersistence::Permanent)
         .unwrap();
-    let prepared = table_rename(&rows, "public.items", "public.renamed").unwrap();
-    assert_eq!(
-        format!("{:?}", rows.get(&original.relation).unwrap()),
-        format!("{original:?}")
-    );
-    assert_eq!(prepared.updates.len(), 1);
-    let updated = &prepared.updates[0];
-    assert_eq!(updated.table_name, "public.renamed");
-    assert_eq!(updated.relation, original.relation);
-    assert_eq!(updated.parameters_json, original.parameters_json);
-    let uqa_sql::Statement::CreateIndex(expected) = uqa_sql::compile(
-        "CREATE INDEX saved ON renamed(row_key(renamed.*)) WHERE row_enabled(renamed.*)",
-    )
-    .unwrap()
-    .remove(0) else {
-        panic!("index declaration")
-    };
-    assert_eq!(
-        serde_json::from_str::<Vec<IndexKey>>(&updated.columns_json).unwrap(),
-        expected.columns
-    );
-    assert_eq!(
-        index_definition(updated).unwrap().predicate,
-        expected.predicate
-    );
-    assert_eq!(
-        format!("{:?}", prepared.rows.get(&original.relation).unwrap()),
-        format!("{updated:?}")
-    );
+    for schema in ["public", "moved"] {
+        let updated = table_rename(
+            &original,
+            &RelationIdentity::new("public", "items"),
+            &RelationIdentity::new(schema, "renamed"),
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{:?}", rows.get(&original.relation).unwrap()),
+            format!("{original:?}")
+        );
+        assert_eq!(updated.table_name, format!("{schema}.renamed"));
+        assert_eq!(updated.relation, RelationIdentity::new(schema, "saved"));
+        assert_eq!(updated.parameters_json, original.parameters_json);
+        let uqa_sql::Statement::CreateIndex(expected) = uqa_sql::compile(
+            "CREATE INDEX saved ON renamed(row_key(renamed.*)) WHERE row_enabled(renamed.*)",
+        )
+        .unwrap()
+        .remove(0) else {
+            panic!("index declaration")
+        };
+        assert_eq!(
+            serde_json::from_str::<Vec<IndexKey>>(&updated.columns_json).unwrap(),
+            expected.columns
+        );
+        assert_eq!(
+            index_definition(&updated).unwrap().predicate,
+            expected.predicate
+        );
+    }
 }

@@ -389,7 +389,23 @@ impl Engine {
 
     pub(crate) fn try_rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_definition_transaction(|engine| {
-            engine.try_rename_table_inner(from, to)
+            let Some(from) = engine.resolve_table_ddl_target(from, "ALTER TABLE RENAME")? else {
+                return Ok(false);
+            };
+            let source = Self::resolved_relation_identity(&from)?;
+            let (schema, name) =
+                RelationIdentity::parse_reference(to).map_err(StorageBackendError::Other)?;
+            let target =
+                RelationIdentity::new(schema.unwrap_or_else(|| source.schema.clone()), name);
+            let indexes = uqa_execution::schema::indexes::relocation::prepare_table_indexes(
+                &engine.index_registry_context(),
+                &engine.relation_creation_context(),
+                engine,
+                &source,
+                &target,
+            )
+            .map_err(|error| StorageBackendError::backend("prepare table index rename", error))?;
+            engine.try_rename_table_inner(&source, &target, indexes)
         })
     }
 
@@ -415,19 +431,11 @@ impl Engine {
     /// Rename or move a table inside the caller's storage transaction: `ALTER SCHEMA RENAME` moves every table of a schema this way, so the catalog is refreshed once the whole schema is consistent rather than after each table.
     pub(crate) fn try_rename_table_inner(
         &self,
-        from: &str,
-        to: &str,
+        from_relation: &RelationIdentity,
+        to_relation: &RelationIdentity,
+        indexes: uqa_execution::schema::indexes::relocation::PreparedIndexRelocations,
     ) -> StorageBackendResult<bool> {
-        let Some(from) = self.resolve_table_ddl_target(from, "ALTER TABLE RENAME")? else {
-            return Ok(false);
-        };
-        let from_relation = Self::resolved_relation_identity(&from)?;
-        let (target_schema, target_name) =
-            RelationIdentity::parse_reference(to).map_err(StorageBackendError::Other)?;
-        let to_relation = RelationIdentity::new(
-            target_schema.unwrap_or_else(|| from_relation.schema.clone()),
-            target_name,
-        );
+        let from = from_relation.qualified_name();
         if to_relation.schema != self.temporary_schema_name()
             && !self
                 .durable
@@ -446,22 +454,17 @@ impl Engine {
                 "relation `{to}` already exists as {kind}"
             )));
         }
-        let array_name = self.reserve_table_array_rename(&from_relation, &to_relation)?;
+        let array_name = self.reserve_table_array_rename(from_relation, to_relation)?;
         let persist_catalog = {
             let tables = self.storage.tables.read();
-            if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
+            if !tables.contains_key(from_relation) || tables.contains_key(to_relation) {
                 return Ok(false);
             }
             self.is_persistent()
-                && tables.get(&from_relation).is_some_and(|table| {
+                && tables.get(from_relation).is_some_and(|table| {
                     table.persistence != uqa_sql::ast::RelationPersistence::Temporary
                 })
         };
-        let indexes = uqa_execution::schema::indexes::references::table_rename(
-            &self.durable.catalog_indexes.read(),
-            &from,
-            &to,
-        )?;
         let analyzers = self
             .durable
             .table_field_analyzers
@@ -474,13 +477,15 @@ impl Engine {
             }
         }
         let mut tables = self.storage.tables.write();
-        let Some(state) = tables.rename(&from_relation, to_relation.clone())? else {
+        let Some(state) = tables.rename(from_relation, to_relation.clone())? else {
             return Ok(false);
         };
         drop(tables);
         *state.row_type_array_name.write() = array_name;
-        self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
-        indexes.publish(self)?;
+        self.rewrite_relation_rename_dependents(from_relation, to_relation)?;
+        indexes
+            .publish(self)
+            .map_err(|error| StorageBackendError::backend("publish table index rename", error))?;
         *self.durable.table_field_analyzers.write() = analyzers;
         if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;
@@ -499,7 +504,7 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
-        self.rename_constraint_transaction_relation(&from_relation, &to_relation);
+        self.rename_constraint_transaction_relation(from_relation, to_relation);
         self.note_prepared_table_change(&state);
         self.clear_regtype_output_cache();
         Ok(true)

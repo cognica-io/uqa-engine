@@ -114,8 +114,15 @@ impl RelationEventAlterTransactions for Engine {
     }
 }
 impl TableLifecycle for Engine {
-    fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
-        self.try_rename_table_inner(from, to)
+    fn rename_table(
+        &self,
+        from: &str,
+        to: &str,
+        indexes: uqa_execution::schema::indexes::relocation::PreparedIndexRelocations,
+    ) -> StorageBackendResult<bool> {
+        let from = Self::resolved_relation_identity(from)?;
+        let to = Self::resolved_relation_identity(to)?;
+        self.try_rename_table_inner(&from, &to, indexes)
     }
     fn rename_column(&self, table: &str, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.try_rename_column(table, from, to)
