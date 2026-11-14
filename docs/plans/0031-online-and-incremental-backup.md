@@ -2,6 +2,45 @@
 
 Status: implementation in progress under [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). The [design](../design/online-and-incremental-backup.md) was established against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`) and merged in [#1320](https://github.com/cognica-io/uqa-engine/pull/1320). Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API.
 
+
+## Delivery backlog and actual PR boundaries
+
+The source inventory on 2026-11-14 contains 150,107 committed additions plus deletions against main `7a2efa492fd53a40aec9509dc9543853786ddf8f`, ending at `7a222c5dd3fd37931bb7f4abf3ba409cd9f196c3`. A further 635 changed lines in three local files implement an unfinished retained type-copy unit; these files are excluded from the committed inventory and are not delivered. Neither total is the diff of PR #1380. The complete local backlog cannot become one integration PR under the 10,000-line policy.
+
+PR #1380 is the only open backup implementation candidate. Its original 9,705-line diff targets main; the delivery inventory is added within the same limit. Complete its final-source qualification and merge before publishing the next coherent unit. Preserve the later source and logical commits while delivery proceeds in dependency order. No new implementation is added while this backlog is being reconciled.
+
+The table records existing local branch boundaries, not published PRs or completed independent qualification. Each later entry must obtain a real PR against its delivered prerequisite, pass an actual-base diff check including all added files and delivery records, and retain its own verification before review or merge. The listed interval counts cannot substitute for that check. A pending, failed, skipped or cancelled result does not qualify the candidate. Broader integration must not recombine these sources into an oversized PR.
+
+| Local branch | Prerequisite source | Head source | Interval additions + deletions |
+| --- | --- | --- | ---: |
+| `feature/backup-native-table-declarations` | `7a2efa492fd5` | `672cfd6ecac6` | 9,705 |
+| `feature/backup-persistent-table-owners` | `672cfd6ecac6` | `39bb90d5a304` | 9,212 |
+| `feature/backup-persistent-table-input` | `39bb90d5a304` | `e1d4f6658bd5` | 6,464 |
+| `feature/backup-engine-table-assembly` | `e1d4f6658bd5` | `da089476b65f` | 9,824 |
+| `feature/backup-restore-continuation` | `da089476b65f` | `9ae19b8f816d` | 2,706 |
+| `feature/backup-catalog-continuation` | `9ae19b8f816d` | `858f00ff8293` | 6,277 |
+| `feature/backup-plan-continuation` | `858f00ff8293` | `8fc4683fde98` | 9,249 |
+| `feature/backup-memory-engine-restore` | `8fc4683fde98` | `a7b24a8f40fe` | 7,229 |
+| `feature/backup-persistent-engine-restore` | `a7b24a8f40fe` | `650e9dd5e6d1` | 9,142 |
+| `feature/backup-constraint-catalog-input` | `650e9dd5e6d1` | `c92b13e86395` | 6,000 |
+| `feature/backup-partition-watermark-input` | `c92b13e86395` | `ceb7f1a4b4a1` | 1,286 |
+| `feature/backup-graph-catalog-input` | `ceb7f1a4b4a1` | `302230e7a5fa` | 2,326 |
+| `feature/backup-sequence-catalog-input` | `302230e7a5fa` | `ceaa2f8604ac` | 4,744 |
+| `feature/backup-graph-oid-input` | `ceaa2f8604ac` | `3b2bcda0ac84` | 1,415 |
+| `feature/backup-type-catalog-input` | `3b2bcda0ac84` | `9c11bddfcb15` | 8,512 |
+| `feature/backup-authority-catalog-input` | `9c11bddfcb15` | `43e439738cd3` | 5,114 |
+| `feature/backup-analyzer-catalog-input` | `43e439738cd3` | `67ff5422f785` | 7,241 |
+| `feature/backup-field-analyzer-installation` | `67ff5422f785` | `7f8c5b37eb61` | 2,167 |
+| `feature/backup-gin-analyzer-input` | `7f8c5b37eb61` | `be0f0b12b2ae` | 8,263 |
+| `feature/backup-binding-envelope-input` | `be0f0b12b2ae` | `f45bfc5457f5` | 8,528 |
+| `feature/backup-routine-catalog-input` | `f45bfc5457f5` | `aa8b088134ee` | 5,529 |
+| `feature/backup-projected-routine-construction` | `aa8b088134ee` | `45d9070299fa` | 7,040 |
+| `feature/backup-routine-canonicalization` | `45d9070299fa` | `9ced2fd251e2` | 5,281 |
+| `feature/backup-routine-type-identities` | `9ced2fd251e2` | `0fbe3408b433` | 6,158 |
+| `feature/backup-routine-placeholder-ownership` | `0fbe3408b433` | `7a222c5dd3fd` | 4,533 |
+
+This inventory does not complete any original backup requirement. Complete persistent loading, logical closure, public restoration, snapshot-qualified fingerprints and end-to-end acceptance remain in #1322.
+
 ## Current scope and progress
 
 **Live checklist: 87 of 100 items are checked; 13 remain unchecked. Delivery: 13 of the 18 original requirements are merged; five remain open. Native catalog input: 24 of 24 components are implemented and locally verified. Table metadata input: all 10 slots, including the header, are locally verified. Native document input/adoption, evaluated-text input/publication, evaluated-index input/key conversion/registration, complete native vector input/adoption, historical field population, native dictionary frame decoding, fixed dictionary tables, lexical validation, native dictionary string input, Japanese completion-index construction, provenance token/string input and canonicalization/structural validation, descriptor fingerprint/runtime-profile validation, native configuration construction/validation, common executable and Korean/Japanese user-rule preparation, exact resolved analyzer/dictionary reconstruction, native graph/path input/adoption and native model input/adoption and complete named/field analyzer input/publication are also locally verified.** These are separate progress measures. A checked implementation subtask records only its stated local evidence; its parent remains open until integration, required final-source qualification and delivery are complete. Public Engine import and snapshot-qualified fingerprints remain disabled.
