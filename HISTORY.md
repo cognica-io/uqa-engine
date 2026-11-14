@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retain original table array-name metadata owners in catalog snapshots and construct table membership through shared inline and retained input. Preserve decoded identity order, replacement semantics, native key/node admission and source-independent metadata lifetime. Complete routine restore integration remains in progress.
 - Retain one immutable session search-path and role generation before producing catalog namespace inputs. Preserve setting, rollback and routine-configuration behavior while copying retained namespace names through bounded work with native admission and cancellation. Complete routine restore integration remains in progress.
 
 - Prepare stored routine placeholders through retained input, moving original declaration and name allocations into a private namespace. Preserve signature-sorted lookup, original finalization order, existing temporary routines and failure retirement. Engine publication and body finalization remain in progress.

@@ -31,7 +31,7 @@ pub(crate) fn table_snapshot(
                 &object_id,
             )
         }),
-        row_type_array_name: constraints.row_type_array_name,
+        row_type_array_name: constraints.row_type_array_name.into(),
         security: Arc::new(super::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         ))

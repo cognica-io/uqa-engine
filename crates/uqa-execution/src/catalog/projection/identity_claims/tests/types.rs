@@ -30,7 +30,7 @@ fn table(oid: u32) -> CatalogTableSnapshot {
             array_type: Some(oid + 2),
             rule: None,
         },
-        row_type_array_name: None,
+        row_type_array_name: None.into(),
         security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)).into(),
         columns: SharedTableDefinition::default(),
         columns_declared: true,

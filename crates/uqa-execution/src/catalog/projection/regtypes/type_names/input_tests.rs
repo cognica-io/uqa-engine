@@ -172,7 +172,7 @@ fn collision_variant(catalog: &CatalogReadView, variant: usize) -> CatalogReadVi
                 .tables
                 .remove(&RelationIdentity::new("public", "t"))
                 .unwrap();
-            table.row_type_array_name = Some("v".into());
+            table.row_type_array_name = Some("v".into()).into();
             snapshot
                 .tables
                 .insert(RelationIdentity::new("public", "f"), table);
@@ -183,7 +183,7 @@ fn collision_variant(catalog: &CatalogReadView, variant: usize) -> CatalogReadVi
                 .get_mut(&RelationIdentity::new("public", "t"))
                 .unwrap();
             table.catalog_oids.row_type = None;
-            table.row_type_array_name = Some("view_array".into());
+            table.row_type_array_name = Some("view_array".into()).into();
         }
         _ => {}
     }

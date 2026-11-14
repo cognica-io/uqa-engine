@@ -68164,6 +68164,74 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_table_capture_preserves_original_order_replacement_and_shared_metadata_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/tables/tests.rs",
+      "capability": "Retained table catalog membership",
+      "workload": "Capture long decoded identities, duplicate replacements and native metadata through inline and retained construction; cancel or abandon every suspended prefix and deny native capacity.",
+      "invariant": "Both constructors produce the original ordered membership and last replacement while keys and nodes own their admission and shared metadata retains its original source allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_table_capture_retires_all_pending_prefixes_without_releasing_selected_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/tables/tests.rs",
+      "capability": "Retained table catalog membership",
+      "workload": "Capture long decoded identities, duplicate replacements and native metadata through inline and retained construction; cancel or abandon every suspended prefix and deny native capacity.",
+      "invariant": "Both constructors produce the original ordered membership and last replacement while keys and nodes own their admission and shared metadata retains its original source allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_table_capture_denies_native_growth_and_preserves_empty_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/tables/tests.rs",
+      "capability": "Retained table catalog membership",
+      "workload": "Capture long decoded identities, duplicate replacements and native metadata through inline and retained construction; cancel or abandon every suspended prefix and deny native capacity.",
+      "invariant": "Both constructors produce the original ordered membership and last replacement while keys and nodes own their admission and shared metadata retains its original source allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_table_capture_keeps_selected_metadata_through_suspended_names_and_source_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/state/table_catalog/tests.rs",
+      "capability": "Table metadata capture ownership",
+      "workload": "Select metadata without allocation, suspend native name capture, alter columns and displaced array names, replace membership and close the source on all four providers.",
+      "invariant": "A selected table retains original metadata identities and names independently of later source changes and lifetime; membership construction owns only its new names and nodes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "inline_table_catalog_capture_keeps_original_array_name_owners",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_catalog/tests.rs",
+      "capability": "Table metadata capture ownership",
+      "workload": "Select metadata without allocation, suspend native name capture, alter columns and displaced array names, replace membership and close the source on all four providers.",
+      "invariant": "A selected table retains original metadata identities and names independently of later source changes and lifetime; membership construction owns only its new names and nodes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

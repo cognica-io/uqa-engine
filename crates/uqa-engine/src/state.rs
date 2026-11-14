@@ -30,6 +30,7 @@ mod resource_capture;
 mod session_namespace;
 mod table_assembly;
 mod table_capture;
+mod table_catalog;
 pub(crate) use table_assembly::TableContents;
 mod table_definition;
 pub(crate) use table_definition::{TableDefinitionCell, TableDefinitionWrite};

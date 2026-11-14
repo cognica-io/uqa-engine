@@ -101,7 +101,7 @@ pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
-    pub row_type_array_name: Option<String>,
+    pub row_type_array_name: SharedTableMetadata<Option<String>>,
     pub security: uqa_sql::catalog::table_metadata::SharedTableMetadata<
         crate::catalog::security::BoundTableSecurity,
     >,

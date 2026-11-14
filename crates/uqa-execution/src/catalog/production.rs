@@ -48,3 +48,5 @@ fn default_shared<T: Default>(
     let memory = control.reserve(size_of::<Produced<T>>())?;
     Ok(Arc::new(control.finish(T::default(), memory)?))
 }
+
+mod tables;
