@@ -50,6 +50,7 @@ mod record;
 mod row;
 mod temporal;
 mod value;
+pub(crate) mod work;
 pub use value::image as value_image;
 
 pub use array::{

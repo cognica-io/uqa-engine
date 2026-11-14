@@ -14,7 +14,7 @@ use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub(super) const PREFIX: &str = "uqa.sql.domain.v1:";
-const OID_PREFIX: &str = "uqa.sql.domain_oid.v1:";
+pub(super) const OID_PREFIX: &str = "uqa.sql.domain_oid.v1:";
 const FORMAT: &str = r#"{"domain_catalog_format":3}"#;
 
 pub(super) fn key(name: &str) -> String {

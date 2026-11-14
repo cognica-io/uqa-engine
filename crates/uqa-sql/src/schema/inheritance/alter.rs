@@ -286,11 +286,53 @@ pub fn append_inherited_keys_matching(
 }
 
 pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
-    left.kind == right.kind
-        && left.columns == right.columns
-        && left.included_columns == right.included_columns
-        && left.nulls_not_distinct == right.nulls_not_distinct
-        && left.without_overlaps == right.without_overlaps
+    crate::catalog::work::inline(key_equivalent_from(
+        left,
+        right,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("uncontrolled key comparison")
+}
+
+pub(crate) async fn key_equivalent_from(
+    left: &TableKeyConstraint,
+    right: &TableKeyConstraint,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<bool, crate::SQLError> {
+    control.check()?;
+    if left.kind != right.kind {
+        return Ok(false);
+    }
+    for (left, right) in [
+        (&left.columns, &right.columns),
+        (&left.included_columns, &right.included_columns),
+    ] {
+        if left.len() != right.len() {
+            return Ok(false);
+        }
+        for (left, right) in left.iter().zip(right) {
+            work.checkpoint().await?;
+            control.check()?;
+            if left.len() != right.len() {
+                return Ok(false);
+            }
+            for (left, right) in left
+                .as_bytes()
+                .chunks(4096)
+                .zip(right.as_bytes().chunks(4096))
+            {
+                work.checkpoint().await?;
+                control.check()?;
+                if left != right {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(left.nulls_not_distinct == right.nulls_not_distinct
+        && left.without_overlaps == right.without_overlaps)
 }
 
 pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::TableConstraintSet) {

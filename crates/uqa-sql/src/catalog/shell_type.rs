@@ -6,13 +6,9 @@
 
 //! An undefined type owns its name and OID before any value layout or array type exists. Completing it preserves that identity.
 
-use crate::catalog::roles::RoleDefinitions;
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::identity::RoleSubject;
 use crate::ast::ObjectAclEntry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,42 +22,15 @@ pub struct StoredShellType {
     pub usage_acl: Option<Vec<ObjectAclEntry>>,
 }
 
-/// Reject inconsistent names, duplicate identities and stale owner incarnations before publishing any restored shell.
-pub fn validate_shell_registry(
-    registry: &impl super::type_definitions::TypeDefinitionView<StoredShellType>,
-    roles: &RoleDefinitions,
-) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for (name, definition) in registry.iter() {
-        if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
-            return Err(format!("invalid or duplicate shell identity for `{name}`"));
-        }
-        if definition.oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(definition.oid) {
-            return Err(format!(
-                "invalid or duplicate shell OID {} for `{name}`",
-                definition.oid
-            ));
-        }
-        if definition.identity.schema.is_empty()
-            || !super::array_type_names::valid_type_name(&definition.identity.name)
-            || definition.identity.qualified_name() != *name
-        {
-            return Err(format!("inconsistent shell name for `{name}`"));
-        }
-        if !definition.owner.is_valid() || definition.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "shell `{name}` references missing role incarnation {}",
-                definition.owner.oid
-            ));
-        }
-    }
-    Ok(())
-}
+mod validation;
+pub use validation::{
+    validate_shell_registry, validate_shell_registry_from_input,
+    validate_shell_registry_with_control,
+};
 
 #[cfg(test)]
 mod tests {
-    use crate::catalog::roles::RoleDefinition;
+    use crate::catalog::roles::{RoleDefinition, RoleDefinitions};
     use std::collections::BTreeMap;
 
     use super::*;

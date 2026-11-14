@@ -210,3 +210,5 @@ pub(super) fn save_serialized<C: super::CatalogFacade + ?Sized>(
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod replacements;

@@ -118,11 +118,17 @@ impl SQLiteIVFIndex {
             let tx = conn.savepoint()?;
             tx.execute(
                 "DELETE FROM _ivf_centroids WHERE table_name = ?1 AND field = ?2",
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
             )?;
             tx.execute(
                 "DELETE FROM _ivf_assignments WHERE table_name = ?1 AND field = ?2",
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
             )?;
             write_untrained_meta(&tx, &self.persistent, self.params, vector_count)?;
             tx.commit()?;

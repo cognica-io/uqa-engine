@@ -31,7 +31,7 @@ impl From<ObjectAddress> for CommentAddress {
     }
 }
 mod registry;
-pub use registry::{CapturedComments, CommentRegistry};
+pub use registry::{CapturedComments, CommentCatalogInput, CommentRegistry};
 pub mod capture;
 pub mod snapshot;
 pub trait CommentPublication {
@@ -52,16 +52,22 @@ fn key(address: CommentAddress) -> String {
 fn address(key_text: &str) -> Option<CommentAddress> {
     let mut parts = key_text.strip_prefix(PREFIX)?.split(':');
     let value = CommentAddress {
-        class_id: parts.next()?.parse().ok()?,
-        object_id: parts.next()?.parse().ok()?,
-        sub_id: parts.next()?.parse().ok()?,
+        class_id: address_number(parts.next()?)?,
+        object_id: address_number(parts.next()?)?,
+        sub_id: i32::try_from(address_number(parts.next()?)?).ok()?,
     };
-    (parts.next().is_none()
-        && value.class_id != 0
-        && value.object_id != 0
-        && value.sub_id >= 0
-        && key(value) == key_text)
-        .then_some(value)
+    (parts.next().is_none() && value.class_id != 0 && value.object_id != 0).then_some(value)
+}
+
+fn address_number(text: &str) -> Option<u32> {
+    if text.is_empty()
+        || text.len() > 10
+        || (text.len() > 1 && text.starts_with('0'))
+        || !text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    text.parse().ok()
 }
 
 pub fn restore(

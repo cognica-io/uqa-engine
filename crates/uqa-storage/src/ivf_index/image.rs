@@ -8,9 +8,9 @@
 
 use super::state::{IVFData, IVFState, StoredVector, VectorKey};
 use crate::{
-    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
+    image_io::{ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
-    vector_index::image::{entries, invalid, read_floats},
+    vector_index::image::{entries, invalid, read_floats, Input},
     StorageBackendResult,
 };
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};

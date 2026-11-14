@@ -6,12 +6,14 @@
 
 //! One cursor selects native slots in the exact encoded child order.
 
-use super::{invalid, Expr, Frame, Input, SQLError};
+use super::{invalid, Expr, Fields, Frame, Input, SQLError};
 use crate::ast::NullsOrder;
 
 impl Frame {
-    pub(super) fn prepare_child(&mut self, input: &mut Input<'_>) -> Result<bool, SQLError> {
-        input.prepare_expression_child(&mut self.value, self.cursor)
+    pub(super) async fn prepare_child(&mut self, input: &mut Fields<'_>) -> Result<bool, SQLError> {
+        input
+            .prepare_expression_child(&mut self.value, self.cursor)
+            .await
     }
 
     pub(super) fn child(&mut self) -> Option<&mut Expr> {
@@ -19,8 +21,8 @@ impl Frame {
     }
 }
 
-impl Input<'_> {
-    pub(in super::super) fn prepare_expression_child(
+impl Fields<'_> {
+    pub(in super::super) async fn prepare_expression_child(
         &mut self,
         value: &mut Expr,
         cursor: usize,
@@ -31,8 +33,8 @@ impl Input<'_> {
         if let Expr::Func { args, order_by, .. } = value {
             if let Some(index) = cursor.checked_sub(args.len()) {
                 if let Some(order) = order_by.get_mut(index) {
-                    order.descending = self.flag()?;
-                    order.nulls = match self.binary.array::<1>()?[0] {
+                    order.descending = self.flag().await?;
+                    order.nulls = match self.binary.array::<1>().await?[0] {
                         0 => None,
                         1 => Some(NullsOrder::First),
                         2 => Some(NullsOrder::Last),
@@ -42,6 +44,16 @@ impl Input<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+impl Input<'_> {
+    pub(in super::super) fn prepare_expression_child(
+        &mut self,
+        value: &mut Expr,
+        cursor: usize,
+    ) -> Result<bool, SQLError> {
+        self.fields(async |mut input| input.prepare_expression_child(value, cursor).await)
     }
 }
 

@@ -11,10 +11,15 @@ use super::{EpochCoordinator, SessionContext};
 
 #[test]
 fn session_state_readers_never_observe_a_torn_pair() {
-    let session = Arc::new(SessionContext::new(crate::random_state_from_seed(1)));
+    let session = Arc::new(SessionContext::with_retention(
+        crate::random_state_from_seed(1),
+        uqa_core::memory::MemoryBudget::new(
+            uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+        ),
+    ));
     {
         let mut state = session.state.write();
-        state.search_path = vec!["0".to_string()];
+        state.search_path = vec!["0".to_string()].into();
         state.session_vars.insert("generation".into(), "0".into());
     }
     let done = Arc::new(AtomicBool::new(false));
@@ -24,7 +29,7 @@ fn session_state_readers_never_observe_a_torn_pair() {
         for generation in 1..10_000 {
             let generation = generation.to_string();
             let mut state = writer_session.state.write();
-            state.search_path = vec![generation.clone()];
+            state.search_path = vec![generation.clone()].into();
             state.session_vars.insert("generation".into(), generation);
         }
         writer_done.store(true, Ordering::Release);

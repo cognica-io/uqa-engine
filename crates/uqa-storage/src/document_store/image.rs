@@ -11,8 +11,9 @@ use std::io::{Read, Write};
 use super::{DocumentMetadata, StoredDocument};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use uqa_core::{
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
     memory::Budgeted,
-    value_image::{read_value_image, ValueImageError},
+    value_image::{ValueImageError, ValueImageInput},
     Value,
 };
 
@@ -49,22 +50,43 @@ pub fn read_document_image(
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<StoredDocument>> {
     control.check()?;
-    let mut header = [0; 9];
-    read_exact(input, &mut header, control)?;
+    decode_image(
+        input,
+        control.memory(),
+        control.cancellation(),
+        async |mut input| read_document_image_from(&mut input).await,
+    )
+}
+
+/// Retain incomplete tuple fields on the original allowance. Like `read_document_image`, completion leaves following bytes to the enclosing image.
+pub fn document_image_input(
+    control: &StorageReadControl,
+) -> StorageBackendResult<ImageDecoder<Budgeted<StoredDocument>, StorageBackendError>> {
+    Ok(ImageDecoder::new(
+        control.memory(),
+        control.cancellation(),
+        |mut reader| async move { read_document_image_from(&mut reader.input()).await },
+    )?)
+}
+
+/// Decode one native tuple on the enclosing continuation without a second read buffer or a second grammar.
+pub async fn read_document_image_from(
+    input: &mut AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<StoredDocument>> {
+    let header = input.array::<9>().await?;
     if &header[..8] != MAGIC || header[8] > 1 {
         return Err(invalid("document image version or metadata flag"));
     }
     let metadata = if header[8] == 1 {
-        control.check()?;
-        let mut xmin = [0; 4];
-        read_exact(input, &mut xmin, control)?;
+        let xmin = input.array().await?;
         DocumentMetadata::with_tuple_xmin(u32::from_le_bytes(xmin))
     } else {
         DocumentMetadata::default()
     };
-    let value =
-        read_value_image(input, control.memory(), control.cancellation()).map_err(value_error)?;
-    control.check()?;
+    let value = ValueImageInput::read_from(input)
+        .await
+        .map_err(value_error)?;
+    input.cancellation.check()?;
     let (value, memory) = value.into_parts();
     let Value::Map(fields) = value else {
         return Err(invalid("document image fields are not a map"));
@@ -89,27 +111,6 @@ pub fn decode_document_image(
 
 fn invalid(reason: &'static str) -> StorageBackendError {
     StorageBackendError::Other(reason.into())
-}
-
-fn io_error(error: std::io::Error) -> StorageBackendError {
-    StorageBackendError::backend("document image I/O", error)
-}
-
-fn read_exact(
-    input: &mut dyn Read,
-    mut bytes: &mut [u8],
-    control: &StorageReadControl,
-) -> StorageBackendResult<()> {
-    while !bytes.is_empty() {
-        control.check()?;
-        match input.read(bytes) {
-            Ok(0) => return Err(io_error(std::io::ErrorKind::UnexpectedEof.into())),
-            Ok(count) => bytes = &mut bytes[count..],
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(io_error(error)),
-        }
-    }
-    control.check()
 }
 
 fn value_error(error: ValueImageError) -> StorageBackendError {

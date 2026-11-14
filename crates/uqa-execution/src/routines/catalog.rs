@@ -7,6 +7,7 @@
 //! Routine registry snapshots, retained write guards, and durable publication.
 
 pub(crate) mod encoding;
+pub mod input;
 pub(super) mod publication;
 pub(super) mod revision;
 mod values;

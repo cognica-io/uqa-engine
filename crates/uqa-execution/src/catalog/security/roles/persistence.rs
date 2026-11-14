@@ -15,6 +15,7 @@ use uqa_sql::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+pub mod input;
 mod memberships;
 mod records;
 

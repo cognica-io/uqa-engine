@@ -8,6 +8,7 @@
 
 use super::{CapturedValueIndex, Entry};
 use uqa_core::{
+    image_io::AsyncImageInput,
     memory::{Budgeted, MemoryBudget, MemoryError, ProductionControl, RetainedMap},
     CancellationToken,
 };
@@ -50,17 +51,59 @@ impl NativeValueSources {
         name: &ValueIndexKey,
         entry: &Entry,
     ) -> StorageBackendResult<Self> {
-        let mut next = self.without_key(name)?;
-        let Entry::Captured(cell) = entry else {
+        let (next, key) = self.prepare_entry(name, entry)?;
+        let Some(key) = key else {
             return Ok(next);
         };
-        let key = cell.key()?;
         let cancellation = CancellationToken::new();
         let name = ProductionControl::new(self.names.budget(), &cancellation, &cancellation)
             .copy_text(name.name())
             .map_err(super::super::capture::value_error)?
             .into_budgeted()
             .expect("admitted source name");
+        next.finish_entry(name, key)
+    }
+
+    pub(super) async fn with_entry_from(
+        &self,
+        name: &ValueIndexKey,
+        entry: &Entry,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        input.checkpoint().await?;
+        let (next, key) = self.prepare_entry(name, entry)?;
+        let Some(key) = key else {
+            return Ok(next);
+        };
+        let name = input.copy_text(name.name()).await?;
+        next.finish_entry(name, key)
+    }
+
+    fn prepare_entry(
+        &self,
+        name: &ValueIndexKey,
+        entry: &Entry,
+    ) -> StorageBackendResult<(Self, Option<IndexSource>)> {
+        let next = self.without_key(name)?;
+        let key = match entry {
+            Entry::Captured(cell) => Some(cell.key()?),
+            Entry::Plain(_) => None,
+        };
+        Ok((next, key))
+    }
+
+    fn finish_entry(
+        mut self,
+        name: Budgeted<String>,
+        key: IndexSource,
+    ) -> StorageBackendResult<Self> {
+        if !name.budget().shares_allowance(self.names.budget())
+            || name.reserved_bytes() < name.capacity()
+        {
+            return Err(super::image::invalid(
+                "evaluated source name has no complete input admission",
+            ));
+        }
         let (name, mut memory) = name.into_parts();
         let bytes = key.retained_source_bytes();
         let footprint = name
@@ -68,13 +111,13 @@ impl NativeValueSources {
             .checked_add(bytes)
             .ok_or(MemoryError::SizeOverflow)?;
         memory.absorb(self.names.budget().reserve(bytes)?);
-        next.sources = next.sources.with_source(&key)?;
-        next.names.insert(
+        self.sources = self.sources.with_source(&key)?;
+        self.names.insert(
             ValueIndexKey::Index(name),
             Budgeted::new(key, memory),
             footprint,
         )?;
-        Ok(next)
+        Ok(self)
     }
 
     pub(super) fn without_key(&self, name: &ValueIndexKey) -> StorageBackendResult<Self> {

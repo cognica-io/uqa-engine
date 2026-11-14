@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, Body, Empty, Field, Input, PlanMemory, SQLError, Step};
+use super::{invalid, Body, Empty, Field, Fields, Input, PlanMemory, SQLError, Step};
 use crate::ast::{Expr, FrameBound, WindowCallModifiers};
 
 syntax_enum!(FrameBound, FrameBound::CurrentRow;
@@ -33,6 +33,80 @@ impl Empty for Expr {
     }
 }
 
+macro_rules! borrowed_syntax_fields {
+    ($position:expr; $($field:expr),*; $($unused:expr),*) => {{
+        let fields: [&mut dyn Field; _] = [$($field as &mut dyn Field),*];
+        fields.into_iter().nth($position)
+    }};
+}
+macro_rules! native_syntax_fields {
+    ($position:expr; $($field:expr),*; $input:expr, $memory:expr) => {
+        read_syntax_fields!($position, $input, $memory; $($field),*)
+    };
+}
+macro_rules! expression_fields {
+    ($owner:expr, $index:expr, $select:ident $(, $args:expr)*) => {{
+        let index = $index;
+        match $owner {
+            Expr::ScalarSubquery(body) => $select!(index; body; $($args),*),
+            Expr::Exists { body, negated } => {
+                $select!(index; negated, body; $($args),*)
+            }
+            Expr::InSubquery {
+                expr,
+                body,
+                negated,
+            } => {
+                $select!(index; negated, expr, body; $($args),*)
+            }
+            Expr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                modifiers,
+            } => {
+                $select!(index; name, args, spec, filter, modifiers; $($args),*)
+            }
+            value => match super::super::super::expressions::expression_child(value, index) {
+                Some(value) => $select!(0; value; $($args),*),
+                None => $select!(0;; $($args),*),
+            },
+        }
+    }};
+}
+macro_rules! read_expression {
+    ($owner:expr, $position:expr, $input:expr, $memory:expr, $read:ident, $select:ident) => {{
+        if $position == 0 {
+            *$owner = $read!($input.statement_expression($memory))?;
+            return Ok(Step::Advance);
+        }
+        if !matches!(
+            $owner,
+            Expr::ScalarSubquery(_)
+                | Expr::Exists { .. }
+                | Expr::InSubquery { .. }
+                | Expr::WindowCall { .. }
+        ) && !$read!($input.prepare_expression_child($owner, $position - 1))?
+        {
+            return Ok(Step::Done);
+        }
+        $select!($owner, $position, $input, $memory)
+    }};
+}
+macro_rules! read_borrowed_expression {
+    ($owner:expr, $position:expr, $input:expr, $memory:expr) => {
+        $owner
+            .field($position)
+            .map_or(Ok(Step::Done), |field| field.read($input, $memory))
+    };
+}
+macro_rules! read_native_expression {
+    ($owner:expr, $position:expr, $input:expr, $memory:expr) => {
+        expression_fields!($owner, $position - 1, native_syntax_fields, $input, $memory)
+    };
+}
+
 impl Body for Expr {
     fn new(_: &mut PlanMemory) -> Result<Self, SQLError> {
         Ok(Self::Star)
@@ -40,38 +114,9 @@ impl Body for Expr {
     fn first_field(&self) -> usize {
         1
     }
-
     fn field(&mut self, position: usize) -> Option<&mut dyn Field> {
-        let index = position.checked_sub(1)?;
-        match self {
-            Self::ScalarSubquery(body) => (index == 0).then_some(body as &mut dyn Field),
-            Self::Exists { body, negated } => {
-                let fields: [&mut dyn Field; 2] = [negated, body];
-                fields.into_iter().nth(index)
-            }
-            Self::InSubquery {
-                expr,
-                body,
-                negated,
-            } => {
-                let fields: [&mut dyn Field; 3] = [negated, expr, body];
-                fields.into_iter().nth(index)
-            }
-            Self::WindowCall {
-                name,
-                args,
-                spec,
-                filter,
-                modifiers,
-            } => {
-                let fields: [&mut dyn Field; 5] = [name, args, spec, filter, modifiers];
-                fields.into_iter().nth(index)
-            }
-            _ => super::super::super::expressions::expression_child(self, index)
-                .map(|value| value as &mut dyn Field),
-        }
+        expression_fields!(self, position.checked_sub(1)?, borrowed_syntax_fields)
     }
-
     fn read(
         &mut self,
         position: usize,
@@ -79,46 +124,76 @@ impl Body for Expr {
         input: &mut Input<'_>,
         memory: &mut PlanMemory,
     ) -> Result<Step, SQLError> {
-        if position == 0 {
-            *self = input.statement_expression(memory)?;
-            return Ok(Step::Advance);
-        }
-        if !matches!(
+        read_expression!(
             self,
-            Self::ScalarSubquery(_)
-                | Self::Exists { .. }
-                | Self::InSubquery { .. }
-                | Self::WindowCall { .. }
-        ) && !input.prepare_expression_child(self, position - 1)?
-        {
-            return Ok(Step::Done);
-        }
-        self.field(position)
-            .map_or(Ok(Step::Done), |field| field.read(input, memory))
+            position,
+            input,
+            memory,
+            read_field,
+            read_borrowed_expression
+        )
+    }
+    async fn read_fields(
+        &mut self,
+        position: usize,
+        _: &mut Option<usize>,
+        input: &mut Fields<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step, SQLError> {
+        read_expression!(
+            self,
+            position,
+            input,
+            memory,
+            await_field,
+            read_native_expression
+        )
     }
 }
 
+macro_rules! statement_expression_header {
+    ($input:ident, $read:ident $(, $async:ident)?) => {
+        impl $input<'_> {
+            $($async)? fn statement_expression(&mut self, memory: &mut PlanMemory) -> Result<Expr, SQLError> {
+                Ok(match $read!(self.binary.array::<1>())?[0] {
+                    24 => Expr::ScalarSubquery(Field::new(memory)?),
+                    25 => Expr::Exists {
+                        body: Field::new(memory)?,
+                        negated: false,
+                    },
+                    26 => Expr::InSubquery {
+                        expr: Field::new(memory)?,
+                        body: Field::new(memory)?,
+                        negated: false,
+                    },
+                    27 => Expr::WindowCall {
+                        name: String::new(),
+                        args: Vec::new(),
+                        spec: Field::new(memory)?,
+                        filter: None,
+                        modifiers: WindowCallModifiers::default(),
+                    },
+                    tag => $read!(self.statement_scalar_tag(tag, memory))?,
+                })
+            }
+        }
+    };
+}
+statement_expression_header!(Input, read_field);
+statement_expression_header!(Fields, await_field, async);
 impl Input<'_> {
-    fn statement_expression(&mut self, memory: &mut PlanMemory) -> Result<Expr, SQLError> {
-        Ok(match self.binary.array::<1>()?[0] {
-            24 => Expr::ScalarSubquery(Field::new(memory)?),
-            25 => Expr::Exists {
-                body: Field::new(memory)?,
-                negated: false,
-            },
-            26 => Expr::InSubquery {
-                expr: Field::new(memory)?,
-                body: Field::new(memory)?,
-                negated: false,
-            },
-            27 => Expr::WindowCall {
-                name: String::new(),
-                args: Vec::new(),
-                spec: Field::new(memory)?,
-                filter: None,
-                modifiers: WindowCallModifiers::default(),
-            },
-            tag => self.expression_tag(tag, memory)?,
-        })
+    fn statement_scalar_tag(&mut self, tag: u8, memory: &mut PlanMemory) -> Result<Expr, SQLError> {
+        self.expression_tag(tag, memory)
+    }
+}
+impl Fields<'_> {
+    async fn statement_scalar_tag(
+        &mut self,
+        tag: u8,
+        memory: &mut PlanMemory,
+    ) -> Result<Expr, SQLError> {
+        let mut value = Expr::Star;
+        await_field!(self.expression_tag(tag, memory, &mut value))?;
+        Ok(value)
     }
 }

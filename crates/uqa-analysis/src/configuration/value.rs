@@ -57,6 +57,10 @@ impl<W: Work<AnalysisError>> Read for Input<'_, '_, W> {
     fn implicit_defaults(&self) -> bool {
         true
     }
+    #[cfg(any(feature = "nori", feature = "kuromoji"))]
+    async fn default_text(&mut self, value: &'static str) -> AnalysisResult<String> {
+        copy(value, self.work).await
+    }
     fn missing(&self, name: &'static str) -> Self::Error {
         if let Some((length, fields, description)) = self.finished_sequence {
             let expected = format!(

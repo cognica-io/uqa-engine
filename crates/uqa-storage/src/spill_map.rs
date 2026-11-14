@@ -22,11 +22,22 @@ use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, M
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
-pub(crate) trait Record: Sized {
+pub(crate) trait Record: Sized + Send + Sync {
     fn memory_bytes(&self) -> StorageBackendResult<usize>;
     fn encoded_bytes(&self) -> StorageBackendResult<usize>;
     fn encode(&self, bytes: &mut Vec<u8>);
     fn decode(bytes: &[u8]) -> StorageBackendResult<Self>;
+    fn encode_from(
+        &self,
+        bytes: &mut Vec<u8>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> impl std::future::Future<Output = StorageBackendResult<()>> + Send {
+        async {
+            work.checkpoint().await?;
+            self.encode(bytes);
+            Ok(())
+        }
+    }
 }
 
 pub(crate) enum Read<'a, V> {
@@ -258,14 +269,26 @@ impl<V: Record> Map<V> {
         value: V,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.insert_from(key, value, control, &mut ()))
+    }
+
+    pub(crate) async fn insert_from(
+        &mut self,
+        key: u128,
+        value: V,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         check(control)?;
         let present = self.contains_key(key)?;
         let Some(value) = self.insert_resident(key, value)? else {
             self.len += usize::from(!present);
             return Ok(());
         };
-        self.spill(control)?;
-        self.insert_disk(key, &value, present, control)
+        self.spill_from(control, work).await?;
+        self.insert_disk_from(key, &value, present, control, work)
+            .await
     }
 
     /// Return ownership when the resident tree cannot admit the value. Both a
@@ -351,17 +374,22 @@ impl<V: Record> Map<V> {
         }
     }
 
-    fn insert_disk(
+    async fn insert_disk_from(
         &mut self,
         key: u128,
         value: &V,
         present: bool,
         control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
     ) -> StorageBackendResult<()> {
         if let Root::Disk(map) = &mut self.root {
             let mut candidate = map.clone();
-            candidate.insert(key, value, &self.memory)?;
-            candidate.compact::<V>(&self.memory, control)?;
+            candidate
+                .insert_from(key, value, &self.memory, work)
+                .await?;
+            candidate
+                .compact_from::<V>(&self.memory, control, work)
+                .await?;
             check(control)?;
             *map = candidate;
             self.len += usize::from(!present);
@@ -433,6 +461,14 @@ impl<V: Record> Map<V> {
         &mut self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.spill_from(control, &mut ()))
+    }
+
+    async fn spill_from(
+        &mut self,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         let Root::Memory(resident) = &self.root else {
             return Ok(());
         };
@@ -445,7 +481,7 @@ impl<V: Record> Map<V> {
         )?;
         for (key, value) in resident {
             check(control)?;
-            disk.push(*key, &***value, &self.memory)?;
+            disk.push_from(*key, &***value, &self.memory, work).await?;
         }
         let root = disk.finish()?;
         check(control)?;

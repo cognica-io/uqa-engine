@@ -35,6 +35,7 @@ use uqa_sql::{
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
+pub mod input;
 mod persistence;
 pub type DatabaseAuthorityRead<'a> = Box<dyn Deref<Target = DatabaseAuthority> + 'a>;
 pub type DatabaseSecurityWrite<'a> = Box<dyn DerefMut<Target = DatabaseAuthority> + 'a>;

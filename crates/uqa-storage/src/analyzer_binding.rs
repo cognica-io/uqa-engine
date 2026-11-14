@@ -17,6 +17,7 @@ use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendRes
 pub mod capture;
 mod image;
 pub mod registry;
+mod stored;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -139,13 +140,17 @@ impl FieldAnalyzerBinding {
 
     /// Compatibility label for the most recent explicit assignment. Exact execution always uses both retained revisions.
     pub fn last_assignment(&self) -> Option<(String, String)> {
+        self.last_assignment_ref()
+            .map(|(name, phase)| (name.to_owned(), phase.to_owned()))
+    }
+
+    /// Borrow the last assignment label without copying either native name.
+    pub fn last_assignment_ref(&self) -> Option<(&str, &'static str)> {
         let side = match self.last_phase {
             AnalyzerPhase::Index | AnalyzerPhase::Both => &self.index,
             AnalyzerPhase::Search => &self.search,
         };
-        side.name
-            .clone()
-            .map(|name| (name, self.phase_name().to_owned()))
+        side.name.as_deref().map(|name| (name, self.phase_name()))
     }
 
     pub fn phase_name(&self) -> &'static str {

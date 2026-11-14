@@ -237,6 +237,7 @@ async fn canonicalize_with(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
     crate::work::inline(check_resolved_with(config, &mut ()))
 }

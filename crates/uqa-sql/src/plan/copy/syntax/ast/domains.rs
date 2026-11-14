@@ -9,6 +9,7 @@ use super::{Copying, Result, SyntaxCopy};
 syntax_struct!(crate::ast::AlterDomain { name, action });
 
 syntax_enum!(crate::ast::AlterDomainAction {
+    SetDefault { expression },
     AddCheck { constraint },
     AddNotNull { constraint },
     DropConstraint { name, if_exists, cascade },

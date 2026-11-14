@@ -86,6 +86,11 @@ impl<'a> BackupRestoreOperation<'a> {
 }
 
 impl<W: BackupRestoreWork> BackupRestoreJob<'_, W> {
+    /// Observe the active provider continuation without changing its admission or lifetime.
+    pub fn work(&self) -> Option<&W> {
+        self.work.as_ref()
+    }
+
     pub const fn id(&self) -> RestoreId {
         self.operation.id()
     }
@@ -100,6 +105,14 @@ impl<W: BackupRestoreWork> BackupRestoreJob<'_, W> {
 
     /// Perform one owner work step. Complete provider work is dropped before preparing publication. A failed step cannot execute again; close the job and resume the durable operation to enter recovery.
     pub fn advance(&mut self) -> BackupResult<BackupRestoreStep> {
+        self.advance_with(BackupRestoreWork::advance)
+    }
+
+    /// Supply call-specific limits or input to one owner step under the same durable transition. The callback must satisfy `BackupRestoreWork`'s completion contract. Errors and unwinding retire the work, and prepared or completed jobs do not invoke it again.
+    pub fn advance_with(
+        &mut self,
+        advance: impl FnOnce(&mut W) -> BackupResult<BackupRestoreWorkStep>,
+    ) -> BackupResult<BackupRestoreStep> {
         match self.operation.state {
             State::Complete => return Ok(BackupRestoreStep::Complete),
             State::Prepared => return Ok(BackupRestoreStep::Prepared),
@@ -109,7 +122,7 @@ impl<W: BackupRestoreWork> BackupRestoreJob<'_, W> {
         // Taking the owner makes both errors and unwinding terminal without a caller repair path.
         let mut work = self.work.take().ok_or(BackupError::Finished)?;
         self.operation.control.cancellation().check()?;
-        if work.advance()? == BackupRestoreWorkStep::Pending {
+        if advance(&mut work)? == BackupRestoreWorkStep::Pending {
             self.work = Some(work);
             return Ok(BackupRestoreStep::Pending);
         }
@@ -158,14 +171,14 @@ struct FileWork<W> {
 }
 
 /// Keep an installed filename-based provider attached to its private directory across work steps. Directory movement or a nonregular file makes the continuation terminal; recovery resolves its current pinned location. Provider work must keep all file access inside this directory and close its handles when dropped.
-pub struct RestoreFileWork<W: BackupRestoreWork> {
+pub struct RestoreFileWork<W> {
     active: Option<FileWork<W>>,
     complete: bool,
 }
 
 impl RestoreDirectory<'_> {
     /// Open a continuation for an existing private regular file. The constructor may open provider handles but cannot retain the borrowed pathname; its provider may retain its own opening path under this wrapper's directory checks. No process-wide working directory changes occur.
-    pub fn begin_file_work<W: BackupRestoreWork>(
+    pub fn begin_file_work<W>(
         &self,
         name: &str,
         control: &StorageReadControl,
@@ -195,12 +208,22 @@ impl RestoreDirectory<'_> {
 
 impl<W: BackupRestoreWork> BackupRestoreWork for RestoreFileWork<W> {
     fn advance(&mut self) -> BackupResult<BackupRestoreWorkStep> {
+        self.advance_with(|work, _| work.advance())
+    }
+}
+
+impl<W> RestoreFileWork<W> {
+    /// Run one operation against the admitted private file. This also permits a provider to finish physical input before an enclosing catalog validator opens that same file. The callback must close any newly opened handles before returning Complete; retained handles belong to `W` and retire with it. Errors and unwinding consume the owner, and complete work is never invoked again.
+    pub fn advance_with(
+        &mut self,
+        operation: impl FnOnce(&mut W, &Path) -> BackupResult<BackupRestoreWorkStep>,
+    ) -> BackupResult<BackupRestoreWorkStep> {
         if self.complete {
             return Ok(BackupRestoreWorkStep::Complete);
         }
         let mut active = self.active.take().ok_or(BackupError::Finished)?;
         active.binding.verify()?;
-        let step = active.work.advance()?;
+        let step = operation(&mut active.work, active.binding.path.as_path())?;
         active.binding.verify()?;
         if step == BackupRestoreWorkStep::Complete {
             drop(active);

@@ -78,5 +78,18 @@ pub fn publish(
     Ok(())
 }
 
+/// Resumable stored definitions, OID claims and complete native validation under one selected catalog read boundary.
+pub type EnumCatalogInput = super::type_records::input::TypeCatalogInput<StoredEnum>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<EnumCatalogInput> {
+    super::type_records::input::new(&records::FORMAT, catalog, roles, limits, mutations, control)
+}
+
 #[cfg(test)]
 mod tests;

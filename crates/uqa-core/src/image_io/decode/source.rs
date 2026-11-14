@@ -60,6 +60,7 @@ where
     loop {
         cancellation.check().map_err(ImageIoError::from)?;
         reader.checkpoint().await?;
+        cancellation.check().map_err(ImageIoError::from)?;
         {
             let mut context = Context::from_waker(Waker::noop());
             if let Poll::Ready(result) = future.as_mut().poll(&mut context) {

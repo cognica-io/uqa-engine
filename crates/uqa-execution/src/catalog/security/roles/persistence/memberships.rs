@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, fmt::Write};
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 pub(super) const PREFIX: &str = "uqa.sql.role_membership.v1:";
-const OID_PREFIX: &str = "uqa.sql.role_membership_oid.v1:";
+pub(super) const OID_PREFIX: &str = "uqa.sql.role_membership_oid.v1:";
 const FORMAT: &str = r#"{"role_membership_catalog_format":1}"#;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,6 +30,22 @@ struct RecordFormat {
     role_membership_catalog_format: u32,
 }
 
+pub(super) fn require_current_marker(json: Option<&str>) -> StorageBackendResult<()> {
+    let Some(json) = json else {
+        return Err(StorageBackendError::Other(
+            "role metadata requires initial-open record migration".into(),
+        ));
+    };
+    let format: RecordFormat = serde_json::from_str(json)?;
+    if format.role_membership_catalog_format != 1 {
+        return Err(StorageBackendError::Other(format!(
+            "unsupported role membership catalog format {}",
+            format.role_membership_catalog_format
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum StoredMemberships {
@@ -38,15 +54,21 @@ enum StoredMemberships {
 }
 
 pub(super) fn key(membership: &RoleMembershipKey) -> String {
-    let mut key = String::from(PREFIX);
-    for identity in [membership.role, membership.member, membership.grantor] {
-        write!(&mut key, "{:08x}", identity.oid).expect("string write");
-        for byte in identity.object_id {
-            write!(&mut key, "{byte:02x}").expect("string write");
-        }
-        key.push(':');
-    }
+    let mut key = String::new();
+    write_key(&mut key, membership).expect("string write");
     key
+}
+
+pub(super) fn write_key(key: &mut impl Write, membership: &RoleMembershipKey) -> std::fmt::Result {
+    key.write_str(PREFIX)?;
+    for identity in [membership.role, membership.member, membership.grantor] {
+        write!(key, "{:08x}", identity.oid)?;
+        for byte in identity.object_id {
+            write!(key, "{byte:02x}")?;
+        }
+        key.write_char(':')?;
+    }
+    Ok(())
 }
 
 fn oid_key(oid: i64) -> String {

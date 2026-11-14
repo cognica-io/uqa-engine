@@ -5,15 +5,17 @@
 //
 
 use super::{
-    initial_random_state, Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, ColumnStatsRow,
-    DeepModel, DurableCatalogState, Engine, EpochCoordinator, FieldName, ManagedConnection, Path,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession, QueryRuntime,
-    RuntimeExtensions, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError,
-    SQLiteStorageProvider, SessionContext, StorageBackendError, StorageBackendResult,
-    StorageContext, TableSchema, TableState, Value, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
+    initial_random_state, Analyzer, Arc, BTreeMap, CatalogFacade, DeepModel, DurableCatalogState,
+    Engine, EpochCoordinator, FieldName, ManagedConnection, Path, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, QueryRuntime, RuntimeExtensions,
+    SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider,
+    SessionContext, StorageBackendError, StorageBackendResult, StorageContext, TableSchema,
+    TableState, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
 };
 
 mod authenticated_session;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod authority_input;
 mod cache_refresh;
 mod catalog_reload;
 mod catalog_sync;
@@ -21,9 +23,17 @@ mod data_sync;
 mod graphs;
 mod key_identities;
 mod lifecycle;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod persistent_input;
 mod registries;
 mod session_seed;
 mod statistics;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod table_input;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod type_input;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use persistent_input::PersistentEngineInput;
 mod table_restore;
 mod value_restoration;
 

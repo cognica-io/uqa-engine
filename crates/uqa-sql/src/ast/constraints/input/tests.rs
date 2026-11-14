@@ -33,9 +33,10 @@ fn compare(text: &str) -> bool {
     valid
 }
 
-const SIMPLE: &str = r#"[{"name":"column","ty":"Text","primary_key":false,"not_null":false}]"#;
+pub(super) const SIMPLE: &str =
+    r#"[{"name":"column","ty":"Text","primary_key":false,"not_null":false}]"#;
 
-fn complete() -> serde_json::Value {
+pub(super) fn complete() -> serde_json::Value {
     serde_json::from_str(r#"[{
         "name": "한글_column",
         "ty": {"Domain":{"schema":"s","name":"d","oid":40000,"array_oid":40001,"base":{"Array":"Text"}}},

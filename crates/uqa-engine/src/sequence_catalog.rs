@@ -10,6 +10,23 @@ use super::{CatalogFacade, Engine, RelationIdentity, StorageBackendResult};
 use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn sequence_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<
+        uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput,
+    > {
+        uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput::new(
+            std::sync::Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            self.durable.roles.read().clone(),
+            limits,
+            self.durable.sequences.read().budget(),
+            control,
+        )
+    }
+
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
         let snapshot = self.sequence_read_snapshot()?;
         self.install_sequence_read_snapshot(&snapshot);

@@ -485,3 +485,4 @@ fn cancellation_and_failed_disk_append_keep_the_original_root() {
     drop(map);
     assert_eq!(control.memory().used(), 0);
 }
+mod input;

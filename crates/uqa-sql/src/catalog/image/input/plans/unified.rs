@@ -6,10 +6,12 @@
 
 //! A bound routine member retains the same iterative owner as its native query or command.
 
-use super::{empty_query, invalid, CommandPlan, Input, Kind, Node, Owner, QueryPlan, SQLError};
+use super::{
+    empty_query, invalid, CommandPlan, Fields, Input, Kind, Node, Owner, QueryPlan, SQLError,
+};
 use crate::plan::UnifiedPlan;
 use std::{io::Read, ops::Deref};
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{image_io::ImageDecoder, memory::MemoryBudget, CancellationToken};
 
 /// Immutable reconstructed query or mutation command with admitted original fields and iterative full/partial retirement.
 #[derive(Debug)]
@@ -72,6 +74,39 @@ impl Drop for CapturedPlan {
 }
 
 impl UnifiedPlan {
+    /// Resume the original bound query or mutation without recompiling SQL or rebinding any captured reference.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<CapturedPlan, SQLError>, SQLError> {
+        Ok(ImageDecoder::new(
+            memory,
+            cancellation,
+            |mut reader| async move {
+                let mut retained_children = 0;
+                let mut input = Fields {
+                    binary: reader.input(),
+                    retained_children: &mut retained_children,
+                };
+                if input
+                    .header(super::super::super::expressions::plans::UNIFIED_MAGIC)
+                    .await?
+                    != 1
+                {
+                    return Err(invalid("bound SQL plan root count"));
+                }
+                let kind = match input.binary.array::<1>().await?[0] {
+                    0 => Kind::Query,
+                    1 => Kind::Command,
+                    _ => return Err(invalid("bound SQL plan root kind")),
+                };
+                let owner = input.native_plan(kind).await?;
+                input.binary.end().await?;
+                CapturedPlan::new(owner)
+            },
+        )?)
+    }
+
     /// Reconstruct a stored bound SQL body member without lowering, resolving or executing it. Query/window addresses and every mutation's private arena retain the existing native validation.
     pub fn read_image(
         reader: &mut dyn Read,

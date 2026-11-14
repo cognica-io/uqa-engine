@@ -317,13 +317,14 @@ impl Engine {
         )
         .map_err(|error| StorageBackendError::backend("CREATE TABLE array type", error))?;
         let table = TableState {
+            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
             security: TableMetadataCell::new(BoundTableSecurity::owner(owner.identity())),
             storage_generation: CatalogCell::new(crate::new_table_storage_generation()?),
-            document_store: self.storage.memory_cell(docs, persistence)?,
-            inverted_index: self.storage.memory_cell(inv, persistence)?,
-            vector_indexes: self.storage.memory_vector_indexes(persistence)?,
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs.into()),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv.into()),
+            vector_indexes: self.storage.memory_vector_indexes(persistence),
             fts_fields: crate::state::TableMetadataCell::new(fts_fields),
             columns: crate::state::TableDefinitionCell::new(&Vec::new())?,
             columns_declared: CatalogCell::new(false),
@@ -340,7 +341,7 @@ impl Engine {
             hierarchy: crate::state::TableDefinitionCell::new(
                 &uqa_sql::ast::TableHierarchy::default(),
             )?,
-            value_indexes: self.storage.memory_value_indexes(persistence)?,
+            value_indexes: self.storage.memory_value_indexes(persistence),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),
             persistence,
@@ -349,7 +350,7 @@ impl Engine {
             row_type_array_name: crate::state::TableMetadataCell::new(Some(row_type_array_name)),
             dropped_attributes: crate::state::TableMetadataCell::new(Vec::new()),
         };
-        let table_arc = self.storage.table_state(table)?;
+        let table_arc = self.storage.table_state(table, None)?;
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {
             self.try_save_table_schema(name, &table_arc)?;
         }
@@ -533,7 +534,7 @@ impl Engine {
                 let mut indexes = vectors.live_mut()?;
                 indexes.remove(&field)?;
                 if let Some(old) = old {
-                    indexes.insert(field, old)?;
+                    indexes.insert_handle(field, old)?;
                 }
                 return Err(err);
             }

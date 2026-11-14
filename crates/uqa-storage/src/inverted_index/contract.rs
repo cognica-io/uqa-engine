@@ -31,6 +31,17 @@ pub enum AnalyzerPhase {
 }
 
 impl AnalyzerPhase {
+    /// Canonicalize the case-insensitive assignment vocabulary, including the query alias, without trimming stored input.
+    pub fn normalize(value: &str) -> Result<(String, Self), String> {
+        let phase = Self::parse(&value.to_ascii_lowercase())?;
+        let name = match phase {
+            Self::Index => "index",
+            Self::Search => "search",
+            Self::Both => "both",
+        };
+        Ok((name.to_owned(), phase))
+    }
+
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "index" => Ok(AnalyzerPhase::Index),
@@ -814,3 +825,6 @@ pub trait InvertedIndex: Send + Sync {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests;

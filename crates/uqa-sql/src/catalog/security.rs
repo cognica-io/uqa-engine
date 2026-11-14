@@ -13,6 +13,8 @@ pub mod authority;
 pub mod capture;
 pub mod columns;
 pub mod dependencies;
+mod grant_paths;
+pub mod projected_input;
 mod role_bindings;
 pub mod schema;
 pub mod schema_binding;

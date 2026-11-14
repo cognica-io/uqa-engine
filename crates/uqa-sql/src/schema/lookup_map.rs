@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Ordinary mutation and admitted immutable lookup share column-key hashing and equality.
+//! Ordinary hashing and retained sorted lookup preserve the same column identities and immutable ownership.
 
 use std::{
     borrow::Borrow,
@@ -13,10 +13,26 @@ use std::{
     hash::Hash,
     sync::Arc,
 };
-use uqa_core::memory::{BudgetedHashIndex, BudgetedHashIndexIter, Produced, ProductionControl};
+use uqa_core::memory::{
+    BudgetedHashIndex, BudgetedHashIndexIter, OwnedMap, Produced, ProductionControl,
+};
 
 type Ordinary<K, V> = HashMap<K, V, ahash::RandomState>;
-type Admitted<K, V> = Arc<Produced<BudgetedHashIndex<K, V, ahash::RandomState>>>;
+type Admitted<K, V> = Arc<Produced<RetainedIndex<K, V>>>;
+
+pub(crate) enum RetainedIndex<K, V> {
+    Hash(BudgetedHashIndex<K, V, ahash::RandomState>),
+    Sorted(Vec<(Produced<K>, Produced<V>)>),
+}
+
+impl<K, V> RetainedIndex<K, V> {
+    fn iter(&self) -> SchemaMapIter<'_, K, V> {
+        match self {
+            Self::Hash(map) => SchemaMapIter::Admitted(map.iter()),
+            Self::Sorted(map) => SchemaMapIter::Sorted(map.iter()),
+        }
+    }
+}
 
 pub(crate) enum SchemaMap<K, V> {
     Ordinary(Ordinary<K, V>),
@@ -36,14 +52,14 @@ impl<K, V> SchemaMap<K, V> {
     ) -> Result<Self, crate::SQLError> {
         Ok(Self::Admitted(
             control
-                .finish(index, control.empty_reservation())?
+                .finish(RetainedIndex::Hash(index), control.empty_reservation())?
                 .into_shared(control)?,
         ))
     }
     pub(crate) fn len(&self) -> usize {
         match self {
             Self::Ordinary(map) => map.len(),
-            Self::Admitted(map) => map.len(),
+            Self::Admitted(map) => map.iter().len(),
         }
     }
     pub(crate) fn is_empty(&self) -> bool {
@@ -52,7 +68,7 @@ impl<K, V> SchemaMap<K, V> {
     pub(crate) fn iter(&self) -> SchemaMapIter<'_, K, V> {
         match self {
             Self::Ordinary(map) => SchemaMapIter::Ordinary(map.iter()),
-            Self::Admitted(map) => SchemaMapIter::Admitted(map.iter()),
+            Self::Admitted(map) => map.iter(),
         }
     }
     pub(crate) fn keys(&self) -> impl ExactSizeIterator<Item = &K> {
@@ -61,9 +77,35 @@ impl<K, V> SchemaMap<K, V> {
     pub(crate) fn values(&self) -> impl ExactSizeIterator<Item = &V> {
         self.iter().map(|(_, value)| value)
     }
+
+    /// Freeze completed ordered keys into an immutable lookup index one entry at a time. Iteration then borrows a slice without allocating a traversal stack.
+    pub(in crate::schema) async fn from_ordered(
+        index: OwnedMap<K, Produced<V>>,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Self, crate::SQLError> {
+        control.check()?;
+        let mut entries = uqa_core::memory::ProductionVec::new(*control);
+        entries.reserve(index.len())?;
+        let mut index = index.into_iter();
+        loop {
+            input.checkpoint().await?;
+            control.check()?;
+            let Some(entry) = index.next_retained() else {
+                break;
+            };
+            entries.push_produced(control.finish(entry, control.empty_reservation())?)?;
+        }
+        let (entries, memory) = entries.finish()?.into_parts();
+        Ok(Self::Admitted(
+            control
+                .finish(RetainedIndex::Sorted(entries), memory)?
+                .into_shared(control)?,
+        ))
+    }
 }
 
-impl<K: Eq + Hash, V> SchemaMap<K, V> {
+impl<K: Ord + Hash, V> SchemaMap<K, V> {
     pub(super) fn from_produced(
         entries: impl IntoIterator<Item = Result<(Produced<K>, Produced<V>), crate::SQLError>>,
         control: &ProductionControl<'_>,
@@ -101,16 +143,22 @@ impl<K: Eq + Hash, V> SchemaMap<K, V> {
         }
     }
 
-    pub(crate) fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<&V>
+    pub(crate) fn get<Q: Ord + Hash + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
     {
         match self {
             Self::Ordinary(map) => map.get(key),
-            Self::Admitted(map) => map.get(key),
+            Self::Admitted(map) => match &***map {
+                RetainedIndex::Hash(map) => map.get(key),
+                RetainedIndex::Sorted(map) => map
+                    .binary_search_by(|(stored, _)| <K as Borrow<Q>>::borrow(&**stored).cmp(key))
+                    .ok()
+                    .map(|position| &*map[position].1),
+            },
         }
     }
-    pub(crate) fn contains_key<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> bool
+    pub(crate) fn contains_key<Q: Ord + Hash + ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
     {
@@ -118,7 +166,7 @@ impl<K: Eq + Hash, V> SchemaMap<K, V> {
     }
 }
 
-impl<K: Eq + Hash + Clone, V: Clone> SchemaMap<K, V> {
+impl<K: Ord + Hash + Clone, V: Clone> SchemaMap<K, V> {
     /// The ordinary API produces its own mutable generation. Controlled producers publish completed indexes through `from_admitted` and never allocate through these infallible mutation methods.
     fn ordinary_mutation(&mut self) -> &mut Ordinary<K, V> {
         if let Self::Admitted(index) = self {
@@ -137,7 +185,7 @@ impl<K: Eq + Hash + Clone, V: Clone> SchemaMap<K, V> {
     pub(crate) fn insert(&mut self, key: K, value: V) -> Option<V> {
         self.ordinary_mutation().insert(key, value)
     }
-    pub(crate) fn remove<Q: Eq + Hash + ?Sized>(&mut self, key: &Q) -> Option<V>
+    pub(crate) fn remove<Q: Ord + Hash + ?Sized>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
     {
@@ -169,7 +217,7 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for SchemaMap<K, V> {
         f.debug_map().entries(self.iter()).finish()
     }
 }
-impl<K: Eq + Hash, V: PartialEq> PartialEq for SchemaMap<K, V> {
+impl<K: Ord + Hash, V: PartialEq> PartialEq for SchemaMap<K, V> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len()
             && self
@@ -177,18 +225,18 @@ impl<K: Eq + Hash, V: PartialEq> PartialEq for SchemaMap<K, V> {
                 .all(|(key, value)| other.get(key) == Some(value))
     }
 }
-impl<K: Eq + Hash, V: Eq> Eq for SchemaMap<K, V> {}
+impl<K: Ord + Hash, V: Eq> Eq for SchemaMap<K, V> {}
 impl<K: Eq + Hash, V> FromIterator<(K, V)> for SchemaMap<K, V> {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(entries: T) -> Self {
         Self::Ordinary(entries.into_iter().collect())
     }
 }
-impl<K: Eq + Hash + Clone, V: Clone> Extend<(K, V)> for SchemaMap<K, V> {
+impl<K: Ord + Hash + Clone, V: Clone> Extend<(K, V)> for SchemaMap<K, V> {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, entries: T) {
         self.ordinary_mutation().extend(entries);
     }
 }
-impl<K: Eq + Hash + Borrow<Q>, V, Q: Eq + Hash + ?Sized> std::ops::Index<&Q> for SchemaMap<K, V> {
+impl<K: Ord + Hash + Borrow<Q>, V, Q: Ord + Hash + ?Sized> std::ops::Index<&Q> for SchemaMap<K, V> {
     type Output = V;
     fn index(&self, key: &Q) -> &Self::Output {
         self.get(key).expect("missing schema map key")
@@ -219,6 +267,7 @@ impl<'a, K, V> IntoIterator for &'a SchemaMap<K, V> {
 pub(crate) enum SchemaMapIter<'a, K, V> {
     Ordinary(hash_map::Iter<'a, K, V>),
     Admitted(BudgetedHashIndexIter<'a, K, V>),
+    Sorted(std::slice::Iter<'a, (Produced<K>, Produced<V>)>),
 }
 impl<'a, K, V> Iterator for SchemaMapIter<'a, K, V> {
     type Item = (&'a K, &'a V);
@@ -226,12 +275,14 @@ impl<'a, K, V> Iterator for SchemaMapIter<'a, K, V> {
         match self {
             Self::Ordinary(iter) => iter.next(),
             Self::Admitted(iter) => iter.next(),
+            Self::Sorted(iter) => iter.next().map(|(key, value)| (&**key, &**value)),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         match self {
             Self::Ordinary(iter) => iter.size_hint(),
             Self::Admitted(iter) => iter.size_hint(),
+            Self::Sorted(iter) => iter.size_hint(),
         }
     }
 }

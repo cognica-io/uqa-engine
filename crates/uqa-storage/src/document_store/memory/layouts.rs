@@ -15,6 +15,7 @@ use std::{
 
 use super::{Document, Value};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
+use uqa_core::image_io::AsyncImageInput;
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation, OwnedMap};
 
 #[derive(Debug, Clone)]
@@ -121,7 +122,9 @@ impl DocumentLayouts {
         let mut hasher = self.hasher.build_hasher();
         document.len().hash(&mut hasher);
         for name in document.keys() {
-            name.hash(&mut hasher);
+            for bytes in field_hash_parts(name) {
+                hasher.write(bytes);
+            }
         }
         hasher.finish()
     }
@@ -134,25 +137,57 @@ impl DocumentLayouts {
     }
 
     /// The unpublished builder owns this layout set; any failure consumes that builder and its partial rows.
-    pub(super) fn store_image_fields(
+    pub(super) async fn store_image_fields(
         &mut self,
         names: Budgeted<Vec<String>>,
         control: &StorageReadControl,
+        input: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<usize> {
         control.check()?;
         let mut hasher = self.hasher.build_hasher();
         names.len().hash(&mut hasher);
         for name in names.iter() {
-            name.hash(&mut hasher);
+            input.checkpoint().await?;
+            control.check()?;
+            for bytes in field_hash_parts(name) {
+                input.checkpoint().await?;
+                control.check()?;
+                hasher.write(bytes);
+            }
         }
         let hash = hasher.finish();
-        if let Some(id) = self.identities.get(&hash).and_then(|candidates| {
-            candidates
-                .iter()
-                .copied()
-                .find(|id| &*self.fields[*id] == names.as_slice())
-        }) {
-            return Ok(id);
+        if let Some(candidates) = self.identities.get(&hash) {
+            for &id in candidates.iter() {
+                input.checkpoint().await?;
+                control.check()?;
+                let fields = &self.fields[id];
+                if fields.len() != names.len() {
+                    continue;
+                }
+                let mut equal = true;
+                for (a, b) in fields.iter().zip(names.iter()) {
+                    input.checkpoint().await?;
+                    control.check()?;
+                    if a.len() != b.len() {
+                        equal = false;
+                        break;
+                    }
+                    for (a, b) in a.as_bytes().chunks(4096).zip(b.as_bytes().chunks(4096)) {
+                        input.checkpoint().await?;
+                        control.check()?;
+                        if a != b {
+                            equal = false;
+                            break;
+                        }
+                    }
+                    if !equal {
+                        break;
+                    }
+                }
+                if equal {
+                    return Ok(id);
+                }
+            }
         }
         let names = names.into_shared()?;
         let name_bytes = names.reserved_bytes() as u128;
@@ -198,6 +233,13 @@ impl DocumentLayouts {
         control.check()?;
         Ok(id)
     }
+}
+
+fn field_hash_parts(name: &str) -> impl Iterator<Item = &[u8]> {
+    // Both layout constructors hash identical fragments. The separator cannot occur in UTF-8.
+    name.as_bytes()
+        .chunks(4096)
+        .chain(std::iter::once(&b"\xff"[..]))
 }
 
 impl Clone for DocumentLayouts {

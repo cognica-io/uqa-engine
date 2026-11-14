@@ -21,12 +21,12 @@ impl Engine {
             return Ok(());
         };
         let analyzer = table.analyzer.read().configuration().clone();
-        *table.document_store.write() = backend.document_store(table_name);
+        *table.document_store.write() = backend.document_store(table_name).into();
         table
             .doc_count_dirty
             .store(true, std::sync::atomic::Ordering::Release);
         Self::value_indexes_clear(table)?;
-        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
+        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer).into();
 
         let vector_fields = table
             .vector_indexes

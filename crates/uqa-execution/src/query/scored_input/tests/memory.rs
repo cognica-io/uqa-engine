@@ -75,13 +75,13 @@ impl DocumentStore for Documents {
     }
 }
 
-struct Table(RwLock<Box<dyn DocumentStore>>);
+struct Table(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
 
 impl TableRead for Table {
     fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
         Vec::new()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.0.read()
     }
     fn maps_integer_keys(&self) -> bool {
@@ -106,11 +106,13 @@ fn ordered_document_batches_bound_wide_projection_and_resume_exactly() {
                 .unwrap();
         }
         let visited = Arc::new(AtomicUsize::new(0));
-        let table = Arc::new(Table(RwLock::new(Box::new(Documents {
-            rows: documents,
-            shared,
-            visited: Arc::clone(&visited),
-        }))));
+        let table = Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(Documents {
+                rows: documents,
+                shared,
+                visited: Arc::clone(&visited),
+            }),
+        ))));
         let allocation = allocation_counter::measure(|| {
             let mut source = source(table, local);
             let mut expected = 1;
@@ -210,11 +212,13 @@ fn projection_classification(shared: bool) {
             .unwrap();
     }
     let visited = Arc::new(AtomicUsize::new(0));
-    let table = Arc::new(Table(RwLock::new(Box::new(Documents {
-        rows: documents,
-        shared,
-        visited: Arc::clone(&visited),
-    }))));
+    let table = Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+        Box::new(Documents {
+            rows: documents,
+            shared,
+            visited: Arc::clone(&visited),
+        }),
+    ))));
     let before = crate::query::scored_input::projection::inspections();
     let mut source =
         ScoredDocumentSource::new("wide", table, ScoredInput::All, columns, None, None)
@@ -279,11 +283,13 @@ fn ordered_typed_scan_batches_do_not_reencode_the_complete_schema() {
             )
             .unwrap();
         }
-        let table = Arc::new(Table(RwLock::new(Box::new(Documents {
-            rows,
-            shared,
-            visited: Arc::new(AtomicUsize::new(0)),
-        }))));
+        let table = Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(Documents {
+                rows,
+                shared,
+                visited: Arc::new(AtomicUsize::new(0)),
+            }),
+        ))));
         let mut scan: Box<dyn RowSource> = if local {
             Box::new(
                 LocalTableRowSource::new(LocalTableScanConfig {
@@ -367,11 +373,13 @@ fn mixed_width_shared_pages_do_not_prefetch_the_unconsumed_tail_repeatedly() {
             .unwrap();
     }
     let visited = Arc::new(AtomicUsize::new(0));
-    let table = Arc::new(Table(RwLock::new(Box::new(Documents {
-        rows: documents,
-        shared: true,
-        visited: Arc::clone(&visited),
-    }))));
+    let table = Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+        Box::new(Documents {
+            rows: documents,
+            shared: true,
+            visited: Arc::clone(&visited),
+        }),
+    ))));
     let mut source = source(table, false);
     let mut expected = 1;
     loop {

@@ -17,6 +17,7 @@ use uqa_core::{
 };
 
 mod image;
+mod input;
 pub(crate) use image::DefinitionEntry;
 pub(crate) use image::DefinitionImage;
 mod serialization;
@@ -185,7 +186,7 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
     }
 
     /// Select the destination allowance for future edits. Original entries and all captured predecessors keep their own reservations.
-    pub(crate) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+    pub fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
         self.durable = self.durable.into_mutation_budget(memory);
         self.temporary = self.temporary.into_mutation_budget(memory);
         self
@@ -215,6 +216,30 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
             .get(name)
             .or_else(|| self.temporary.get(name))
             .map(|value| &**value)
+    }
+
+    pub async fn get_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
+        &self,
+        name: &Q,
+        input: &mut C,
+    ) -> Result<Option<&T>, C::Error> {
+        if let Some(value) = self.durable.get_from(name, input).await? {
+            return Ok(Some(&**value));
+        }
+        Ok(self
+            .temporary
+            .get_from(name, input)
+            .await?
+            .map(|value| &**value))
+    }
+
+    /// Select native membership through the caller's retained comparisons without copying a query key or changing either definition generation.
+    pub async fn contains_key_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
+        &self,
+        name: &Q,
+        input: &mut C,
+    ) -> Result<bool, C::Error> {
+        Ok(self.get_from(name, input).await?.is_some())
     }
 
     pub fn contains_key<Q: Ord + ?Sized>(&self, name: &Q) -> bool
@@ -296,7 +321,7 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
 }
 
 impl<K: DefinitionKey, T: StoredDefinition<K::View>> DefinitionRegistry<K, T> {
-    /// Move decoded payloads into their native tree without copying or releasing their admission. The image owner has already validated keys and definitions.
+    /// Move decoded payloads into their native tree without copying or releasing their admission. The calling image or stored-catalog owner supplies the required semantic validation boundary.
     pub(crate) fn insert_image_entry(
         &mut self,
         name: Budgeted<K>,

@@ -34,6 +34,19 @@ fn compare(text: &str) {
 }
 
 #[test]
+fn catalog_table_row_input_borrows_overwritten_arbitrary_precision_numbers() {
+    let text = envelope(&format!(
+        r#""role_owner":{},"role_owner":"owner""#,
+        "9".repeat(2 << 20)
+    ));
+    compare(&text);
+    let control = StorageReadControl::with_limit(8192);
+    let allocation = allocation_counter::measure(|| drop(row(text.as_bytes(), &control).unwrap()));
+    assert_eq!(control.memory().used(), 0);
+    assert!(allocation.bytes_max < 8192, "{allocation:?}");
+}
+
+#[test]
 fn catalog_table_row_input_preserves_flattened_security_versions_and_original_fields() {
     let owner = serde_json::to_string(&RoleIdentity::BOOTSTRAP).unwrap();
     let security = serde_json::to_value(RelationSecurityRow::bootstrap()).unwrap();
@@ -117,6 +130,8 @@ fn catalog_table_row_input_preserves_known_duplicates_and_projected_authority_co
         r#""role_owner":"owner","column_acls":{"x":[{"role":"PUBLIC"}]},"acl_revisions":{}"#.to_owned(),
         r#""role_owner":"owner","unrecognized":true"#.to_owned(),
         r#""role_owner":"\ud800","role_owner":"owner""#.to_owned(),
+        r#""role_owner":1e9999,"role_owner":"owner""#.to_owned(),
+        r#""role_owner":"owner","column_acls":{"x":1e9999,"x":[]}"#.to_owned(),
     ] { compare(&envelope(&fields)); }
     let text = envelope(r#""role_owner":"owner""#).replace(
         r#""name":"items""#,

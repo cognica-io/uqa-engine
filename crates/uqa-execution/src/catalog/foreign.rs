@@ -5,7 +5,7 @@
 //
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_fdw::ColumnType as ForeignColumnType;
 use uqa_sql::ast::{ColumnDef, ColumnType, TableCheck};
@@ -14,8 +14,10 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 const FOREIGN_TABLE_SCHEMA_VERSION: u8 = 3;
 
 pub mod capture;
+mod input;
 pub mod reference;
 pub mod registry;
+mod validation;
 pub mod wrappers;
 pub use reference::ForeignServerReference;
 pub use registry::{ForeignCatalog, ForeignTables};
@@ -91,44 +93,12 @@ impl StoredForeignTable {
         let schema = serde_json::from_str::<ForeignTableSchemaFormat>(schema_json)?;
         let (schema, legacy) = match schema {
             ForeignTableSchemaFormat::Current(schema) => {
-                if !matches!(schema.version, 1 | 2 | FOREIGN_TABLE_SCHEMA_VERSION) {
-                    return Err(StorageBackendError::Other(format!(
-                        "foreign table `{name}` has unsupported schema version {}",
-                        schema.version
-                    )));
-                }
-                reference::validate_schema_reference(
-                    &name,
-                    schema.version,
-                    schema.server_reference,
-                )?;
-                if schema.catalog_oids.is_some_and(|oids| {
-                    !oids.is_valid_for(
-                        uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
-                        &schema.object_id,
-                    )
-                }) {
-                    return Err(StorageBackendError::Other(format!(
-                        "foreign table `{name}` records invalid catalog OIDs"
-                    )));
-                }
-                let legacy = schema.version != FOREIGN_TABLE_SCHEMA_VERSION;
+                let legacy = schema.validate(&name)?;
                 (schema, legacy)
             }
-            ForeignTableSchemaFormat::Legacy(columns) => (
-                PersistedForeignTableSchema {
-                    version: 1,
-                    object_id: [0; 16],
-                    catalog_oids: None,
-                    row_type_array_name: None,
-                    server_reference: None,
-                    option_order: None,
-                    columns,
-                    dropped_attributes: Vec::new(),
-                    checks: Vec::new(),
-                },
-                true,
-            ),
+            ForeignTableSchemaFormat::Legacy(columns) => {
+                (PersistedForeignTableSchema::legacy(columns), true)
+            }
         };
         let option_order = match schema.option_order {
             Some(order) => order,
@@ -139,15 +109,13 @@ impl StoredForeignTable {
                 )))
             }
         };
-        let names: BTreeSet<_> = option_order.iter().collect();
-        if names.len() != option_order.len()
-            || names.len() != options.len()
-            || names.iter().any(|name| !options.contains_key(*name))
-        {
-            return Err(StorageBackendError::Other(format!(
-                "foreign table `{name}` option order disagrees with stored options"
-            )));
-        }
+        validation::option_order(
+            &name,
+            &option_order,
+            options.len(),
+            |name| options.contains_key(name),
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
         Ok((
             Self {
                 name,

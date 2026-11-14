@@ -11,6 +11,7 @@ use uqa_core::Value;
 use super::{FunctionBinding, SelectStmt};
 
 mod input;
+pub(crate) use input::validate_scalar_fields;
 mod ownership;
 
 /// Query-local identity for an executor-only row source. Parser-produced SQL never contains this identity, so internal row carriers cannot collide with user relation aliases.

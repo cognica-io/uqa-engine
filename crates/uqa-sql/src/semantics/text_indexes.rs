@@ -10,6 +10,9 @@ use super::{multi_field_match_shape, MultiFieldMatchShape};
 use crate::{plan::SourcePlan, SQLError, ScalarExpr};
 use uqa_core::Value;
 
+mod analyzers;
+pub use analyzers::{validate_analyzer_column, validate_analyzer_column_from, AnalyzerColumnError};
+
 pub trait TextMatchCatalog {
     fn has_table(&self, table: &str) -> Result<bool, String>;
     fn has_column(&self, table: &str, column: &str) -> Result<bool, String>;

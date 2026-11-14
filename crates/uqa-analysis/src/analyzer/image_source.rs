@@ -67,6 +67,27 @@ impl CompiledAnalyzer {
 }
 
 impl CompiledAnalyzer {
+    /// Prepare encoded ownership for an existing immutable revision through retained work. No cache lock crosses a suspension; concurrent readers share the first completed publication, and incomplete preparation is never visible.
+    pub async fn image_source_with_input(
+        &self,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<AnalyzerImageSource, ValueRetentionError> {
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        control.check()?;
+        if let Some(source) = self.image_source.0.lock().upgrade() {
+            return Ok(AnalyzerImageSource(source));
+        }
+        let source =
+            preparation::prepare(self, &control, &mut preparation::Retained(input)).await?;
+        control.check()?;
+        let mut cached = self.image_source.0.lock();
+        if let Some(current) = cached.upgrade() {
+            return Ok(AnalyzerImageSource(current));
+        }
+        *cached = Arc::downgrade(&source);
+        Ok(AnalyzerImageSource(source))
+    }
+
     /// Prepare independent encoded catalog ownership before sharing a freshly reconstructed revision. Consuming the private revision keeps its caches inaccessible throughout suspension; the returned image owns its copied descriptor/artifacts independently of imported allocations and executable models.
     pub async fn into_image_source_with_input(
         mut self,

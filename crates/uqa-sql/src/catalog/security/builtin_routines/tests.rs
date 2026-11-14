@@ -9,6 +9,8 @@ use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::RoleDefinitions;
 
+mod input;
+
 #[test]
 fn builtin_acl_validation_preserves_role_identity_across_rename() {
     let mut reader = RoleDefinition::bootstrap();

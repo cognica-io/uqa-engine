@@ -9,7 +9,8 @@
 use std::sync::Arc;
 
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation, OwnedMap},
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::{Budgeted, BudgetedVec, MemoryError, MemoryReservation, OwnedMap, ProductionControl},
     DocId, Value,
 };
 
@@ -39,16 +40,54 @@ impl MemoryDocumentStoreBuilder {
 
     /// Adopt one complete, uniquely identified tuple under this builder's allowance. Values and field names move into their native shared owners; no SQL or analyzer is executed.
     pub fn add_document(
+        self,
+        id: DocId,
+        document: Budgeted<StoredDocument>,
+    ) -> StorageBackendResult<Self> {
+        let control = self.control.clone();
+        decode_image(
+            &mut std::io::empty(),
+            control.memory(),
+            control.cancellation(),
+            async |mut input| self.add_document_from(id, document, &mut input).await,
+        )
+    }
+
+    /// Read and adopt one exact tuple image. Decoding, payload traversal and native layout registration retain their progress through the same admitted continuation; failures consume the complete unpublished corpus.
+    pub fn document_input(
+        self,
+        id: DocId,
+    ) -> StorageBackendResult<ImageDecoder<Self, StorageBackendError>> {
+        let control = self.control.clone();
+        Ok(ImageDecoder::new(
+            control.memory(),
+            control.cancellation(),
+            |mut reader| async move {
+                let mut input = reader.input();
+                let document = super::super::image::read_document_image_from(&mut input).await?;
+                input.end().await?;
+                self.add_document_from(id, document, &mut input).await
+            },
+        )?)
+    }
+
+    /// Adopt an already decoded tuple while borrowing its owner's work channel. No source bytes are read during this conversion.
+    pub async fn add_document_from(
         mut self,
         id: DocId,
         document: Budgeted<StoredDocument>,
+        input: &mut AsyncImageInput<'_>,
     ) -> StorageBackendResult<Self> {
         self.control.check()?;
         if self.rows.contains_key(&id) {
             return Err(invalid("native document image repeats a document identity"));
         }
-        let (values, names, metadata, value_bytes) = convert(document, &self.control)?;
-        let layout_id = self.layouts.store_image_fields(names, &self.control)?;
+        let (values, names, metadata, value_bytes) =
+            convert(document, &self.control, input).await?;
+        let layout_id = self
+            .layouts
+            .store_image_fields(names, &self.control, input)
+            .await?;
         let values = values.into_shared()?;
         let payload_bytes = value_bytes as u128
             + values.capacity() as u128 * size_of::<Value>() as u128
@@ -105,9 +144,10 @@ type Converted = (
     usize,
 );
 
-fn convert(
+async fn convert(
     document: Budgeted<StoredDocument>,
     control: &StorageReadControl,
+    input: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<Converted> {
     if !document.budget().shares_allowance(control.memory()) {
         return Err(invalid(
@@ -117,17 +157,20 @@ fn convert(
     let mut names_bytes = 0_usize;
     let mut value_bytes = 0_usize;
     for (name, value) in document.fields() {
+        input.checkpoint().await?;
         control.check()?;
         names_bytes = names_bytes
             .checked_add(name.capacity())
             .ok_or(MemoryError::SizeOverflow)?;
-        value_bytes = value_bytes
-            .checked_add(
-                value
-                    .retained_payload_bytes(control.memory(), control.cancellation())
-                    .map_err(super::super::retained::retention_error)?,
-            )
-            .ok_or(MemoryError::SizeOverflow)?;
+        let production =
+            ProductionControl::new(control.memory(), control.cancellation(), input.cancellation);
+        for bytes in value.retained_payload_parts_with_control(production) {
+            input.checkpoint().await?;
+            control.check()?;
+            value_bytes = value_bytes
+                .checked_add(bytes.map_err(super::super::retained::retention_error)?)
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
     }
     let entries = document
         .fields()
@@ -156,6 +199,7 @@ fn convert(
     converted.names.reserve(count)?;
     let fields = std::mem::take(converted.source.fields_mut());
     for (name, value) in fields {
+        input.checkpoint().await?;
         control.check()?;
         converted.names.push(name)?;
         converted.values.push(value)?;

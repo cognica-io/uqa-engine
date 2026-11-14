@@ -54,7 +54,7 @@ impl Engine {
     }
 
     fn fixed_transaction_catalog_baseline(
-        tables: &BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        tables: &crate::state::TableRegistryMap,
     ) -> StorageBackendResult<crate::FixedTransactionCatalogBaseline> {
         let mut baseline = BTreeMap::new();
         for (relation, table) in tables {
@@ -85,9 +85,9 @@ impl Engine {
     fn merged_latest_fixed_snapshot_table_catalog(
         &self,
         latest: &Engine,
-        current: &BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        current: &crate::state::TableRegistryMap,
     ) -> StorageBackendResult<(
-        BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        crate::state::TableRegistryMap,
         crate::FixedTransactionCatalogBaseline,
     )> {
         let baseline = self
@@ -127,7 +127,7 @@ impl Engine {
         let mut merged = latest_tables
             .into_iter()
             .filter(|(_, table)| !suppressed_generations.contains(&table.storage_generation()))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<crate::state::TableRegistryMap>();
         for (relation, table) in local {
             let generation = table.storage_generation();
             merged.retain(|_, candidate| candidate.storage_generation() != generation);
@@ -635,7 +635,7 @@ impl Engine {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        let mut rebound = BTreeMap::new();
+        let mut rebound = crate::state::TableRegistryMap::new();
         let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(
             catalog.as_ref(),
         )?;

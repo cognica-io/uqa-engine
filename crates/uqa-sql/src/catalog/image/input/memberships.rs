@@ -6,7 +6,7 @@
 
 //! Membership decoding retains original bindings and verifies their explicit ordered keys.
 
-use super::{invalid, Input};
+use super::{invalid, Fields};
 use crate::{
     catalog::roles::{RoleMembership, RoleMembershipKey, RoleMemberships},
     SQLError,
@@ -22,16 +22,35 @@ pub(in super::super) fn memberships(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<RoleMemberships, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::MEMBERSHIPS)?;
-    let mut result = RoleMemberships::with_budget(memory);
-    let mut oids = BudgetedMap::new(memory);
-    for _ in 0..count {
-        cancellation.check()?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl RoleMemberships {
+    /// Retain native fields and claims across independent entry, byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(memory, mutations, cancellation)
+    }
+}
+
+impl super::continuation::CatalogEntries for RoleMemberships {
+    type Scratch = BudgetedMap<i64, ()>;
+    const MAGIC: [u8; 8] = super::super::MEMBERSHIPS;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), BudgetedMap::new(memory))
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        identities: &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
         let key = RoleMembershipKey {
-            role: input.identity()?,
-            member: input.identity()?,
-            grantor: input.identity()?,
+            role: input.identity().await?,
+            member: input.identity().await?,
+            grantor: input.identity().await?,
         };
         if result
             .last_durable_key()
@@ -39,15 +58,15 @@ pub(in super::super) fn memberships(
         {
             return Err(invalid("membership order"));
         }
-        let oid = input.oid()?;
-        let role = input.binding()?;
-        let member = input.binding()?;
-        let grantor = input.binding()?;
-        let [bits] = input.binary.array()?;
+        let oid = input.oid().await?;
+        let role = input.binding().await?;
+        let member = input.binding().await?;
+        let grantor = input.binding().await?;
+        let [bits] = input.binary.array().await?;
         if bits & !7 != 0 {
             return Err(invalid("membership option bits"));
         }
-        if oids.insert(oid, ())?.is_some() {
+        if identities.insert(oid, ())?.is_some() {
             return Err(invalid("duplicate membership OID"));
         }
         let (role, mut reservation) = role.into_parts();
@@ -70,8 +89,14 @@ pub(in super::super) fn memberships(
         if membership.key() != key {
             return Err(invalid("membership key"));
         }
-        result.insert_image_entry(Budgeted::new(key, memory.empty_reservation()), membership)?;
+        result.insert_image_entry(
+            Budgeted::new(key, input.binary.memory.empty_reservation()),
+            membership,
+        )?;
+
+        Ok(())
     }
-    input.binary.end()?;
-    Ok(result)
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
 }

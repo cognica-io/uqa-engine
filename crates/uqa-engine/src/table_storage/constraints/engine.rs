@@ -331,10 +331,7 @@ impl Engine {
         &self,
         state: &TableState,
     ) -> StorageBackendResult<DocumentIdAllocator<'_>> {
-        let durable = (state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
-            .then(|| self.storage.backend.as_ref()?.identifier_allocator())
-            .flatten();
-        DocumentIdAllocator::new(durable, state.object_id(), state.storage_generation())
+        state.identifier_allocator(self.storage.backend.as_deref())
     }
 
     /// Durable providers reserve identities in their storage namespace; serialized providers retain candidate locks through publication.
@@ -494,5 +491,17 @@ impl Engine {
         let mut current = state.next_id.write();
         *current = restored_document_id_watermark(maximum, persisted.or(Some(*current)));
         Ok(())
+    }
+}
+
+impl TableState {
+    pub(crate) fn identifier_allocator<'a>(
+        &self,
+        backend: Option<&'a dyn uqa_storage::PersistentStorageBackend>,
+    ) -> StorageBackendResult<DocumentIdAllocator<'a>> {
+        let durable = (self.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            .then(|| backend?.identifier_allocator())
+            .flatten();
+        DocumentIdAllocator::new(durable, self.object_id(), self.storage_generation())
     }
 }

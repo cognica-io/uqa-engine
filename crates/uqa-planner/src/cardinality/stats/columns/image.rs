@@ -9,7 +9,7 @@
 use super::{ColumnStatistics, ColumnStats, SQLError};
 use std::{io::Write, slice::Iter};
 use uqa_core::{
-    image_io::ImageOutput,
+    image_io::{ImageDecoder, ImageOutput},
     memory::{MemoryBudget, MemoryReservation},
     value_image::{ValueImageError, ValueImageReader},
     CancellationToken, Value,
@@ -136,6 +136,18 @@ impl ColumnStatistics {
         cancellation: &CancellationToken,
     ) -> Result<Self, SQLError> {
         input::read(reader, memory, cancellation)
+    }
+
+    /// Retain native distributions across byte/poll windows using the same strict image grammar as synchronous input.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+        Ok(ImageDecoder::new(
+            memory,
+            cancellation,
+            |mut reader| async move { input::read_from(reader.input()).await },
+        )?)
     }
 }
 

@@ -38,6 +38,11 @@ impl AnalyzerCatalog {
         }
     }
 
+    /// Allowance used for future membership mutations; retained predecessors keep their original owners.
+    pub fn budget(&self) -> &MemoryBudget {
+        self.revisions.budget()
+    }
+
     pub fn get(&self, name: &str) -> Option<&Arc<CompiledAnalyzer>> {
         self.revisions.get(name)
     }
@@ -178,6 +183,27 @@ impl AnalyzerCatalog {
             revisions: self.revisions.into_mutation_budget(memory),
             images: self.images.into_mutation_budget(memory),
         }
+    }
+
+    /// Publish an already restored persistent revision without re-resolving or re-encoding its native configuration. Both names and the encoded closure use the original work channel; only a complete pair replaces this unpublished catalog.
+    pub async fn insert_restored_from(
+        mut self,
+        name: Budgeted<String>,
+        compiled: Arc<CompiledAnalyzer>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let control = StorageReadControl::new(input.memory, input.cancellation);
+        self.validate_image_name(&name, &control)?;
+        let image_name = input.copy_text(&name).await?;
+        let image = compiled.image_source_with_input(input).await?;
+        self.insert_prepared(
+            name.into(),
+            image_name.into(),
+            compiled,
+            image,
+            input.cancellation,
+        )?;
+        Ok(self)
     }
 
     pub fn remove(&mut self, name: &str) -> StorageBackendResult<bool> {

@@ -12,6 +12,8 @@ pub(crate) enum DictionaryError {
     Input(#[from] uqa_core::image_io::ImageIoError),
     #[error("invalid provenance manifest: {0}")]
     Manifest(#[from] serde_json::Error),
+    #[error("invalid provenance manifest: {0}")]
+    ManifestDiagnostic(#[from] uqa_core::json::JsonDiagnostic),
     #[error("unsupported bundle version {0}")]
     Version(u32),
     #[error("dictionary checksum mismatch in section {0}")]

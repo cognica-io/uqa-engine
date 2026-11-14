@@ -7,19 +7,19 @@
 //! Language configuration views preserve the public field order and optional values.
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
-use super::{fields, optional_text, scalar, tagged, Form, View};
+use super::{fields, optional_text, scalar, tagged, Fields, Scalar, View};
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
-use crate::{AnalysisResult, TokenFilter};
+use crate::TokenFilter;
 
 #[cfg(feature = "nori")]
-pub(super) fn nori(value: &crate::nori::NoriTokenizerConfig) -> AnalysisResult<Form<'_>> {
-    Ok(tagged(
+pub(super) fn nori(value: &crate::nori::NoriTokenizerConfig) -> Fields<'_> {
+    tagged(
         "nori_tokenizer",
-        vec![
+        [
             ("dictionary", View::Text(&value.dictionary)),
             (
                 "decompound_mode",
-                View::Scalar(serde_json::to_value(value.decompound_mode)?),
+                View::Scalar(Scalar::DecompoundMode(value.decompound_mode)),
             ),
             (
                 "output_unknown_unigrams",
@@ -31,18 +31,16 @@ pub(super) fn nori(value: &crate::nori::NoriTokenizerConfig) -> AnalysisResult<F
                 optional_text(value.user_dictionary.as_deref()),
             ),
         ],
-    ))
+    )
 }
 
 #[cfg(feature = "kuromoji")]
-pub(super) fn kuromoji(
-    value: &crate::kuromoji::KuromojiTokenizerConfig,
-) -> AnalysisResult<Form<'_>> {
-    Ok(tagged(
+pub(super) fn kuromoji(value: &crate::kuromoji::KuromojiTokenizerConfig) -> Fields<'_> {
+    tagged(
         "kuromoji_tokenizer",
-        vec![
+        [
             ("dictionary", View::Text(&value.dictionary)),
-            ("mode", View::Scalar(serde_json::to_value(value.mode)?)),
+            ("mode", View::Scalar(Scalar::KuromojiMode(value.mode))),
             ("discard_punctuation", scalar(value.discard_punctuation)),
             (
                 "discard_compound_token",
@@ -58,42 +56,35 @@ pub(super) fn kuromoji(
                 optional_text(value.n_best_examples.as_deref()),
             ),
         ],
-    ))
+    )
 }
 
 #[cfg(feature = "kuromoji")]
 fn optional_strings(value: Option<&[String]>) -> View<'_> {
-    value.map_or(View::Scalar(serde_json::Value::Null), View::Strings)
+    value.map_or(View::Scalar(Scalar::Null), View::Strings)
 }
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
-#[cfg_attr(
-    not(feature = "kuromoji"),
-    expect(
-        clippy::unnecessary_wraps,
-        reason = "Kuromoji adds fallible public scalar serialization to the shared language view"
-    )
-)]
-pub(super) fn filter(value: &TokenFilter) -> AnalysisResult<Form<'_>> {
-    Ok(match value {
+pub(super) fn filter(value: &TokenFilter) -> Fields<'_> {
+    match value {
         #[cfg(feature = "nori")]
         TokenFilter::NoriPartOfSpeech(config) => tagged(
             "nori_part_of_speech",
-            vec![(
+            [(
                 "stop_tags",
                 config
                     .stop_tags
                     .as_deref()
-                    .map_or(View::Scalar(serde_json::Value::Null), View::POSTags),
+                    .map_or(View::Scalar(Scalar::Null), View::POSTags),
             )],
         ),
         #[cfg(feature = "nori")]
-        TokenFilter::NoriReadingForm(_) => tagged("nori_readingform", vec![]),
+        TokenFilter::NoriReadingForm(_) => tagged("nori_readingform", []),
         #[cfg(feature = "nori")]
-        TokenFilter::NoriNumber(_) => tagged("nori_number", vec![]),
+        TokenFilter::NoriNumber(_) => tagged("nori_number", []),
         TokenFilter::UnicodeSimpleLowercase(config) => tagged(
             "unicode_simple_lowercase",
-            vec![(
+            [(
                 "unicode_profile",
                 match &config.unicode_profile {
                     crate::UnicodeProfileSource::LegacyNori(value) => View::Text(value),
@@ -104,7 +95,7 @@ pub(super) fn filter(value: &TokenFilter) -> AnalysisResult<Form<'_>> {
         #[cfg(feature = "kuromoji")]
         TokenFilter::KuromojiPartOfSpeech(config) => tagged(
             "kuromoji_part_of_speech",
-            vec![
+            [
                 ("stop_tags", optional_strings(config.stop_tags.as_deref())),
                 ("dictionary", optional_text(config.dictionary.as_deref())),
             ],
@@ -112,7 +103,7 @@ pub(super) fn filter(value: &TokenFilter) -> AnalysisResult<Form<'_>> {
         #[cfg(feature = "kuromoji")]
         TokenFilter::KuromojiStop(config) => tagged(
             "kuromoji_stop",
-            vec![
+            [
                 ("words", optional_strings(config.words.as_deref())),
                 ("ignore_case", scalar(config.ignore_case)),
                 ("dictionary", optional_text(config.dictionary.as_deref())),
@@ -121,42 +112,42 @@ pub(super) fn filter(value: &TokenFilter) -> AnalysisResult<Form<'_>> {
         #[cfg(feature = "kuromoji")]
         TokenFilter::KuromojiCompletion(config) => tagged(
             "kuromoji_completion",
-            vec![
+            [
                 ("dictionary", View::Text(&config.dictionary)),
-                ("mode", View::Scalar(serde_json::to_value(config.mode)?)),
+                ("mode", View::Scalar(Scalar::CompletionMode(config.mode))),
             ],
         ),
         #[cfg(feature = "kuromoji")]
-        TokenFilter::KuromojiBaseForm(_) => tagged("kuromoji_baseform", vec![]),
+        TokenFilter::KuromojiBaseForm(_) => tagged("kuromoji_baseform", []),
         #[cfg(feature = "kuromoji")]
         TokenFilter::KuromojiStem(config) => tagged(
             "kuromoji_stemmer",
-            vec![("minimum_length", scalar(config.minimum_length))],
+            [("minimum_length", scalar(config.minimum_length))],
         ),
         #[cfg(feature = "kuromoji")]
-        TokenFilter::KuromojiHiraganaUppercase(_) => tagged("kuromoji_hiragana_uppercase", vec![]),
+        TokenFilter::KuromojiHiraganaUppercase(_) => tagged("kuromoji_hiragana_uppercase", []),
         #[cfg(feature = "kuromoji")]
-        TokenFilter::KuromojiKatakanaUppercase(_) => tagged("kuromoji_katakana_uppercase", vec![]),
+        TokenFilter::KuromojiKatakanaUppercase(_) => tagged("kuromoji_katakana_uppercase", []),
         #[cfg(feature = "kuromoji")]
         TokenFilter::KuromojiReadingForm(config) => tagged(
             "kuromoji_readingform",
-            vec![("use_romaji", scalar(config.use_romaji))],
+            [("use_romaji", scalar(config.use_romaji))],
         ),
         #[cfg(feature = "kuromoji")]
-        TokenFilter::KuromojiNumber(_) => tagged("kuromoji_number", vec![]),
+        TokenFilter::KuromojiNumber(_) => tagged("kuromoji_number", []),
         _ => unreachable!("common stages are selected before language configuration views"),
-    })
+    }
 }
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
-pub(super) fn profile(value: &crate::UnicodeProfile) -> Form<'_> {
+pub(super) fn profile(value: &crate::UnicodeProfile) -> Fields<'_> {
     let (provider, dictionary) = match value {
         #[cfg(feature = "nori")]
         crate::UnicodeProfile::Nori { dictionary } => ("nori", dictionary),
         #[cfg(feature = "kuromoji")]
         crate::UnicodeProfile::Kuromoji { dictionary } => ("kuromoji", dictionary),
     };
-    fields(vec![
+    fields([
         ("provider", View::Text(provider)),
         ("dictionary", View::Text(dictionary)),
     ])

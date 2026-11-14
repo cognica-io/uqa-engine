@@ -7,7 +7,7 @@
 use uqa_core::memory::BudgetedVec;
 
 use crate::read_control::StorageReadControl;
-use crate::vector_index::validate_vector_values_controlled;
+use crate::vector_index::validate_vector_values_from;
 use crate::{StorageBackendError, StorageBackendResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +74,16 @@ pub(super) fn norms(
     raw: &[f32],
     control: &StorageReadControl,
 ) -> StorageBackendResult<(f32, f64)> {
-    validate_vector_values_controlled(dimensions, raw, Some(control))?;
+    crate::image_io::work::inline(norms_from(dimensions, raw, control, &mut ()))
+}
+
+pub(super) async fn norms_from(
+    dimensions: u32,
+    raw: &[f32],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<(f32, f64)> {
+    validate_vector_values_from(dimensions, raw, Some(control), work).await?;
     if dimensions == 0 {
         return Err(StorageBackendError::Other(
             "DiskANN dimensions must be positive".into(),
@@ -83,7 +92,7 @@ pub(super) fn norms(
     let mut canonical_squared_norm = 0.0_f32;
     let mut squared_norm = 0.0_f64;
     for (offset, &value) in raw.iter().enumerate() {
-        checkpoint(offset, control)?;
+        checkpoint_from(offset, control, work).await?;
         canonical_squared_norm += value * value;
         let value = f64::from(value);
         squared_norm += value * value;
@@ -169,6 +178,17 @@ pub(super) fn checkpoint(offset: usize, control: &StorageReadControl) -> Storage
         control.check()?;
     }
     Ok(())
+}
+
+pub(super) async fn checkpoint_from(
+    offset: usize,
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
+    if offset.is_multiple_of(1024) {
+        work.checkpoint().await?;
+    }
+    checkpoint(offset, control)
 }
 
 #[cfg(test)]

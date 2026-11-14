@@ -16,6 +16,7 @@ use crate::{
 use uqa_core::memory::ProductionControl;
 
 mod resources;
+mod windows;
 
 fn fixture() -> RuleCatalog {
     let Statement::CreateRule(definition) = crate::compile("CREATE RULE watch AS ON UPDATE TO public.items WHERE NEW.id > OLD.id DO ALSO INSERT INTO public.audit SELECT NEW.id").unwrap().remove(0) else { panic!("rule") };

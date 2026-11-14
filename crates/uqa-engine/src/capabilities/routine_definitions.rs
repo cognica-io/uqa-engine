@@ -254,10 +254,13 @@ impl RoutineCompilationSession for Engine {
         crate::session::effective_search_path(&self.session.state.read())
     }
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String> {
-        std::mem::replace(&mut self.session.state.write().search_path, path)
+        std::sync::Arc::unwrap_or_clone(std::mem::replace(
+            &mut self.session.state.write().search_path,
+            path.into(),
+        ))
     }
     fn restore_routine_search_path(&self, path: Vec<String>) {
-        self.session.state.write().search_path = path;
+        self.session.state.write().search_path = path.into();
     }
     fn routine_settings_scope(
         &self,

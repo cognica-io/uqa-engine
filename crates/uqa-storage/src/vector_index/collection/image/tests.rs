@@ -11,6 +11,8 @@ use crate::vector_index::{
 };
 use uqa_core::memory::BudgetedString;
 
+mod input;
+
 fn field(name: &str, control: &StorageReadControl) -> Budgeted<String> {
     let mut name_owner = BudgetedString::new(control.memory());
     name_owner.push_str(name).unwrap();

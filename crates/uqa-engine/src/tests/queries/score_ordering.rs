@@ -20,7 +20,7 @@ type ProjectionLog = Arc<Mutex<Vec<Vec<String>>>>;
 type DocumentBatchLog = Arc<Mutex<Vec<Vec<DocId>>>>;
 
 struct ProjectionRecordingStore {
-    inner: Box<dyn DocumentStore>,
+    inner: uqa_storage::StorageHandle<dyn DocumentStore>,
     projections: ProjectionLog,
     document_batches: DocumentBatchLog,
 }
@@ -100,12 +100,15 @@ fn install_projection_recorder(
     let projections = Arc::new(Mutex::new(Vec::new()));
     let document_batches = Arc::new(Mutex::new(Vec::new()));
     let mut store = table.document_store.write();
-    let inner = std::mem::replace(&mut *store, Box::new(MemoryDocumentStore::new()));
-    *store = Box::new(ProjectionRecordingStore {
+    let inner = std::mem::replace(
+        &mut *store,
+        uqa_storage::StorageHandle::new(Box::new(MemoryDocumentStore::new())),
+    );
+    *store = uqa_storage::StorageHandle::new(Box::new(ProjectionRecordingStore {
         inner,
         projections: Arc::clone(&projections),
         document_batches: Arc::clone(&document_batches),
-    });
+    }));
     (projections, document_batches)
 }
 

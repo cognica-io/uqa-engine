@@ -12,6 +12,7 @@ use uqa_core::memory::ProductionControl;
 
 mod input;
 mod retention;
+mod windows;
 mod wire;
 
 fn native() -> StoredTrigger {

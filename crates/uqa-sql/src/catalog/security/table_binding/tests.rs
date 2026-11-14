@@ -10,6 +10,7 @@ use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::{
     columns::grant_column_acl,
     table::{grant_acl, role_has_column_privilege, TableAclPrivilege},
+    AclGrantee,
 };
 
 #[test]
@@ -284,3 +285,6 @@ fn named_public_and_public_paths_bind_and_resolve_independently() {
 }
 
 mod production;
+
+mod continuation;
+mod validation;

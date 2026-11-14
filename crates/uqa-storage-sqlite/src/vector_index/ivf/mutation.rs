@@ -82,7 +82,10 @@ impl SQLiteIVFIndex {
             ] {
                 tx.execute(
                     &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
-                    params![self.persistent.table, self.persistent.field],
+                    params![
+                        self.persistent.table.as_str(),
+                        self.persistent.field.as_str()
+                    ],
                 )?;
             }
             tx.commit()?;
@@ -102,7 +105,11 @@ impl SQLiteIVFIndex {
             tx.execute(
                 "DELETE FROM _vectors
                   WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                params![self.persistent.table, self.persistent.field, doc_id],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str(),
+                    doc_id
+                ],
             )?;
             let mut insert = tx.prepare(
                 "INSERT INTO _vectors
@@ -111,8 +118,8 @@ impl SQLiteIVFIndex {
             )?;
             for (ordinal, vector) in vectors {
                 insert.execute(params![
-                    self.persistent.table,
-                    self.persistent.field,
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str(),
                     doc_id,
                     ordinal,
                     vector
@@ -132,7 +139,11 @@ impl SQLiteIVFIndex {
             tx.execute(
                 "DELETE FROM _vectors
                   WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                params![self.persistent.table, self.persistent.field, doc_id],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str(),
+                    doc_id
+                ],
             )?;
             write_metadata(&tx, &self.persistent, metadata)?;
             tx.commit()?;

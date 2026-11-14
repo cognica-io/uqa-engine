@@ -35,6 +35,7 @@ mod image;
 mod memory;
 mod metadata;
 mod read_cursor;
+mod replacement;
 mod retained;
 mod snapshot;
 pub(crate) mod statistics;
@@ -294,122 +295,5 @@ impl MemoryIndexState {
             )));
         }
         Ok(document)
-    }
-
-    fn plan_replacement(
-        &self,
-        doc_id: DocId,
-        new_fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
-    ) -> StorageBackendResult<MemoryReplacementPlan> {
-        self.plan_replacement_with_names(doc_id, new_fields, |field| Ok(field.clone()))
-    }
-
-    fn plan_replacement_with_names(
-        &self,
-        doc_id: DocId,
-        new_fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
-        mut copy_name: impl FnMut(&FieldName) -> StorageBackendResult<FieldName>,
-    ) -> StorageBackendResult<MemoryReplacementPlan> {
-        let previous = self.document(doc_id)?;
-        let old_terms = previous
-            .map(|document| document.terms.clone())
-            .unwrap_or_default();
-        let empty_fields = OwnedMap::new();
-        let old_fields = previous.map_or(&empty_fields, |document| &document.fields);
-        let next_doc_count = self
-            .doc_count
-            .checked_sub(u64::from(previous.is_some()))
-            .ok_or_else(|| counter_error("document count"))?
-            .checked_add(u64::from(!new_fields.is_empty()))
-            .ok_or_else(|| counter_error("document count"))?;
-        for key in &old_terms {
-            if !self
-                .index
-                .get(key)
-                .is_some_and(|postings| postings.contains_key(&doc_id))
-            {
-                return Err(StorageBackendError::Other(format!(
-                    "inverted-index document {doc_id} references a missing posting"
-                )));
-            }
-        }
-
-        // Merge the two already ordered field views without allocating a temporary set.
-        let mut old_keys = old_fields.keys().peekable();
-        let mut new_keys = new_fields.keys().peekable();
-        let affected_fields = std::iter::from_fn(|| match (old_keys.peek(), new_keys.peek()) {
-            (Some(old), Some(new)) => match old.cmp(new) {
-                std::cmp::Ordering::Less => old_keys.next(),
-                std::cmp::Ordering::Greater => new_keys.next(),
-                std::cmp::Ordering::Equal => {
-                    old_keys.next();
-                    new_keys.next()
-                }
-            },
-            (Some(_), None) => old_keys.next(),
-            (None, Some(_)) => new_keys.next(),
-            (None, None) => None,
-        });
-        let mut field_counters = OwnedMap::new();
-        for field in affected_fields {
-            let old_length = old_fields.get(field).map_or(0, |metadata| metadata.length);
-            let new_length = new_fields.get(field).map_or(0, |metadata| metadata.length);
-            let total = self
-                .field_counters
-                .get(field)
-                .map_or(0, |counters| counters.total)
-                .checked_sub(old_length)
-                .ok_or_else(|| counter_error("total field length"))?
-                .checked_add(new_length)
-                .ok_or_else(|| counter_error("total field length"))?;
-            let field_docs = self
-                .field_counters
-                .get(field)
-                .map_or(0, |counters| counters.docs)
-                .checked_sub(u64::from(old_fields.contains_key(field)))
-                .ok_or_else(|| counter_error("field document count"))?
-                .checked_add(u64::from(new_fields.contains_key(field)))
-                .ok_or_else(|| counter_error("field document count"))?;
-            field_counters.insert(
-                copy_name(field)?,
-                MemoryFieldCounters {
-                    total,
-                    docs: field_docs,
-                },
-            );
-        }
-        Ok(MemoryReplacementPlan {
-            old_terms,
-            next_doc_count,
-            field_counters,
-        })
-    }
-
-    fn apply_replacement(
-        &mut self,
-        doc_id: DocId,
-        staged: StagedMemoryDocument,
-        plan: MemoryReplacementPlan,
-    ) -> StorageBackendResult<()> {
-        for key in plan.old_terms {
-            self.remove_posting(doc_id, &key)?;
-        }
-        self.remove_document_metadata(doc_id);
-        for (field, counters) in plan.field_counters {
-            footprint::set_counter(
-                &mut self.field_counters,
-                field,
-                (counters.docs != 0).then_some(counters),
-                &mut self.retention,
-            );
-        }
-        for (key, entry) in staged.postings {
-            self.insert_posting(doc_id, key, entry);
-        }
-        self.doc_count = plan.next_doc_count;
-        if !staged.fields.is_empty() {
-            self.insert_document_metadata(doc_id, staged.fields, staged.terms);
-        }
-        Ok(())
     }
 }

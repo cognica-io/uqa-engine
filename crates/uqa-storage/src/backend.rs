@@ -23,6 +23,13 @@ use crate::inverted_index::InvertedIndex;
 use crate::vector_index::{VectorIndex, VectorIndexOpenMode, VectorIndexSpec};
 use crate::CatalogFacade;
 
+mod handle;
+mod name;
+#[cfg(test)]
+mod retained_tests;
+pub use handle::StorageHandle;
+pub use name::StorageName;
+
 /// A session's completed record commit usable after the caller classifies its changes as data-only. A provider with cache generations also certifies that catalog, registry, graph and storage-schema generations stayed unchanged. Providers without those generations rely on the caller's classification. This is commit evidence, not a read of the latest database state.
 #[derive(Clone)]
 pub struct CommittedDataRevision {
@@ -53,6 +60,8 @@ pub enum StorageBackendError {
     Analysis(#[from] uqa_analysis::AnalysisError),
     #[error("payload serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("payload serialization failed: {0}")]
+    Json(#[from] uqa_core::json::JsonDiagnostic),
     #[error("{backend} storage failed: {source}")]
     Backend {
         backend: &'static str,
@@ -61,6 +70,9 @@ pub enum StorageBackendError {
     },
     #[error("{0}")]
     Other(String),
+    /// A native diagnostic retains its original owner instead of copying its message across the catalog boundary.
+    #[error("{0}")]
+    RetainedDiagnostic(#[source] Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl StorageBackendError {
@@ -83,6 +95,19 @@ impl From<uqa_core::ValueRetentionError> for StorageBackendError {
             error @ uqa_core::ValueRetentionError::Malformed { .. } => {
                 Self::backend("value", error)
             }
+        }
+    }
+}
+
+impl From<uqa_core::json::JsonInputError> for StorageBackendError {
+    fn from(error: uqa_core::json::JsonInputError) -> Self {
+        use uqa_core::json::JsonInputError;
+        match error {
+            JsonInputError::Diagnostic(error) => Self::Json(error),
+            JsonInputError::Memory(error) => Self::Memory(error),
+            JsonInputError::Cancelled(error) => Self::Cancelled(error),
+            JsonInputError::Image(error) => error.into(),
+            JsonInputError::Invalid => Self::Other("invalid JSON input".into()),
         }
     }
 }
@@ -469,12 +494,37 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore>;
 
+    /// Restore a writable document handle with its original admitted name and boxed allocation. Providers must implement this ownership boundary explicitly; the ordinary factory cannot establish allocation admission after construction.
+    fn document_store_with_control(
+        &self,
+        _table: StorageName,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn DocumentStore>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled document handles are not implemented by this backend".into(),
+        ))
+    }
+
     /// Upgrade backend-owned document records before table handles are restored. Implementations must make the rewrite atomic and idempotent.
     fn migrate_document_storage(&self) -> StorageBackendResult<()> {
         Ok(())
     }
 
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
+
+    /// Restore a writable text-index handle sharing the original admitted name and lazy default. Construction must not resolve resources or retain the input cancellation signal.
+    fn inverted_index_with_control(
+        &self,
+        _table: StorageName,
+        _default: crate::inverted_index::AnalyzerDefault,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn InvertedIndex>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled inverted-index handles are not implemented by this backend".into(),
+        ))
+    }
 
     /// Upgrade backend-owned inverted-index values before table handles are
     /// restored. Implementations must make the rewrite atomic and idempotent.
@@ -490,6 +540,20 @@ pub trait PersistentStorageBackend: Send + Sync {
         spec: VectorIndexSpec,
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>>;
+
+    /// Restore the canonical vector field under its original admitted table and field names. This opens the existing exact vector records without loading or rebuilding a catalog-selected acceleration index. The concrete box and any shared handle state retain their construction allowance; completed handles do not retain input cancellation.
+    fn canonical_vector_index_with_control(
+        &self,
+        _table: StorageName,
+        _field: StorageName,
+        _dimensions: u32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<StorageHandle<dyn VectorIndex>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled canonical vector handles are not implemented by this backend".into(),
+        ))
+    }
 
     /// Open a catalog-bound `DiskANN` owner on this exact backend session. Creation joins the active catalog transaction and returns an initialized index; restoration never builds missing state.
     fn diskann_index(

@@ -12,12 +12,14 @@ use std::{
     sync::Arc,
 };
 use uqa_core::{
+    image_io::ImageIoError,
     memory::{Budgeted, MemoryError, Produced, ProductionControl},
     CancellationToken,
 };
 
 mod footprint;
 mod image;
+mod names;
 mod shared;
 pub use shared::SharedTableMetadata;
 #[cfg(test)]
@@ -33,8 +35,9 @@ impl TableMetadataValue for Vec<crate::ast::ForeignKey> {}
 impl TableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
 impl TableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
 
-/// Stored constraint fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
+/// Stored metadata fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
 pub(crate) trait DecodedTableMetadataValue: TableMetadataValue {}
+impl DecodedTableMetadataValue for Vec<String> {}
 impl DecodedTableMetadataValue for Option<String> {}
 impl DecodedTableMetadataValue for Vec<crate::ast::ForeignKey> {}
 impl DecodedTableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
@@ -102,7 +105,7 @@ impl<T: TableMetadataValue> TableMetadata<T> {
     pub(crate) fn from_decoded(
         value: Budgeted<T>,
         cancellation: &CancellationToken,
-    ) -> Result<Self, SQLError>
+    ) -> Result<Self, ImageIoError>
     where
         T: DecodedTableMetadataValue,
     {

@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use super::Expr;
 
+mod input;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameIndexStmt {
     pub name: String,

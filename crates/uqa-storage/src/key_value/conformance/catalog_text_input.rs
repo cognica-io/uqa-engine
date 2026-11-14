@@ -75,6 +75,87 @@ pub fn verify_catalog_text_input(source: PersistentStorageSession) -> StorageBac
         &0,
         "failed input releases provider and cursor memory",
     )?;
+    verify_prefix(later)?;
+    Ok(())
+}
+
+fn verify_prefix(source: PersistentStorageSession) -> StorageBackendResult<()> {
+    let control = StorageReadControl::with_limit(65536);
+    let limits = CatalogTextLimits {
+        maximum_key_bytes: 4096,
+        maximum_value_bytes: 1024,
+    };
+    for (name, value) in [
+        ("literal%_\0한글:a", "first"),
+        ("literal%_\0한글:longer", "second"),
+        ("literal_other", "outside"),
+    ] {
+        source.catalog.set_metadata(name, value)?;
+    }
+    source
+        .catalog
+        .set_metadata("unrelated_large_value", &"x".repeat(1 << 18))?;
+    source.backend.begin_transaction()?;
+    source
+        .catalog
+        .set_metadata("literal%_\0한글:a", "private")?;
+    let expected = source.catalog.metadata_with_prefix("literal%_\0한글:")?;
+    let prefix = String::from("literal%_\0한글:");
+    let mut input = source
+        .catalog
+        .begin_metadata_input(&prefix, limits, &control)?;
+    drop(prefix);
+    source.backend.rollback_transaction()?;
+    source.catalog.set_metadata("literal%_\0한글:a", "later")?;
+    let mut absent = source
+        .catalog
+        .begin_metadata_input("absent", limits, &control)?;
+    drop(source);
+    let mut actual = Vec::new();
+    let mut complete = false;
+    for _ in 0..4096 {
+        match input.advance()? {
+            CatalogTextStep::Pending => (),
+            CatalogTextStep::Row(row) => actual.push((row.name.clone(), row.value.clone())),
+            CatalogTextStep::Complete => {
+                complete = true;
+                break;
+            }
+        }
+    }
+    expect(
+        complete,
+        "selected metadata input completes within its finite key population",
+    )?;
+    expect_eq(
+        &actual,
+        &expected,
+        "literal-prefix input preserves provider order, private values and source retirement",
+    )?;
+    complete = false;
+    for _ in 0..4096 {
+        match absent.advance()? {
+            CatalogTextStep::Pending => (),
+            CatalogTextStep::Row(_) => {
+                return Err(crate::StorageBackendError::Other(
+                    "absent metadata prefix returned a row".into(),
+                ))
+            }
+            CatalogTextStep::Complete => {
+                complete = true;
+                break;
+            }
+        }
+    }
+    expect(
+        complete,
+        "absent input skips unrelated oversized payloads before reading them",
+    )?;
+    expect_eq(
+        &control.memory().used(),
+        &0,
+        "completed prefix inputs retire every cursor and selection owner",
+    )?;
     Ok(())
 }
 

@@ -7,15 +7,14 @@
 //! Construct native JSON values through the shared retained grammar and operation schedule.
 
 use crate::work::Work;
-use serde::de::Error as _;
 use serde_json::Value;
 use uqa_core::{
     image_io::ImageIoError,
     json::{
-        decode_json_string_with_work, JsonExpected, JsonReadError, JsonReadWork, JsonReader,
-        JsonToken,
+        decode_json_string_with_work, JsonDiagnostic, JsonPosition, JsonReadError, JsonReadWork,
+        JsonReader, JsonToken,
     },
-    memory::ProductionControl,
+    memory::{Produced, ProductionControl},
 };
 
 mod comparison;
@@ -32,19 +31,42 @@ pub(crate) fn fragment(text: &str, position: usize) -> &str {
     &text[position..end]
 }
 
-enum Frame {
-    Array(Vec<Value>),
-    Object(serde_json::Map<String, Value>, Option<String>),
-}
+mod value;
 
 enum Error<E> {
     Grammar(JsonReadError),
+    Serde(serde_json::Error),
+    Diagnostic(JsonDiagnostic),
     Work(E),
+}
+
+impl<E> From<serde_json::Error> for Error<E> {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Serde(error)
+    }
+}
+
+impl<E> Error<E> {
+    fn into_data(self) -> Self {
+        match self {
+            Self::Diagnostic(error) => Self::Diagnostic(error.into_data()),
+            Self::Serde(error) => {
+                Self::Serde(<serde_json::Error as serde::de::Error>::custom(error))
+            }
+            error => error,
+        }
+    }
 }
 
 impl<E> From<JsonReadError> for Error<E> {
     fn from(error: JsonReadError) -> Self {
         Self::Grammar(error)
+    }
+}
+
+impl<E> From<JsonDiagnostic> for Error<E> {
+    fn from(error: JsonDiagnostic) -> Self {
+        Self::Diagnostic(error)
     }
 }
 
@@ -58,14 +80,18 @@ impl<W: Work<E>, E> JsonReadWork for Scheduler<'_, W, E> {
     }
 }
 
-pub(crate) trait InputError: From<serde_json::Error> + From<ImageIoError> + Send {}
-impl<E: From<serde_json::Error> + From<ImageIoError> + Send> InputError for E {}
+pub(crate) trait InputError:
+    From<serde_json::Error> + From<JsonDiagnostic> + From<ImageIoError> + Send
+{
+}
+impl<E: From<serde_json::Error> + From<JsonDiagnostic> + From<ImageIoError> + Send> InputError
+    for E
+{
+}
 
 /// Borrowed syntax retains the enclosing schedule; Analysis owns decoded model allocations.
 pub(crate) struct Input<'a> {
     reader: JsonReader<'a, 'static>,
-    bytes: &'a [u8],
-    pending: Option<JsonToken<'a, &'a [u8]>>,
 }
 
 impl<'a> Input<'a> {
@@ -73,8 +99,6 @@ impl<'a> Input<'a> {
         Self {
             reader: JsonReader::from_slice_with_control(bytes, &ProductionControl::uncontrolled())
                 .with_depth_limit(127),
-            bytes,
-            pending: None,
         }
     }
 
@@ -82,51 +106,164 @@ impl<'a> Input<'a> {
         &mut self,
         work: &mut impl Work<E>,
     ) -> Result<Option<JsonToken<'a, &'a [u8]>>, E> {
-        if let Some(token) = self.pending.take() {
-            return Ok(Some(token));
-        }
+        self.next_native(work)
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    async fn next_native<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<Option<JsonToken<'a, &'a [u8]>>, Error<E>> {
         match self
             .reader
             .next_event_with_work(&mut Scheduler(work, std::marker::PhantomData))
             .await
         {
             Ok(event) => Ok(event.map(|event| event.token)),
-            Err(error) => {
-                Err(diagnostic(error, self.bytes, self.reader.syntax_position(), work).await?)
+            Err(error) => Err(self.located(error)),
+        }
+    }
+
+    pub(crate) fn position(&self) -> JsonPosition {
+        self.reader.position()
+    }
+
+    fn located<E>(&self, error: Error<E>) -> Error<E> {
+        match error {
+            Error::Grammar(JsonReadError::InvalidJson | JsonReadError::Malformed { .. }) => {
+                Error::Diagnostic(self.reader.syntax_error().map_or_else(
+                    || JsonDiagnostic::message("invalid JSON text", self.position()),
+                    JsonDiagnostic::from,
+                ))
             }
+            error => error,
         }
     }
 
-    pub(crate) async fn peek<E: InputError>(
-        &mut self,
-        work: &mut impl Work<E>,
-    ) -> Result<Option<JsonToken<'a, &'a [u8]>>, E> {
-        if self.pending.is_none() {
-            self.pending = self.next(work).await?;
+    fn error<E: InputError>(&self, error: Error<E>) -> E {
+        match self.located(error) {
+            Error::Work(error) => error,
+            Error::Serde(error) => error.into(),
+            Error::Diagnostic(error) => error.into(),
+            Error::Grammar(JsonReadError::Memory(error)) => ImageIoError::from(error).into(),
+            Error::Grammar(JsonReadError::Cancelled(error)) => ImageIoError::from(error).into(),
+            Error::Grammar(_) => unreachable!("native syntax already located"),
         }
-        Ok(self.pending)
     }
 
-    pub(crate) async fn located<E: InputError>(
+    pub(crate) async fn invalid_type<E: InputError>(
         &self,
-        error: serde_json::Error,
+        token: JsonToken<'_, &'_ [u8]>,
+        expected: &'static str,
         work: &mut impl Work<E>,
     ) -> Result<E, E> {
-        let (position, _) = self.reader.syntax_position();
-        let mut line = 1;
-        let mut column = 0;
-        for part in self.bytes[..position].chunks(4096) {
-            work.checkpoint().await?;
-            for byte in part {
-                if *byte == b'\n' {
-                    line += 1;
-                    column = 0;
-                } else {
-                    column += 1;
-                }
-            }
+        let owner = work.production_control();
+        JsonDiagnostic::observe_type_with_work(
+            token,
+            self.position(),
+            expected,
+            &owner.control(),
+            &mut Scheduler(work, std::marker::PhantomData),
+        )
+        .await
+        .map(Into::into)
+        .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn name<E: InputError>(
+        &self,
+        encoded: &[u8],
+        work: &mut impl Work<E>,
+    ) -> Result<Produced<String>, E> {
+        let owner = work.production_control();
+        decode_json_string_with_work(
+            encoded,
+            &owner.control(),
+            &mut Scheduler(work, std::marker::PhantomData),
+        )
+        .await
+        .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn text<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<String, E> {
+        let token = self.next(work).await?.expect("typed input expects a value");
+        match token {
+            JsonToken::String(encoded) => self.string(encoded, work).await,
+            token => Err(self.invalid_type(token, "a string", work).await?),
         }
-        Ok(serde_json::Error::custom(format!("{error} at line {line} column {column}")).into())
+    }
+
+    pub(crate) async fn u32<E: InputError>(&mut self, work: &mut impl Work<E>) -> Result<u32, E> {
+        let owner = work.production_control();
+        self.reader
+            .read_u32_with_work(
+                &owner.control(),
+                &mut Scheduler(work, std::marker::PhantomData),
+            )
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn u8<E: InputError>(&mut self, work: &mut impl Work<E>) -> Result<u8, E> {
+        let owner = work.production_control();
+        self.reader
+            .read_u8_with_work(
+                &owner.control(),
+                &mut Scheduler(work, std::marker::PhantomData),
+            )
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn unit_variant<E: InputError>(
+        &mut self,
+        variants: &'static [&'static str],
+        work: &mut impl Work<E>,
+    ) -> Result<usize, E> {
+        let owner = work.production_control();
+        self.reader
+            .read_unit_variant_with_work(
+                variants,
+                &owner.control(),
+                &mut Scheduler(work, std::marker::PhantomData),
+            )
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn next_array_value<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<bool, E> {
+        self.reader
+            .next_array_value_with_work(&mut Scheduler(work, std::marker::PhantomData))
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn finish_array<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<(), E> {
+        self.reader
+            .finish_array_with_work(&mut Scheduler(work, std::marker::PhantomData))
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    pub(crate) async fn finish_struct_error<E: InputError>(
+        &mut self,
+        work: &mut impl Work<E>,
+    ) -> Result<(), E> {
+        self.reader
+            .finish_struct_error_with_work(&mut Scheduler(work, std::marker::PhantomData))
+            .await
+            .map(|_| ())
+            .map_err(|error| self.error(error))
     }
 
     pub(crate) async fn string<E: InputError>(
@@ -134,7 +271,28 @@ impl<'a> Input<'a> {
         encoded: &[u8],
         work: &mut impl Work<E>,
     ) -> Result<String, E> {
-        string(encoded, work).await
+        self.model_string(encoded, work)
+            .await
+            .map_err(|error| self.error(error))
+    }
+
+    async fn model_string<E: InputError>(
+        &self,
+        encoded: &[u8],
+        work: &mut impl Work<E>,
+    ) -> Result<String, Error<E>> {
+        decode_json_string_with_work(
+            encoded,
+            &ProductionControl::uncontrolled(),
+            &mut Scheduler(work, std::marker::PhantomData),
+        )
+        .await
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("Analysis owns model allocations")
+        })
+        .map_err(|error| self.located(error))
     }
 
     #[cfg(any(feature = "nori", feature = "kuromoji"))]
@@ -153,121 +311,15 @@ impl<'a> Input<'a> {
         &mut self,
         work: &mut impl Work<E>,
     ) -> Result<Value, E> {
-        let mut stack = Vec::new();
-        loop {
-            let token = self
-                .next(work)
-                .await?
-                .ok_or_else(|| E::from(serde_json::Error::custom("EOF while parsing a value")))?;
-            let value = match token {
-                JsonToken::StartArray => {
-                    stack.push(Frame::Array(Vec::new()));
-                    continue;
-                }
-                JsonToken::StartObject => {
-                    stack.push(Frame::Object(serde_json::Map::new(), None));
-                    continue;
-                }
-                JsonToken::Key(encoded) => {
-                    let key = string(encoded, work).await?;
-                    let Some(Frame::Object(_, pending)) = stack.last_mut() else {
-                        unreachable!("the grammar emits keys only inside objects")
-                    };
-                    *pending = Some(key);
-                    continue;
-                }
-                JsonToken::EndArray => {
-                    let Some(Frame::Array(values)) = stack.pop() else {
-                        unreachable!("the grammar closes its matching array")
-                    };
-                    Value::Array(values)
-                }
-                JsonToken::EndObject => {
-                    let Some(Frame::Object(values, None)) = stack.pop() else {
-                        unreachable!("the grammar closes objects after their values")
-                    };
-                    Value::Object(values)
-                }
-                JsonToken::Null => Value::Null,
-                JsonToken::Bool(value) => Value::Bool(value),
-                JsonToken::String(encoded) => Value::String(string(encoded, work).await?),
-                // The dependency's public number constructor preserves arbitrary precision.
-                // Its scalar conversion remains a synchronous dependency boundary.
-                JsonToken::Number(encoded) => {
-                    Value::Number(serde_json::from_slice(encoded).map_err(E::from)?)
-                }
-            };
-            match stack.last_mut() {
-                Some(Frame::Array(values)) => values.push(value),
-                Some(Frame::Object(values, key)) => {
-                    values.insert(key.take().expect("the grammar supplies a key"), value);
-                }
-                None => return Ok(value),
+        let result = match value::read(self, work) {
+            Ok(value) => {
+                let (future, memory) = value.into_parts();
+                let result = future.await;
+                drop(memory);
+                result
             }
-        }
+            Err(error) => Err(error),
+        };
+        result.map_err(|error| self.error(error))
     }
-}
-
-async fn string<E: InputError>(encoded: &[u8], work: &mut impl Work<E>) -> Result<String, E> {
-    match decode_json_string_with_work(
-        encoded,
-        &ProductionControl::uncontrolled(),
-        &mut Scheduler(work, std::marker::PhantomData),
-    )
-    .await
-    {
-        Ok(value) => Ok(value
-            .into_uncontrolled()
-            .expect("Analysis owns model allocations")),
-        Err(error) => Err(diagnostic(error, encoded, (0, JsonExpected::Value), work).await?),
-    }
-}
-
-async fn diagnostic<E: InputError>(
-    error: Error<E>,
-    bytes: &[u8],
-    (position, expected): (usize, JsonExpected),
-    work: &mut impl Work<E>,
-) -> Result<E, E> {
-    match error {
-        Error::Work(error) => return Ok(error),
-        Error::Grammar(JsonReadError::Memory(error)) => {
-            return Ok(uqa_core::image_io::ImageIoError::from(error).into());
-        }
-        Error::Grammar(JsonReadError::Cancelled(error)) => {
-            return Ok(uqa_core::image_io::ImageIoError::from(error).into());
-        }
-        Error::Grammar(JsonReadError::InvalidJson | JsonReadError::Malformed { .. }) => {}
-    }
-    let reason = if position == bytes.len() {
-        match expected {
-            JsonExpected::ObjectKeyOrEnd
-            | JsonExpected::ObjectSeparator
-            | JsonExpected::Key
-            | JsonExpected::Colon => "EOF while parsing an object",
-            JsonExpected::ArrayValueOrEnd | JsonExpected::ArraySeparator => {
-                "EOF while parsing a list"
-            }
-            _ => "EOF while parsing a value",
-        }
-    } else {
-        "invalid JSON text"
-    };
-    let mut line = 1;
-    let mut column = 0;
-    for part in bytes[..position.min(bytes.len())].chunks(4096) {
-        work.checkpoint().await?;
-        for byte in part {
-            if *byte == b'\n' {
-                line += 1;
-                column = 0;
-            } else {
-                column += 1;
-            }
-        }
-    }
-    if position < bytes.len() {
-        column += 1;
-    }
-    Ok(serde_json::Error::custom(format!("{reason} at line {line} column {column}")).into())
 }

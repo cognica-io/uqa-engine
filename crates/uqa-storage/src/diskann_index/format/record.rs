@@ -64,13 +64,14 @@ pub(super) fn finish(
     Ok(bytes)
 }
 
-pub(super) fn open<'a>(
+pub(super) async fn open_from<'a>(
     magic: [u8; 8],
     generation: DiskANNGeneration,
     bytes: &'a [u8],
     control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
 ) -> StorageBackendResult<&'a [u8]> {
-    open_revision(magic, REVISION, generation, bytes, control)
+    open_revision_from(magic, REVISION, generation, bytes, control, work).await
 }
 
 pub(super) fn open_revision<'a>(
@@ -79,6 +80,24 @@ pub(super) fn open_revision<'a>(
     generation: DiskANNGeneration,
     bytes: &'a [u8],
     control: &StorageReadControl,
+) -> StorageBackendResult<&'a [u8]> {
+    crate::image_io::work::inline(open_revision_from(
+        magic,
+        revision,
+        generation,
+        bytes,
+        control,
+        &mut (),
+    ))
+}
+
+async fn open_revision_from<'a>(
+    magic: [u8; 8],
+    revision: u32,
+    generation: DiskANNGeneration,
+    bytes: &'a [u8],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
 ) -> StorageBackendResult<&'a [u8]> {
     control.check()?;
     if bytes.len() < HEADER_BYTES
@@ -99,16 +118,24 @@ pub(super) fn open_revision<'a>(
     if actual != generation || u64_at(bytes, 56)? != (bytes.len() - HEADER_BYTES) as u64 {
         return Err(invalid("record generation or body length differs"));
     }
-    if field::<32>(bytes, 64)? != checksum(bytes, control)? {
+    if field::<32>(bytes, 64)? != checksum_from(bytes, control, work).await? {
         return Err(invalid("record checksum mismatch"));
     }
     Ok(&bytes[HEADER_BYTES..])
 }
 
 fn checksum(bytes: &[u8], control: &StorageReadControl) -> StorageBackendResult<[u8; 32]> {
+    crate::image_io::work::inline(checksum_from(bytes, control, &mut ()))
+}
+
+async fn checksum_from(
+    bytes: &[u8],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<[u8; 32]> {
     let mut hash = Sha256::new();
     hash.update(&bytes[..64]);
-    update(&mut hash, &bytes[HEADER_BYTES..], control)?;
+    update_from(&mut hash, &bytes[HEADER_BYTES..], control, work).await?;
     Ok(hash.finalize().into())
 }
 
@@ -116,18 +143,28 @@ pub fn artifact_digest(
     bytes: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<[u8; 32]> {
+    crate::image_io::work::inline(artifact_digest_from(bytes, control, &mut ()))
+}
+
+pub(in crate::diskann_index) async fn artifact_digest_from(
+    bytes: &[u8],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<[u8; 32]> {
     let mut hash = Sha256::new();
-    update(&mut hash, bytes, control)?;
+    update_from(&mut hash, bytes, control, work).await?;
     Ok(hash.finalize().into())
 }
 
-pub(super) fn update(
+async fn update_from(
     hash: &mut Sha256,
     bytes: &[u8],
     control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
 ) -> StorageBackendResult<()> {
     control.check()?;
     for part in bytes.chunks(4096) {
+        work.checkpoint().await?;
         control.check()?;
         hash.update(part);
     }

@@ -11,6 +11,8 @@
 //! an independent [`RedbKeyValueStore`] transaction state while sharing the
 //! same MVCC database.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_target;
 mod error;
 mod mvcc;
 
@@ -24,6 +26,8 @@ use uqa_storage::{
     PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup_target::RedbBackupTarget;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use mvcc::backup_import::{RedbBackupImport, RedbBackupImportStep};
 pub use mvcc::RedbRecordStore;

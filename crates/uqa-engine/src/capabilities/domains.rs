@@ -55,7 +55,23 @@ impl Engine {
         }
     }
 }
-impl uqa_execution::schema::domains::alteration::DomainConstraintBinding for Engine {
+impl uqa_execution::schema::domains::alteration::DomainAlterBinding for Engine {
+    fn bind_domain_default(
+        &self,
+        definition: &CreateDomain,
+        expression: &mut uqa_sql::ast::Expr,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
+        let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        uqa_sql::schema::domains::prepare_domain_default(
+            &uqa_sql::schema::SchemaBindingContext {
+                catalog: self,
+                binding: &binding,
+            },
+            definition,
+            expression,
+        )
+    }
     fn bind_added_check(
         &self,
         definition: &CreateDomain,

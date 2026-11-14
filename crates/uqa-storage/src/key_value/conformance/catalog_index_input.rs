@@ -13,6 +13,9 @@ use crate::{
     CatalogIndexRow, PersistentStorageSession, RelationIdentity, StorageBackendResult,
 };
 
+mod load;
+pub use load::verify_catalog_index_load;
+
 /// Verify original names, encoded fields, optional definitions and private membership on a fresh disposable provider session.
 pub fn verify_catalog_index_input(source: PersistentStorageSession) -> StorageBackendResult<()> {
     prepare(&source)?;

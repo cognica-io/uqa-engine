@@ -101,6 +101,7 @@ impl Engine {
     ) -> Arc<TableState> {
         let analyzer = source.analyzer.read().configuration().clone();
         Arc::new(TableState {
+            _image_memory: None,
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
             security: crate::state::TableMetadataCell::from_generation(
@@ -108,10 +109,10 @@ impl Engine {
             ),
             storage_generation: crate::state::CatalogCell::new(source.storage_generation()),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                storage.backend.document_store(name),
+                storage.backend.document_store(name).into(),
             ),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                storage.backend.inverted_index(name, analyzer),
+                storage.backend.inverted_index(name, analyzer).into(),
             ),
             // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(

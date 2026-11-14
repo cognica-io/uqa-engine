@@ -14,6 +14,9 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod diagnostics;
+mod resources;
+
 fn original() -> Value {
     let descriptor = AnalyzerDescriptor::resolve(
         &crate::keyword_analyzer(),
@@ -59,15 +62,6 @@ fn native_descriptor_wire_preserves_reference_struct_forms_and_values() {
     }
 }
 
-fn message(error: &serde_json::Error) -> String {
-    error
-        .to_string()
-        .split(" at line ")
-        .next()
-        .unwrap()
-        .to_owned()
-}
-
 #[test]
 fn native_descriptor_wire_preserves_schema_and_duplicate_key_error_order() {
     let invalid = [
@@ -94,21 +88,27 @@ fn native_descriptor_wire_preserves_schema_and_duplicate_key_error_order() {
         let Err(reference) = serde_json::from_str::<Wire>(text) else {
             panic!("invalid reference accepted {text}");
         };
-        let Err(AnalysisError::Json(actual)) = inline(decode(text, &mut ())) else {
+        let Err(AnalysisError::JsonDiagnostic(actual)) = inline(decode(text, &mut ())) else {
             panic!("invalid native input accepted {text}");
         };
-        assert_eq!(message(&actual), message(&reference), "{text}");
+        assert_eq!(actual.to_string(), reference.to_string(), "{text}");
+        assert_eq!(actual.is_data(), reference.is_data(), "{text}");
+        assert_eq!(actual.is_syntax(), reference.is_syntax(), "{text}");
+        assert_eq!(actual.is_eof(), reference.is_eof(), "{text}");
+        assert_eq!(actual.position().line, reference.line(), "{text}");
+        assert_eq!(actual.position().column, reference.column(), "{text}");
     }
     // Duplicate admission completes before any typed field or fingerprint validation.
     for text in [
         r#"{"fingerprint":false,"descriptor":{"pipeline":{"x":1,"x":2}}}"#,
         r#"{"descriptor":{"pipeline":{"x":1,"\u0078":2}},"fingerprint":false}"#,
     ] {
-        let Err(AnalysisError::Json(error)) = inline(decode(text, &mut ())) else {
+        let Err(AnalysisError::JsonDiagnostic(error)) = inline(decode(text, &mut ())) else {
             panic!("duplicate native input accepted");
         };
-        assert_eq!(message(&error), "duplicate analyzer descriptor property");
-        assert_eq!(error.line(), 1);
+        assert!(error
+            .to_string()
+            .starts_with("duplicate analyzer descriptor property at line 1 column "));
     }
 }
 

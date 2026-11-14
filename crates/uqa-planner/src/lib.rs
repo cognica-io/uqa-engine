@@ -62,6 +62,7 @@ pub mod statement_planning;
 pub mod text_top_k;
 pub mod unified_plan;
 
+pub use cardinality::stored_column_statistics;
 pub use cardinality::{
     column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate, AccessParadigm,
     CardinalityEstimator, ColumnStatistics, ColumnStatisticsImageReader, ColumnStats, EdgeSample,

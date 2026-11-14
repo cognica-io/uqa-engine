@@ -8,10 +8,9 @@
 
 use std::collections::BTreeSet;
 
-use serde::de::{DeserializeOwned, Error as _};
-use uqa_core::json::JsonToken;
+use uqa_core::json::{JsonDiagnostic, JsonToken};
 
-use super::{DescriptorData, RuntimeProfiles, Wire};
+use super::{DescriptorData, RuntimeProfiles, TokenLengthPolicy, Wire};
 use crate::{json::Input, work::Work, AnalysisError, AnalysisResult};
 
 pub(super) async fn decode(
@@ -20,31 +19,49 @@ pub(super) async fn decode(
 ) -> AnalysisResult<Wire> {
     unique_keys(json, work).await?;
     let mut input = Input::new(json.as_bytes());
-    match wire(&mut input, work).await {
-        Err(AnalysisError::Json(error)) if error.line() == 0 => {
-            Err(input.located(error, work).await?)
-        }
-        result => result,
+    let value = wire(&mut input, work).await?;
+    if input.next(work).await?.is_some() {
+        unreachable!("the original grammar admits one complete root");
     }
+    Ok(value)
 }
 
 async fn wire(input: &mut Input<'_>, work: &mut impl Work<AnalysisError>) -> AnalysisResult<Wire> {
-    let mut fields = Fields::new(input, "Wire", &["descriptor", "fingerprint"], work).await?;
+    let mut fields = Fields::new(
+        input,
+        "struct Wire",
+        "struct Wire with 2 elements",
+        &["descriptor", "fingerprint"],
+        work,
+    )
+    .await?;
     let mut descriptor = None;
     let mut fingerprint = None;
     while let Some(field) = fields.next(input, work).await? {
         match field {
             0 => descriptor = Some(data(input, work).await?),
-            1 => fingerprint = Some(typed(input, work).await?),
+            1 => {
+                let value = input.text(work).await?;
+                fingerprint = Some(match value.parse() {
+                    Ok(value) => value,
+                    Err(AnalysisError::Descriptor(reason)) => {
+                        input.finish_struct_error(work).await?;
+                        return Err(JsonDiagnostic::prefixed_message(
+                            "invalid analyzer descriptor: ",
+                            reason,
+                            input.position(),
+                        )
+                        .into());
+                    }
+                    Err(error) => return Err(error),
+                });
+            }
             _ => unreachable!(),
         }
     }
-    if input.next(work).await?.is_some() {
-        unreachable!("the original grammar admits one complete root");
-    }
     Ok(Wire {
-        descriptor: required(descriptor, "descriptor")?,
-        fingerprint: required(fingerprint, "fingerprint")?,
+        descriptor: required(descriptor, "descriptor", input)?,
+        fingerprint: required(fingerprint, "fingerprint", input)?,
     })
 }
 
@@ -64,12 +81,12 @@ async fn unique_keys(json: &str, work: &mut impl Work<AnalysisError>) -> Analysi
                     .expect("keys occur inside objects")
                     .insert(key)
                 {
-                    return Err(input
-                        .located(
-                            serde_json::Error::custom("duplicate analyzer descriptor property"),
-                            work,
-                        )
-                        .await?);
+                    input.finish_struct_error(work).await?;
+                    return Err(JsonDiagnostic::message(
+                        "duplicate analyzer descriptor property",
+                        input.position(),
+                    )
+                    .into());
                 }
             }
             _ => (),
@@ -84,7 +101,8 @@ async fn data(
 ) -> AnalysisResult<DescriptorData> {
     let mut fields = Fields::new(
         input,
-        "DescriptorData",
+        "struct DescriptorData",
+        "struct DescriptorData with 7 elements",
         &[
             "format",
             "format_version",
@@ -102,24 +120,39 @@ async fn data(
     let (mut length_policy, mut pipeline, mut runtime_profiles) = (None, None, None);
     while let Some(field) = fields.next(input, work).await? {
         match field {
-            0 => format = Some(typed(input, work).await?),
-            1 => format_version = Some(typed(input, work).await?),
-            2 => algorithm_revision = Some(typed(input, work).await?),
-            3 => source_mapping_revision = Some(typed(input, work).await?),
-            4 => length_policy = Some(typed(input, work).await?),
+            0 => format = Some(input.text(work).await?),
+            1 => format_version = Some(input.u32(work).await?),
+            2 => algorithm_revision = Some(input.u32(work).await?),
+            3 => source_mapping_revision = Some(input.u32(work).await?),
+            4 => {
+                length_policy = Some(
+                    match input
+                        .unit_variant(&["emitted_tokens", "discount_overlaps"], work)
+                        .await?
+                    {
+                        0 => TokenLengthPolicy::EmittedTokens,
+                        1 => TokenLengthPolicy::DiscountOverlaps,
+                        _ => unreachable!(),
+                    },
+                );
+            }
             5 => pipeline = Some(input.value(work).await?),
             6 => runtime_profiles = Some(profiles(input, work).await?),
             _ => unreachable!(),
         }
     }
     Ok(DescriptorData {
-        format: required(format, "format")?,
-        format_version: required(format_version, "format_version")?,
-        algorithm_revision: required(algorithm_revision, "algorithm_revision")?,
-        source_mapping_revision: required(source_mapping_revision, "source_mapping_revision")?,
-        length_policy: required(length_policy, "length_policy")?,
-        pipeline: required(pipeline, "pipeline")?,
-        runtime_profiles: required(runtime_profiles, "runtime_profiles")?,
+        format: required(format, "format", input)?,
+        format_version: required(format_version, "format_version", input)?,
+        algorithm_revision: required(algorithm_revision, "algorithm_revision", input)?,
+        source_mapping_revision: required(
+            source_mapping_revision,
+            "source_mapping_revision",
+            input,
+        )?,
+        length_policy: required(length_policy, "length_policy", input)?,
+        pipeline: required(pipeline, "pipeline", input)?,
+        runtime_profiles: required(runtime_profiles, "runtime_profiles", input)?,
     })
 }
 
@@ -129,7 +162,8 @@ async fn profiles(
 ) -> AnalysisResult<RuntimeProfiles> {
     let mut fields = Fields::new(
         input,
-        "RuntimeProfiles",
+        "struct RuntimeProfiles",
+        "struct RuntimeProfiles with 3 elements",
         &["rust_unicode", "normalization_unicode", "expressions"],
         work,
     )
@@ -140,25 +174,23 @@ async fn profiles(
             0 => rust_unicode = Some(version(input, work).await?),
             1 => normalization_unicode = Some(version(input, work).await?),
             2 => {
-                if input.peek(work).await? != Some(JsonToken::StartArray) {
-                    expressions = Some(typed(input, work).await?);
-                    continue;
+                let token = input.next(work).await?.expect("required expressions");
+                if token != JsonToken::StartArray {
+                    return Err(input.invalid_type(token, "a sequence", work).await?);
                 }
-                input.next(work).await?;
                 let mut values = Vec::new();
-                while input.peek(work).await? != Some(JsonToken::EndArray) {
-                    values.push(typed(input, work).await?);
+                while input.next_array_value(work).await? {
+                    values.push(input.text(work).await?);
                 }
-                input.next(work).await?;
                 expressions = Some(values);
             }
             _ => unreachable!(),
         }
     }
     Ok(RuntimeProfiles {
-        rust_unicode: required(rust_unicode, "rust_unicode")?,
-        normalization_unicode: required(normalization_unicode, "normalization_unicode")?,
-        expressions: required(expressions, "expressions")?,
+        rust_unicode: required(rust_unicode, "rust_unicode", input)?,
+        normalization_unicode: required(normalization_unicode, "normalization_unicode", input)?,
+        expressions: required(expressions, "expressions", input)?,
     })
 }
 
@@ -166,75 +198,55 @@ async fn version(
     input: &mut Input<'_>,
     work: &mut impl Work<AnalysisError>,
 ) -> AnalysisResult<Option<(u8, u8, u8)>> {
-    if input.peek(work).await? == Some(JsonToken::Null) {
-        input.next(work).await?;
+    let token = input.next(work).await?.expect("required version");
+    if token == JsonToken::Null {
         return Ok(None);
     }
-    if input.peek(work).await? != Some(JsonToken::StartArray) {
-        return typed(input, work).await;
+    if token != JsonToken::StartArray {
+        return Err(input.invalid_type(token, "a tuple of size 3", work).await?);
     }
-    input.next(work).await?;
     let mut version = [0; 3];
     for (index, component) in version.iter_mut().enumerate() {
-        if input.peek(work).await? == Some(JsonToken::EndArray) {
-            return Err(serde_json::Error::invalid_length(index, &"a tuple of size 3").into());
+        if !input.next_array_value(work).await? {
+            return Err(JsonDiagnostic::invalid_length(
+                index,
+                "a tuple of size 3",
+                input.position(),
+            )
+            .into());
         }
-        *component = typed(input, work).await?;
+        *component = input.u8(work).await?;
     }
-    if input.next(work).await? != Some(JsonToken::EndArray) {
-        return Err(serde_json::Error::custom("trailing characters").into());
-    }
+    input.finish_array(work).await?;
     Ok(Some((version[0], version[1], version[2])))
 }
 
-async fn typed<T: DeserializeOwned>(
-    input: &mut Input<'_>,
-    work: &mut impl Work<AnalysisError>,
-) -> AnalysisResult<T> {
-    let value = input.value(work).await?;
-    match value {
-        // Scalar conversion keeps the public JSON dependency's numeric diagnostics.
-        serde_json::Value::Number(value) => serde_json::from_str(value.as_str()).map_err(|error| {
-            serde_json::Error::custom(error.to_string().split(" at line ").next().unwrap()).into()
-        }),
-        value => Ok(serde_json::from_value(value)?),
-    }
-}
-
-fn required<T>(value: Option<T>, field: &'static str) -> AnalysisResult<T> {
-    value.ok_or_else(|| serde_json::Error::missing_field(field).into())
+fn required<T>(value: Option<T>, field: &'static str, input: &Input<'_>) -> AnalysisResult<T> {
+    value.ok_or_else(|| JsonDiagnostic::missing_field(field, input.position()).into())
 }
 
 struct Fields {
     names: &'static [&'static str],
-    name: &'static str,
+    expected_length: &'static str,
     sequence: Option<usize>,
 }
 
 impl Fields {
     async fn new(
         input: &mut Input<'_>,
-        name: &'static str,
+        expected: &'static str,
+        expected_length: &'static str,
         names: &'static [&'static str],
         work: &mut impl Work<AnalysisError>,
     ) -> AnalysisResult<Self> {
-        let sequence = match input.peek(work).await? {
-            Some(JsonToken::StartObject) => None,
-            Some(JsonToken::StartArray) => Some(0),
-            _ => {
-                let value = input.value(work).await?;
-                let expected = format!("struct {name}");
-                return Err(serde_json::Error::invalid_type(
-                    unexpected(&value),
-                    &expected.as_str(),
-                )
-                .into());
-            }
+        let sequence = match input.next(work).await?.expect("required struct") {
+            JsonToken::StartObject => None,
+            JsonToken::StartArray => Some(0),
+            token => return Err(input.invalid_type(token, expected, work).await?),
         };
-        input.next(work).await?;
         Ok(Self {
             names,
-            name,
+            expected_length,
             sequence,
         })
     }
@@ -245,20 +257,17 @@ impl Fields {
         work: &mut impl Work<AnalysisError>,
     ) -> AnalysisResult<Option<usize>> {
         if let Some(index) = &mut self.sequence {
-            if input.peek(work).await? == Some(JsonToken::EndArray) {
-                input.next(work).await?;
-                if *index != self.names.len() {
-                    return Err(serde_json::Error::custom(format!(
-                        "invalid length {index}, expected struct {} with {} elements",
-                        self.name,
-                        self.names.len()
-                    ))
-                    .into());
-                }
+            if *index == self.names.len() {
+                input.finish_array(work).await?;
                 return Ok(None);
             }
-            if *index == self.names.len() {
-                return Err(serde_json::Error::custom("trailing characters").into());
+            if !input.next_array_value(work).await? {
+                return Err(JsonDiagnostic::invalid_length(
+                    *index,
+                    self.expected_length,
+                    input.position(),
+                )
+                .into());
             }
             let field = *index;
             *index += 1;
@@ -267,31 +276,17 @@ impl Fields {
         match input.next(work).await? {
             Some(JsonToken::EndObject) => Ok(None),
             Some(JsonToken::Key(encoded)) => {
-                let key = input.string(encoded, work).await?;
+                let key = input.name(encoded, work).await?;
                 self.names
                     .iter()
-                    .position(|name| *name == key)
+                    .position(|name| *name == key.as_str())
                     .map(Some)
-                    .ok_or_else(|| serde_json::Error::unknown_field(&key, self.names).into())
+                    .ok_or_else(|| {
+                        JsonDiagnostic::unknown_field(key, self.names, input.position()).into()
+                    })
             }
             _ => unreachable!("the grammar requires an object key or closing delimiter"),
         }
-    }
-}
-
-fn unexpected(value: &serde_json::Value) -> serde::de::Unexpected<'_> {
-    match value {
-        serde_json::Value::Null => serde::de::Unexpected::Unit,
-        serde_json::Value::Bool(value) => serde::de::Unexpected::Bool(*value),
-        serde_json::Value::String(value) => serde::de::Unexpected::Str(value),
-        serde_json::Value::Number(value) => value
-            .as_u64()
-            .map(serde::de::Unexpected::Unsigned)
-            .or_else(|| value.as_i64().map(serde::de::Unexpected::Signed))
-            .or_else(|| value.as_f64().map(serde::de::Unexpected::Float))
-            .unwrap_or(serde::de::Unexpected::Other("number")),
-        serde_json::Value::Array(_) => serde::de::Unexpected::Seq,
-        serde_json::Value::Object(_) => serde::de::Unexpected::Map,
     }
 }
 

@@ -43,10 +43,13 @@ pub use expressions::{
     DefinitionImageReader,
 };
 pub use input::{
-    read_columns_image, read_columns_image_with_footprint, read_dropped_attributes_image,
-    read_foreign_keys_image, read_table_checks_image, read_table_checks_image_with_footprint,
-    read_table_hierarchy_image, read_table_hierarchy_image_with_footprint, read_table_keys_image,
-    CapturedExpressionPlan, CapturedPlan, CapturedQuery, CapturedScalar, CapturedStatement,
+    read_columns_image, read_columns_image_from, read_columns_image_with_footprint,
+    read_dropped_attributes_image, read_dropped_attributes_image_from, read_foreign_keys_image,
+    read_foreign_keys_image_from, read_table_checks_image, read_table_checks_image_from,
+    read_table_checks_image_with_footprint, read_table_hierarchy_image,
+    read_table_hierarchy_image_from, read_table_hierarchy_image_with_footprint,
+    read_table_keys_image, read_table_keys_image_from, CapturedExpressionPlan, CapturedPlan,
+    CapturedQuery, CapturedScalar, CapturedStatement, CatalogImageInput,
 };
 pub use reader::CatalogImageReader;
 use reader::Entries;
@@ -91,6 +94,13 @@ impl crate::catalog::security::BoundTableSecurity {
         cancellation: &CancellationToken,
     ) -> Result<uqa_core::memory::Budgeted<Self>, SQLError> {
         input::bound_table_security(reader, memory, cancellation)
+    }
+
+    /// Resume native table authority on a parent image without rebuilding grants or revisions.
+    pub async fn read_image_from(
+        input: uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<uqa_core::memory::Budgeted<Self>, SQLError> {
+        input::bound_table_security_from(input).await
     }
 }
 

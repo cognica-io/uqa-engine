@@ -113,3 +113,110 @@ fn capture_columns(engine: &Engine) -> usize {
     }
     captures
 }
+
+#[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn retained_engine_catalog_capture_keeps_completed_generations_after_ddl_and_engine_retirement(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        memory::{MemoryBudget, RetainedValue},
+        CancellationToken,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("captured-catalog"));
+    pause_automatic_statistics(&engine);
+    engine.sql("CREATE TABLE items(id integer); CREATE TABLE later_item(body text); CREATE VIEW capture_view AS SELECT id FROM items; CREATE DOMAIN captured_type AS integer; CREATE TEMP TABLE temporary_item(id integer)", &[]).unwrap();
+    let expected = engine.restored_catalog_read_view();
+    let durable = engine.durable.snapshot();
+    let tables = engine.storage.tables.live_snapshot();
+    let mut selected = None;
+    let allocation = allocation_counter::measure(|| {
+        selected = Some(engine.catalog_read_capture(&durable, None));
+    });
+    assert_eq!(allocation.bytes_total, 0);
+    let capture = selected.unwrap();
+    let native = MemoryBudget::new(1 << 20);
+    let work = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let original = token.clone();
+    let retained_native = native.clone();
+    let mut input =
+        ImageDecoder::<_, uqa_sql::SQLError>::new(&work, &token, |mut reader| async move {
+            let view = capture
+                .capture_from_input(
+                    tables.iter().map(crate::TableState::catalog_snapshot_entry),
+                    &retained_native,
+                    &original,
+                    &mut reader.input(),
+                )
+                .await?;
+            Ok((engine, view))
+        })
+        .unwrap();
+    assert!(input
+        .advance(
+            &mut std::io::empty(),
+            ImageDecodeWindow { bytes: 1, steps: 1 }
+        )
+        .unwrap()
+        .is_none());
+    let (engine, actual) = input.read(&mut std::io::empty()).unwrap();
+    engine.sql("ALTER TABLE later_item ADD COLUMN added integer; DROP VIEW capture_view; DROP DOMAIN captured_type; CREATE TABLE after_capture(id integer)", &[]).unwrap();
+    drop((durable, engine));
+    assert_eq!(
+        actual.snapshot().temporary_namespace,
+        expected.snapshot().temporary_namespace
+    );
+    assert_eq!(
+        actual.snapshot().tables.keys().collect::<Vec<_>>(),
+        expected.snapshot().tables.keys().collect::<Vec<_>>()
+    );
+    for (name, table) in &actual.snapshot().tables {
+        let original = &expected.snapshot().tables[name];
+        assert!(table.columns.shares_definition(&original.columns));
+        assert_eq!(table.object_id, original.object_id);
+        assert_eq!(table.catalog_oids, original.catalog_oids);
+    }
+    macro_rules! shared { ($($field:ident),+ $(,)?) => { $(assert!(RetainedValue::ptr_eq(&actual.snapshot().definitions.$field, &expected.snapshot().definitions.$field), stringify!($field));)+ }; }
+    shared!(
+        builtin_routine_security,
+        foreign_wrappers,
+        foreign_servers,
+        sql_user_functions,
+        role_memberships,
+        domains,
+        enums,
+        ranges,
+        shells,
+        comments,
+        composites,
+        graphs,
+        views,
+        catalog_indexes,
+        database_security,
+        schemas,
+        sequences,
+        graph_catalog_oids,
+        system_relation_security,
+        roles,
+        triggers,
+        rules
+    );
+    assert!(Arc::ptr_eq(
+        &actual.snapshot().definitions.foreign_tables,
+        &expected.snapshot().definitions.foreign_tables
+    ));
+    assert!(Arc::ptr_eq(
+        &actual.snapshot().definitions.foreign_table_security,
+        &expected.snapshot().definitions.foreign_table_security
+    ));
+    assert_eq!(work.used(), 0);
+    assert!(native.used() > 0);
+    drop((actual, expected));
+    assert_eq!(native.used(), 0);
+}

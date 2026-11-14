@@ -34,6 +34,7 @@ mod namespaces;
 mod object_acl;
 mod overriding;
 mod pattern_operator;
+mod query_input;
 mod ranges;
 mod reference_name;
 mod referenced_partition;
@@ -54,6 +55,7 @@ mod table_alteration;
 mod type_lifecycle;
 mod type_privileges;
 mod types;
+pub(crate) use types::builtin_array_element_name;
 
 pub use acl_role_specification::AclRoleSpecification;
 pub use array_access::{ArrayAccess, ArraySliceBounds, MAX_ARRAY_SUBSCRIPT_DIMENSIONS};

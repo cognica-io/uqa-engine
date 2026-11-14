@@ -7,6 +7,7 @@
 //! Immutable ordered roots retain original entries and admit successor paths under their owning allowance.
 
 mod bidirectional;
+mod input;
 #[cfg(test)]
 mod tests;
 mod tree;

@@ -9,8 +9,9 @@
 use super::{role_bindings, SequenceSecurity};
 use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{identity::RoleBinding, RoleIdentity, RoleReference};
+mod resolution;
+
 use uqa_core::{
-    catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
     catalog_sequence::{SequenceAclEntry, SequencePrivileges},
 };
@@ -82,33 +83,14 @@ impl BoundSequenceSecurity {
 
     /// Resolve display names only through the role view accompanying this authority snapshot.
     pub fn resolve(&self, roles: &RoleDefinitions) -> Result<SequenceSecurity, String> {
-        let name =
-            |identity| role_bindings::role_name(roles, identity, "sequence").map(str::to_owned);
-        let entries = |entries: &[BoundSequenceAclEntry]| {
-            entries
-                .iter()
-                .map(|entry| {
-                    Ok(SequenceAclEntry {
-                        role: entry
-                            .role
-                            .map(name)
-                            .transpose()?
-                            .map_or(AclGrantee::Public, AclGrantee::Role),
-                        grantor: Some(name(entry.grantor)?),
-                        privileges: entry.privileges,
-                        grant_options: entry.grant_options,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()
-        };
-        Ok(SequenceSecurity {
-            role_owner: name(self.role_owner)?,
-            acl: self.acl.as_deref().map(entries).transpose()?,
-        })
+        self.resolve_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map(|value| value.into_parts().0)
+            .map_err(resolution::diagnostic)
     }
 
     pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
-        super::sequence::validate_sequence_security_invariants(&self.resolve(roles)?, roles)
+        self.validate_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map_err(resolution::diagnostic)
     }
 
     pub fn depends_on(&self, role: RoleIdentity) -> bool {

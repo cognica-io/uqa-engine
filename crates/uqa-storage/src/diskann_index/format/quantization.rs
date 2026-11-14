@@ -125,11 +125,20 @@ pub fn decode_codebook(
     bytes: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<(PQCodebook, DiskANNQuantizationIdentity)> {
+    crate::image_io::work::inline(decode_codebook_from(manifest, bytes, control, &mut ()))
+}
+
+pub(in crate::diskann_index) async fn decode_codebook_from(
+    manifest: &DiskANNManifest,
+    bytes: &[u8],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<(PQCodebook, DiskANNQuantizationIdentity)> {
     let input = manifest.input();
-    let body = record::open(MAGIC, input.generation, bytes, control)?;
+    let body = record::open_from(MAGIC, input.generation, bytes, control, work).await?;
     if input.nodes == 0
         || body.len() < METADATA_BYTES
-        || record::artifact_digest(bytes, control)? != input.artifacts.codebook
+        || record::artifact_digest_from(bytes, control, work).await? != input.artifacts.codebook
     {
         return Err(invalid(
             "codebook is absent or differs from manifest digest",
@@ -178,7 +187,7 @@ pub fn decode_codebook(
         return Err(invalid("codebook scalar count or length differs"));
     }
     for chunk in 0..=chunks {
-        checkpoint(chunk, control)?;
+        crate::diskann_index::metric::checkpoint_from(chunk, control, work).await?;
         let expected = if chunk == chunks {
             dimensions as usize
         } else {
@@ -192,10 +201,12 @@ pub fn decode_codebook(
     centroids.reserve(scalars)?;
     let start = METADATA_BYTES + (chunks + 1) * 4;
     for (offset, scalar) in body[start..].as_chunks::<8>().0.iter().enumerate() {
-        checkpoint(offset, control)?;
+        crate::diskann_index::metric::checkpoint_from(offset, control, work).await?;
         centroids.push(f64::from_bits(u64::from_le_bytes(field(scalar, 0)?)))?;
     }
-    let codebook = PQCodebook::restore(dimensions, chunks, count, summary, centroids, control)?;
+    let codebook =
+        PQCodebook::restore_from(dimensions, chunks, count, summary, centroids, control, work)
+            .await?;
     let identity =
         DiskANNQuantizationIdentity::new(input.generation, &codebook, input.artifacts.codebook);
     Ok((codebook, identity))

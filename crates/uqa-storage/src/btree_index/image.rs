@@ -8,7 +8,11 @@
 
 use super::{entries::Entries, BTreeIndex};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
-use uqa_core::{memory::Budgeted, DocId, Value};
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput},
+    memory::{Budgeted, MemoryError, ProductionControl},
+    DocId, Value,
+};
 
 /// A private physical index under construction. Only completion exposes ordinary mutation; rejection consumes every partial field, key and identity buffer.
 pub struct BTreeIndexImageBuilder {
@@ -38,14 +42,57 @@ impl BTreeIndexImageBuilder {
     }
 
     /// Adopt an evaluated key without SQL comparison. Repeated physical keys append strictly increasing identities; the enclosing image validates global identity uniqueness and its declared count before publication.
-    pub fn add_value(mut self, id: DocId, value: Budgeted<Value>) -> StorageBackendResult<Self> {
+    pub fn add_value(self, id: DocId, value: Budgeted<Value>) -> StorageBackendResult<Self> {
+        let control = self.control.clone();
+        decode_image(
+            &mut std::io::empty(),
+            control.memory(),
+            control.cancellation(),
+            async |mut input| self.add_value_from(id, value, &mut input).await,
+        )
+    }
+
+    /// Adopt the same native physical key through an enclosing work channel, retaining payload accounting between nested value transitions.
+    pub async fn add_value_from(
+        self,
+        id: DocId,
+        value: Budgeted<Value>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let control = self.control.clone();
+        input
+            .with_scope(
+                control.memory(),
+                control.cancellation(),
+                async |mut child| self.adopt_value_from(id, value, &mut child).await,
+            )
+            .await
+    }
+
+    async fn adopt_value_from(
+        mut self,
+        id: DocId,
+        value: Budgeted<Value>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
         self.control.check()?;
         if !value.budget().shares_allowance(self.control.memory()) {
             return Err(invalid("index key belongs to another input allowance"));
         }
-        let payload = value
-            .retained_payload_bytes(self.control.memory(), self.control.cancellation())
-            .map_err(|error| StorageBackendError::backend("evaluated index image", error))?;
+        let production = ProductionControl::new(
+            self.control.memory(),
+            self.control.cancellation(),
+            input.cancellation,
+        );
+        let mut payload = 0usize;
+        for bytes in value.retained_payload_parts_with_control(production) {
+            input.checkpoint().await?;
+            payload = payload
+                .checked_add(bytes.map_err(|error| {
+                    StorageBackendError::backend("evaluated index image", error)
+                })?)
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
         if value.reserved_bytes() < payload {
             return Err(invalid("index key has no complete input admission"));
         }

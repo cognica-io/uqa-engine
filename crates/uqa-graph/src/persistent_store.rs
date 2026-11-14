@@ -62,7 +62,33 @@ impl PersistentGraphStore {
         catalog: Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
     ) -> Self {
-        Self::from_storage(Arc::new(catalog::CatalogGraphStorage { catalog, backend }))
+        Self::from_storage(Arc::new(catalog::CatalogGraphStorage {
+            catalog,
+            backend,
+            _memory: None,
+        }))
+    }
+
+    pub(crate) fn catalog_image_handle(
+        catalog: Arc<dyn CatalogFacade>,
+        backend: Arc<dyn PersistentStorageBackend>,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<Arc<crate::GraphStoreHandle>> {
+        control.check()?;
+        let memory = control
+            .memory()
+            .reserve(size_of::<catalog::CatalogGraphStorage>())?;
+        let mut store = Self::from_storage(Arc::new(catalog::CatalogGraphStorage {
+            catalog,
+            backend,
+            _memory: Some(memory),
+        }));
+        store.image_memory = Some(
+            control
+                .memory()
+                .reserve(size_of::<crate::GraphStoreHandle>())?,
+        );
+        Ok(Arc::new(crate::GraphStoreHandle::Persistent(store)))
     }
 
     pub fn from_storage(storage: Arc<dyn GraphStorage>) -> Self {

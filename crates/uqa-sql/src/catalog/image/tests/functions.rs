@@ -13,6 +13,7 @@ use crate::ast::{
 
 mod dispatch;
 mod validation;
+mod windows;
 
 fn binding() -> FunctionBinding {
     FunctionBinding {

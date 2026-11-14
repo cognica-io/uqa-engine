@@ -71,6 +71,27 @@ pub(super) fn insert<K: Ord, V>(link: &mut Link<K, V>, entry: OwnedNode<K, V>) -
     previous
 }
 
+/// The exclusive insertion owner completed every comparison before publishing this path. Rotations move the same nodes and never repeat a key comparison.
+pub(super) fn insert_selected<K, V>(
+    link: &mut Link<K, V>,
+    entry: OwnedNode<K, V>,
+    path: &[Ordering],
+) {
+    let Some((direction, rest)) = path.split_first() else {
+        debug_assert!(link.is_none());
+        *link = Some(entry);
+        return;
+    };
+    let node = &mut *link.as_mut().expect("selected insertion ancestor").value;
+    let child = match direction {
+        Ordering::Less => &mut node.left,
+        Ordering::Greater => &mut node.right,
+        Ordering::Equal => unreachable!("vacant insertion path has no equal key"),
+    };
+    insert_selected(child, entry, rest);
+    balance(link);
+}
+
 pub(super) fn remove<K: Borrow<Q>, V, Q: Ord + ?Sized>(
     link: &mut Link<K, V>,
     key: &Q,
@@ -124,6 +145,23 @@ pub(super) fn into_entry<K, V>(node: OwnedNode<K, V>) -> (K, V) {
     // The callee has freed the node allocation before its reservation is released.
     drop(memory);
     entry
+}
+
+pub(super) fn into_retained_entry<K, V>(node: OwnedNode<K, V>) -> (crate::memory::Produced<K>, V) {
+    use crate::memory::{Budgeted, ProductionControl};
+    let (node, memory) = node.into_parts();
+    let (key, value) = unbox_entry(node);
+    // Unboxing has freed this node. Its attached payload lease continues with the original key.
+    let key = match memory {
+        Some(mut memory) => {
+            drop(memory.split(size_of::<Node<K, V>>()));
+            Budgeted::new(key, memory).into()
+        }
+        None => ProductionControl::uncontrolled()
+            .finish(key, None)
+            .expect("moving an ordinary key has no fallible admission"),
+    };
+    (key, value)
 }
 
 #[expect(

@@ -14,12 +14,12 @@ use crate::{
         format::{
             DiskANNBuildProvenance, DiskANNGeneration, DiskANNManifest, DiskANNOriginSummary,
         },
-        pages::{DiskANNMemorySource, DiskANNReadLimits},
+        pages::{DiskANNMemorySource, DiskANNReadLimits, RecordInput},
         RetainedDiskANNIndex,
     },
-    image_io::{ImageInput, ImageOutput, ImageRead, ImageReader},
+    image_io::{ImageOutput, ImageRead, ImageReader},
     read_control::StorageReadControl,
-    vector_index::image::{invalid, VectorImageSnapshot, VectorImageSource},
+    vector_index::image::{invalid, Input, VectorImageSnapshot, VectorImageSource},
     StorageBackendResult,
 };
 use std::sync::Arc;
@@ -68,8 +68,8 @@ pub(super) fn write(
     })
 }
 
-pub(crate) fn read(
-    input: &mut ImageInput<'_>,
+pub(crate) async fn read(
+    input: &mut Input<'_, '_>,
     dimensions: u32,
     temporary: &DiskANNTemporaryBudget,
 ) -> StorageBackendResult<DiskANNMemoryIndex> {
@@ -78,45 +78,51 @@ pub(crate) fn read(
         .memory()
         .reserve(size_of::<DiskANNMemoryIndex>())?;
     let generation = DiskANNGeneration::new(
-        input.array()?,
-        u64::from_le_bytes(input.array()?),
-        u64::from_le_bytes(input.array()?),
-        u64::from_le_bytes(input.array()?),
+        input.source.array().await?,
+        u64::from_le_bytes(input.source.array().await?),
+        u64::from_le_bytes(input.source.array().await?),
+        u64::from_le_bytes(input.source.array().await?),
     )?;
     if generation.table() != 1 || generation.index() != 1 {
         return Err(invalid());
     }
-    let bytes = input.bytes_with_limit(
-        DiskANNManifest::ENCODED_BYTES
-            + DiskANNBuildProvenance::ENCODED_BYTES
-            + DiskANNOriginSummary::ENCODED_BYTES,
-    )?;
+    let bytes = input
+        .source
+        .bytes_with_limit(
+            DiskANNManifest::ENCODED_BYTES
+                + DiskANNBuildProvenance::ENCODED_BYTES
+                + DiskANNOriginSummary::ENCODED_BYTES,
+        )
+        .await?;
     let manifest = DiskANNManifest::decode(generation, &bytes, input.control)?;
     drop(bytes);
     if manifest.input().dimensions != dimensions || manifest.origins().is_none() {
         return Err(invalid());
     }
-    let options = read_options(input, &manifest)?;
+    let options = read_options(input, &manifest).await?;
     input.control.check_value_size(
         DiskANNManifest::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES,
         options.generation.max_record_bytes,
     )?;
     let physical =
-        DiskANNMemorySource::read_image(input, &manifest, options.generation.max_record_bytes)?;
+        DiskANNMemorySource::read_image(input, &manifest, options.generation.max_record_bytes)
+            .await?;
     // Decoded payloads keep their original admission. Future query and mutation
     // allocations belong to the independent destination, like an ordinary index.
     let owner = StorageReadControl::with_limit(
         crate::mvcc::VersionedSessionOptions::default().retained_bytes,
     );
-    let canonical = Canonical::read_image(input, dimensions, generation, &physical, &owner)?;
-    let index = RetainedDiskANNIndex::open_with_owner(
+    let canonical = Canonical::read_image(input, dimensions, generation, &physical, &owner).await?;
+    let index = RetainedDiskANNIndex::open_from(
         canonical,
-        Arc::new(physical.clone()),
+        RecordInput::Memory(Arc::new(physical.clone())),
         options.parameters,
         options.read,
         input.control,
         &owner,
-    )?;
+        input.source,
+    )
+    .await?;
     // Existing origins and physical data identities are retained. New mutations and
     // generations belong to a fresh lineage, so the source and restored writer cannot
     // manufacture the same revision identity for divergent future values.
@@ -134,18 +140,18 @@ pub(crate) fn read(
     Ok(result)
 }
 
-fn read_options(
-    input: &mut ImageInput<'_>,
+async fn read_options(
+    input: &mut Input<'_, '_>,
     manifest: &DiskANNManifest,
 ) -> StorageBackendResult<DiskANNMemoryOptions> {
     let build = manifest.build_provenance().ok_or_else(invalid)?;
     Ok(DiskANNMemoryOptions {
         parameters: manifest.input().parameters,
         read: DiskANNReadLimits {
-            resident_bytes: input.count()?,
-            cache_bytes: input.count()?,
-            max_in_flight_page_bytes: input.count()?,
-            max_record_bytes: input.count()?,
+            resident_bytes: input.source.count().await?,
+            cache_bytes: input.source.count().await?,
+            max_in_flight_page_bytes: input.source.count().await?,
+            max_record_bytes: input.source.count().await?,
         },
         partitions: build.partition_options(),
         merge: build.merge_options(),
@@ -153,7 +159,7 @@ fn read_options(
             training: build.training(),
             code_batch_nodes: build.code_batch_nodes(),
             side_batch_entries: build.side_batch_entries(),
-            max_record_bytes: input.count()?,
+            max_record_bytes: input.source.count().await?,
         },
     })
 }

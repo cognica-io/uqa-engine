@@ -59,19 +59,21 @@ pub(super) fn require_format(
     catalog: &dyn CatalogFacade,
     allow_legacy: bool,
 ) -> StorageBackendResult<bool> {
-    match catalog
-        .get_metadata(CATALOG_ADDRESS_METADATA_KEY)?
-        .as_deref()
-    {
-        Some("1") => Ok(false),
-        None if allow_legacy => Ok(true),
-        None => Err(StorageBackendError::Other(
-            "constraints require an initial catalog address migration".into(),
-        )),
-        Some(_) => Err(StorageBackendError::Other(
-            "unknown constraint catalog address format".into(),
-        )),
-    }
+    format(
+        catalog
+            .get_metadata(CATALOG_ADDRESS_METADATA_KEY)?
+            .as_deref(),
+        allow_legacy,
+    )
+}
+
+pub(super) fn format(value: Option<&str>, allow_legacy: bool) -> StorageBackendResult<bool> {
+    super::identity_format(
+        value,
+        allow_legacy,
+        "constraints require an initial catalog address migration",
+        "unknown constraint catalog address format",
+    )
 }
 
 pub(super) struct ForeignMigration {
@@ -85,23 +87,31 @@ pub(super) fn key_and_check_identities(
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
 ) -> Vec<ConstraintCatalogIdentity> {
+    key_and_check_slots(columns, constraints)
+        .flatten()
+        .collect()
+}
+
+pub(super) fn key_and_check_slots<'a>(
+    columns: &'a [ColumnDef],
+    constraints: &'a TableConstraintSet,
+) -> impl Iterator<Item = Option<ConstraintCatalogIdentity>> + 'a {
     constraints
         .key_constraints
         .iter()
-        .filter_map(|key| key.catalog_identity)
-        .chain(columns.iter().filter_map(|column| {
+        .map(|key| key.catalog_identity)
+        .chain(columns.iter().map(|column| {
             column
                 .check_object_id
                 .zip(column.check_catalog_oid)
                 .map(|(object_id, oid)| ConstraintCatalogIdentity { object_id, oid })
         }))
-        .chain(constraints.checks.iter().filter_map(|check| {
+        .chain(constraints.checks.iter().map(|check| {
             check
                 .object_id
                 .zip(check.catalog_oid)
                 .map(|(object_id, oid)| ConstraintCatalogIdentity { object_id, oid })
         }))
-        .collect()
 }
 
 fn identified_rows(
@@ -161,17 +171,11 @@ pub(super) fn coordinate(
         );
     }
     let replacements = coordinate_addresses(&rows)?;
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
+    let mut identities = super::claims::GlobalClaims::default();
     for table in tables {
         table.changed |=
             apply_replacements(&mut table.columns, &mut table.constraints, &replacements);
-        validate(
-            &table.columns,
-            &table.constraints,
-            &mut identities,
-            &mut oids,
-        )?;
+        validate(&table.columns, &table.constraints, &mut identities)?;
     }
     for table in foreign {
         let mut constraints = TableConstraintSet {
@@ -180,12 +184,7 @@ pub(super) fn coordinate(
         };
         table.changed |=
             apply_replacements(&mut table.table.columns, &mut constraints, &replacements);
-        validate(
-            &table.table.columns,
-            &constraints,
-            &mut identities,
-            &mut oids,
-        )?;
+        validate(&table.table.columns, &constraints, &mut identities)?;
         table.table.checks = constraints.checks;
     }
     Ok(())
@@ -285,12 +284,11 @@ fn apply_replacements(
 fn validate(
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
-    identities: &mut BTreeSet<[u8; 16]>,
-    oids: &mut BTreeSet<i64>,
+    identities: &mut super::claims::GlobalClaims,
 ) -> StorageBackendResult<()> {
     claims::validate_constraint_identities(columns, constraints)
         .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
-    super::register_identities(columns, constraints, identities, oids)
+    super::register_identities(columns, constraints, identities)
 }
 
 #[cfg(test)]

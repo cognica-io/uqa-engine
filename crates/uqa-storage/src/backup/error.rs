@@ -74,6 +74,15 @@ impl From<crate::StorageBackendError> for BackupError {
         match error {
             crate::StorageBackendError::Memory(error) => Self::Memory(error),
             crate::StorageBackendError::Cancelled(error) => Self::Cancelled(error),
+            crate::StorageBackendError::Json(error) => {
+                Self::Storage(crate::StorageBackendError::Json(error.into_type_only()))
+            }
+            crate::StorageBackendError::Analysis(error) => Self::Storage(
+                crate::StorageBackendError::Analysis(error.redact_json_payloads()),
+            ),
+            crate::StorageBackendError::RetainedDiagnostic(_) => {
+                Self::Invalid("stored catalog authority")
+            }
             error => Self::Storage(error),
         }
     }

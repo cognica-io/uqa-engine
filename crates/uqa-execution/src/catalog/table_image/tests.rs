@@ -6,7 +6,7 @@
 
 use super::*;
 use std::collections::BTreeMap;
-use uqa_core::{memory::BudgetedString, value_image::write_value_image, Value};
+use uqa_core::{memory::ProductionControl, value_image::write_value_image, Value};
 use uqa_storage::{
     diskann_index::{DiskANNIndexOptions, DiskANNMemoryIndex},
     inverted_index::AnalyzerBindings,
@@ -16,20 +16,25 @@ use uqa_storage::{
 
 type Unit = (DecodedMemoryTableUnit, Vec<u8>);
 
-fn name(value: &str) -> BudgetedString {
+mod input;
+mod value_registration;
+mod vector_input;
+
+fn name(value: &str) -> uqa_storage::backup::MemoryImageName {
     let control = StorageReadControl::with_limit(1 << 20);
     let production = ProductionControl::new(
         control.memory(),
         control.cancellation(),
         control.cancellation(),
     );
-    BudgetedString::from_budgeted(
+    uqa_storage::backup::MemoryImageName::from_budgeted(
         production
             .copy_text(value)
             .unwrap()
             .into_budgeted()
             .unwrap(),
     )
+    .unwrap()
 }
 
 fn vector(kind: usize) -> Box<dyn VectorIndex> {

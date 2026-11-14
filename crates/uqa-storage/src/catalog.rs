@@ -15,21 +15,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+pub mod analyzer_input;
 mod cache_revisions;
 pub mod capture;
+pub mod foreign_load;
 mod graph_access;
 pub mod graph_guards;
 pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
+pub mod index_load;
 pub mod input;
+mod ordering;
 mod record_revisions;
 mod relation;
 pub mod relation_acl;
 mod relation_security;
-mod schema;
+pub mod schema;
 pub mod scoring_params;
+mod sequence;
+pub mod text_load;
+pub use sequence::{SequenceOptions, SequenceRow};
+pub use uqa_core::catalog_sequence::{
+    SequenceAclEntry, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
+};
+
+pub mod sequence_load;
 mod sequence_security;
 mod sequence_values;
 
@@ -54,7 +66,7 @@ pub mod table_load;
 pub mod text_input;
 
 pub use schema::{BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaRow};
-pub use table::{TableAclEntry, TablePrivileges};
+pub use table::{TableAclEntry, TablePrivileges, TableSchema, VectorFieldSchema};
 
 /// A borrowed metadata record on one catalog read boundary. Callbacks must not reenter persistence.
 pub type MetadataReadVisitor<'a> = dyn FnMut(&str, &str) -> StorageBackendResult<()> + 'a;
@@ -79,38 +91,6 @@ impl RelationKind {
             Self::Index => "index",
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableSchema {
-    pub relation: RelationIdentity,
-    #[serde(flatten)]
-    pub security: RelationSecurityRow,
-    /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
-    #[serde(default)]
-    pub object_id: [u8; 16],
-    /// Stable physical-storage identity. `CREATE TABLE` and `TRUNCATE` allocate a new value, while schema-only alterations and renames preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
-    #[serde(default)]
-    pub storage_generation: [u8; 16],
-    pub analyzer_json: String,
-    pub fts_fields: Vec<String>,
-    pub vector_fields: Vec<VectorFieldSchema>,
-    /// Serialized `Vec<uqa_sql::ast::ColumnDef>` capturing the schema
-    /// columns (name, type, `auto_increment`, flags). Empty for
-    /// tables created by the legacy code path before column tracking
-    /// existed.
-    #[serde(default)]
-    pub columns_json: String,
-    /// Serialized `uqa_sql::ast::TableConstraintSet`. Empty for catalogs
-    /// created before durable table constraints were introduced.
-    #[serde(default)]
-    pub constraints_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorFieldSchema {
-    pub field: String,
-    pub dimensions: u32,
 }
 
 /// One row from graph-edge persistence, represented as a typed struct so the
@@ -225,71 +205,32 @@ pub struct ColumnStatsRow {
     pub mcv_frequencies_json: String,
 }
 
-/// Durable SQL sequence state. Sequence allocation is implemented by the
-/// catalog backend as one atomic mutation so independent engine sessions (and
-/// independently opened engines) cannot return the same value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SequenceOptions {
-    pub data_type: String,
-    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by native sequence restoration.
-    pub min_value: Option<i64>,
-    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by native sequence restoration.
-    pub max_value: Option<i64>,
-    pub cycle: bool,
-    #[serde(default = "default_sequence_cache_size")]
-    pub cache_size: i64,
-}
-
-const fn default_sequence_cache_size() -> i64 {
-    1
-}
-
-impl Default for SequenceOptions {
-    fn default() -> Self {
-        Self {
-            data_type: "bigint".into(),
-            min_value: None,
-            max_value: None,
-            cycle: false,
-            cache_size: default_sequence_cache_size(),
-        }
-    }
-}
-
-pub use uqa_core::catalog_sequence::{
-    SequenceAclEntry, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
-};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SequenceRow {
-    pub relation: RelationIdentity,
-    /// Captured owner and ACL role identities, or a legacy row awaiting initial-open migration.
-    #[serde(flatten)]
-    pub security: SequenceSecurityRow,
-    /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
-    #[serde(default)]
-    pub object_id: [u8; 16],
-    /// Changes when value-generation options or persistence replace the sequence's allocation state. Stable across ownership and name changes, value reservations, and `setval`.
-    #[serde(default)]
-    pub definition_generation: [u8; 16],
-    pub start: i64,
-    pub increment: i64,
-    pub current: i64,
-    /// False until the first allocation returns `current` verbatim.
-    pub called: bool,
-    /// Number of values whose advancement is already durable in the sequence log.
-    #[serde(default)]
-    pub log_count: i64,
-    /// `PostgreSQL` `pg_class.relpersistence` code. Durable sequence rows accept only permanent (`p`) and unlogged (`u`) values.
-    pub persistence: String,
-    #[serde(default)]
-    pub owner: Option<SequenceOwner>,
-    #[serde(default)]
-    pub options: SequenceOptions,
-}
-
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Retain physical graph-name records from one selected view. Consumers finish complete membership before validating label metadata; Key/Value name records do not read their ignored payloads.
+    fn begin_graph_name_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<String>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained graph name input is not supported".into(),
+        ))
+    }
+
+    /// Retain complete foreign definitions and independent relation ACLs from one original view, preserving physical errors before publication and the provider's original result order.
+    fn begin_foreign_table_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<foreign_load::CatalogForeignTableLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained foreign table loading is not supported".into(),
+        ))
+    }
+
     /// Retain and assemble a complete admitted table catalog, preserving the provider's original cross-record predicates, ACL replacement order and result ordering.
     fn begin_table_load(
         &self,
@@ -327,6 +268,44 @@ pub trait CatalogFacade: Send + Sync {
         ))
     }
 
+    /// Read a complete named family and apply the provider's original result order before semantic interpretation.
+    fn begin_text_load(
+        &self,
+        _family: text_input::CatalogTextFamily,
+        _limits: text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<text_load::CatalogTextLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained ordered catalog text is not supported".into(),
+        ))
+    }
+
+    /// Retain field binding envelopes and compatibility labels from one provider view. Complete physical bindings precede labels; the consumer owns ordering and semantic interpretation at that boundary.
+    fn begin_analyzer_input(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<analyzer_input::CatalogAnalyzerInput> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog analyzer input is not supported".into(),
+        ))
+    }
+
+    /// Retain literal-prefix metadata in original provider order. Reject unrelated keys before materializing their values; each inspected physical slot remains bounded by the cursor window.
+    fn begin_metadata_input(
+        &self,
+        _prefix: &str,
+        _limits: text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<text_input::CatalogTextInput> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained metadata prefix input is not supported".into(),
+        ))
+    }
+
     /// Retain secondary-index definitions from the same native read boundary. Each row preserves its original encoded columns, parameters and optional semantic definition; later consumers own catalog ordering and reference validation.
     fn begin_index_input(
         &self,
@@ -336,6 +315,18 @@ pub trait CatalogFacade: Send + Sync {
         control.check()?;
         Err(StorageBackendError::Other(
             "retained catalog index input is not supported".into(),
+        ))
+    }
+
+    /// Complete physical index rows in the same order as the ordinary provider loader before interpreting their definitions.
+    fn begin_index_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<index_load::CatalogIndexLoad> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "retained catalog index loading is not supported".into(),
         ))
     }
 
@@ -391,6 +382,18 @@ pub trait CatalogFacade: Send + Sync {
     /// Remove one metadata record, retaining its private deletion and write precondition until transaction end.
     fn delete_metadata(&self, key: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    /// Read one exact metadata record on the catalog's current committed/private view. Encoded key/value limits precede provider payload materialization; the returned text retains its original allocation allowance. Unsupported providers reject the operation without falling back to an unbounded owned read.
+    fn get_metadata_with_control(
+        &self,
+        _key: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled metadata reads are not supported".into(),
+        ))
+    }
     /// Visit matching metadata records on one catalog snapshot without collecting their payloads. The prefix is literal, including NUL and wildcard characters. Providers retain their original read allowance and cancellation; an error stops the scan before the next record. The callback must not reenter persistence and owns any retained output. Unsupported providers must reject this operation instead of materializing all records.
     fn visit_metadata_with_prefix(
         &self,
@@ -465,6 +468,27 @@ pub trait CatalogFacade: Send + Sync {
     fn save_schema_row(&self, schema: &SchemaRow) -> StorageBackendResult<()>;
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()>;
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>>;
+
+    /// Retain original sequence definitions and generation values for complete bounded restoration.
+    fn begin_sequence_load(
+        &self,
+        _limits: input::CatalogInputLimits,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<sequence_load::CatalogSequenceLoad> {
+        Err(StorageBackendError::Other(
+            "retained sequence input is unavailable".into(),
+        ))
+    }
+
+    fn begin_schema_load(
+        &self,
+        _limits: crate::catalog::input::CatalogInputLimits,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::schema::load::CatalogSchemaLoad> {
+        Err(StorageBackendError::Other(
+            "retained schema input is not supported by this catalog".into(),
+        ))
+    }
 
     /// Whether this exact schema has a private creation, replacement or deletion in the current session.
     fn schema_has_private_changes(&self, _name: &str) -> StorageBackendResult<bool> {
@@ -644,6 +668,19 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool>;
+
+    /// Test the exact canonical name key without reading its ignored payload. Decoded names from a physical scan do not substitute for canonical presence. The caller retains the enclosing catalog transaction.
+    fn named_graph_exists_with_control(
+        &self,
+        _name: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled graph-name lookup is not supported".into(),
+        ))
+    }
 
     /// Read one entity without loading any other graph payload.
     fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>>;
@@ -925,61 +962,22 @@ pub trait CatalogFacade: Send + Sync {
         table_name: &str,
         stats: &[ColumnStatsInput<'_>],
     ) -> StorageBackendResult<()>;
+    /// Retain the selected table's committed/private statistics and consume one physical record per advance. Counts and encoded distributions retain their stored representation; Planner owns their semantic decoding.
+    fn begin_column_stats_input(
+        &self,
+        _table_name: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<input::CatalogInput<ColumnStatsRow>> {
+        control.check()?;
+        Err(crate::StorageBackendError::Other(
+            "retained column statistics input is not supported by this catalog".into(),
+        ))
+    }
+
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>>;
     fn delete_column_stats(&self, table_name: &str) -> StorageBackendResult<()>;
 }
 
 #[cfg(test)]
-mod tests {
-    use super::RelationIdentity;
-
-    #[test]
-    fn relation_identity_rendering_is_reversible_and_collision_free() {
-        let left = RelationIdentity::new("a.b", "c");
-        let right = RelationIdentity::new("a", "b.c");
-        assert_eq!(left.qualified_name(), "\"a.b\".c");
-        assert_eq!(right.qualified_name(), "a.\"b.c\"");
-        assert_ne!(left.qualified_name(), right.qualified_name());
-        assert_eq!(
-            RelationIdentity::from_legacy_name(&left.qualified_name()).unwrap(),
-            left
-        );
-        assert_eq!(
-            RelationIdentity::from_legacy_name(&right.qualified_name()).unwrap(),
-            right
-        );
-    }
-
-    #[test]
-    fn relation_identity_preserves_quotes_and_unqualified_public_alias() {
-        let quoted = RelationIdentity::new("public", "a\"b.c");
-        assert_eq!(quoted.qualified_name(), "public.\"a\"\"b.c\"");
-        assert_eq!(
-            quoted.canonical_and_legacy_public_names(),
-            vec![
-                "public.\"a\"\"b.c\"".to_string(),
-                "\"a\"\"b.c\"".to_string()
-            ]
-        );
-        assert_eq!(
-            RelationIdentity::from_legacy_name(&quoted.qualified_name()).unwrap(),
-            quoted
-        );
-        assert_eq!(
-            RelationIdentity::from_legacy_name("plain").unwrap(),
-            RelationIdentity::new("public", "plain")
-        );
-        assert_eq!(
-            RelationIdentity::new("app", "plain").canonical_and_legacy_public_names(),
-            vec!["app.plain".to_string()]
-        );
-        assert_eq!(
-            RelationIdentity::new("public", "Upper").canonical_and_legacy_public_names(),
-            vec![
-                "public.\"Upper\"".to_string(),
-                "\"Upper\"".to_string(),
-                "Upper".to_string()
-            ]
-        );
-    }
-}
+mod tests;

@@ -10,6 +10,7 @@ use uqa_sql::ast::RelationPersistence;
 
 mod native;
 mod resources;
+mod windows;
 
 fn address(object_id: u32, sub_id: i32, class_id: u32) -> CommentAddress {
     CommentAddress {

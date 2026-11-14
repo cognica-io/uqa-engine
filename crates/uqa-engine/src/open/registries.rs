@@ -18,16 +18,57 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_registries_after_sequences(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_sequences(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         *self.durable.graph_catalog_oids.write() =
             uqa_execution::catalog::graph_oids::load(catalog)?;
+        self.restore_registries_after_graph_oids(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_graph_oids(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         self.restore_enums_from_catalog(catalog)?;
         self.restore_shells_from_catalog(catalog)?;
+        self.restore_registries_after_shells(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_shells(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         self.restore_ranges_from_catalog(catalog)?;
         let comments =
             uqa_execution::catalog::comments::restore(catalog, &self.durable.comments.read())?;
         *self.durable.comments.write() = comments;
         self.restore_composites_from_catalog(catalog)?;
+        self.restore_registries_after_composites(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_composites(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_registries_after_domains(catalog, mode, domains)
+    }
+
+    pub(super) fn restore_registries_after_domains(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+    ) -> StorageBackendResult<()> {
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(
                 catalog,
@@ -43,8 +84,37 @@ impl Engine {
                 catalog,
                 &self.durable.roles.read(),
             )?;
+        self.restore_registries_after_builtin_authority(
+            catalog,
+            mode,
+            domains,
+            pending_sql_functions,
+        )
+    }
+
+    pub(super) fn restore_registries_after_builtin_authority(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+        pending_sql_functions: Option<
+            uqa_execution::routines::restoration::PendingSQLFunctionRestore,
+        >,
+    ) -> StorageBackendResult<()> {
         self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog, mode)?;
+        self.restore_registries_after_analyzers(catalog, mode, domains, pending_sql_functions)
+    }
+
+    pub(super) fn restore_registries_after_analyzers(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+        pending_sql_functions: Option<
+            uqa_execution::routines::restoration::PendingSQLFunctionRestore,
+        >,
+    ) -> StorageBackendResult<()> {
         self.restore_foreign_registries_from_catalog(catalog, mode)?;
         // Stored view plans are rebound only after every row-producing
         // relation kind is present. Legacy unqualified sources may refer to a
@@ -261,6 +331,23 @@ impl Engine {
             indexes.insert(&key, index)?;
         }
         *self.durable.path_indexes.write() = indexes;
+        Ok(())
+    }
+}
+
+impl Engine {
+    /// Registry loading and ordinary opening share the same model-cache semantics.
+    pub(super) fn restore_model_caches(
+        &self,
+        catalog: &dyn uqa_storage::CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        for (name, json) in catalog.load_models()? {
+            let model = super::Arc::new(serde_json::from_str::<super::DeepModel>(&json)?);
+            self.durable.models.write().insert(name, model)?;
+        }
+        for (name, json) in catalog.load_all_scoring_params()? {
+            self.durable.scoring_params.write().insert(name, json)?;
+        }
         Ok(())
     }
 }

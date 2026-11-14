@@ -13,6 +13,7 @@ use std::io;
 use uqa_core::memory::ProductionControl;
 
 mod domains;
+mod windows;
 
 fn encode(value: &Expr) -> Vec<u8> {
     let memory = MemoryBudget::new(64 << 20);

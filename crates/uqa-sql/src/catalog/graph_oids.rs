@@ -10,6 +10,7 @@ use uqa_core::memory::OwnedMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod input;
 mod label;
 pub mod registry;
 pub use registry::{CapturedGraphOidRegistry, GraphOidRegistry};

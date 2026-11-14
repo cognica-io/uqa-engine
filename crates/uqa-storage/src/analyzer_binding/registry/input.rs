@@ -17,6 +17,17 @@ use uqa_core::{
 mod tests;
 
 impl FieldAnalyzerCatalog {
+    /// Retain lower-bound name copying before seeking a table's original compiled field revisions. The returned iterator borrows this immutable generation and never resolves resources.
+    pub async fn durable_fields_from<'a>(
+        &'a self,
+        table: &'a str,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<impl Iterator<Item = (&'a str, &'a FieldAnalyzerBinding)>> {
+        let (table_name, memory) = input.copy_text(table).await?.into_parts();
+        let start = Budgeted::new((table_name, String::new()), memory);
+        Ok(self.fields_from_start(table, &start))
+    }
+
     /// Seek one permanent table's original field bindings without visiting earlier tables. Only the temporary lower-bound name is allocated, under the supplied allowance; yielded bindings borrow this immutable catalog generation.
     pub fn durable_fields_with_control<'a>(
         &'a self,
@@ -31,11 +42,19 @@ impl FieldAnalyzerCatalog {
         );
         let (name, memory) = production.copy_text(table)?.into_parts();
         let start = production.finish((name, String::new()), memory)?;
-        let values = self.durable.range_from(std::ops::Bound::Included(&*start));
         control.check()?;
-        Ok(values
+        Ok(self.fields_from_start(table, &start))
+    }
+
+    fn fields_from_start<'a>(
+        &'a self,
+        table: &'a str,
+        start: &(String, String),
+    ) -> impl Iterator<Item = (&'a str, &'a FieldAnalyzerBinding)> + use<'a> {
+        self.durable
+            .range_from(std::ops::Bound::Included(start))
             .take_while(move |(key, _)| key.0 .0 == table)
-            .map(|(key, value)| (key.0 .1.as_str(), &**value)))
+            .map(|(key, value)| (key.0 .1.as_str(), &**value))
     }
 
     /// Add one decoded permanent field binding without resolving or recompiling its revisions. Input owns the complete key and binding name allocations; immutable catalog copies retain those exact owners. Failure consumes the unpublished candidate.
@@ -139,6 +158,25 @@ impl FieldAnalyzerCatalog {
         self.temporary = self.temporary.into_mutation_budget(memory);
         self.images = self.images.into_mutation_budget(memory);
         self
+    }
+
+    /// Adopt a native stored binding and prepare its encoded projection through the same work channel. Names and revision handles move unchanged, while paired catalog roots publish only after both encoded sides are complete.
+    pub async fn insert_restored_from(
+        self,
+        key: Budgeted<(String, String)>,
+        value: Budgeted<FieldAnalyzerBinding>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let control = StorageReadControl::new(input.memory, input.cancellation);
+        let key_bytes = self.validate_image_admission(&key, &value, &control)?;
+        let image = ImageBinding::prepare_restored(&value, input).await?;
+        let table = input.copy_text(&key.0).await?;
+        let field = input.copy_text(&key.1).await?;
+        let (table, mut memory) = table.into_parts();
+        let (field, field_memory) = field.into_parts();
+        memory.absorb(field_memory);
+        let image_key = StoredKey(Budgeted::new((table, field), memory).into());
+        self.publish_image(key, value, image_key, image, key_bytes, &control)
     }
 }
 

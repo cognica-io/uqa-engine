@@ -7,6 +7,8 @@
 use super::*;
 use crate::vector_index::MemoryVectorIndex;
 
+mod handles;
+
 fn encoded(index: &dyn VectorIndex) -> Vec<u8> {
     let mut bytes = Vec::new();
     index

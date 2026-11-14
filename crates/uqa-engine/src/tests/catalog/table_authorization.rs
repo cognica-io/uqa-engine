@@ -6,7 +6,6 @@
 
 use crate::{Engine, TableState};
 use parking_lot::MappedRwLockReadGuard;
-use std::collections::BTreeMap;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -39,7 +38,7 @@ impl TablePrivilegeState for ObservedTable {
     }
 }
 struct ObservedRead<'a> {
-    actual: MappedRwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    actual: MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>,
     columns_reads: Arc<AtomicUsize>,
 }
 impl TablePrivilegeRead for ObservedRead<'_> {

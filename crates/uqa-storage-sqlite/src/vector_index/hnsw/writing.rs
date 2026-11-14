@@ -29,11 +29,17 @@ impl SQLiteHNSWIndex {
         if delta.full_rewrite {
             conn.execute(
                 "DELETE FROM _hnsw_edges WHERE table_name = ?1 AND field = ?2",
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
             )?;
             conn.execute(
                 "DELETE FROM _hnsw_nodes WHERE table_name = ?1 AND field = ?2",
-                params![self.persistent.table, self.persistent.field],
+                params![
+                    self.persistent.table.as_str(),
+                    self.persistent.field.as_str()
+                ],
             )?;
         }
         for node in delta.nodes() {
@@ -81,8 +87,8 @@ fn write_meta(
              live_count, deleted_count, revision, format_version)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
-            index.persistent.table,
-            index.persistent.field,
+            index.persistent.table.as_str(),
+            index.persistent.field.as_str(),
             i64::from(index.persistent.dimensions),
             checked_i64("m", index.params.m)?,
             checked_i64("ef_construction", index.params.ef_construction)?,
@@ -114,8 +120,8 @@ fn write_node(
             (table_name, field, node_id, doc_id, vector_ordinal, level, deleted, vector)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
-            index.persistent.table,
-            index.persistent.field,
+            index.persistent.table.as_str(),
+            index.persistent.field.as_str(),
             node_id,
             i64::try_from(node.doc_id)
                 .map_err(|_| invalid_metadata("doc_id", &node.doc_id.to_string()))?,
@@ -128,7 +134,11 @@ fn write_node(
     conn.execute(
         "DELETE FROM _hnsw_edges
           WHERE table_name = ?1 AND field = ?2 AND source_node_id = ?3",
-        params![index.persistent.table, index.persistent.field, node_id],
+        params![
+            index.persistent.table.as_str(),
+            index.persistent.field.as_str(),
+            node_id
+        ],
     )?;
     let mut statement = conn.prepare(
         "INSERT INTO _hnsw_edges
@@ -138,8 +148,8 @@ fn write_node(
     for (layer, neighbors) in node.neighbors.iter().enumerate() {
         for neighbor in neighbors {
             statement.execute(params![
-                index.persistent.table,
-                index.persistent.field,
+                index.persistent.table.as_str(),
+                index.persistent.field.as_str(),
                 node_id,
                 checked_i64("layer", layer)?,
                 checked_i64_u64("target_node_id", *neighbor)?,
@@ -158,7 +168,10 @@ fn assert_revision(
         .query_row(
             "SELECT revision FROM _hnsw_indexes
               WHERE table_name = ?1 AND field = ?2",
-            params![index.persistent.table, index.persistent.field],
+            params![
+                index.persistent.table.as_str(),
+                index.persistent.field.as_str()
+            ],
             |row| row.get::<_, i64>(0),
         )
         .optional()?

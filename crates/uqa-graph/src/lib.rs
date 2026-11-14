@@ -40,7 +40,7 @@ mod types;
 mod versioned_store;
 
 pub use adapters::{GraphPostingCodec, PostingToGraphAdapter, TextTfScoreNormalizer};
-pub use catalog::{CapturedGraphCatalog, GraphCatalog};
+pub use catalog::{CapturedGraphCatalog, GraphCatalog, GraphCatalogInput};
 pub use centrality::{BetweennessCentrality, PageRank, HITS};
 pub use cross_paradigm::{
     CrossParadigmError, CrossParadigmResult, Document, SemanticGraphSearch, TextToGraph, ToGraph,

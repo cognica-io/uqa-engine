@@ -7,10 +7,9 @@
 //! File-format opening, connection binding, and independent session creation.
 
 use super::{
-    Arc, DeepModel, Engine, ManagedConnection, Path, PersistentStorageBackend,
-    PersistentStorageProvider, PersistentStorageSession, SQLiteCompressedContainerAnchor,
-    SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider, StorageBackendError,
-    StorageBackendResult,
+    Arc, Engine, ManagedConnection, Path, PersistentStorageBackend, PersistentStorageProvider,
+    PersistentStorageSession, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions,
+    SQLiteError, SQLiteStorageProvider, StorageBackendError, StorageBackendResult,
 };
 
 struct BackendSessionProvider {
@@ -55,7 +54,31 @@ impl Engine {
     }
 
     pub(crate) fn in_memory_with_retention(memory: uqa_core::memory::MemoryBudget) -> Self {
-        let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
+        let storage = super::StorageContext::memory();
+        let durable = super::DurableCatalogState::memory(
+            storage
+                .memory_capture
+                .as_ref()
+                .expect("memory source domain"),
+        )
+        .expect("a fresh memory source domain has available registry identities");
+        Self::from_memory_state(
+            storage,
+            durable,
+            uqa_execution::catalog::identity::CatalogOidCounter::default(),
+            memory,
+        )
+    }
+
+    pub(crate) fn from_memory_state(
+        storage: super::StorageContext,
+        durable: super::DurableCatalogState,
+        catalog_oids: uqa_execution::catalog::identity::CatalogOidCounter,
+        memory: uqa_core::memory::MemoryBudget,
+    ) -> Self {
+        let row_locks = Arc::new(crate::row_locks::RowLockManager::with_catalog_oids(
+            catalog_oids,
+        ));
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
         let session = Arc::new(super::SessionContext::with_retention(
@@ -69,14 +92,6 @@ impl Engine {
             session.state.io_timing(),
         );
         session.state.attach_cancellation(&runtime.cancellation);
-        let storage = super::StorageContext::memory();
-        let durable = super::DurableCatalogState::memory(
-            storage
-                .memory_capture
-                .as_ref()
-                .expect("memory source domain"),
-        )
-        .expect("a fresh memory source domain has available registry identities");
         Self {
             storage,
             durable: Arc::new(durable),
@@ -345,18 +360,26 @@ impl Engine {
     pub fn from_persistent_provider(
         provider: Arc<dyn PersistentStorageProvider>,
     ) -> StorageBackendResult<Self> {
-        let identity = provider.storage_identity()?;
         let session = provider.open_initial_session()?;
         let mut engine = Self::from_persistent_session(session, Some(Arc::clone(&provider)))?;
-        let row_locks = crate::row_locks::shared_provider_manager(identity.clone(), &provider);
-        let notification_hub =
-            crate::notifications::shared_provider_notification_hub(identity, &provider);
-        engine.session_id = row_locks.allocate_session();
-        engine.statistics = crate::statistics::shared_statistics(&row_locks);
-        engine.row_locks = row_locks;
-        engine.install_notification_hub(notification_hub)?;
-        engine.start_automatic_statistics();
+        engine.activate_persistent_provider(&provider)?;
         Ok(engine)
+    }
+
+    pub(super) fn activate_persistent_provider(
+        &mut self,
+        provider: &Arc<dyn PersistentStorageProvider>,
+    ) -> StorageBackendResult<()> {
+        let identity = provider.storage_identity()?;
+        let row_locks = crate::row_locks::shared_provider_manager(identity.clone(), provider);
+        let notification_hub =
+            crate::notifications::shared_provider_notification_hub(identity, provider);
+        self.session_id = row_locks.allocate_session();
+        self.statistics = crate::statistics::shared_statistics(&row_locks);
+        self.row_locks = row_locks;
+        self.install_notification_hub(notification_hub)?;
+        self.start_automatic_statistics();
+        Ok(())
     }
 
     /// Build an engine from already-open persistent metadata and data backends. The backend's session factory is retained for independent SQL sessions and latest-committed row-lock rechecks. Prefer [`Self::from_persistent_provider`] when a database-level owner is already available.
@@ -419,12 +442,29 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> Self {
+        Self::empty_persistent_session_with_retention(
+            storage_session,
+            provider,
+            uqa_core::memory::MemoryBudget::new(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
+        )
+    }
+
+    pub(super) fn empty_persistent_session_with_retention(
+        storage_session: PersistentStorageSession,
+        provider: Option<Arc<dyn PersistentStorageProvider>>,
+        retention: uqa_core::memory::MemoryBudget,
+    ) -> Self {
         let PersistentStorageSession { catalog, backend } = storage_session;
         let cancellation = backend.write_cancellation().unwrap_or_default();
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
-        let session = Arc::new(super::SessionContext::new(super::initial_random_state()));
+        let session = Arc::new(super::SessionContext::with_retention(
+            super::initial_random_state(),
+            retention,
+        ));
         let client_level = session.state.client_level();
         let runtime = super::QueryRuntime::with_cancellation(
             super::SQL_FUNCTION_DEPTH_LIMIT,
@@ -536,13 +576,7 @@ impl Engine {
         }
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.
-        for (name, json) in restore_catalog.load_models()? {
-            let model = Arc::new(serde_json::from_str::<DeepModel>(&json)?);
-            engine.durable.models.write().insert(name, model)?;
-        }
-        for (name, json) in restore_catalog.load_all_scoring_params()? {
-            engine.durable.scoring_params.write().insert(name, json)?;
-        }
+        engine.restore_model_caches(restore_catalog.as_ref())?;
         // Initial catalog migrations and physical-index repairs above may
         // commit. Establish the backend monitor baseline only after every
         // one-time write has completed.

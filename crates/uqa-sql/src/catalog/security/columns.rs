@@ -25,25 +25,15 @@ pub fn column_grant_option_roles(
     privilege: TableAclPrivilege,
 ) -> BTreeSet<String> {
     let mut reachable = grant_option_roles(security, privilege);
-    let Some(acl) = security.column_acls.get(column) else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, &security.role_owner))
-            {
-                changed |= reachable.insert(role.to_owned());
-            }
-        }
-        if !changed {
-            return reachable;
-        }
-    }
+    super::table::grant_paths::extend(
+        &security.role_owner,
+        security.column_acls.get(column).map(Vec::as_slice),
+        privilege,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary column grant closure has no resource scope");
+    reachable
 }
 
 pub fn select_column_acl_grantor(

@@ -36,9 +36,11 @@ use super::{
     TAG_TABLE_FIELD_ANALYZER, TAG_VERTEX, TAG_VIEW,
 };
 
+mod analyzer_input;
 mod analyzers;
 pub(super) mod diskann;
 mod foreign;
+mod foreign_input;
 mod graph_access;
 mod graph_guards;
 mod graph_observations;
@@ -57,7 +59,9 @@ mod records;
 mod relation_acl;
 mod relations;
 mod schema_table;
+mod sequence_input;
 mod sequences;
+mod statistics_input;
 mod table_data;
 mod table_input;
 mod tables;
@@ -102,12 +106,53 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn begin_analyzer_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::analyzer_input::CatalogAnalyzerInput> {
+        self.analyzer_input(limits, control)
+    }
+
+    fn begin_foreign_table_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::foreign_load::CatalogForeignTableLoad> {
+        self.foreign_table_load(limits, control)
+    }
+
     fn begin_index_input(
         &self,
         limits: crate::catalog::input::CatalogInputLimits,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<crate::catalog::input::CatalogInput<crate::CatalogIndexRow>> {
         self.index_input(limits, control)
+    }
+
+    fn begin_index_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::index_load::CatalogIndexLoad> {
+        crate::catalog::index_load::CatalogIndexLoad::new(
+            self.index_input(limits, control)?,
+            crate::catalog::index_load::CatalogIndexOrder::Relation,
+            control,
+        )
+    }
+
+    fn begin_text_load(
+        &self,
+        family: crate::catalog::text_input::CatalogTextFamily,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::StorageBackendResult<crate::catalog::text_load::CatalogTextLoad> {
+        crate::catalog::text_load::CatalogTextLoad::new(
+            self.text_input(family, limits, control)?,
+            crate::catalog::text_load::CatalogTextOrder::Name,
+            control,
+        )
     }
 
     fn begin_text_input(
@@ -117,6 +162,15 @@ impl CatalogFacade for KeyValueCatalog {
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<crate::catalog::text_input::CatalogTextInput> {
         self.text_input(family, limits, control)
+    }
+
+    fn begin_metadata_input(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::text_input::CatalogTextLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::text_input::CatalogTextInput> {
+        self.metadata_input(prefix, limits, control)
     }
 
     fn record_revisions(
@@ -289,6 +343,15 @@ impl CatalogFacade for KeyValueCatalog {
         self.get_metadata_impl(key)
     }
 
+    fn get_metadata_with_control(
+        &self,
+        key: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.metadata_with_control(key, limits, control)
+    }
+
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         self.metadata_has_private_changes_impl(key)
     }
@@ -345,6 +408,22 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>> {
         self.load_schema_rows_impl()
+    }
+
+    fn begin_sequence_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::sequence_load::CatalogSequenceLoad> {
+        self.sequence_load(limits, control)
+    }
+
+    fn begin_schema_load(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::schema::load::CatalogSchemaLoad> {
+        self.schema_load(limits, control)
     }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
@@ -561,12 +640,29 @@ impl CatalogFacade for KeyValueCatalog {
         self.drop_named_graph_impl(name)
     }
 
+    fn begin_graph_name_input(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::input::CatalogInput<String>> {
+        self.graph_name_input(limits, control)
+    }
+
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.load_named_graphs_impl()
     }
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool> {
         self.store
             .contains_key(&single_str_key(TAG_NAMED_GRAPH, name)?)
+    }
+
+    fn named_graph_exists_with_control(
+        &self,
+        name: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.graph_name_exists_with_control(name, limits, control)
     }
 
     fn save_vertex(
@@ -829,6 +925,15 @@ impl CatalogFacade for KeyValueCatalog {
         stats: &[ColumnStatsInput<'_>],
     ) -> StorageBackendResult<()> {
         self.replace_column_stats_impl(table_name, stats)
+    }
+
+    fn begin_column_stats_input(
+        &self,
+        table_name: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::input::CatalogInput<ColumnStatsRow>> {
+        self.column_stats_input(table_name, limits, control)
     }
 
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {

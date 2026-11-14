@@ -20,12 +20,9 @@ pub trait BuiltinRoutineSecurityState: BuiltinRoutineSecurityCatalog {
     ) -> Box<dyn DerefMut<Target = BuiltinRoutineSecurities> + '_>;
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredSecurity {
-    builtin_routine_acl_format: u32,
-    entry: BuiltinRoutineSecurity,
-}
+use uqa_sql::catalog::security::builtin_routines::stored::StoredSecurity;
+
+pub mod input;
 
 fn encode(entry: &BuiltinRoutineSecurity) -> StorageBackendResult<String> {
     Ok(serde_json::to_string(&StoredSecurity {

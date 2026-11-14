@@ -9,6 +9,7 @@ use super::{
     ProductionControl, SQLError,
 };
 use std::{borrow::Borrow, cmp::Ordering};
+use uqa_core::memory::{MemoryError, OwnedMap, OwnedProductionControl};
 
 pub(super) struct ColumnName(pub(super) Produced<String>);
 
@@ -39,20 +40,41 @@ enum Map {
     Admitted(AdmittedColumns),
 }
 
-pub(crate) struct Builder<'a> {
+pub(crate) struct Builder {
     columns: Map,
-    control: ProductionControl<'a>,
+    control: OwnedProductionControl,
+    retained_bytes: Option<usize>,
 }
 
-impl<'a> Builder<'a> {
-    pub(crate) fn new(control: ProductionControl<'a>) -> Self {
+impl Builder {
+    pub(crate) fn new(control: ProductionControl<'_>) -> Self {
         Self {
             columns: control.budget().map_or_else(
                 || Map::Ordinary(BTreeMap::new()),
                 |budget| Map::Admitted(BudgetedMap::new(budget)),
             ),
-            control,
+            control: control.capture(),
+            retained_bytes: None,
         }
+    }
+
+    /// Stored rows have a bounded encoded size; account each completed row while it is current so final publication never revisits the accumulated population.
+    pub(crate) fn stored(control: ProductionControl<'_>) -> Self {
+        let mut builder = Self::new(control);
+        builder.retained_bytes = Some(size_of::<Produced<AdmittedColumns>>());
+        builder
+    }
+
+    fn entry_bytes(&self, name: &str) -> Result<usize, SQLError> {
+        let Map::Admitted(columns) = &self.columns else {
+            unreachable!("stored statistics use an admitted map")
+        };
+        let Some((name, stats)) = columns.get_key_value(name) else {
+            return Ok(0);
+        };
+        let mut bytes = OwnedMap::<ColumnName, Produced<ColumnStats>>::entry_bytes();
+        super::footprint::column(&name.0, stats, &self.control.control(), &mut bytes)?;
+        Ok(bytes)
     }
 
     pub(crate) fn insert(
@@ -60,8 +82,22 @@ impl<'a> Builder<'a> {
         name: &str,
         stats: Produced<ColumnStats>,
     ) -> Result<(), SQLError> {
-        let name = self.control.copy_text(name)?;
-        self.insert_owned(name, stats)
+        let previous = self
+            .retained_bytes
+            .map(|_| self.entry_bytes(name))
+            .transpose()?;
+        let owned_name = self.control.control().copy_text(name)?;
+        self.insert_owned(owned_name, stats)?;
+        if let (Some(bytes), Some(previous)) = (self.retained_bytes, previous) {
+            let current = self.entry_bytes(name)?;
+            self.retained_bytes = Some(
+                bytes
+                    .checked_sub(previous)
+                    .and_then(|bytes| bytes.checked_add(current))
+                    .ok_or(MemoryError::SizeOverflow)?,
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn insert_owned(
@@ -69,7 +105,7 @@ impl<'a> Builder<'a> {
         name: Produced<String>,
         stats: Produced<ColumnStats>,
     ) -> Result<(), SQLError> {
-        self.control.check()?;
+        self.control.control().check()?;
         match &mut self.columns {
             Map::Ordinary(columns) => {
                 columns.insert(
@@ -85,17 +121,21 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn finish(self) -> Result<ColumnStatistics, SQLError> {
-        self.control.check()?;
+        self.control.control().check()?;
         Ok(match self.columns {
             Map::Ordinary(columns) => columns.into(),
             Map::Admitted(columns) if columns.is_empty() => ColumnStatistics::default(),
             Map::Admitted(columns) => {
-                let bytes = super::footprint::admitted(&columns, &self.control)?;
+                let control = self.control.control();
+                let bytes = match self.retained_bytes {
+                    Some(bytes) => bytes,
+                    None => super::footprint::admitted(&columns, &control)?,
+                };
                 ColumnStatistics(
                     Columns::Admitted(
-                        self.control
-                            .finish(columns, self.control.empty_reservation())?
-                            .into_shared(&self.control)?,
+                        control
+                            .finish(columns, control.empty_reservation())?
+                            .into_shared(&control)?,
                     ),
                     Ok(bytes),
                 )

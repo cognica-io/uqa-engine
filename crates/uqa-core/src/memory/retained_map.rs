@@ -155,6 +155,19 @@ impl<K: Ord, V> RetainedMap<K, V> {
         self.values.get(key).map(|entry| &entry.value)
     }
 
+    /// Borrow one original payload while its immutable search path retains the caller's comparison progress.
+    pub async fn get_from<Q: ?Sized, C: super::MapKeyInput<Q, K>>(
+        &self,
+        key: &Q,
+        input: &mut C,
+    ) -> Result<Option<&V>, C::Error> {
+        Ok(self
+            .values
+            .get_from(key, input)
+            .await?
+            .map(|entry| &entry.value))
+    }
+
     /// Replace a matching key and its value together. Failed footprint or tree admission leaves the original root and footprint unchanged.
     pub fn insert(&mut self, key: K, value: V, payload_bytes: usize) -> Result<(), MemoryError> {
         self.prepare_insert(key, payload_bytes)?.publish(value);
@@ -175,6 +188,35 @@ impl<K: Ord, V> RetainedMap<K, V> {
             .ok_or(MemoryError::SizeOverflow)?;
         Ok(PreparedRetainedMapInsert {
             insertion: self.values.prepare_insert(key)?,
+            footprint: &mut self.payload_bytes,
+            payload_bytes,
+            total,
+        })
+    }
+
+    /// Select the previous footprint and complete insertion through retained comparisons. The exclusive borrow fixes both the root and cached footprint until infallible publication or abandonment.
+    pub async fn prepare_insert_from<C>(
+        &mut self,
+        key: K,
+        payload_bytes: usize,
+        input: &mut C,
+    ) -> Result<PreparedRetainedMapInsert<'_, K, V>, C::Error>
+    where
+        C: super::MapKeyInput<K>,
+        C::Error: From<MemoryError>,
+    {
+        let previous = self
+            .values
+            .get_from(&key, input)
+            .await?
+            .map_or(0, |entry| entry.payload_bytes);
+        let total = self
+            .payload_bytes
+            .checked_sub(previous)
+            .and_then(|bytes| bytes.checked_add(payload_bytes))
+            .ok_or(MemoryError::SizeOverflow)?;
+        Ok(PreparedRetainedMapInsert {
+            insertion: self.values.prepare_insert_from(key, input).await?,
             footprint: &mut self.payload_bytes,
             payload_bytes,
             total,

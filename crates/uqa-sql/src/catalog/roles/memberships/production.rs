@@ -36,6 +36,22 @@ fn role_reaches_with_control(
     role: RoleIdentity,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(role_reaches_from(
+        memberships,
+        member,
+        role,
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn role_reaches_from(
+    memberships: &RoleMemberships,
+    member: RoleIdentity,
+    role: RoleIdentity,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<bool, SQLError> {
     control.check()?;
     if member == role {
         return Ok(true);
@@ -48,6 +64,8 @@ fn role_reaches_with_control(
     while let Some(&current) = queue.get(head) {
         head += 1;
         for membership in memberships.values() {
+            control.check()?;
+            work.checkpoint().await?;
             control.check()?;
             if membership.member.identity() != current || !membership.inherit_option {
                 continue;

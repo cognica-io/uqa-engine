@@ -7,7 +7,7 @@
 use uqa_core::memory::BudgetedVec;
 
 use super::{field, invalid, record, DiskANNQuantizationIdentity};
-use crate::diskann_index::{metric::checkpoint, pq::PQCodebook};
+use crate::diskann_index::pq::PQCodebook;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 const MAGIC: [u8; 8] = *b"UQADNCD\0";
@@ -78,7 +78,17 @@ impl DiskANNQuantizationIdentity {
         bytes: &'a [u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNCodeBatch<'a>> {
-        let body = record::open(MAGIC, self.generation, bytes, control)?;
+        crate::image_io::work::inline(self.decode_codes_from(start, bytes, control, &mut ()))
+    }
+
+    pub(in crate::diskann_index) async fn decode_codes_from<'a>(
+        self,
+        start: u64,
+        bytes: &'a [u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<DiskANNCodeBatch<'a>> {
+        let body = record::open_from(MAGIC, self.generation, bytes, control, work).await?;
         if body.len() < METADATA_BYTES {
             return Err(invalid("truncated code batch"));
         }
@@ -99,7 +109,9 @@ impl DiskANNQuantizationIdentity {
             return Err(invalid("code batch corpus, address or codebook differs"));
         }
         let codes = &body[METADATA_BYTES..];
-        let count = self.validate_codes(start, codes, control)?;
+        let count = self
+            .validate_codes_from(start, codes, control, work)
+            .await?;
         if record::u64_at(body, 32)? != count {
             return Err(invalid("code batch count differs"));
         }
@@ -117,6 +129,16 @@ impl DiskANNQuantizationIdentity {
         codes: &[u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<u64> {
+        crate::image_io::work::inline(self.validate_codes_from(start, codes, control, &mut ()))
+    }
+
+    async fn validate_codes_from(
+        self,
+        start: u64,
+        codes: &[u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<u64> {
         control.check()?;
         if codes.is_empty() || !codes.len().is_multiple_of(self.chunks) {
             return Err(invalid("codes must contain complete nonempty node entries"));
@@ -126,7 +148,7 @@ impl DiskANNQuantizationIdentity {
             return Err(invalid("code batch exceeds the generation"));
         }
         for (offset, &label) in codes.iter().enumerate() {
-            checkpoint(offset, control)?;
+            crate::diskann_index::metric::checkpoint_from(offset, control, work).await?;
             if u16::from(label) >= self.centroids {
                 return Err(invalid("code label exceeds actual centroid count"));
             }

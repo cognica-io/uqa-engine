@@ -14,6 +14,7 @@ use super::{
     DocId, FieldName, IndexedFieldMetadata, MemoryDocument, MemoryFieldCounters, MemoryIndexState,
     MemoryPosting, PostingKey,
 };
+use crate::image_io::work::{inline, Work};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 #[derive(Debug, Default)]
@@ -67,25 +68,26 @@ fn index_key_size(key: &PostingKey) -> u128 {
         + term_payload(key)
 }
 
-fn terms_size(terms: &Vec<PostingKey>) -> u128 {
-    terms.capacity() as u128 * size_of::<PostingKey>() as u128
-        + terms.iter().map(term_payload).sum::<u128>()
-}
-
-fn fields_size(fields: &OwnedMap<FieldName, IndexedFieldMetadata>) -> u128 {
-    fields
-        .keys()
-        .map(|field| {
-            OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes() as u128
-                + field.capacity() as u128
-        })
-        .sum::<u128>()
-}
-
 fn document_size(document: &MemoryDocument) -> u128 {
-    OwnedMap::<DocId, MemoryDocument>::entry_bytes() as u128
-        + fields_size(&document.fields)
-        + terms_size(&document.terms)
+    inline(document_size_from(document, &mut ())).expect("inline footprint traversal is infallible")
+}
+
+async fn document_size_from(
+    document: &MemoryDocument,
+    work: &mut impl Work,
+) -> StorageBackendResult<u128> {
+    let mut bytes = OwnedMap::<DocId, MemoryDocument>::entry_bytes() as u128
+        + document.terms.capacity() as u128 * size_of::<PostingKey>() as u128;
+    for field in document.fields.keys() {
+        work.checkpoint().await?;
+        bytes += OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes() as u128
+            + field.capacity() as u128;
+    }
+    for key in &document.terms {
+        work.checkpoint().await?;
+        bytes += term_payload(key);
+    }
+    Ok(bytes)
 }
 
 fn counter_size(capacity: usize) -> u128 {
@@ -188,10 +190,23 @@ impl MemoryIndexState {
         fields: OwnedMap<FieldName, IndexedFieldMetadata>,
         terms: Vec<PostingKey>,
     ) {
+        inline(self.insert_document_metadata_from(doc_id, fields, terms, &mut ()))
+            .expect("inline document publication is infallible");
+    }
+
+    pub(super) async fn insert_document_metadata_from(
+        &mut self,
+        doc_id: DocId,
+        fields: OwnedMap<FieldName, IndexedFieldMetadata>,
+        terms: Vec<PostingKey>,
+        work: &mut impl Work,
+    ) -> StorageBackendResult<()> {
         self.remove_document_metadata(doc_id);
         let document = MemoryDocument { fields, terms };
-        self.retention.add(document_size(&document));
+        self.retention
+            .add(document_size_from(&document, work).await?);
         self.documents.insert(doc_id, document);
+        Ok(())
     }
 
     fn payload_size(&self) -> u128 {

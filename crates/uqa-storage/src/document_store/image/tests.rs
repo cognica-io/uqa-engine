@@ -9,6 +9,7 @@ use crate::{document_store::Document, DocumentStore, MemoryDocumentStore, ReadOn
 use std::collections::BTreeMap;
 use uqa_core::{DatumValue, RecordValue};
 
+mod input;
 mod stream;
 
 #[test]

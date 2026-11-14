@@ -38,6 +38,7 @@ mod sampling_rng;
 mod stats;
 
 pub use entropy::{column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate};
+pub use stats::stored as stored_column_statistics;
 pub(crate) use stats::RelationStatsRef;
 pub use stats::{
     AccessParadigm, ColumnStatistics, ColumnStatisticsImageReader, ColumnStats, EdgeSample,

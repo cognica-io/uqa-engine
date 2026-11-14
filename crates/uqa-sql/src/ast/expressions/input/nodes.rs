@@ -73,7 +73,7 @@ impl<'a> Input<'a, '_> {
             "CompositeRow" => return self.composite_row(token, children),
             "Binary" => return self.binary_expression(token, children),
             "IsNull" | "InList" | "Between" | "Cast" => {
-                return self.structured_expression(tag, token, children)
+                return self.structured_expression(tag, token, children);
             }
             "Case" => return self.case_expression(token, children),
             "Func" => return self.function_expression(token, children),

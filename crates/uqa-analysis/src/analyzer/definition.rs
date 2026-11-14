@@ -112,6 +112,33 @@ impl AnalyzerDefinition {
         Self::publish_image(configuration, bytes, cancellation)
     }
 
+    /// Publish an admitted native configuration and its canonical image without resolving resources or validating stages. The configuration retains its original allowance; image output and traversal use the enclosing work channel. Counting and copying both yield at native fields and fixed text fragments, and destination capacity is admitted before allocation.
+    pub async fn from_configuration_from(
+        configuration: Budgeted<Analyzer>,
+        input: AsyncImageInput<'_>,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let cancellation = input.cancellation;
+        cancellation.check().map_err(ValueRetentionError::from)?;
+        let bytes = crate::configuration::encode_from(&configuration, input)
+            .await
+            .map_err(|error| match error {
+                AnalysisError::Memory(error) => ValueRetentionError::Memory(error).into(),
+                AnalysisError::Input(error) => error.into(),
+                error => AnalyzerConfigurationError::Encoding(Arc::new(error)),
+            })?;
+        Self::publish_image(configuration, bytes, cancellation)
+    }
+
+    /// Reconstruct ordinary stored JSON through Analysis's native constructors, preserving defaults, aliases, field order and duplicate-field rejection. The source retires before canonical publication; native configuration and output retain the enclosing allowance. No stage or external resource is resolved.
+    pub async fn from_stored_from(
+        text: Budgeted<String>,
+        mut input: AsyncImageInput<'_>,
+    ) -> Result<Self, AnalyzerConfigurationError> {
+        let configuration = crate::configuration::decode_stored_from(&text, &mut input).await?;
+        drop(text);
+        Self::from_configuration_from(configuration, input).await
+    }
+
     fn publish_image(
         configuration: Budgeted<Analyzer>,
         bytes: Budgeted<Vec<u8>>,

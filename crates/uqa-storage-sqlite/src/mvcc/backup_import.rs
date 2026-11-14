@@ -120,7 +120,15 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
     }
 
     pub fn advance(&mut self) -> BackupResult<SQLiteBackupImportStep> {
-        let result = self.advance_inner();
+        self.advance_with_window(16 * 1024)
+    }
+
+    /// Advance with a caller-selected whole-object verification window. At most one record is imported; its separate value limit and bounded BLOB writes remain unchanged.
+    pub fn advance_with_window(
+        &mut self,
+        maximum_object_bytes: usize,
+    ) -> BackupResult<SQLiteBackupImportStep> {
+        let result = self.advance_inner(maximum_object_bytes);
         if result.is_err() {
             self.input = None;
             self.connection = None;
@@ -128,12 +136,15 @@ impl<'a> SQLiteKeyValueBackupImport<'a> {
         result
     }
 
-    fn advance_inner(&mut self) -> BackupResult<SQLiteBackupImportStep> {
+    fn advance_inner(
+        &mut self,
+        maximum_object_bytes: usize,
+    ) -> BackupResult<SQLiteBackupImportStep> {
         if self.complete {
             return Ok(SQLiteBackupImportStep::Complete);
         }
         let input = self.input.as_mut().ok_or(BackupError::Finished)?;
-        match input.advance(16 * 1024)? {
+        match input.advance(maximum_object_bytes)? {
             KeyValueImageStep::Pending => return Ok(SQLiteBackupImportStep::Pending),
             KeyValueImageStep::Complete => {
                 let connection = self

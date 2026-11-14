@@ -146,6 +146,10 @@ impl<'a> BackupImageReader<'a> {
         self.unit.as_ref().map(|unit| &unit.entry)
     }
 
+    pub(in crate::backup) fn current_read_bytes(&self) -> Option<u64> {
+        self.unit.as_ref().map(|unit| unit.bytes)
+    }
+
     pub(in crate::backup) fn read_exact_current(
         &mut self,
         mut output: &mut [u8],

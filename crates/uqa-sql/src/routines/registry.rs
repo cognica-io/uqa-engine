@@ -57,6 +57,23 @@ impl<'a> IntoIterator for &'a CapturedRoutines {
 }
 
 impl RoutineRegistry {
+    pub(in crate::routines) async fn insert_restored_group_from<C>(
+        &mut self,
+        name: uqa_core::memory::Budgeted<String>,
+        values: uqa_core::memory::Budgeted<Vec<SQLRoutine>>,
+        children: usize,
+        temporary: bool,
+        input: &mut C,
+    ) -> Result<(), C::Error>
+    where
+        C: uqa_core::memory::MapKeyInput<String>,
+        C::Error: From<MemoryError>,
+    {
+        self.definitions
+            .insert_native_entry_from(name, values, children, temporary, input)
+            .await
+    }
+
     pub(crate) fn insert_image_entry(
         &mut self,
         name: uqa_core::memory::Budgeted<String>,

@@ -53,9 +53,9 @@ impl CatalogTableAcl {
 }
 
 #[derive(Debug)]
-pub enum CatalogTableInputStep {
+pub enum CatalogTableInputStep<T = TableSchema> {
     Pending,
-    Definition(Budgeted<Box<TableSchema>>),
+    Definition(Budgeted<Box<T>>),
     /// All definitions have been read. The catalog consumer performs its existing ordering and cross-record predicates before requesting ACL records.
     DefinitionsComplete,
     AclReplacement(Budgeted<CatalogTableAcl>),
@@ -63,23 +63,23 @@ pub enum CatalogTableInputStep {
 }
 
 /// Read original physical definitions followed by ACL replacements from one retained view. Returned definitions contain their inline authority; they are not an assembled catalog until the owner has applied the replacement records and its existing validation rules.
-pub struct CatalogTableInput {
-    state: State,
+pub struct CatalogTableInput<T = TableSchema> {
+    state: State<T>,
     control: StorageReadControl,
 }
 
-enum State {
-    Reading(Budgeted<Box<Input>>),
+enum State<T> {
+    Reading(Budgeted<Box<Input<T>>>),
     Complete,
     Failed,
 }
 
-struct Input {
-    definitions: Option<CatalogInput<TableSchema>>,
+struct Input<T> {
+    definitions: Option<CatalogInput<T>>,
     acls: CatalogInput<CatalogTableAcl>,
 }
 
-impl CatalogTableInput {
+impl<T> CatalogTableInput<T> {
     pub(crate) fn control(&self) -> &StorageReadControl {
         &self.control
     }
@@ -87,7 +87,7 @@ impl CatalogTableInput {
     /// Both physical streams retain the supplied view before either reads a value. Prefixes must select exactly the provider's table definitions and independent ACL metadata.
     pub fn new(
         read: Arc<dyn KeyValueRead + Send + Sync>,
-        definitions: (&[u8], CatalogRowDecoder<TableSchema>),
+        definitions: (&[u8], CatalogRowDecoder<T>),
         acls: (&[u8], CatalogRowDecoder<CatalogTableAcl>),
         limits: CatalogInputLimits,
         control: &StorageReadControl,
@@ -98,7 +98,7 @@ impl CatalogTableInput {
     /// Select independent ACL keys before reading their values when the provider's physical prefix also contains unrelated metadata.
     pub fn new_filtered(
         read: Arc<dyn KeyValueRead + Send + Sync>,
-        definitions: (&[u8], CatalogRowDecoder<TableSchema>),
+        definitions: (&[u8], CatalogRowDecoder<T>),
         acls: (&[u8], CatalogRowDecoder<CatalogTableAcl>),
         select_acl: CatalogKeyFilter,
         limits: CatalogInputLimits,
@@ -109,14 +109,14 @@ impl CatalogTableInput {
 
     fn create(
         read: Arc<dyn KeyValueRead + Send + Sync>,
-        definitions: (&[u8], CatalogRowDecoder<TableSchema>),
+        definitions: (&[u8], CatalogRowDecoder<T>),
         acls: (&[u8], CatalogRowDecoder<CatalogTableAcl>),
         select_acl: Option<CatalogKeyFilter>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
-        let memory = control.memory().reserve(size_of::<Input>())?;
+        let memory = control.memory().reserve(size_of::<Input<T>>())?;
         let definitions =
             CatalogInput::new(read.clone(), definitions.0, definitions.1, limits, control)?;
         let acls = if let Some(select) = select_acl {
@@ -137,7 +137,7 @@ impl CatalogTableInput {
     }
 
     /// Consume at most one merged physical slot. Failure or unwinding retires both original streams; completion closes the common view and is idempotent.
-    pub fn advance(&mut self) -> StorageBackendResult<CatalogTableInputStep> {
+    pub fn advance(&mut self) -> StorageBackendResult<CatalogTableInputStep<T>> {
         match self.state {
             State::Complete => return Ok(CatalogTableInputStep::Complete),
             State::Failed => {
@@ -161,13 +161,13 @@ impl CatalogTableInput {
     }
 }
 
-impl Input {
-    fn advance(&mut self) -> StorageBackendResult<CatalogTableInputStep> {
+impl<T> Input<T> {
+    fn advance(&mut self) -> StorageBackendResult<CatalogTableInputStep<T>> {
         if let Some(definitions) = self.definitions.as_mut() {
             return Ok(match definitions.advance()? {
                 CatalogInputStep::Pending => CatalogTableInputStep::Pending,
                 CatalogInputStep::Row(row) => {
-                    let mut memory = row.budget().reserve(size_of::<TableSchema>())?;
+                    let mut memory = row.budget().reserve(size_of::<T>())?;
                     let (row, payloads) = row.into_parts();
                     memory.absorb(payloads);
                     CatalogTableInputStep::Definition(Budgeted::new(Box::new(row), memory))

@@ -18,6 +18,60 @@ use super::*;
 mod paths;
 mod scheduled;
 
+#[test]
+fn durable_restore_cancellation_needs_neither_live_input_nor_an_active_token() {
+    for stage in ["admitted", "started", "complete"] {
+        let fixture = Fixture::new();
+        let mut operation = fixture.begin();
+        let id = operation.id();
+        let request = operation.request();
+        let completed = match stage {
+            "started" => {
+                assert!(operation
+                    .prepare(Importer {
+                        fail_after_import: true,
+                        ..Importer::default()
+                    })
+                    .is_err());
+                None
+            }
+            "complete" => {
+                operation.prepare(Importer::default()).unwrap();
+                let receipt = operation.publish().unwrap();
+                std::fs::write(fixture.path().join("later"), b"preserved after publication")
+                    .unwrap();
+                Some(receipt)
+            }
+            _ => None,
+        };
+        drop(operation);
+        fixture
+            .repository
+            .remove_backup(fixture.backup, &fixture.control)
+            .unwrap();
+        fixture.control.cancellation().cancel();
+        for _ in 0..2 {
+            let cancelled = fixture
+                .repository
+                .cancel_restore(id, fixture.path(), &fixture.control)
+                .unwrap();
+            assert_eq!(cancelled.request(), request);
+            assert_eq!(cancelled.completed(), completed);
+            assert_eq!(cancelled.backup(), fixture.backup);
+            drop(cancelled);
+            assert_eq!(fixture.control.memory().used(), 0);
+        }
+        if completed.is_some() {
+            assert_eq!(
+                std::fs::read(fixture.path().join("later")).unwrap(),
+                b"preserved after publication"
+            );
+        } else {
+            assert!(!fixture.path().exists());
+        }
+    }
+}
+
 struct Fixture {
     directory: tempfile::TempDir,
     repository: LocalRepository,

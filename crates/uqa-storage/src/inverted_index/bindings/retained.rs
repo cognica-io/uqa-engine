@@ -7,7 +7,11 @@
 //! Controlled captures freeze field containers while ordinary clones remain writable.
 
 use super::{AnalyzerBindings, AnalyzerDefault, FieldRevisions};
-use crate::{read_control::StorageReadControl, StorageBackendResult};
+use crate::{
+    image_io::work::{inline, Work},
+    read_control::StorageReadControl,
+    StorageBackendResult,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_analysis::CompiledAnalyzer;
 use uqa_core::memory::{Budgeted, BudgetedMap, BudgetedString, MemoryReservation};
@@ -80,7 +84,23 @@ impl AnalyzerBindings {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
-        let fields = retain_fields(fields, control)?;
+        let fields = inline(retain_fields(fields, control, &mut ()))?;
+        Ok(Self {
+            default: default.0,
+            fields,
+        })
+    }
+
+    pub(in crate::inverted_index) async fn from_retained_revisions_from<'a>(
+        default: AnalyzerDefault,
+        fields: impl IntoIterator<
+            Item = StorageBackendResult<(&'a str, Arc<CompiledAnalyzer>, Arc<CompiledAnalyzer>)>,
+        >,
+        control: &StorageReadControl,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let fields = retain_fields(fields, control, input).await?;
         Ok(Self {
             default: default.0,
             fields,
@@ -94,7 +114,7 @@ impl AnalyzerBindings {
             FieldBindings::Live(fields) if fields.is_empty() => {
                 FieldBindings::Live(BTreeMap::new())
             }
-            FieldBindings::Live(_) => retain_fields(
+            FieldBindings::Live(_) => inline(retain_fields(
                 self.fields.iter().map(|(name, pair)| {
                     Ok((
                         name.as_str(),
@@ -103,7 +123,8 @@ impl AnalyzerBindings {
                     ))
                 }),
                 control,
-            )?,
+                &mut (),
+            ))?,
         };
         Ok(Self {
             default: Arc::clone(&self.default),
@@ -112,20 +133,23 @@ impl AnalyzerBindings {
     }
 }
 
-fn retain_fields<'a>(
+async fn retain_fields<'a>(
     fields: impl IntoIterator<
         Item = StorageBackendResult<(&'a str, Arc<CompiledAnalyzer>, Arc<CompiledAnalyzer>)>,
     >,
     control: &StorageReadControl,
+    work: &mut impl Work,
 ) -> StorageBackendResult<FieldBindings> {
     let mut retained = BudgetedMap::new(control.memory());
     for field in fields {
+        work.checkpoint().await?;
         control.check()?;
         let (name, index, search) = field?;
         let mut owned = BudgetedString::new(control.memory());
         owned.reserve(name.len())?;
         for (offset, character) in name.chars().enumerate() {
             if offset % 1024 == 0 {
+                work.checkpoint().await?;
                 control.check()?;
             }
             owned.push(character)?;

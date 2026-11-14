@@ -257,25 +257,15 @@ pub fn grant_option_roles(
     privilege: TableAclPrivilege,
 ) -> BTreeSet<String> {
     let mut reachable = BTreeSet::from([security.role_owner.clone()]);
-    let Some(acl) = security.acl.as_ref() else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, &security.role_owner))
-            {
-                changed |= reachable.insert(role.to_owned());
-            }
-        }
-        if !changed {
-            return reachable;
-        }
-    }
+    grant_paths::extend(
+        &security.role_owner,
+        security.acl.as_deref(),
+        privilege,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary grant closure has no resource scope");
+    reachable
 }
 
 pub fn select_acl_grantor(
@@ -545,6 +535,7 @@ pub fn role_has_column_privilege(
     )
 }
 
-mod invariants;
+pub(super) mod grant_paths;
+pub(super) mod invariants;
 pub mod selection;
 pub use invariants::validate_table_security_invariants;

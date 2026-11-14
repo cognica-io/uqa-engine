@@ -67,7 +67,7 @@ fn physical_sequence_value(
         definition_generation: decode_sequence_identity(
             &relation,
             "definition generation",
-            row.get::<_, Vec<u8>>(2)?,
+            &row.get::<_, Vec<u8>>(2)?,
         )?,
         position: SequenceValuePosition {
             current: row.get(3)?,

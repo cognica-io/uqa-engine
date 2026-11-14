@@ -640,6 +640,7 @@ pub fn routine_local_name(name: &str) -> Result<String, SQLError> {
 mod names_production;
 pub use names_production::{
     routine_local_name_with_control, routine_returns_anonymous_record_with_control,
+    routine_signature_types_from_input,
 };
 
 pub fn routine_kind(def: &CreateFunction) -> &'static str {

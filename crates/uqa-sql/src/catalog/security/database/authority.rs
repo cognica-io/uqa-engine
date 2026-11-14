@@ -22,6 +22,10 @@ pub struct DatabaseAuthority {
 }
 
 impl DatabaseAuthority {
+    pub fn budget(&self) -> &MemoryBudget {
+        &self.memory
+    }
+
     pub fn bootstrap() -> Self {
         Self::with_budget(
             &BoundDatabaseSecurity::bootstrap(),

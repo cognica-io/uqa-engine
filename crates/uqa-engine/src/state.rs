@@ -27,7 +27,11 @@ mod generation_sources;
 pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
+mod session_namespace;
+mod table_assembly;
 mod table_capture;
+mod table_catalog;
+pub(crate) use table_assembly::TableContents;
 mod table_definition;
 pub(crate) use table_definition::{TableDefinitionCell, TableDefinitionWrite};
 mod table_metadata;
@@ -39,6 +43,9 @@ pub(crate) use table_membership::CapturedTable;
 pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::SnapshotTableCut;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::TableRegistryInput;
+pub(crate) use table_membership::TableRegistryMap;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
@@ -110,17 +117,6 @@ impl StorageContext {
         }
     }
 
-    pub(super) fn memory_cell<T: uqa_storage::memory_capture::MemoryCaptureSource>(
-        &self,
-        value: T,
-        persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureCell<T>> {
-        match self.table_capture_registry(persistence) {
-            Some(registry) => registry.cell(value),
-            None => Ok(uqa_storage::memory_capture::MemoryCaptureCell::new(value)),
-        }
-    }
-
     pub(super) fn table_capture_registry(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
@@ -133,29 +129,26 @@ impl StorageContext {
     pub(super) fn memory_vector_indexes(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<
-        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
-    > {
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>
+    {
         let indexes = self.table_capture_registry(persistence).map_or_else(
             uqa_storage::vector_index::VectorIndexes::default,
             uqa_storage::vector_index::VectorIndexes::memory,
         );
-        self.memory_cell(indexes, persistence)
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
     }
 
     pub(super) fn memory_value_indexes(
         &self,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> uqa_storage::StorageBackendResult<
-        uqa_storage::memory_capture::MemoryCaptureCell<
-            uqa_execution::catalog::index::value::ValueIndexes,
-        >,
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
     > {
         use uqa_execution::catalog::index::value::ValueIndexes;
         let indexes = self
             .table_capture_registry(persistence)
             .map_or_else(ValueIndexes::default, ValueIndexes::memory);
-        self.memory_cell(indexes, persistence)
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
     }
 }
 
@@ -499,22 +492,13 @@ pub(super) enum RuntimeParameterValue {
     Setting(Option<String>),
     SearchPath {
         setting: Option<String>,
-        path: Vec<String>,
+        path: Arc<Vec<String>>,
     },
     Role(Option<Arc<uqa_sql::catalog::roles::identity::RoleBinding>>),
     SessionAuthorization(Arc<uqa_sql::catalog::roles::identity::RoleBinding>),
 }
 
 impl SessionContext {
-    pub(super) fn new(random_state: super::SessionRandomState) -> Self {
-        Self::with_retention(
-            random_state,
-            uqa_core::memory::MemoryBudget::new(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
-        )
-    }
-
     pub(super) fn with_retention(
         random_state: super::SessionRandomState,
         query_retention: uqa_core::memory::MemoryBudget,
@@ -522,7 +506,7 @@ impl SessionContext {
         let state = super::SessionStateSnapshot {
             command_overlays: Vec::new(),
             graph_overlay: None,
-            search_path: crate::session::default_search_path(),
+            search_path: crate::session::default_search_path().into(),
             temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),

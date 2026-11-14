@@ -9,6 +9,7 @@
 use super::{BTreeMap, Value, VertexConstraint};
 
 pub(super) mod columns;
+pub mod stored;
 pub use columns::{ColumnStatistics, ColumnStatisticsImageReader};
 
 /// Jaccard-style selectivity assumed for text-similarity joins when no

@@ -107,6 +107,14 @@ impl AnalyzerBindings {
         }
     }
 
+    /// Share an existing lazy default while creating an independently writable, initially empty field map. No analyzer configuration or resource is copied or resolved.
+    pub fn from_default(default: AnalyzerDefault) -> Self {
+        Self {
+            default: default.0,
+            fields: FieldBindings::Live(BTreeMap::new()),
+        }
+    }
+
     pub fn default_binding(&self) -> AnalyzerDefault {
         AnalyzerDefault(Arc::clone(&self.default))
     }

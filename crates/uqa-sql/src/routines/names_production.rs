@@ -45,3 +45,34 @@ pub fn routine_returns_anonymous_record_with_control(
     };
     Ok(canonical_routine_type_name_with_control(name, control)?.as_str() == "record")
 }
+
+/// Build the original ordered identity signature through a retained input's work channel. Output-only parameters still consume work without entering the identity.
+pub async fn routine_signature_types_from_input(
+    definition: &CreateFunction,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<Produced<Vec<String>>, crate::type_resolution::RoutineSignatureInputError> {
+    control.check()?;
+    input.checkpoint().await?;
+    control.check()?;
+    let mut signature = uqa_core::memory::ProductionVec::new(*control);
+    for parameter in &definition.params {
+        control.check()?;
+        input.checkpoint().await?;
+        control.check()?;
+        if CreateFunction::is_identity_param(parameter) {
+            signature.push_produced(
+                crate::type_resolution::canonical_routine_type_name_from_input(
+                    &parameter.type_name,
+                    control,
+                    input,
+                )
+                .await?,
+            )?;
+        }
+    }
+    Ok(signature.finish()?)
+}
+
+#[cfg(test)]
+mod tests;

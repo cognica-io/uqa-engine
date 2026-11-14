@@ -14,7 +14,7 @@ use crate::{
     },
     read_control::StorageReadControl,
     vector_index::{image::VectorImageSnapshot, VectorIndex},
-    StorageBackendError, StorageBackendResult,
+    StorageBackendError, StorageBackendResult, StorageHandle,
 };
 use std::{borrow::Borrow, sync::Arc};
 use uqa_core::{
@@ -98,11 +98,20 @@ impl LiveVectorIndexesMut<'_> {
         &mut self,
         field: FieldName,
         index: Box<dyn VectorIndex>,
-    ) -> StorageBackendResult<Option<Box<dyn VectorIndex>>> {
+    ) -> StorageBackendResult<Option<StorageHandle<dyn VectorIndex>>> {
         let index = match self.capture.as_ref() {
             Some(capture) => index.into_memory_capture(&capture.registry)?,
             None => index,
         };
+        self.insert_handle(field, index.into())
+    }
+
+    /// Publish an existing complete owner. A memory collection accepts only a source already registered with its original capture domain.
+    pub fn insert_handle(
+        &mut self,
+        field: FieldName,
+        index: StorageHandle<dyn VectorIndex>,
+    ) -> StorageBackendResult<Option<StorageHandle<dyn VectorIndex>>> {
         let capture = self
             .capture
             .as_ref()
@@ -122,7 +131,7 @@ impl LiveVectorIndexesMut<'_> {
     pub fn remove<Q: Ord + ?Sized>(
         &mut self,
         field: &Q,
-    ) -> StorageBackendResult<Option<Box<dyn VectorIndex>>>
+    ) -> StorageBackendResult<Option<StorageHandle<dyn VectorIndex>>>
     where
         FieldName: Borrow<Q>,
     {
@@ -150,13 +159,13 @@ impl LiveVectorIndexesMut<'_> {
     where
         FieldName: Borrow<Q>,
     {
-        self.indexes.get_mut(field).map(Box::as_mut)
+        self.indexes.get_mut(field).map(StorageHandle::as_mut)
     }
 
     pub fn values_mut(
         &mut self,
     ) -> impl ExactSizeIterator<Item = &mut (dyn VectorIndex + 'static)> {
-        self.indexes.values_mut().map(Box::as_mut)
+        self.indexes.values_mut().map(StorageHandle::as_mut)
     }
 
     pub fn iter_mut(
@@ -175,11 +184,17 @@ impl LiveVectorIndexesMut<'_> {
             for (field, index) in indexes {
                 let index = index.into_memory_capture(&capture.registry)?;
                 capture = capture.with_index(&field, index.as_ref())?;
-                registered.insert(field, index);
+                registered.insert(field, index.into());
             }
             (registered, Some(capture))
         } else {
-            (indexes.into_iter().collect(), None)
+            (
+                indexes
+                    .into_iter()
+                    .map(|(field, index)| (field, index.into()))
+                    .collect(),
+                None,
+            )
         };
         if let (Some(previous), Some(next)) = (self.capture.as_ref(), capture.as_mut()) {
             previous.publish_all(next)?;

@@ -11,6 +11,8 @@ use super::{
     CTE,
 };
 
+mod input;
+
 fn upgrade_exprs(expressions: &mut [Expr]) -> bool {
     expressions.iter_mut().fold(false, |changed, expression| {
         expression.upgrade_legacy_serialized_dispatches() | changed
@@ -190,6 +192,9 @@ impl Statement {
                 changed
             }
             Self::AlterDomain(domain) => match &mut domain.action {
+                crate::ast::AlterDomainAction::SetDefault { expression } => expression
+                    .as_mut()
+                    .is_some_and(|expression| expression.upgrade_legacy_serialized_dispatches()),
                 crate::ast::AlterDomainAction::AddCheck { constraint } => {
                     constraint.expression.upgrade_legacy_serialized_dispatches()
                 }

@@ -10,7 +10,11 @@ use super::{RoleAttribute, SchemaAclPrivilege};
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     catalog::{
-        roles::{identity::RoleSubject, memberships::role_inherits_with_control, RoleIdentity},
+        roles::{
+            identity::{find_identity, RoleSubject},
+            memberships::{role_inherits_with_control, role_reaches_from},
+            RoleIdentity, RoleReference,
+        },
         security::BoundSchemaSecurity,
     },
     SQLError,
@@ -20,6 +24,7 @@ use uqa_core::{
 };
 
 /// A retained registry row or a stack-backed builtin ACL has the same privilege rules.
+#[derive(Clone, Copy)]
 pub struct SchemaPrivilegeView<'a> {
     pub role_owner: RoleIdentity,
     pub acl: Option<&'a [BoundAclEntry<SchemaPrivileges>]>,
@@ -42,15 +47,7 @@ pub fn role_has_schema_privilege_with_control(
     memberships: &RoleMemberships,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    // Ordinary namespace lookup resolves the complete ACL before considering even PUBLIC or superuser access. Invalid persisted references therefore keep the namespace unusable.
-    require_role(security.role_owner, roles, control)?;
-    for entry in security.acl.into_iter().flatten() {
-        control.check()?;
-        if let Some(role) = entry.role {
-            require_role(role, roles, control)?;
-        }
-        require_role(entry.grantor, roles, control)?;
-    }
+    crate::catalog::work::inline(validate(security, roles, control, &mut ()))?;
     if subject
         .role_definition_with_control(roles, control)?
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
@@ -80,10 +77,87 @@ pub fn role_has_schema_privilege_with_control(
     }
 }
 
-fn require_role(
+/// Check one native session subject under retained work, after validating the complete persisted ACL in its original order.
+pub async fn role_has_schema_privilege_from_input(
+    security: SchemaPrivilegeView<'_>,
+    subject: &RoleReference,
+    privilege: SchemaAclPrivilege,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<bool, SQLError> {
+    validate(security, roles, control, input).await?;
+    let subject = subject
+        .role_definition_from_input(roles, control, input)
+        .await?;
+    allowed(security, subject, privilege, memberships, control, input).await
+}
+
+async fn validate(
+    security: SchemaPrivilegeView<'_>,
+    roles: &RoleDefinitions,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<(), SQLError> {
+    // Ordinary namespace lookup resolves every ACL reference before considering PUBLIC or superuser access.
+    require_role(security.role_owner, roles, control, work).await?;
+    for entry in security.acl.into_iter().flatten() {
+        work.checkpoint().await?;
+        control.check()?;
+        if let Some(role) = entry.role {
+            require_role(role, roles, control, work).await?;
+        }
+        require_role(entry.grantor, roles, control, work).await?;
+    }
+    Ok(())
+}
+
+async fn allowed(
+    security: SchemaPrivilegeView<'_>,
+    subject: Option<&crate::catalog::roles::RoleDefinition>,
+    privilege: SchemaAclPrivilege,
+    memberships: &RoleMemberships,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<bool, SQLError> {
+    if subject.is_some_and(|role| role.has(RoleAttribute::Superuser)) {
+        return Ok(true);
+    }
+    let subject = subject.map(crate::catalog::roles::RoleDefinition::identity);
+    match security.acl {
+        None => match subject {
+            Some(subject) => {
+                role_reaches_from(memberships, subject, security.role_owner, control, work).await
+            }
+            None => Ok(false),
+        },
+        Some(acl) => {
+            for entry in acl {
+                work.checkpoint().await?;
+                control.check()?;
+                if entry.privileges.intersects(privilege.mask())
+                    && match (entry.role, subject) {
+                        (None, _) => true,
+                        (Some(role), Some(subject)) => {
+                            role_reaches_from(memberships, subject, role, control, work).await?
+                        }
+                        _ => false,
+                    }
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+    }
+}
+
+async fn require_role(
     role: RoleIdentity,
     roles: &RoleDefinitions,
     control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
 ) -> Result<(), SQLError> {
     control.check()?;
     if !role.is_valid() {
@@ -91,7 +165,7 @@ fn require_role(
             "invalid persisted schema role identity".into(),
         ));
     }
-    if role.role_definition_with_control(roles, control)?.is_none() {
+    if find_identity(role, roles, control, work).await?.is_none() {
         return Err(SQLError::Internal(format!(
             "persisted schema privileges reference missing role incarnation {}",
             role.oid
@@ -100,5 +174,7 @@ fn require_role(
     Ok(())
 }
 
+#[cfg(test)]
+mod input_tests;
 #[cfg(test)]
 mod tests;

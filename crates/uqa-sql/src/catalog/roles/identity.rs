@@ -7,6 +7,7 @@
 //! Role incarnations and authorization subjects over an explicit role catalog.
 
 use super::RoleDefinition;
+mod input;
 use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
@@ -227,6 +228,16 @@ impl RoleBinding {
         Ok(Self::new(role.name.clone(), oid, role.object_id))
     }
 
+    /// Validate a role incarnation without constructing an owned display-name binding.
+    pub(crate) fn identity_from_definition(
+        role: &RoleDefinition,
+    ) -> Result<RoleIdentity, SQLError> {
+        Ok(RoleIdentity {
+            oid: i64::from(Self::validated_oid(role)?),
+            object_id: role.object_id,
+        })
+    }
+
     fn validated_oid(role: &RoleDefinition) -> Result<u32, SQLError> {
         if role.oid <= 0 {
             return Err(SQLError::Internal("invalid role OID".into()));
@@ -364,20 +375,7 @@ impl RoleSubject for RoleBinding {
         roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
-        control.check()?;
-        if let Some(role) = roles
-            .get(&self.name)
-            .filter(|role| self.matches_definition(role))
-        {
-            return Ok(Some(role));
-        }
-        for role in roles.values() {
-            control.check()?;
-            if self.matches_definition(role) {
-                return Ok(Some(role));
-            }
-        }
-        Ok(None)
+        crate::catalog::work::inline(input::bound(self, roles, control, &mut ()))
     }
 }
 
@@ -398,18 +396,28 @@ impl RoleSubject for RoleIdentity {
         roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
-        control.check()?;
-        if !self.is_valid() {
-            return Ok(None);
-        }
-        for role in roles.values() {
-            control.check()?;
-            if role.identity() == *self {
-                return Ok(Some(role));
-            }
-        }
-        Ok(None)
+        crate::catalog::work::inline(find_identity(*self, roles, control, &mut ()))
     }
+}
+
+pub(crate) async fn find_identity<'a>(
+    identity: RoleIdentity,
+    roles: &'a RoleDefinitions,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<Option<&'a RoleDefinition>, SQLError> {
+    control.check()?;
+    if !identity.is_valid() {
+        return Ok(None);
+    }
+    for role in roles.values() {
+        work.checkpoint().await?;
+        control.check()?;
+        if role.identity() == identity {
+            return Ok(Some(role));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

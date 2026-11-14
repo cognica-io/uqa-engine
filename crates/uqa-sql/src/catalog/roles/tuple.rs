@@ -54,12 +54,10 @@ impl RoleTuple {
 }
 
 pub fn validate_revisions(roles: &RoleDefinitions) -> Result<(), String> {
-    for (name, role) in roles {
-        if role.revision == 0 {
-            return Err(format!("persisted role `{name}` has no tuple revision"));
-        }
-    }
-    Ok(())
+    super::restoration::validation::finish(
+        roles,
+        super::restoration::validation::RoleValidationMode::Revisions,
+    )
 }
 
 pub fn validate_revision_changes(

@@ -6,7 +6,7 @@
 
 //! Stored syntax shares native plan admission, suspended ownership and iterative retirement.
 
-use super::{invalid, Input, PlanMemory, SQLError};
+use super::{invalid, Fields, Input, PlanMemory, SQLError};
 use crate::ast::{
     AssignmentStep, AssignmentTarget, AssignmentTargets, CteCycleClause, DeleteStmt, Expr,
     FrameBound, FromClause, InsertStmt, MergeStmt, MergeWhen, MultipleAssignmentTargets,
@@ -93,6 +93,21 @@ impl super::NativeNode for Node {
     fn validate(frame: &mut super::Frame<Self>, input: &Input<'_>) -> Result<(), SQLError> {
         validation::observe(&frame.node, &mut frame.references);
         validation::validate(&frame.node, &frame.references, input)
+    }
+    async fn read_fields(
+        frame: &mut super::Frame<Self>,
+        input: &mut Fields<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step, SQLError> {
+        await_field!(frame
+            .node
+            .read_fields(frame.position, &mut frame.count, input, memory))
+    }
+    fn validate_step(frame: &mut super::Frame<Self>, position: usize) -> Result<bool, SQLError> {
+        if position == 0 {
+            validation::observe(&frame.node, &mut frame.references);
+        }
+        validation::validate_step(&frame.node, &frame.references, position)
     }
     fn attach(frame: &mut super::Frame<Self>, child: super::Frame<Self>) {
         if validation::carries_enclosing_references(&child.node) {

@@ -53,6 +53,24 @@ pub struct NativeTableConstraints {
     pub row_type_array_name: TableMetadata<Option<String>>,
 }
 
+impl NativeTableConstraints {
+    /// Publish an ordinary validated declaration through the same native field owners used by retained stored input. Executable literals acquire independent SQL ownership; exclusively owned metadata moves into its generation.
+    pub fn new(value: TableConstraintSet) -> Result<Self, SQLError> {
+        Ok(Self {
+            dropped_attributes: TableMetadata::new(value.dropped_attributes),
+            columns_declared: value.columns_declared,
+            checks: TableDefinition::new(&value.checks)?,
+            foreign_keys: TableMetadata::new(value.foreign_keys),
+            key_constraints: TableMetadata::new(value.key_constraints),
+            persistence: value.persistence,
+            on_commit: value.on_commit,
+            hierarchy: TableDefinition::new(&value.hierarchy)?,
+            catalog_oids: value.catalog_oids,
+            row_type_array_name: TableMetadata::new(value.row_type_array_name),
+        })
+    }
+}
+
 impl StoredTableConstraints {
     pub fn read_stored_json(
         text: &str,

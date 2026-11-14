@@ -35,6 +35,52 @@ pub(super) fn decode_id(prefix: &[u8], key: &[u8]) -> StorageBackendResult<DocId
 }
 
 impl Documents<'_> {
+    pub(super) fn maximum(&self) -> StorageBackendResult<DocId> {
+        self.read.control().check()?;
+        let prefix = document_key_prefix_controlled(self.table, self.read.control())?;
+        let mut maximum = 0;
+        let mut previous = None;
+        let mut failure = None;
+        let scanned = self.read.visit_keys_after(
+            &prefix,
+            None,
+            usize::MAX,
+            self.read.control(),
+            &mut |key| {
+                if failure.is_some() {
+                    return Err(other_error("document identity scan has already failed"));
+                }
+                let result = (|| {
+                    self.read.control().check()?;
+                    if !key.starts_with(&prefix) {
+                        return Err(other_error(
+                            "document identity scan exceeds its selected range",
+                        ));
+                    }
+                    let id = decode_id(&prefix, key)?;
+                    if previous.is_some_and(|previous| id <= previous) {
+                        return Err(other_error(
+                            "document identity scan does not advance in id order",
+                        ));
+                    }
+                    maximum = maximum.max(id);
+                    previous = Some(id);
+                    Ok(())
+                })();
+                result.map_err(|error| {
+                    failure = Some(error);
+                    other_error("document identity scan failed")
+                })
+            },
+        );
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        scanned?;
+        self.read.control().check()?;
+        Ok(maximum)
+    }
+
     pub(super) fn retained_many_controlled(
         &self,
         ids: &[DocId],

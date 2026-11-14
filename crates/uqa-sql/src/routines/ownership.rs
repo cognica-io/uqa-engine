@@ -72,11 +72,11 @@ impl SQLUserFunction {
             }
         };
         let (definition, memory) = definition.into_parts();
-        RetainedRoutineValue::native_with_children(
+        Ok(RetainedRoutineValue::native_with_children(
             control.finish(Self::new(definition, body), memory)?,
             children,
             control,
-        )
+        )?)
     }
 }
 

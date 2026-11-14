@@ -6,7 +6,9 @@
 
 //! Complete table catalogs retain physical input, original predicates and admitted replacements.
 
-mod acl;
+use super::relation_acl::replacements as acl;
+mod components;
+pub use components::CatalogTableComponents;
 mod ordering;
 #[cfg(test)]
 mod tests;
@@ -135,7 +137,15 @@ async fn assemble(
     drop(source);
     drop(validation);
     for table in tables.iter_mut() {
-        replacements.apply(table, &mut progress).await?;
+        let schema = &mut table.schema;
+        replacements
+            .apply(
+                &schema.relation,
+                &mut schema.security,
+                &mut table.memory,
+                &mut progress,
+            )
+            .await?;
     }
     drop(replacements);
     if matches!(order, CatalogTableOrder::AfterReplacements) {

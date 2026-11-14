@@ -10,6 +10,8 @@ mod admission;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod backup_import;
 mod backup_metadata;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_target;
 mod codec;
 mod commit_cache;
 mod connection_functions;
@@ -39,6 +41,8 @@ mod write;
 pub use backup_import::{
     SQLiteBackupImportOptions, SQLiteBackupImportStep, SQLiteKeyValueBackupImport,
 };
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup_target::{SQLiteBackupMapping, SQLiteBackupTarget};
 pub(crate) use schema::WritePermit;
 pub use serializable::SQLiteSerializableAdmission;
 

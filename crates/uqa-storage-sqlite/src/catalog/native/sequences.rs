@@ -227,11 +227,7 @@ impl NativeSnapshot {
         owner: NativeRecordOwner,
     ) -> Result<Option<SequenceValuePosition>> {
         self.read_row(Family::SequenceValues, owner, &[], |row| {
-            Ok(SequenceValuePosition {
-                current: values::integer(row[2]),
-                called: values::integer(row[3]) != 0,
-                log_count: values::integer(row[4]),
-            })
+            Ok(value_position(row))
         })
     }
 
@@ -314,5 +310,14 @@ impl NativeSnapshot {
                 ValueRef::Integer(sequence.log_count),
             ],
         )
+    }
+}
+
+/// Original fixed generation-value projection after native layout validation.
+pub(super) fn value_position(row: &[ValueRef<'_>]) -> SequenceValuePosition {
+    SequenceValuePosition {
+        current: values::integer(row[2]),
+        called: values::integer(row[3]) != 0,
+        log_count: values::integer(row[4]),
     }
 }

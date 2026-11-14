@@ -37,8 +37,8 @@ pub(crate) use canonical::{
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     CapturedVectorIndexes, LiveVectorIndexesMut, MemoryVectorIndexesBuilder,
-    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
-    VectorSourcePublication,
+    PersistentVectorIndexesBuilder, RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes,
+    VectorIndexesIter, VectorSourcePublication,
 };
 pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
@@ -61,11 +61,25 @@ pub fn validate_vector_values_controlled(
     vector: &[f32],
     control: Option<&crate::read_control::StorageReadControl>,
 ) -> StorageBackendResult<()> {
+    crate::image_io::work::inline(validate_vector_values_from(
+        dimensions,
+        vector,
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn validate_vector_values_from(
+    dimensions: u32,
+    vector: &[f32],
+    control: Option<&crate::read_control::StorageReadControl>,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
     if let Some(control) = control {
         control.check()?;
     }
     validate_vector_dimensions(dimensions, vector.len())?;
-    validate_vector_components_controlled(vector, 0, control)
+    validate_vector_components_from(vector, 0, control, work).await
 }
 
 pub(crate) fn validate_vector_dimensions(
@@ -90,8 +104,23 @@ pub(crate) fn validate_vector_components_controlled(
     offset: usize,
     control: Option<&crate::read_control::StorageReadControl>,
 ) -> StorageBackendResult<()> {
+    crate::image_io::work::inline(validate_vector_components_from(
+        vector,
+        offset,
+        control,
+        &mut (),
+    ))
+}
+
+async fn validate_vector_components_from(
+    vector: &[f32],
+    offset: usize,
+    control: Option<&crate::read_control::StorageReadControl>,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
     for (index, value) in vector.iter().copied().enumerate() {
         if index.is_multiple_of(1024) {
+            work.checkpoint().await?;
             if let Some(control) = control {
                 control.check()?;
             }

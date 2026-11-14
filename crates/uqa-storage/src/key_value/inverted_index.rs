@@ -68,7 +68,7 @@ pub(super) struct FieldStats {
 #[derive(Clone)]
 pub struct KeyValueInvertedIndex {
     source: OccurrenceSource,
-    table: String,
+    table: crate::StorageName,
     bindings: AnalyzerBindings,
 }
 
@@ -91,11 +91,38 @@ impl KeyValueInvertedIndex {
         table: impl Into<String>,
         bindings: AnalyzerBindings,
     ) -> Self {
+        Self::from_storage_name(storage, table.into().into(), bindings)
+    }
+
+    /// Bind a provider projection to the same immutable physical name. Admitted names remain shared with their original owner, including native-provider temporary projections.
+    pub fn from_storage_name(
+        storage: Arc<dyn OccurrenceStorage>,
+        table: crate::StorageName,
+        bindings: AnalyzerBindings,
+    ) -> Self {
         Self {
             source: OccurrenceSource::Live(storage),
-            table: table.into(),
+            table,
             bindings,
         }
+    }
+
+    pub(crate) fn with_control(
+        store: Arc<dyn KeyValueStore>,
+        table: crate::StorageName,
+        default: crate::inverted_index::AnalyzerDefault,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        let source = uqa_core::memory::Budgeted::new(
+            storage::KeyValueOccurrences(store),
+            control.memory().reserve(0)?,
+        )
+        .into_shared()?;
+        Ok(Self::from_storage_name(
+            source,
+            table,
+            AnalyzerBindings::from_default(default),
+        ))
     }
 
     /// Compiled bindings used by this index, including successful native-provider binding changes.

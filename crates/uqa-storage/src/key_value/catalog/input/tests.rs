@@ -8,6 +8,90 @@ use super::*;
 use crate::key_value::catalog::{decode_catalog_relation_key, relation_key, StoredCatalogIndex};
 use crate::key_value::codec::single_str_key;
 
+#[test]
+fn controlled_graph_presence_requires_the_canonical_key_without_reading_payloads() {
+    use crate::{CatalogFacade, KeyValueStore, MemoryKeyValueStore};
+    use std::sync::Arc;
+    let store = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store.clone());
+    let canonical = single_str_key(super::super::TAG_NAMED_GRAPH, "graph").unwrap();
+    let mut alias = canonical.clone();
+    alias.extend_from_slice(b"alias");
+    store.put(&alias, &[0xff; 2048]).unwrap();
+    assert_eq!(catalog.load_named_graphs().unwrap(), ["graph"]);
+    let control = StorageReadControl::with_limit(4096);
+    let limits = CatalogInputLimits {
+        maximum_key_bytes: 256,
+        maximum_value_bytes: 1,
+    };
+    assert!(!catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .unwrap());
+    store.put(&canonical, &[0xff; 8192]).unwrap();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .unwrap());
+    assert!(!catalog
+        .named_graph_exists_with_control("absent", limits, &control)
+        .unwrap());
+    assert_eq!(control.memory().used(), 0);
+    let occupied = control
+        .memory()
+        .reserve(control.memory().available())
+        .unwrap();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .is_err());
+    drop(occupied);
+    control.cancellation().cancel();
+    assert!(catalog
+        .named_graph_exists_with_control("graph", limits, &control)
+        .is_err());
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn key_value_schema_input_preserves_raw_legacy_names_and_original_key_validation() {
+    use crate::{CatalogFacade, KeyValueStore, MemoryKeyValueStore};
+    use std::sync::Arc;
+    for name in ["", "public", "한글\0schema"] {
+        for trailing in [false, true] {
+            let mut key = single_str_key(super::super::TAG_SCHEMA, name).unwrap();
+            if trailing {
+                key.extend_from_slice(b"trailing");
+            }
+            for bytes in [
+                name.as_bytes().to_vec(),
+                serde_json::to_vec(&crate::SchemaRow::bootstrap(name)).unwrap(),
+                serde_json::to_vec(&crate::SchemaRow::legacy("different")).unwrap(),
+                b"{".to_vec(),
+            ] {
+                let store = Arc::new(MemoryKeyValueStore::new());
+                store.put(&key, &bytes).unwrap();
+                let catalog = KeyValueCatalog::new(store);
+                let control = StorageReadControl::with_limit(1 << 20);
+                match (
+                    catalog.load_schema_rows(),
+                    decode_schema(&key, &bytes, &control),
+                ) {
+                    (Ok(expected), Ok(Some(actual))) => assert_eq!(*actual, expected[0]),
+                    (Err(expected), Err(actual)) => {
+                        assert_eq!(
+                            std::mem::discriminant(&expected),
+                            std::mem::discriminant(&actual)
+                        );
+                        if matches!(expected, StorageBackendError::Other(_)) {
+                            assert_eq!(actual.to_string(), expected.to_string());
+                        }
+                    }
+                    (expected, actual) => panic!("{name:?}: {expected:?} / {actual:?}"),
+                }
+                assert_eq!(control.memory().used(), 0);
+            }
+        }
+    }
+}
+
 fn equal(left: &CatalogIndexRow, right: &CatalogIndexRow) {
     assert_eq!(left.relation, right.relation);
     assert_eq!(left.index_type, right.index_type);

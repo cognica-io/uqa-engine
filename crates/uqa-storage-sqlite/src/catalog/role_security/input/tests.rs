@@ -9,6 +9,85 @@ use super::*;
 use uqa_core::{catalog_role::RoleIdentity, memory::MemoryBudget, CancellationToken};
 
 #[test]
+fn native_schema_input_preserves_original_owner_classes_acl_shapes_and_tuple_formats() {
+    use super::super::{decode_schema, encode_schema};
+    use uqa_core::catalog_schema::{BoundSchemaRow, SchemaTupleIdentity};
+    use uqa_storage::SchemaRow;
+    let mut current = BoundSchemaRow::bootstrap("public");
+    current.tuple = Some(SchemaTupleIdentity::initial(2200));
+    let (current_owner, bound) = encode_schema(&current.into()).unwrap();
+    let (old_owner, _) = encode_schema(&SchemaRow::bootstrap("public")).unwrap();
+    let (_, named) = encode_schema(&SchemaRow::legacy("public")).unwrap();
+    for owner in [
+        ValueRef::Text(b"uqa"),
+        (&current_owner).into(),
+        (&old_owner).into(),
+        ValueRef::Blob(b"invalid"),
+        ValueRef::Text(&[255]),
+        ValueRef::Null,
+        ValueRef::Integer(1),
+    ] {
+        for acl in [
+            None,
+            Some("null"),
+            Some("[]"),
+            Some("["),
+            bound.as_deref(),
+            named.as_deref(),
+            Some(r#"[{"role":"reader","role":"other"}]"#),
+        ] {
+            let control = StorageReadControl::with_limit(1 << 20);
+            match (
+                decode_schema("schema한글".into(), owner, acl),
+                schema("schema한글", owner, acl, &control),
+            ) {
+                (Ok(expected), Ok(actual)) => assert_eq!(*actual, expected),
+                (Err(expected), Err(actual)) => {
+                    assert_eq!(
+                        std::mem::discriminant(&actual),
+                        std::mem::discriminant(&expected),
+                        "{owner:?}, {acl:?}: {actual} / {expected}"
+                    );
+                    if matches!(expected, SQLiteError::StorageBackend(_)) {
+                        assert_eq!(actual.to_string(), expected.to_string());
+                    }
+                }
+                (expected, actual) => panic!("{owner:?}, {acl:?}: {actual:?} / {expected:?}"),
+            }
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+}
+
+#[test]
+fn native_schema_input_admits_original_name_owner_and_acl_allocations() {
+    let owner = "owner한글".repeat(512);
+    let name = "schema".repeat(512);
+    let acl = r#"[{"role":"reader","grantor":"owner"},{"role":"PUBLIC"}]"#;
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut output = None;
+    let allocations = allocation_counter::measure(|| {
+        output =
+            Some(schema(&name, ValueRef::Text(owner.as_bytes()), Some(acl), &control).unwrap());
+    });
+    assert_eq!(
+        usize::try_from(allocations.bytes_current).unwrap(),
+        control.memory().used()
+    );
+    assert!(usize::try_from(allocations.bytes_max).unwrap() <= control.memory().peak());
+    let peak = control.memory().peak();
+    control.cancellation().cancel();
+    assert_eq!(output.as_ref().unwrap().name(), name);
+    drop(output);
+    assert_eq!(control.memory().used(), 0);
+    for limit in (0..peak).step_by(127).chain([peak - 1]) {
+        let control = StorageReadControl::with_limit(limit);
+        assert!(schema(&name, ValueRef::Text(owner.as_bytes()), Some(acl), &control).is_err());
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn native_authority_input_preserves_original_storage_classes_nulls_and_recipient_shapes() {
     let identity = encode_identity(RoleIdentity::BOOTSTRAP).unwrap();
     let owner_json = serde_json::to_string(&RoleIdentity::BOOTSTRAP).unwrap();

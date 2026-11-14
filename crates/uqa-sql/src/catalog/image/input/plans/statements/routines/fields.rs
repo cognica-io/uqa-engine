@@ -19,16 +19,16 @@ empty! {
     SQLBodyForm => SQLBodyForm::Return, RoutineSecurityAttributes => RoutineSecurityAttributes::default(),
     RoutineAttributeClauses => RoutineAttributeClauses::default(),
 }
-leaf!(u32, |input, _memory| Ok::<_, SQLError>(u32::from_le_bytes(
-    input.binary.array()?
-)));
-leaf!(f32, |input, _memory| Ok::<_, SQLError>(f32::from_bits(
-    u32::from_le_bytes(input.binary.array()?)
-)));
-leaf!([u8; 16], |input, _memory| input.object_id());
-leaf!(RoleIdentity, |input, _memory| input.identity());
-leaf!(FunctionParamMode, |input, _memory| Ok::<_, SQLError>(
-    match input.binary.array::<1>()?[0] {
+leaf!(u32, |input, _memory, read| Ok::<_, SQLError>(
+    u32::from_le_bytes(read!(input.binary.array())?)
+));
+leaf!(f32, |input, _memory, read| Ok::<_, SQLError>(
+    f32::from_bits(u32::from_le_bytes(read!(input.binary.array())?))
+));
+leaf!([u8; 16], |input, _memory, read| read!(input.object_id()));
+leaf!(RoleIdentity, |input, _memory, read| read!(input.identity()));
+leaf!(FunctionParamMode, |input, _memory, read| Ok::<_, SQLError>(
+    match read!(input.binary.array::<1>())?[0] {
         0 => Self::In,
         1 => Self::Out,
         2 => Self::InOut,
@@ -37,75 +37,89 @@ leaf!(FunctionParamMode, |input, _memory| Ok::<_, SQLError>(
         _ => return Err(invalid("routine parameter mode")),
     }
 ));
-leaf!(FunctionReturns, |input, memory| Ok::<_, SQLError>(
-    match input.binary.array::<1>()?[0] {
+leaf!(FunctionReturns, |input, memory, read| Ok::<_, SQLError>(
+    match read!(input.binary.array::<1>())?[0] {
         0 => Self::None,
         1 => Self::Scalar {
-            type_name: input.plan_text(memory)?
+            type_name: read!(input.plan_text(memory))?
         },
         2 => Self::SetOf {
-            type_name: input.plan_text(memory)?
+            type_name: read!(input.plan_text(memory))?
         },
         3 => Self::Table,
         _ => return Err(invalid("routine result shape")),
     }
 ));
-leaf!(FunctionVolatility, |input, _memory| Ok::<_, SQLError>(
-    match input.binary.array::<1>()?[0] {
+leaf!(
+    FunctionVolatility,
+    |input, _memory, read| Ok::<_, SQLError>(match read!(input.binary.array::<1>())?[0] {
         0 => Self::Immutable,
         1 => Self::Stable,
         2 => Self::Volatile,
         _ => return Err(invalid("routine volatility")),
-    }
-));
-leaf!(FunctionParallel, |input, _memory| Ok::<_, SQLError>(
-    match input.binary.array::<1>()?[0] {
+    })
+);
+leaf!(FunctionParallel, |input, _memory, read| Ok::<_, SQLError>(
+    match read!(input.binary.array::<1>())?[0] {
         0 => Self::Unsafe,
         1 => Self::Restricted,
         2 => Self::Safe,
         _ => return Err(invalid("routine parallel safety")),
     }
 ));
-leaf!(SQLBodyForm, |input, _memory| Ok::<_, SQLError>(
-    match input.binary.array::<1>()?[0] {
+leaf!(SQLBodyForm, |input, _memory, read| Ok::<_, SQLError>(
+    match read!(input.binary.array::<1>())?[0] {
         0 => Self::Return,
         1 => Self::Atomic,
         _ => return Err(invalid("routine SQL body form")),
     }
 ));
-leaf!(
-    RoutineSecurityAttributes,
-    |input, _memory| Ok::<_, SQLError>(Self {
-        security_definer: input.flag()?,
-        leakproof: input.flag()?
+leaf!(RoutineSecurityAttributes, |input, _memory, read| Ok::<
+    _,
+    SQLError,
+>(Self {
+    security_definer: read!(input.flag())?,
+    leakproof: read!(input.flag())?,
+}));
+leaf!(Option<RoutineColumnTypeReference>, |input, memory, read| {
+    Ok::<_, SQLError>(if read!(input.flag())? {
+        Some(RoutineColumnTypeReference {
+            schema: read!(input.plan_optional_text(memory))?,
+            relation: read!(input.plan_text(memory))?,
+            column: read!(input.plan_text(memory))?,
+        })
+    } else {
+        None
     })
-);
-leaf!(Option<RoutineColumnTypeReference>, |input, memory| input
-    .flag()?
-    .then(|| Ok::<_, SQLError>(RoutineColumnTypeReference {
-        schema: input.plan_optional_text(memory)?,
-        relation: input.plan_text(memory)?,
-        column: input.plan_text(memory)?,
-    }))
-    .transpose());
-leaf!(Option<RoutineDefaultType>, |input, memory| input
-    .flag()?
-    .then(|| Ok::<_, SQLError>(match input.binary.array::<1>()?[0] {
-        0 => {
-            let (value, lease) = input.column_type()?.into_parts();
-            memory.absorb(lease);
-            RoutineDefaultType::Concrete(value)
-        }
-        1 => RoutineDefaultType::Polymorphic(input.plan_text(memory)?),
-        _ => return Err(invalid("routine default type")),
-    }))
-    .transpose());
-leaf!(Vec<(String, String)>, |input, memory| input.plan_vector(
+});
+leaf!(Option<RoutineDefaultType>, |input, memory, read| {
+    Ok::<_, SQLError>(if read!(input.flag())? {
+        Some(match read!(input.binary.array::<1>())?[0] {
+            0 => {
+                let (value, lease) = read!(input.column_type())?.into_parts();
+                memory.absorb(lease);
+                RoutineDefaultType::Concrete(value)
+            }
+            1 => RoutineDefaultType::Polymorphic(read!(input.plan_text(memory))?),
+            _ => return Err(invalid("routine default type")),
+        })
+    } else {
+        None
+    })
+});
+leaf!(Vec<(String, String)>, |input, memory, read| input_list!(
+    read,
+    input,
     memory,
-    |input, memory| Ok((input.plan_text(memory)?, input.plan_text(memory)?))
+    |input, memory| {
+        Ok((
+            read!(input.plan_text(memory))?,
+            read!(input.plan_text(memory))?,
+        ))
+    }
 ));
-leaf!(Vec<ObjectAclEntry>, |input, memory| {
-    let (value, lease) = input.object_acl()?.into_parts();
+leaf!(Vec<ObjectAclEntry>, |input, memory, read| {
+    let (value, lease) = read!(input.object_acl())?.into_parts();
     memory.absorb(lease);
     Ok::<_, SQLError>(value)
 });

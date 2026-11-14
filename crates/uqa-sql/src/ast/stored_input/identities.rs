@@ -5,9 +5,25 @@
 //
 
 use super::{number, Input, InputError, JsonToken};
-use uqa_core::catalog_identity::CatalogObjectIdentity;
+use uqa_core::{catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity};
 
 impl<'a> Input<'a, '_> {
+    pub(crate) fn stored_role_identity(
+        &mut self,
+        first: JsonToken<'a>,
+    ) -> Result<RoleIdentity, InputError> {
+        let (mut oid, mut object_id) = (0, [0; 16]);
+        self.fields(first, &["oid", "object_id"], 3, |input, field, token| {
+            if field == 0 {
+                oid = number(token)?;
+            } else {
+                object_id = input.identity(token)?;
+            }
+            Ok(())
+        })?;
+        Ok(RoleIdentity { oid, object_id })
+    }
+
     pub(crate) fn optional_identity(
         &mut self,
         token: JsonToken<'a>,

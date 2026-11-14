@@ -16,8 +16,10 @@ use super::{
 };
 use uqa_core::memory::MemoryError;
 
+mod stored;
+
 #[derive(Debug, Clone)]
-pub(super) struct NativeLabels {
+pub(crate) struct NativeLabels {
     pub(super) allocation_id: [u8; 16],
     pub(super) labels: NativeMap<String, u32>,
     pub(super) kinds: NativeMap<String, LabelKind>,
@@ -61,7 +63,7 @@ impl NativeLabels {
         })
     }
 
-    pub(super) fn to_record(&self) -> GraphLabelRegistry {
+    pub(crate) fn to_record(&self) -> GraphLabelRegistry {
         GraphLabelRegistry {
             allocation_id: self.allocation_id,
             labels: self
@@ -121,6 +123,12 @@ impl NativeLabels {
 
 impl Registry for NativeLabels {
     type Error = MemoryError;
+    fn allocation_id(&self) -> [u8; 16] {
+        self.allocation_id
+    }
+    fn set_allocation_id(&mut self, identity: [u8; 16]) {
+        self.allocation_id = identity;
+    }
     fn label(&self, name: &str) -> Option<u32> {
         self.labels.get(name).copied()
     }

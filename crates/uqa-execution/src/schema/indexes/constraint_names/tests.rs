@@ -126,7 +126,7 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
     candidate.key_constraints[0].columns = vec!["new_column".into()];
     let current = crate::catalog::CatalogTableSnapshot {
         dropped_attributes: Vec::new().into(),
-        row_type_array_name: None,
+        row_type_array_name: None.into(),
         object_id: [1; 16],
         catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
             uqa_sql::catalog::relation_oids::RelationOidKind::Table,

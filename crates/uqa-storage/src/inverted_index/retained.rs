@@ -7,18 +7,17 @@
 //! Reconstructed text corpora reuse memory-index semantics with one retained payload allowance.
 
 use super::{
-    AnalyzerBindings, DocId, FieldName, IndexedFieldMetadata, InvertedIndex, MemoryFieldCounters,
-    MemoryIndexState, MemoryInvertedIndex, MemoryReplacementPlan, StagedMemoryDocument,
+    AnalyzerBindings, DocId, FieldName, IndexedFieldMetadata, InvertedIndex, MemoryIndexState,
+    MemoryInvertedIndex, StagedMemoryDocument,
 };
 use crate::{
     read_control::StorageReadControl, ReadOnlySnapshot, StorageBackendError, StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::memory::{
-    Budgeted, BudgetedMap, BudgetedString, MemoryError, MemoryReservation, OwnedMap,
-};
+use uqa_core::memory::{Budgeted, BudgetedMap, BudgetedString, MemoryReservation};
 
 mod charge;
+mod input;
 mod staging;
 
 /// Build an admitted text corpus from borrowed selected fields or evaluated images. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Corpus map/set nodes use exact owned layouts admitted before publication; analyzer field bindings retain their own controlled containers. Allocator bookkeeping remains outside the payload charge. A rejected document leaves previously appended documents unchanged.
@@ -55,6 +54,24 @@ impl RetainedInvertedIndexBuilder {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         let bindings = AnalyzerBindings::from_retained_revisions(default, fields, control)?;
+        Self::new(&bindings, control)
+    }
+
+    /// Populate retained field bindings through the enclosing input continuation. Both historical revisions remain shared; no analysis or resource resolution runs during field installation.
+    pub async fn from_revisions_from<'a>(
+        default: super::AnalyzerDefault,
+        fields: impl IntoIterator<
+            Item = StorageBackendResult<(
+                &'a str,
+                Arc<uqa_analysis::CompiledAnalyzer>,
+                Arc<uqa_analysis::CompiledAnalyzer>,
+            )>,
+        >,
+        control: &StorageReadControl,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let bindings =
+            AnalyzerBindings::from_retained_revisions_from(default, fields, control, input).await?;
         Self::new(&bindings, control)
     }
 
@@ -105,42 +122,15 @@ impl RetainedInvertedIndexBuilder {
         doc_id: DocId,
         staged: Budgeted<StagedMemoryDocument>,
     ) -> StorageBackendResult<()> {
-        let plan = self.plan(doc_id, &staged.fields)?;
-        let charge = charge::new_document(&self.index.state, &staged, &plan, &self.control)?;
-        let new_entries = self.control.memory().reserve(charge.new_entries)?;
-        self.control.check()?;
-        // Reserve every complete owned map/set node before the infallible publication allocates it. Every fallible allocation and validation precedes mutation. The existing application has no old postings to remove for this unique identity.
-        let (staged, memory) = staged.into_parts();
-        let (plan, plan_memory) = plan.into_parts();
-        let mut pending = (staged, plan, memory);
-        pending.2.absorb(plan_memory);
-        pending.2.absorb(new_entries);
-        let result = Arc::get_mut(&mut self.index.state)
-            .expect("unpublished text builder owns its corpus")
-            .apply_replacement(doc_id, pending.0, pending.1);
-        self.memory.absorb(pending.2.split(charge.retained));
-        // Publication moves admitted field nodes and term buffers, then frees counter scratch and duplicate global keys before their remaining reservations are released.
-        result
-    }
-
-    fn plan(
-        &self,
-        doc_id: DocId,
-        fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
-    ) -> StorageBackendResult<Budgeted<MemoryReplacementPlan>> {
-        let mut memory = self.control.memory().reserve(
-            fields
-                .len()
-                .checked_mul(OwnedMap::<FieldName, MemoryFieldCounters>::entry_bytes())
-                .ok_or(MemoryError::SizeOverflow)?,
+        let control = self.control.clone();
+        let publication = uqa_core::image_io::decode_image(
+            &mut std::io::empty(),
+            control.memory(),
+            control.cancellation(),
+            async |mut input| self.prepare_from(doc_id, staged, &mut input).await,
         )?;
-        let plan = self
-            .index
-            .state
-            .plan_replacement_with_names(doc_id, fields, |name| {
-                copy_name(name, &mut memory, &self.control)
-            })?;
-        Ok(Budgeted::new(plan, memory))
+        // Inline publication cannot yield or observe a new cancellation after the complete document has been admitted.
+        crate::image_io::work::inline(self.publish_from(doc_id, publication, &mut ()))
     }
 
     /// Adopt evaluated postings into a writable native owner without analysis or resource resolution. Shared corpus roots retain their original leases; subsequent writes use the native mutation boundary and detach selected roots normally.

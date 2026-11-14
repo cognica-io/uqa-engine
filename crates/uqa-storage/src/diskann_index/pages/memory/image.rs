@@ -9,8 +9,8 @@
 use super::{invalid, DiskANNMemoryBuilder, DiskANNMemorySource, DiskANNRecordKey};
 use crate::{
     diskann_index::format::{DiskANNManifest, DiskANNOriginBatch, DiskANNOriginLayout, PAGE_BYTES},
-    image_io::ImageInput,
     read_control::StorageReadControl,
+    vector_index::image::Input,
     StorageBackendResult,
 };
 use uqa_core::memory::{BudgetedMapIter, BudgetedVec};
@@ -66,18 +66,18 @@ impl DiskANNMemorySource {
         })
     }
 
-    pub(in crate::diskann_index) fn read_image(
-        input: &mut ImageInput<'_>,
+    pub(in crate::diskann_index) async fn read_image(
+        input: &mut Input<'_, '_>,
         manifest: &DiskANNManifest,
         maximum_record: usize,
     ) -> StorageBackendResult<Self> {
         let mut builder =
             DiskANNMemoryBuilder::new(manifest.input().generation, input.control.memory());
-        let count = input.count()?;
+        let count = input.source.count().await?;
         let mut previous = None;
         for _ in 0..count {
-            let tag = input.array::<1>()?[0];
-            let first = u64::from_le_bytes(input.array()?);
+            let tag = input.source.array::<1>().await?[0];
+            let first = u64::from_le_bytes(input.source.array().await?);
             let key = match (tag, first) {
                 (0, 0) => DiskANNRecordKey::Codebook,
                 (1, first) => DiskANNRecordKey::Codes(first),
@@ -88,23 +88,27 @@ impl DiskANNMemorySource {
             if previous.is_some_and(|previous| previous >= key) {
                 return Err(invalid("image records are not strictly ordered"));
             }
-            let bytes = input.bytes_with_limit(maximum_record)?;
-            builder.write_record(key, &bytes, input.control)?;
+            let bytes = input.source.bytes_with_limit(maximum_record).await?;
+            builder
+                .write_record_from(key, &bytes, input.control, input.source)
+                .await?;
             previous = Some(key);
         }
-        let count = u64::from_le_bytes(input.array()?);
+        let count = u64::from_le_bytes(input.source.array().await?);
         if count != manifest.layout().page_count() {
             return Err(invalid("image page count differs from manifest"));
         }
         let mut page = [0_u8; PAGE_BYTES];
         for expected in 0..count {
-            let id = u64::from_le_bytes(input.array()?);
+            let id = u64::from_le_bytes(input.source.array().await?);
             if id != expected {
                 return Err(invalid("image pages are not contiguous"));
             }
-            input.exact(&mut page)?;
+            input.source.exact(&mut page).await?;
             builder.write_graph_page(id, &page, input.control)?;
         }
-        builder.finish(*manifest, input.control)
+        builder
+            .finish_from(manifest, input.control, input.source)
+            .await
     }
 }

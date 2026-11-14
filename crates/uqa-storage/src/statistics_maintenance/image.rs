@@ -9,7 +9,9 @@
 use super::StatisticsMaintenance;
 use std::io::{Read, Write};
 use uqa_core::{
-    image_io::{ImageInput, ImageIoError, ImageIoResult, ImageOutput},
+    image_io::{
+        decode_image, AsyncImageInput, ImageDecoder, ImageIoError, ImageIoResult, ImageOutput,
+    },
     memory::MemoryBudget,
     CancellationToken,
 };
@@ -30,9 +32,11 @@ fn optional<const N: usize>(bytes: &mut [u8; LENGTH], offset: &mut usize, value:
     put(bytes, offset, value.unwrap_or([0; N]));
 }
 
-fn read_optional<const N: usize>(input: &mut ImageInput<'_>) -> ImageIoResult<Option<[u8; N]>> {
-    let flag = input.array::<1>()?[0];
-    let bytes = input.array()?;
+async fn read_optional<const N: usize>(
+    input: &mut AsyncImageInput<'_>,
+) -> ImageIoResult<Option<[u8; N]>> {
+    let flag = input.array::<1>().await?[0];
+    let bytes = input.array().await?;
     match flag {
         0 if bytes == [0; N] => Ok(None),
         1 => Ok(Some(bytes)),
@@ -104,25 +108,36 @@ impl StatisticsMaintenance {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> ImageIoResult<Self> {
-        let mut input = ImageInput {
-            reader,
-            memory,
-            cancellation,
-        };
-        if input.array::<8>()? != MAGIC || u64::from_le_bytes(input.array()?) != 1 {
+        decode_image(reader, memory, cancellation, async |input| {
+            Self::read_image_from(input).await
+        })
+    }
+
+    /// Resume inline fields within the caller's current byte/poll window; no partially decoded maintenance state is published.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> ImageIoResult<ImageDecoder<Self>> {
+        ImageDecoder::new(memory, cancellation, |mut reader| async move {
+            Self::read_image_from(reader.input()).await
+        })
+    }
+
+    async fn read_image_from(mut input: AsyncImageInput<'_>) -> ImageIoResult<Self> {
+        if input.array::<8>().await? != MAGIC || u64::from_le_bytes(input.array().await?) != 1 {
             return Err(ImageIoError::Invalid);
         }
         let value = Self {
-            object_id: read_optional(&mut input)?,
-            generation: u64::from_le_bytes(input.array()?),
-            changes: u64::from_le_bytes(input.array()?),
-            dirty_since_ms: u64::from_le_bytes(input.array()?),
-            analyzed_rows: read_optional(&mut input)?.map(u64::from_le_bytes),
-            statistics_format: u32::from_le_bytes(input.array()?),
-            analyzed_at: read_optional(&mut input)?.map(u64::from_le_bytes),
-            analysis_generation: read_optional(&mut input)?.map(u64::from_le_bytes),
+            object_id: read_optional(&mut input).await?,
+            generation: u64::from_le_bytes(input.array().await?),
+            changes: u64::from_le_bytes(input.array().await?),
+            dirty_since_ms: u64::from_le_bytes(input.array().await?),
+            analyzed_rows: read_optional(&mut input).await?.map(u64::from_le_bytes),
+            statistics_format: u32::from_le_bytes(input.array().await?),
+            analyzed_at: read_optional(&mut input).await?.map(u64::from_le_bytes),
+            analysis_generation: read_optional(&mut input).await?.map(u64::from_le_bytes),
         };
-        input.end()?;
+        input.end().await?;
         Ok(value)
     }
 }

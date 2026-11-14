@@ -28,7 +28,7 @@ fn diverge_documents(engine: &Engine) {
         document.fields_mut().insert("c".into(), Value::Int(-1));
         diverged.put_stored(id, document).unwrap();
     }
-    *table.document_store.write() = Box::new(diverged);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(diverged));
 }
 
 #[test]

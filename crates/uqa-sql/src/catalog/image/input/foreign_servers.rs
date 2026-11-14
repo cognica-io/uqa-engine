@@ -6,7 +6,7 @@
 
 //! Foreign server declarations retain exact option values and their independently stored order.
 
-use super::{invalid, metadata::Identities, Input};
+use super::{invalid, metadata::Identities, Fields};
 use crate::{
     catalog::{
         foreign_server::{ForeignServerDefinition, ForeignServerMetadata, ForeignServers},
@@ -20,20 +20,20 @@ use uqa_core::{
     CancellationToken,
 };
 
-impl Input<'_> {
-    fn server_options(
+impl Fields<'_> {
+    async fn server_options(
         &mut self,
         count: usize,
     ) -> Result<Budgeted<OwnedMap<String, String>>, SQLError> {
         let mut reservation = self.binary.memory.empty_reservation();
         let mut options = OwnedMap::<String, String>::new();
         for _ in 0..count {
-            self.binary.cancellation.check()?;
-            let key = self.binary.text()?;
+            self.binary.checkpoint().await?;
+            let key = self.binary.text().await?;
             if options.first_from(Bound::Included(&*key)).is_some() {
                 return Err(invalid("foreign option order"));
             }
-            let value = self.binary.text()?;
+            let value = self.binary.text().await?;
             reservation.grow(OwnedMap::<String, String>::entry_bytes())?;
             let (key, key_memory) = key.into_parts();
             let (value, value_memory) = value.into_parts();
@@ -44,7 +44,7 @@ impl Input<'_> {
         Ok(Budgeted::new(options, reservation))
     }
 
-    fn server_order(
+    async fn server_order(
         &mut self,
         count: Option<usize>,
         options: &OwnedMap<String, String>,
@@ -59,7 +59,7 @@ impl Input<'_> {
         let mut order = BudgetedVec::new(self.binary.memory);
         order.reserve(count)?;
         for _ in 0..count {
-            let name = self.binary.text()?;
+            let name = self.binary.text().await?;
             if !options.contains_key(&*name) {
                 return Err(invalid("unknown foreign option"));
             }
@@ -69,7 +69,7 @@ impl Input<'_> {
         }
         let mut seen = BudgetedMap::new(self.binary.memory);
         for name in order.iter() {
-            self.binary.cancellation.check()?;
+            self.binary.checkpoint().await?;
             if seen.insert(name.as_str(), ())?.is_some() {
                 return Err(invalid("duplicate foreign option"));
             }
@@ -80,48 +80,49 @@ impl Input<'_> {
         Ok(Budgeted::new(Some(order), reservation))
     }
 
-    fn foreign_server(
+    async fn foreign_server(
         &mut self,
         key: &str,
         identities: &mut Identities,
     ) -> Result<Budgeted<ForeignServerDefinition>, SQLError> {
         let mut reservation = self.binary.memory.empty_reservation();
-        let (name, name_memory) = self.binary.text()?.into_parts();
+        let (name, name_memory) = self.binary.text().await?.into_parts();
         reservation.absorb(name_memory);
-        if self.compare_text(key, &name)? != std::cmp::Ordering::Equal {
+        if self.compare_text(key, &name).await? != std::cmp::Ordering::Equal {
             return Err(invalid("foreign server name"));
         }
-        let (fdw_type, type_memory) = self.binary.text()?.into_parts();
+        let (fdw_type, type_memory) = self.binary.text().await?.into_parts();
         reservation.absorb(type_memory);
         if fdw_type.is_empty() {
             return Err(invalid("foreign wrapper name"));
         }
-        let oid = self.user_oid()?;
+        let oid = self.user_oid().await?;
         identities.oid(oid)?;
-        let object_id = self.object_id()?;
+        let object_id = self.object_id().await?;
         identities.object(object_id)?;
-        let owner = self.identity()?;
-        let (server_type, type_memory) = self.optional_text()?.into_parts();
+        let owner = self.identity().await?;
+        let (server_type, type_memory) = self.optional_text().await?.into_parts();
         reservation.absorb(type_memory);
-        let (version, version_memory) = self.optional_text()?.into_parts();
+        let (version, version_memory) = self.optional_text().await?.into_parts();
         reservation.absorb(version_memory);
-        let wrapper_reference = if self.flag()? {
+        let wrapper_reference = if self.flag().await? {
             Some(ForeignWrapperReference {
-                oid: self.catalog_oid()?,
-                object_id: self.object_id()?,
+                oid: self.catalog_oid().await?,
+                object_id: self.object_id().await?,
             })
         } else {
             None
         };
-        let count = self.binary.count()?;
-        let order_count = if self.flag()? {
-            Some(self.binary.count()?)
+        let count = self.binary.count().await?;
+        let order_count = if self.flag().await? {
+            Some(self.binary.count().await?)
         } else {
             None
         };
-        let (options, options_memory) = self.server_options(count)?.into_parts();
+        let (options, options_memory) = self.server_options(count).await?.into_parts();
         reservation.absorb(options_memory);
-        let (option_order, order_memory) = self.server_order(order_count, &options)?.into_parts();
+        let (option_order, order_memory) =
+            self.server_order(order_count, &options).await?.into_parts();
         reservation.absorb(order_memory);
         Ok(Budgeted::new(
             ForeignServerDefinition {
@@ -148,16 +149,38 @@ pub(in super::super) fn foreign_servers(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<ForeignServers, SQLError> {
-    let mut input = Input::new(reader, memory, cancellation);
-    let count = input.header(super::super::FOREIGN_SERVERS)?;
-    let mut result = ForeignServers::with_budget(memory);
-    let mut identities = Identities::new(memory);
-    for _ in 0..count {
-        cancellation.check()?;
-        let key = input.ordered_name(result.last_durable_key())?;
-        let value = input.foreign_server(&key, &mut identities)?;
-        result.insert_image_entry(key, value)?;
+    super::continuation::read_registry(reader, memory, cancellation)
+}
+
+impl ForeignServers {
+    /// Retain native fields and claims across independent entry, byte and poll windows.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<super::CatalogImageInput<Self>, SQLError> {
+        super::continuation::registry::<Self>(memory, mutations, cancellation)
     }
-    input.binary.end()?;
-    Ok(result)
+}
+
+impl super::continuation::CatalogEntries for ForeignServers {
+    type Scratch = Identities;
+    const MAGIC: [u8; 8] = super::super::FOREIGN_SERVERS;
+    fn create(memory: &MemoryBudget) -> (Self, Self::Scratch) {
+        (Self::with_budget(memory), Identities::new(memory))
+    }
+    async fn read_entry(
+        input: &mut Fields<'_>,
+        result: &mut Self,
+        identities: &mut Self::Scratch,
+    ) -> Result<(), SQLError> {
+        let key = input.ordered_name(result.last_durable_key()).await?;
+        let value = input.foreign_server(&key, identities).await?;
+        result.insert_image_entry(key, value)?;
+
+        Ok(())
+    }
+    fn finish(self, mutations: &MemoryBudget) -> Self {
+        self.into_mutation_budget(mutations)
+    }
 }

@@ -6,6 +6,8 @@
 
 //! Committed Engine generations adapt retained native owners to the shared image stream.
 
+pub(super) mod restore;
+
 mod catalogs;
 mod data;
 mod entries;

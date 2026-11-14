@@ -13,12 +13,12 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 use super::{
     cache::{PageCache, SharedPage},
     invalid, read_manifest, read_record, DiskANNPageReadStats, DiskANNPageSource,
-    DiskANNReadCapabilities, DiskANNReadLimits, DiskANNRecordKey,
+    DiskANNReadCapabilities, DiskANNReadLimits, DiskANNRecordKey, RecordInput,
 };
 use crate::diskann_index::{
     format::{
-        decode_codebook, decode_page, DiskANNManifest, DiskANNNode, DiskANNQuantizationIdentity,
-        DiskANNSideEntry, DiskANNSideLayout, PAGE_BYTES,
+        decode_codebook_from, decode_page, DiskANNManifest, DiskANNNode,
+        DiskANNQuantizationIdentity, DiskANNSideEntry, DiskANNSideLayout, PAGE_BYTES,
     },
     PQCodebook,
 };
@@ -72,9 +72,27 @@ impl DiskANNReader {
         limits: DiskANNReadLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        crate::image_io::work::inline(Self::open_from(
+            RecordInput::Provider(source),
+            dimensions,
+            parameters,
+            limits,
+            control,
+            &mut (),
+        ))
+    }
+
+    pub(in crate::diskann_index) async fn open_from(
+        source: RecordInput,
+        dimensions: u32,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<Self> {
         control.check()?;
         let manifest = read_manifest(
-            &*source,
+            source.source(),
             dimensions,
             parameters,
             limits.max_record_bytes,
@@ -98,22 +116,27 @@ impl DiskANNReader {
                 .and_then(|nodes| nodes.checked_mul(parameters.pq_bytes))
                 .ok_or(MemoryError::SizeOverflow)?;
             codes.reserve(count)?;
-            let bytes = read_record(
-                &*source,
-                DiskANNRecordKey::Codebook,
-                limits.max_record_bytes,
-                control,
-            )?;
-            let (book, identity) = decode_codebook(&manifest, &bytes, &resident_control)?;
+            let bytes = source
+                .read_record(
+                    DiskANNRecordKey::Codebook,
+                    limits.max_record_bytes,
+                    control,
+                    work,
+                )
+                .await?;
+            let (book, identity) =
+                decode_codebook_from(&manifest, &bytes, &resident_control, work).await?;
             drop(bytes);
             load_codes(
-                &*source,
+                &source,
                 identity,
                 &mut codes,
                 limits.max_record_bytes,
                 control,
-            )?;
-            if crate::diskann_index::format::artifact_digest(&codes, control)?
+                work,
+            )
+            .await?;
+            if crate::diskann_index::format::artifact_digest_from(&codes, control, work).await?
                 != manifest.input().artifacts.codes
             {
                 return Err(invalid("resident code stream digest differs"));
@@ -121,7 +144,7 @@ impl DiskANNReader {
             Some(book)
         };
         let resident = Resident {
-            source,
+            source: source.into_source(),
             manifest,
             codebook,
             codes,
@@ -391,18 +414,25 @@ impl DiskANNReader {
     }
 }
 
-fn load_codes(
-    source: &dyn DiskANNPageSource,
+async fn load_codes(
+    source: &RecordInput,
     identity: DiskANNQuantizationIdentity,
     result: &mut BudgetedVec<u8>,
     limit: usize,
     control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
 ) -> StorageBackendResult<()> {
     let mut next = 0;
     while next < identity.node_count() {
-        let bytes = read_record(source, DiskANNRecordKey::Codes(next), limit, control)?;
-        let batch = identity.decode_codes(next, &bytes, control)?;
+        work.checkpoint().await?;
+        let bytes = source
+            .read_record(DiskANNRecordKey::Codes(next), limit, control, work)
+            .await?;
+        let batch = identity
+            .decode_codes_from(next, &bytes, control, work)
+            .await?;
         for part in batch.bytes().chunks(4096) {
+            work.checkpoint().await?;
             control.check()?;
             result.extend_from_slice(part)?;
         }

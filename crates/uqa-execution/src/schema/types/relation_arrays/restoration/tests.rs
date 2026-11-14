@@ -17,7 +17,7 @@ fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> Cat
         dropped_attributes: Vec::new().into(),
         object_id,
         catalog_oids: oids,
-        row_type_array_name: name.map(str::to_owned),
+        row_type_array_name: name.map(str::to_owned).into(),
         security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         ))
@@ -70,7 +70,9 @@ fn missing_array_preserves_scalar_identity_and_skips_occupied_oids_and_names() {
         None
     );
     assert_eq!(
-        catalog.snapshot().tables[&relation].row_type_array_name,
+        catalog.snapshot().tables[&relation]
+            .row_type_array_name
+            .as_deref(),
         None
     );
 }
@@ -90,7 +92,7 @@ fn missing_array_name_keeps_its_recorded_identity_and_reopen_is_idempotent() {
     .unwrap();
     assert_eq!(changes[&relation], (original, "_item".into()));
     let state = snapshot.tables.get_mut(&relation).unwrap();
-    state.row_type_array_name = Some(changes[&relation].1.clone());
+    state.row_type_array_name = Some(changes[&relation].1.clone()).into();
     let reopened = CatalogReadView::new(snapshot);
     assert!(prepare(&reopened, &resolution(), &mut || panic!(
         "completed migration cannot allocate"
@@ -98,7 +100,9 @@ fn missing_array_name_keeps_its_recorded_identity_and_reopen_is_idempotent() {
     .unwrap()
     .is_empty());
     assert_eq!(
-        catalog.snapshot().tables[&relation].row_type_array_name,
+        catalog.snapshot().tables[&relation]
+            .row_type_array_name
+            .as_deref(),
         None
     );
 }

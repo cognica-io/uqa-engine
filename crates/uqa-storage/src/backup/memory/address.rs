@@ -10,7 +10,9 @@ use crate::{backup::NamespaceId, read_control::StorageReadControl, StorageBacken
 use uqa_core::{memory::BudgetedVec, DocId, RelationIdentity};
 
 mod input;
-pub use input::{read_memory_image_address, DecodedMemoryImageAddress, DecodedMemoryTableUnit};
+pub use input::{
+    read_memory_image_address, DecodedMemoryImageAddress, DecodedMemoryTableUnit, MemoryImageName,
+};
 
 /// The namespace identifies this mapping, independently of source or restored history.
 pub fn memory_image_namespace() -> NamespaceId {

@@ -10,6 +10,8 @@ use crate::catalog::Catalog;
 use uqa_core::Value;
 use uqa_storage::StorageBackendError;
 
+mod maximum;
+
 fn store() -> SQLiteDocumentStore {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let _cat = Catalog::open(mc.clone()).unwrap();

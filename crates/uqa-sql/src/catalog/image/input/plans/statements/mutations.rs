@@ -105,11 +105,5 @@ impl Body for (AssignmentTargets, Expr) {
     fn new(_: &mut PlanMemory) -> Result<Self, SQLError> {
         Ok(<Self as Empty>::empty())
     }
-    fn field(&mut self, position: usize) -> Option<&mut dyn Field> {
-        match position {
-            0 => Some(&mut self.0),
-            1 => Some(&mut self.1),
-            _ => None,
-        }
-    }
+    syntax_body_fields!(0, 1);
 }

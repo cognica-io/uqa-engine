@@ -58,6 +58,9 @@ pub enum SQLError {
     /// `SQLERRM` report the same code `PostgreSQL` would.
     #[error("{message}")]
     Routine { sqlstate: String, message: String },
+    /// A routine diagnostic whose original message allowance survives shared ownership and enclosing error context.
+    #[error("{0}")]
+    RetainedRoutine(#[source] std::sync::Arc<retained::RetainedRoutineDiagnostic>),
     /// A primary SQL error with separate `PostgreSQL` diagnostic fields. `SQLERRM` and `Display` expose only the primary message; protocol clients receive detail and hint independently.
     #[error("{message}")]
     Diagnostic {
@@ -158,6 +161,7 @@ impl SQLError {
     /// The typed primary error, unaffected by an attached routine traceback.
     pub fn primary(&self) -> &Self {
         match self {
+            Self::RetainedRoutine(source) => &source.error,
             Self::Context { source, .. }
             | Self::Cleanup { source, .. }
             | Self::Position { source, .. }
@@ -294,6 +298,7 @@ impl SQLError {
     /// errors that do not carry a defined `SQLSTATE`.
     pub fn sqlstate(&self) -> Option<&str> {
         match self {
+            SQLError::RetainedRoutine(source) => source.error.sqlstate(),
             SQLError::Context { source, .. }
             | SQLError::Cleanup { source, .. }
             | SQLError::Position { source, .. }
@@ -358,6 +363,7 @@ impl SQLError {
 }
 
 mod cleanup;
+mod retained;
 
 pub type Result<T> = std::result::Result<T, SQLError>;
 

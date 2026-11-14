@@ -19,24 +19,95 @@ use uqa_core::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn graph_name_exists_with_control(
+        &self,
+        name: &str,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(
+            name.len()
+                .checked_add(5)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+            limits.maximum_key_bytes,
+        )?;
+        let key = crate::key_value::codec::single_str_key_prefix(
+            super::TAG_NAMED_GRAPH,
+            name,
+            name.len(),
+            control.memory(),
+        )?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut present = false;
+            read.visit_keys_after(&key, None, 1, control, &mut |found| {
+                present = found == &*key;
+                Ok(())
+            })?;
+            control.check()?;
+            read.control().check()?;
+            Ok(present)
+        })
+    }
+
+    pub(super) fn schema_load(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::catalog::schema::load::CatalogSchemaLoad> {
+        use crate::catalog::schema::load::{CatalogSchemaLoad, CatalogSchemaOrder};
+        CatalogSchemaLoad::new(
+            self.row_input(&[super::TAG_SCHEMA], decode_schema, limits, control)?,
+            CatalogSchemaOrder::Name,
+            control,
+        )
+    }
+
     pub(super) fn row_input<T>(
         &self,
-        tag: u8,
+        prefix: &[u8],
         decode: CatalogRowDecoder<T>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogInput<T>> {
+        CatalogInput::new(
+            self.retained_input_view(prefix, control)?,
+            prefix,
+            decode,
+            limits,
+            control,
+        )
+    }
+
+    pub(super) fn graph_name_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogInput<String>> {
+        let prefix = &[super::TAG_NAMED_GRAPH];
+        CatalogInput::new_keys(
+            self.retained_input_view(prefix, control)?,
+            prefix,
+            decode_graph_name,
+            limits,
+            control,
+        )
+    }
+
+    fn retained_input_view(
+        &self,
+        prefix: &[u8],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<std::sync::Arc<dyn crate::key_value::KeyValueRead + Send + Sync>>
+    {
         control.check()?;
         if !self.store.transaction_model().is_versioned() {
             return Err(StorageBackendError::Other(
                 "retained catalog input requires a versioned read owner".into(),
             ));
         }
-        let prefix = [tag];
-        let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
-            read.retain(&[&prefix])
-        })?;
-        CatalogInput::new(read, &prefix, decode, limits, control)
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| read.retain(&[prefix]))
     }
 
     pub(super) fn index_input(
@@ -44,8 +115,39 @@ impl KeyValueCatalog {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<CatalogInput<CatalogIndexRow>> {
-        self.row_input(TAG_CATALOG_INDEX, decode_index, limits, control)
+        self.row_input(&[TAG_CATALOG_INDEX], decode_index, limits, control)
     }
+}
+
+fn decode_schema(
+    key: &[u8],
+    value: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<crate::SchemaRow>>> {
+    let mut offset = 1;
+    let name = read_str_ref(key, &mut offset)?;
+    let row = if value == name.as_bytes() {
+        uqa_core::catalog_schema::SchemaRow::legacy_with_control(
+            name,
+            &ProductionControl::new(
+                control.memory(),
+                control.cancellation(),
+                control.cancellation(),
+            ),
+        )?
+        .into_budgeted()
+        .expect("admitted legacy schema")
+        .try_map(|row| Ok::<_, StorageBackendError>(crate::SchemaRow::Legacy(row)))?
+    } else {
+        crate::catalog::schema::input::row(value, control)?
+    };
+    if row.name() != name {
+        return Err(StorageBackendError::Other(format!(
+            "schema catalog key `{name}` disagrees with stored name `{}`",
+            row.name()
+        )));
+    }
+    Ok(Some(row))
 }
 
 fn decode_index(
@@ -108,3 +210,20 @@ fn relation(
 
 #[cfg(test)]
 mod tests;
+
+fn decode_graph_name(
+    key: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<String>>> {
+    let name = read_str_ref(key, &mut 1)?;
+    Ok(Some(
+        ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(name)?
+        .into_budgeted()
+        .expect("retained graph name"),
+    ))
+}

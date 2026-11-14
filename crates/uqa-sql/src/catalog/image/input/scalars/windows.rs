@@ -6,19 +6,19 @@
 
 //! Selected collation and window metadata reconstruct without analysis callbacks.
 
-use super::{boxed, invalid, payload, Input, MemoryReservation, SQLError, ScalarExpr};
+use super::{boxed, invalid, payload, Fields, MemoryReservation, SQLError, ScalarExpr};
 use crate::{
     ast::{FrameExclusion, FrameMode, WindowCallModifiers},
     catalog::collations::derivation::Derivation,
     ir::{ResultCollation, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec},
 };
 
-impl Input<'_> {
-    pub(super) fn native_scalar_collation(&mut self) -> Result<ResultCollation, SQLError> {
-        let tag = self.binary.array::<1>()?[0];
-        let left = u32::from_le_bytes(self.binary.array()?);
-        let right = u32::from_le_bytes(self.binary.array()?);
-        let initial = u32::from_le_bytes(self.binary.array()?);
+impl Fields<'_> {
+    pub(super) async fn native_scalar_collation(&mut self) -> Result<ResultCollation, SQLError> {
+        let tag = self.binary.array::<1>().await?[0];
+        let left = u32::from_le_bytes(self.binary.array().await?);
+        let right = u32::from_le_bytes(self.binary.array().await?);
+        let initial = u32::from_le_bytes(self.binary.array().await?);
         let derivation = match tag {
             0 if left == 0 && right == 0 => Derivation::None,
             1 if right == 0 => Derivation::Implicit(i64::from(left)),
@@ -29,35 +29,41 @@ impl Input<'_> {
         Ok(ResultCollation::new(derivation, initial))
     }
 
-    pub(super) fn native_scalar_window(
+    pub(super) async fn native_scalar_window(
         &mut self,
         memory: &mut MemoryReservation,
-    ) -> Result<ScalarExpr, SQLError> {
-        let name = payload(self.binary.text()?, memory);
-        let args = self.binary.count()?;
+        output: &mut ScalarExpr,
+    ) -> Result<(), SQLError> {
+        let name = payload(self.binary.text().await?, memory);
+        let args = self.binary.count().await?;
         let filter = self
-            .flag()?
+            .flag()
+            .await?
             .then(|| boxed(ScalarExpr::Star, memory))
             .transpose()?;
         let modifiers = WindowCallModifiers {
-            distinct: self.flag()?,
-            ordered: self.flag()?,
-            within_group: self.flag()?,
+            distinct: self.flag().await?,
+            ordered: self.flag().await?,
+            within_group: self.flag().await?,
         };
-        let definition = self.flag()?.then(|| self.binary.count()).transpose()?;
-        let partitions = self.binary.count()?;
-        let orders = self.binary.count()?;
-        let frame = if self.flag()? {
-            let mode = match self.binary.array::<1>()?[0] {
+        let definition = if self.flag().await? {
+            Some(self.binary.count().await?)
+        } else {
+            None
+        };
+        let partitions = self.binary.count().await?;
+        let orders = self.binary.count().await?;
+        let frame = if self.flag().await? {
+            let mode = match self.binary.array::<1>().await?[0] {
                 0 => FrameMode::Rows,
                 1 => FrameMode::Range,
                 2 => FrameMode::Groups,
                 _ => return Err(invalid("native window frame mode")),
             };
-            let start = self.native_frame_bound(memory)?;
-            let end = self.native_frame_bound(memory)?;
-            let between = self.flag()?;
-            let exclusion = match self.binary.array::<1>()?[0] {
+            let start = self.native_frame_bound(memory).await?;
+            let end = self.native_frame_bound(memory).await?;
+            let between = self.flag().await?;
+            let exclusion = match self.binary.array::<1>().await?[0] {
                 0 => FrameExclusion::NoOthers,
                 1 => FrameExclusion::CurrentRow,
                 2 => FrameExclusion::Group,
@@ -74,31 +80,32 @@ impl Input<'_> {
         } else {
             None
         };
-        Ok(ScalarExpr::WindowCall {
+        *output = ScalarExpr::WindowCall {
             name,
-            args: self.native_scalar_slots(args, memory)?,
+            args: self.native_scalar_slots(args, memory).await?,
             spec: ScalarWindowSpec {
                 definition,
-                partition_by: self.native_scalar_slots(partitions, memory)?,
-                order_by: self.items(orders, memory, |_, _| {
-                    Ok(ScalarOrder {
+                partition_by: self.native_scalar_slots(partitions, memory).await?,
+                order_by: self
+                    .slots(orders, memory, || ScalarOrder {
                         expr: ScalarExpr::Star,
                         descending: false,
                         nulls: None,
                     })
-                })?,
+                    .await?,
                 frame,
             },
             filter,
             modifiers,
-        })
+        };
+        Ok(())
     }
 
-    fn native_frame_bound(
+    async fn native_frame_bound(
         &mut self,
         memory: &mut MemoryReservation,
     ) -> Result<ScalarFrameBound, SQLError> {
-        Ok(match self.binary.array::<1>()?[0] {
+        Ok(match self.binary.array::<1>().await?[0] {
             0 => ScalarFrameBound::UnboundedPreceding,
             1 => ScalarFrameBound::UnboundedFollowing,
             2 => ScalarFrameBound::CurrentRow,

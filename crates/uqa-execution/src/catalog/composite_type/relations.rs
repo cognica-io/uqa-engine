@@ -112,40 +112,80 @@ pub(crate) fn by_name_with_control(
     name: &str,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
-    for (identity, oids, array) in definitions(catalog) {
-        control.check()?;
-        if identity.schema != schema {
-            continue;
-        }
-        let array = if identity.name == name {
-            false
-        } else if oids.array_type.is_some()
-            && array.map_or_else(
-                || {
-                    uqa_sql::catalog::array_type_names::default_array_type_name_matches(
-                        &identity.name,
-                        name,
-                    )
-                },
-                |array| array == name,
-            )
-        {
-            true
-        } else {
-            continue;
-        };
-        let Some(reference) = oids.row_type_reference_with_control(identity, control)? else {
+    let selected = crate::catalog::selection_work::inline(select_name_from(
+        catalog,
+        schema,
+        name,
+        control,
+        &mut (),
+    ))?;
+    selected
+        .map(|selected| selected.project(control))
+        .transpose()
+        .map(Option::flatten)
+}
+
+pub(in crate::catalog) struct NamedRelationType<'a> {
+    pub identity: &'a RelationIdentity,
+    pub oids: RelationCatalogOids,
+    pub array: bool,
+}
+impl NamedRelationType<'_> {
+    pub(in crate::catalog) fn project(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let Some(reference) = self
+            .oids
+            .row_type_reference_with_control(self.identity, control)?
+        else {
             return Ok(None);
         };
         let (reference, memory) = reference.into_parts();
         let ty = control.finish(ColumnType::Composite(reference), memory)?;
-        return if array {
+        if self.array {
             ColumnType::array_with_control(ty, control)
                 .map(Some)
                 .map_err(Into::into)
         } else {
             Ok(Some(ty))
+        }
+    }
+}
+
+pub(in crate::catalog) async fn select_name_from<'a>(
+    catalog: &'a CatalogReadView,
+    schema: &str,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::selection_work::Work,
+) -> Result<Option<NamedRelationType<'a>>, SQLError> {
+    use crate::catalog::selection_work::{checkpoint, equal};
+    for (identity, oids, array) in definitions(catalog) {
+        checkpoint(control, work).await?;
+        if !equal(&identity.schema, schema, control, work).await? {
+            continue;
+        }
+        let array = if equal(&identity.name, name, control, work).await? {
+            false
+        } else if oids.array_type.is_some()
+            && match array {
+                Some(array) => equal(array, name, control, work).await?,
+                None => uqa_sql::catalog::array_type_names::default_array_type_name_matches(
+                    &identity.name,
+                    name,
+                ),
+            }
+        {
+            true
+        } else {
+            continue;
         };
+        return Ok(Some(NamedRelationType {
+            identity,
+            oids,
+            array,
+        }));
     }
     Ok(None)
 }

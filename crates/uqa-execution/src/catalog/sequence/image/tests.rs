@@ -29,6 +29,7 @@ use uqa_storage::{memory_capture::MemoryCaptureSource, read_control::StorageRead
 
 mod ordered;
 mod validation;
+mod windows;
 
 #[test]
 fn sequence_image_native_clones_and_captures_retain_decoded_allowance() {

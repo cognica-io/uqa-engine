@@ -8,6 +8,7 @@
 
 use crate::ast::ColumnType;
 mod schema_production;
+pub(crate) mod work;
 use schema_production::CatalogColumnType::{self, Array, Domain, Inline};
 
 pub mod access_methods;
@@ -649,7 +650,7 @@ impl VirtualRelation {
                 "rolconfig" => Array(ColumnType::Text),
                 "oid" => Inline(ColumnType::Oid),
             ],
-            Self::PgUser => columns![
+            Self::PgUser | Self::PgShadow => columns![
                 "usename" => Inline(ColumnType::Name),
                 "usesysid" => Inline(ColumnType::Oid),
                 "usecreatedb" => Inline(ColumnType::Boolean),

@@ -109,7 +109,7 @@ impl Factory {
 
 fn prepare<W: BackupRestoreWork>(job: &mut BackupRestoreJob<'_, W>) {
     for _ in 0..1000 {
-        if job.advance().unwrap() == BackupRestoreStep::Prepared {
+        if job.advance_with(BackupRestoreWork::advance).unwrap() == BackupRestoreStep::Prepared {
             return;
         }
     }
@@ -154,7 +154,11 @@ fn scheduled_restore_owns_admission_and_closes_files_before_preparation() {
         .repository
         .remove_backup(fixture.backup, &fixture.control)
         .unwrap();
-    assert_eq!(job.advance().unwrap(), BackupRestoreStep::Prepared);
+    assert_eq!(
+        job.advance_with(|_| panic!("prepared input must not execute"))
+            .unwrap(),
+        BackupRestoreStep::Prepared
+    );
     let receipt = job.publish().unwrap();
     assert_eq!(fixture.control.memory().used(), 0);
     assert_eq!(receipt.database, request.target());
@@ -167,7 +171,11 @@ fn scheduled_restore_owns_admission_and_closes_files_before_preparation() {
     drop(file);
     std::fs::write(fixture.path().join("database"), b"later committed contents").unwrap();
     fixture.control.cancellation().cancel();
-    assert_eq!(job.advance().unwrap(), BackupRestoreStep::Complete);
+    assert_eq!(
+        job.advance_with(|_| panic!("completed input must not execute"))
+            .unwrap(),
+        BackupRestoreStep::Complete
+    );
     assert_eq!(job.publish().unwrap(), receipt);
     assert_eq!(job.cancel().unwrap(), Some(receipt));
     assert_eq!(

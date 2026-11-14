@@ -152,11 +152,11 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
-    ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
-    InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema,
-    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, RelationIdentity, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -217,7 +217,7 @@ pub use uqa_storage::FtsIndexStat;
 pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
-type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
+type SessionPortalTableSnapshots = Arc<crate::state::TableRegistryMap>;
 type SessionPortalViewSnapshots = RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots =
     RetainedValue<uqa_sql::routines::registry::RoutineRegistry>;
@@ -444,7 +444,7 @@ struct SessionStateSnapshot {
     command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
-    search_path: Vec<String>,
+    search_path: Arc<Vec<String>>,
     /// The OIDs of the session's temporary namespace and its TOAST namespace once its first temporary object created them; a rollback past that creation forgets them.
     temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     session_vars: BTreeMap<String, String>,
@@ -581,8 +581,12 @@ struct TableDataSnapshot {
         uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
     >,
     storage_generation: state::CatalogSnapshot<[u8; 16]>,
-    document_store: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
-    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
     vector_indexes:
         uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
@@ -642,9 +646,12 @@ pub(crate) struct TableState {
     >,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: state::CatalogCell<[u8; 16]>,
-    pub(crate) document_store:
-        uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn DocumentStore>>,
-    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<Box<dyn InvertedIndex>>,
+    pub(crate) document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
     vector_indexes:
         uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
     fts_fields: state::TableMetadataCell<Vec<FieldName>>,
@@ -699,6 +706,8 @@ pub(crate) struct TableState {
     row_type_array_name: state::TableMetadataCell<Option<String>>,
     dropped_attributes:
         state::TableMetadataCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    /// The state header retires after its fields; independently shared generations keep their own admission after this table is dropped.
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl TableState {
@@ -822,13 +831,7 @@ fn parse_analyzer_config(name: &str, config_json: &str) -> std::result::Result<A
 }
 
 fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, AnalyzerPhase), String> {
-    let phase = AnalyzerPhase::parse(&phase.to_ascii_lowercase())?;
-    let normalized = match phase {
-        AnalyzerPhase::Index => "index",
-        AnalyzerPhase::Search => "search",
-        AnalyzerPhase::Both => "both",
-    };
-    Ok((normalized.to_string(), phase))
+    AnalyzerPhase::normalize(phase)
 }
 
 impl Drop for Engine {

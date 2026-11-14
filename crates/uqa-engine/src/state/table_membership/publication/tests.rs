@@ -27,7 +27,7 @@ fn denied_live_table_publication_preserves_members_and_child_update_addresses() 
     let memory = engine
         .storage
         .tables
-        .0
+        .cell
         .read()
         .memory
         .as_ref()

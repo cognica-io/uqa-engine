@@ -5,6 +5,9 @@
 //
 
 use super::*;
+
+mod keys;
+mod load;
 use crate::{
     key_value::KeyValueRead,
     key_value::{KeyValueReadRevision, RecordKeyReadVisitor},
@@ -131,6 +134,113 @@ fn source(failure: &'static str) -> Arc<Source> {
         control: StorageReadControl::with_limit(65536),
         failure,
     })
+}
+
+fn select_prefix(
+    key: &[u8],
+    prefix: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<bool> {
+    control.check()?;
+    Ok(std::str::from_utf8(key)
+        .map_err(|_| invalid("invalid key"))?
+        .starts_with(prefix))
+}
+
+#[test]
+fn metadata_prefix_input_rejects_unselected_values_before_reads_and_bounds_each_key() {
+    let counts = Arc::<Counts>::default();
+    let source = Arc::new(Source {
+        rows: BTreeMap::from([
+            (b"k/absent".to_vec(), None),
+            (b"k/large".to_vec(), Some(vec![0xff; 1 << 18])),
+            (b"k/selected".to_vec(), Some(b"original".to_vec())),
+        ]),
+        counts: counts.clone(),
+        control: StorageReadControl::with_limit(65536),
+        failure: "none",
+    });
+    let weak = Arc::downgrade(&source);
+    let control = StorageReadControl::with_limit(65536);
+    let prefix = String::from("k/selected");
+    let mut input = CatalogTextInput::new_prefix_filtered(
+        source,
+        b"k/",
+        (&prefix, select_prefix),
+        decode,
+        limits(),
+        &control,
+    )
+    .unwrap();
+    drop(prefix);
+    for count in 1..=2 {
+        assert!(matches!(input.advance().unwrap(), CatalogTextStep::Pending));
+        assert_eq!(counts.keys.load(Ordering::SeqCst), count);
+        assert_eq!(counts.values.load(Ordering::SeqCst), 0);
+    }
+    let CatalogTextStep::Row(row) = input.advance().unwrap() else {
+        panic!("selected row");
+    };
+    assert_eq!(row.value, "original");
+    assert_eq!(counts.values.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        input.advance().unwrap(),
+        CatalogTextStep::Complete
+    ));
+    assert!(weak.upgrade().is_none());
+    assert_eq!(
+        control.memory().used(),
+        row.name.capacity() + row.value.capacity()
+    );
+    drop(row);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn metadata_prefix_input_retires_selection_and_original_view_on_failure() {
+    for failure in ["cancel", "budget", "malformed", "panic", "drop"] {
+        let source = source(failure);
+        let weak = Arc::downgrade(&source);
+        let control = StorageReadControl::with_limit(65536);
+        let mut input = CatalogTextInput::new_prefix_filtered(
+            source,
+            b"k/",
+            ("k/name", select_prefix),
+            decode,
+            limits(),
+            &control,
+        )
+        .unwrap();
+        let occupied = (failure == "budget").then(|| {
+            control
+                .memory()
+                .reserve(control.memory().available())
+                .unwrap()
+        });
+        if failure == "cancel" {
+            control.cancellation().cancel();
+        }
+        if failure == "panic" {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| input.advance())).is_err()
+            );
+        } else if failure != "drop" {
+            assert!(input.advance().is_err());
+        }
+        if failure != "drop" {
+            assert!(input.advance().is_err());
+        }
+        drop(input);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(
+            control.memory().used(),
+            occupied
+                .as_ref()
+                .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+        );
+        drop(occupied);
+        assert_eq!(control.memory().used(), 0);
+    }
 }
 
 #[test]

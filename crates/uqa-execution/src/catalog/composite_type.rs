@@ -78,3 +78,16 @@ pub fn publish(
     publication.publish_composite_definitions(registry);
     Ok(())
 }
+
+/// Retain complete physical records and claims before publishing the validated native generation.
+pub type CompositeCatalogInput = super::type_records::input::TypeCatalogInput<StoredComposite>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<CompositeCatalogInput> {
+    super::type_records::input::new(&records::FORMAT, catalog, roles, limits, mutations, control)
+}

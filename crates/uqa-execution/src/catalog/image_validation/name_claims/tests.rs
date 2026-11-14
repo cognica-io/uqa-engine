@@ -57,7 +57,7 @@ fn native_catalog_names_keep_recorded_row_array_names_and_release_workspace() {
         .tables
         .get_mut(&RelationIdentity::new("public", "items"))
         .unwrap()
-        .row_type_array_name = Some("_items_1".into());
+        .row_type_array_name = Some("_items_1".into()).into();
     let memory = MemoryBudget::new(64 << 10);
     let token = CancellationToken::new();
     validate(&snapshot, &memory, &token).unwrap();

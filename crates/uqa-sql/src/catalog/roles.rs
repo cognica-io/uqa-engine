@@ -18,6 +18,7 @@ pub use registry::{
 pub mod identity;
 pub mod rename;
 pub mod session;
+mod stored;
 pub mod tuple;
 use identity::RoleBinding;
 pub use identity::{RoleIdentity, RoleReference};
@@ -75,21 +76,10 @@ impl RoleDefinition {
     }
 
     pub fn bootstrap() -> Self {
-        Self {
-            oid: 10,
-            object_id: RoleIdentity::BOOTSTRAP.object_id,
-            revision: 1,
-            name: "uqa".into(),
-            attributes: OwnedSet::from([
-                RoleAttribute::Superuser,
-                RoleAttribute::Inherit,
-                RoleAttribute::CreateRole,
-                RoleAttribute::CreateDb,
-                RoleAttribute::Login,
-                RoleAttribute::BypassRls,
-            ]),
-            connection_limit: -1,
-        }
+        Self::bootstrap_with_control(&uqa_core::memory::ProductionControl::uncontrolled())
+            .expect("fixed bootstrap role")
+            .into_uncontrolled()
+            .unwrap_or_else(|_| unreachable!("ordinary bootstrap construction"))
     }
 
     pub fn from_create(statement: &CreateRoleStmt, oid: i64, object_id: [u8; 16]) -> Self {

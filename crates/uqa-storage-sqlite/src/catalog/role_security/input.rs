@@ -6,6 +6,9 @@
 
 //! Controlled native authority cells preserve storage-class selection and original field order.
 
+mod sequence;
+pub(in crate::catalog) use sequence::read as sequence;
+
 use super::{
     decode_identity, optional_text, BoundRelationSecurity, LegacyRelationSecurity, Result,
     SQLiteError,
@@ -18,6 +21,84 @@ use uqa_core::{
     memory::{Budgeted, MemoryReservation, OwnedMap, ProductionControl},
 };
 use uqa_storage::{read_control::StorageReadControl, RelationSecurityRow};
+
+pub(in crate::catalog) fn schema(
+    name: &str,
+    owner: ValueRef<'_>,
+    acl: Option<&str>,
+    control: &StorageReadControl,
+) -> Result<Budgeted<uqa_storage::SchemaRow>> {
+    use uqa_core::catalog_schema::{BoundSchemaRow, SchemaRow as LegacySchemaRow};
+    use uqa_storage::SchemaRow;
+    control.check()?;
+    let production = ProductionControl::new(
+        control.memory(),
+        control.cancellation(),
+        control.cancellation(),
+    );
+    let text = |name: &str| -> Result<Budgeted<String>> {
+        Ok(production
+            .copy_text(name)
+            .map_err(uqa_storage::StorageBackendError::from)?
+            .into_budgeted()
+            .expect("admitted schema text"))
+    };
+    let name = text(name)?;
+    let mut memory = control.memory().empty_reservation();
+    let row = match owner {
+        ValueRef::Text(_) => {
+            let owner = text(super::super::native::string_ref(owner)?)?;
+            let acl = acl
+                .map(|text| {
+                    nonnull(
+                        input::schema::legacy_entries(
+                            text.as_bytes(),
+                            control.memory(),
+                            control.cancellation(),
+                        )
+                        .map_err(json_error)?,
+                    )
+                })
+                .transpose()?
+                .unwrap_or_else(|| Budgeted::new(None, control.memory().empty_reservation()));
+            SchemaRow::Legacy(LegacySchemaRow {
+                name: take(name, &mut memory),
+                role_owner: take(owner, &mut memory),
+                acl: take(acl, &mut memory),
+            })
+        }
+        ValueRef::Blob(bytes) => {
+            let (role_owner, tuple) = super::decode_schema_owner(bytes)?;
+            let acl = acl
+                .map(|text| {
+                    nonnull(
+                        input::schema::entries(
+                            text.as_bytes(),
+                            control.memory(),
+                            control.cancellation(),
+                        )
+                        .map_err(json_error)?,
+                    )
+                })
+                .transpose()?
+                .unwrap_or_else(|| Budgeted::new(None, control.memory().empty_reservation()));
+            SchemaRow::Bound(BoundSchemaRow {
+                name: take(name, &mut memory),
+                tuple,
+                role_owner,
+                acl: take(acl, &mut memory),
+            })
+        }
+        _ => {
+            return Err(SQLiteError::StorageBackend(
+                "schema owner has an invalid storage class".into(),
+            ))
+        }
+    };
+    let row = Budgeted::new(row, memory);
+    control.check()?;
+    Ok(row)
+}
 
 pub(in crate::catalog) fn relation(
     owner: ValueRef<'_>,

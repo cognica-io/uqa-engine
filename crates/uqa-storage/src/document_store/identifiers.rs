@@ -12,9 +12,14 @@ use crate::mvcc::{IdentifierAllocator, IdentifierRequest, ObservedIdentifier};
 use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendResult};
 
 pub mod conformance;
+pub mod key_mapping;
 
+mod stored;
 #[cfg(test)]
 mod tests;
+pub use stored::load_legacy_document_id_watermark_from;
+
+const LEGACY_KEY_PREFIX: &str = "uqa.table_next_id.v1:";
 
 /// The durable object and storage generation of a table, which name the namespace of its document identities. A claim about a table's identities, such as that one was never used, holds for the namespace its watermark was read in and for no other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +49,17 @@ impl<'a> DocumentIdAllocator<'a> {
 
     pub fn is_durable(&self) -> bool {
         self.durable.is_some()
+    }
+
+    /// Read the allocation floor without reserving or observing an identity. Legacy metadata can already have moved into the durable namespace, so a reconstructed shared owner must include that namespace even when its local counter only reflects surviving documents.
+    pub fn next_id_floor(&self, local: u128) -> StorageBackendResult<u128> {
+        watermark_identity(local)?;
+        let durable = self
+            .durable
+            .map(|allocator| allocator.identifier_watermark(&self.namespace))
+            .transpose()?
+            .flatten();
+        Ok(durable.map_or(local, |watermark| local.max(u128::from(watermark) + 1)))
     }
 
     /// Reserve one identity at or above the restored local floor. The local cache changes only after successful durable reservation; private rollback cannot reclaim a returned identity.
@@ -166,7 +182,7 @@ fn document_namespace(object: [u8; 16], generation: [u8; 16]) -> [u8; 41] {
 }
 
 pub fn legacy_document_id_metadata_key(table: &str) -> String {
-    format!("uqa.table_next_id.v1:{table}")
+    format!("{LEGACY_KEY_PREFIX}{table}")
 }
 
 /// Combine visible rows with a persisted or retained reservation floor without losing the full-width exhaustion sentinel.

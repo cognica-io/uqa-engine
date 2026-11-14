@@ -9,13 +9,14 @@
 use super::{int_field, take_list, BTreeMap, Value, ValueRetentionError, Workspace};
 use crate::{RecordFieldType, RowValue};
 
-pub(super) fn decoded(
+pub(super) async fn decoded<W: super::Work>(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<Option<RowValue>, ValueRetentionError> {
+    work: &mut W,
+) -> Result<Option<RowValue>, W::Error> {
     let Some(Value::List(values)) = map.get("values") else {
         return if map.contains_key("field_types") {
-            Err(malformed("values are not a sequence"))
+            Err(malformed("values are not a sequence").into())
         } else {
             Ok(None)
         };
@@ -25,15 +26,15 @@ pub(super) fn decoded(
             RowValue::validate_width(values.len(), types.len())?;
             let mut decoded = workspace.vector(types.len())?;
             for ty in types {
-                workspace.check()?;
+                workspace.checkpoint(work).await?;
                 let Value::Map(ty) = ty else {
-                    return Err(malformed("field type is not an object"));
+                    return Err(malformed("field type is not an object").into());
                 };
                 if ty
                     .keys()
                     .any(|name| !matches!(name.as_str(), "oid" | "type_modifier" | "collation_oid"))
                 {
-                    return Err(malformed("field type contains unknown metadata"));
+                    return Err(malformed("field type contains unknown metadata").into());
                 }
                 let oid = int_field(ty, "oid")
                     .ok_or_else(|| malformed("field type OID is not an unsigned 32-bit integer"))?;
@@ -55,15 +56,17 @@ pub(super) fn decoded(
             Some(decoded)
         }
         Some(Value::Null) | None => None,
-        Some(_) => return Err(malformed("field types are not a sequence")),
+        Some(_) => return Err(malformed("field types are not a sequence").into()),
     };
     if let Some(types) = &field_types {
         // Arc slices receive a compact immutable allocation; the intermediate
         // typed vector stays admitted until conversion releases it.
-        workspace.reserve(crate::RowDescriptor::buffer_bytes(types.len())?)?;
+        workspace.reserve(
+            crate::RowDescriptor::buffer_bytes(types.len()).map_err(ValueRetentionError::from)?,
+        )?;
     }
     workspace.reserve(RowValue::decoded_header_bytes())?;
-    workspace.check()?;
+    workspace.checkpoint(work).await?;
     Ok(Some(RowValue::from_validated_parts(
         take_list(map, "values"),
         field_types,

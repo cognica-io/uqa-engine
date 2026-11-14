@@ -6,7 +6,7 @@
 
 //! One admitted traversal owns native plans and original syntax without inflating either node representation.
 
-use super::{driver::Step, Frame, Input, Kind, Node, PlanMemory, SQLError};
+use super::{driver::Step, Fields, Frame, Input, Kind, Node, PlanMemory, SQLError};
 
 pub(in super::super) trait NativeNode: Sized {
     type Kind;
@@ -19,6 +19,12 @@ pub(in super::super) trait NativeNode: Sized {
         memory: &mut PlanMemory,
     ) -> Result<Step<Self::Kind>, SQLError>;
     fn validate(frame: &mut Frame<Self>, input: &Input<'_>) -> Result<(), SQLError>;
+    async fn read_fields(
+        frame: &mut Frame<Self>,
+        input: &mut Fields<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step<Self::Kind>, SQLError>;
+    fn validate_step(frame: &mut Frame<Self>, position: usize) -> Result<bool, SQLError>;
     fn attach(frame: &mut Frame<Self>, child: Frame<Self>);
     fn retire_scalars(frame: &mut Frame<Self>);
     fn retire_child(frame: &mut Frame<Self>) -> Option<Self>;
@@ -44,6 +50,16 @@ impl NativeNode for Node {
     }
     fn validate(frame: &mut Frame, input: &Input<'_>) -> Result<(), SQLError> {
         frame.validate(input)
+    }
+    async fn read_fields(
+        frame: &mut Frame,
+        input: &mut Fields<'_>,
+        memory: &mut PlanMemory,
+    ) -> Result<Step, SQLError> {
+        await_field!(frame.read_fields(input, memory))
+    }
+    fn validate_step(frame: &mut Frame, position: usize) -> Result<bool, SQLError> {
+        frame.validate_step(position)
     }
     fn attach(frame: &mut Frame, child: Frame) {
         frame.attach(child);

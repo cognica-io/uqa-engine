@@ -13,6 +13,8 @@ use crate::catalog::roles::{RoleDefinition, RoleIdentity};
 use serde::{Deserialize, Serialize};
 use uqa_core::catalog_acl::AclGrantee;
 
+mod validation;
+
 pub type BoundDatabaseAclEntry = uqa_core::catalog_role::BoundAclEntry<DatabasePrivileges>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,17 +42,6 @@ impl BoundDatabaseSecurity {
                     .iter()
                     .any(|entry| entry.role == Some(role) || entry.grantor == role)
             })
-    }
-
-    pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
-        role_name(roles, self.role_owner)?;
-        for entry in self.acl.iter().flatten() {
-            if let Some(grantee) = entry.role {
-                role_name(roles, grantee)?;
-            }
-            role_name(roles, entry.grantor)?;
-        }
-        Ok(())
     }
 
     pub fn bind(security: &DatabaseSecurity, roles: &RoleDefinitions) -> Result<Self, String> {

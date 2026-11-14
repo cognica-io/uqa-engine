@@ -18,6 +18,10 @@ pub(crate) mod progress;
 pub(crate) trait Work<E>: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;
 
+    fn production_control(&self) -> uqa_core::memory::OwnedProductionControl {
+        uqa_core::memory::ProductionControl::uncontrolled().capture()
+    }
+
     fn records(&mut self, index: usize) -> impl Future<Output = Result<(), E>> + Send {
         async move {
             if index.is_multiple_of(128) {
@@ -37,6 +41,11 @@ impl<E> Work<E> for () {
 impl<E: From<uqa_core::image_io::ImageIoError>> Work<E>
     for uqa_core::image_io::AsyncImageInput<'_>
 {
+    fn production_control(&self) -> uqa_core::memory::OwnedProductionControl {
+        uqa_core::memory::ProductionControl::new(self.memory, self.cancellation, self.cancellation)
+            .capture()
+    }
+
     async fn checkpoint(&mut self) -> Result<(), E> {
         uqa_core::image_io::AsyncImageInput::checkpoint(self)
             .await

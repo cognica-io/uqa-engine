@@ -11,6 +11,9 @@ use uqa_core::memory::{Produced, ProductionControl};
 pub(crate) struct SchemaSet<T>(SchemaMap<T, ()>);
 
 impl<T> SchemaSet<T> {
+    pub(in crate::schema) fn from_map(map: SchemaMap<T, ()>) -> Self {
+        Self(map)
+    }
     pub(crate) fn with_hasher(hasher: ahash::RandomState) -> Self {
         Self(SchemaMap::with_hasher(hasher))
     }
@@ -22,7 +25,7 @@ impl<T> SchemaSet<T> {
     }
 }
 
-impl<T: Eq + Hash> SchemaSet<T> {
+impl<T: Ord + Hash> SchemaSet<T> {
     pub(super) fn from_produced(
         entries: impl IntoIterator<Item = Result<Produced<T>, crate::SQLError>>,
         control: &ProductionControl<'_>,
@@ -34,7 +37,7 @@ impl<T: Eq + Hash> SchemaSet<T> {
             control,
         )?))
     }
-    pub(crate) fn contains<Q: Eq + Hash + ?Sized>(&self, value: &Q) -> bool
+    pub(crate) fn contains<Q: Ord + Hash + ?Sized>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
     {
@@ -42,11 +45,11 @@ impl<T: Eq + Hash> SchemaSet<T> {
     }
 }
 
-impl<T: Eq + Hash + Clone> SchemaSet<T> {
+impl<T: Ord + Hash + Clone> SchemaSet<T> {
     pub(crate) fn insert(&mut self, value: T) -> bool {
         self.0.insert(value, ()).is_none()
     }
-    pub(crate) fn remove<Q: Eq + Hash + ?Sized>(&mut self, value: &Q) -> bool
+    pub(crate) fn remove<Q: Ord + Hash + ?Sized>(&mut self, value: &Q) -> bool
     where
         T: Borrow<Q>,
     {
@@ -72,29 +75,29 @@ impl<T: fmt::Debug> fmt::Debug for SchemaSet<T> {
         f.debug_set().entries(self.iter()).finish()
     }
 }
-impl<T: Eq + Hash> PartialEq for SchemaSet<T> {
+impl<T: Ord + Hash> PartialEq for SchemaSet<T> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
-impl<T: Eq + Hash> Eq for SchemaSet<T> {}
-impl<T: Eq + Hash> FromIterator<T> for SchemaSet<T> {
+impl<T: Ord + Hash> Eq for SchemaSet<T> {}
+impl<T: Ord + Hash> FromIterator<T> for SchemaSet<T> {
     fn from_iter<I: IntoIterator<Item = T>>(entries: I) -> Self {
         Self(entries.into_iter().map(|entry| (entry, ())).collect())
     }
 }
-impl<T: Eq + Hash + Clone> Extend<T> for SchemaSet<T> {
+impl<T: Ord + Hash + Clone> Extend<T> for SchemaSet<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, entries: I) {
         self.0.extend(entries.into_iter().map(|entry| (entry, ())));
     }
 }
-impl<T: Eq + Hash + Clone> std::ops::BitOr for &SchemaSet<T> {
+impl<T: Ord + Hash + Clone> std::ops::BitOr for &SchemaSet<T> {
     type Output = SchemaSet<T>;
     fn bitor(self, other: Self) -> Self::Output {
         self.iter().chain(other.iter()).cloned().collect()
     }
 }
-impl<T: Eq + Hash + Clone> IntoIterator for SchemaSet<T> {
+impl<T: Ord + Hash + Clone> IntoIterator for SchemaSet<T> {
     type Item = T;
     type IntoIter = std::iter::Map<std::collections::hash_map::IntoIter<T, ()>, fn((T, ())) -> T>;
     fn into_iter(self) -> Self::IntoIter {

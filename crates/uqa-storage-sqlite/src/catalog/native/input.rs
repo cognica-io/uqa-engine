@@ -21,6 +21,57 @@ use uqa_storage::{
 };
 
 impl Catalog {
+    pub(in crate::catalog) fn native_graph_name_exists_with_control(
+        &self,
+        name: &str,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(name.len(), limits.maximum_key_bytes)?;
+        let snapshot = self.conn.native_snapshot()?.ok_or_else(|| {
+            StorageBackendError::Other("controlled graph-name reads require native records".into())
+        })?;
+        let key = NativeRecordIdentity::new(
+            Family::NamedGraphs,
+            NativeRecordOwner::Database(snapshot.database),
+        )
+        .and_then(|identity| identity.encode_key(&[super::text(name)], control))
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        control.check_value_size(key.len(), limits.maximum_key_bytes)?;
+        let read = snapshot.record_read();
+        let mut present = false;
+        read.visit_keys_after(&key, None, 1, control, &mut |found| {
+            present = found == &*key;
+            Ok(())
+        })?;
+        control.check()?;
+        read.control().check()?;
+        Ok(present)
+    }
+
+    pub(in crate::catalog) fn native_graph_name_input(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogInput<String>> {
+        self.native_row_input(Family::NamedGraphs, decode_graph_name, limits, control)
+    }
+
+    pub(in crate::catalog) fn native_schema_load(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::schema::load::CatalogSchemaLoad> {
+        use uqa_storage::catalog::schema::load::{CatalogSchemaLoad, CatalogSchemaOrder};
+        CatalogSchemaLoad::new(
+            self.native_row_input(Family::Schemas, decode_schema, limits, control)?,
+            CatalogSchemaOrder::Physical,
+            control,
+        )
+    }
+
     pub(in crate::catalog) fn native_row_input<T>(
         &self,
         family: Family,
@@ -48,6 +99,22 @@ impl Catalog {
     ) -> StorageBackendResult<CatalogInput<CatalogIndexRow>> {
         self.native_row_input(Family::CatalogIndexes, decode_index, limits, control)
     }
+}
+
+fn decode_schema(
+    key: &[u8],
+    value: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<uqa_storage::SchemaRow>>> {
+    let (_, row) = decode_record(key, value, control)
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+    let acl = (row[2] != ValueRef::Null)
+        .then(|| string_ref(row[2]))
+        .transpose()?;
+    let name = string_ref(row[0])?;
+    super::super::role_security::input::schema(name, row[1], acl, control)
+        .map(Some)
+        .map_err(Into::into)
 }
 
 fn decode_index(
@@ -87,4 +154,24 @@ fn decode_index(
         [text(3)?, table, text(6)?, text(7)?],
         (row[8] != ValueRef::Null).then(|| text(8)).transpose()?,
     )))
+}
+
+fn decode_graph_name(
+    key: &[u8],
+    value: &[u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<Budgeted<String>>> {
+    let (_, row) = decode_record(key, value, control)
+        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+    let name = string_ref(row[0])?;
+    Ok(Some(
+        ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        )
+        .copy_text(name)?
+        .into_budgeted()
+        .expect("retained native graph name"),
+    ))
 }

@@ -7,7 +7,7 @@
 //! Persistent brute-force vector index and exact search contract.
 
 use parking_lot::RwLock;
-use uqa_core::memory::BudgetedVec;
+use uqa_core::memory::{BudgetedVec, RetainedValue};
 use uqa_storage::read_control::StorageReadControl;
 
 mod cache;
@@ -24,11 +24,11 @@ use super::{
 #[derive(Clone)]
 pub struct SQLiteVectorIndex {
     pub(super) conn: ManagedConnection,
-    pub(super) table: String,
-    pub(super) field: String,
+    pub(super) table: uqa_storage::StorageName,
+    pub(super) field: uqa_storage::StorageName,
     pub(super) dimensions: u32,
     pub(super) retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
-    cached_vectors: Arc<RwLock<Option<cache::CachedVectors>>>,
+    cached_vectors: RetainedValue<RwLock<Option<cache::CachedVectors>>>,
 }
 
 impl SQLiteVectorIndex {
@@ -40,12 +40,29 @@ impl SQLiteVectorIndex {
     ) -> Self {
         Self {
             conn,
-            table: table.into(),
-            field: field.into(),
+            table: Into::<String>::into(table).into(),
+            field: Into::<String>::into(field).into(),
             dimensions,
             retained: None,
-            cached_vectors: Arc::default(),
+            cached_vectors: RetainedValue::default(),
         }
+    }
+
+    pub(crate) fn from_names(
+        conn: ManagedConnection,
+        table: uqa_storage::StorageName,
+        field: uqa_storage::StorageName,
+        dimensions: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self {
+            conn,
+            table,
+            field,
+            dimensions,
+            retained: None,
+            cached_vectors: RetainedValue::with_budget(RwLock::new(None), control.memory())?,
+        })
     }
 
     fn score_vectors(
@@ -127,7 +144,7 @@ impl SQLiteVectorIndex {
             "SELECT doc_id, vector_ordinal, vector FROM _vectors
              WHERE table_name = ?1 AND field = ?2 ORDER BY doc_id, vector_ordinal",
         )?;
-        let mut rows = statement.query(params![self.table, self.field])?;
+        let mut rows = statement.query(params![self.table.as_str(), self.field.as_str()])?;
         let mut ordinals = super::codec::PersistedOrdinalSequence::default();
         while let Some(row) = rows.next()? {
             control.check()?;
@@ -166,7 +183,7 @@ impl SQLiteVectorIndex {
                  WHERE table_name = ?1 AND field = ?2
                  ORDER BY doc_id, vector_ordinal",
         )?;
-        let rows = stmt.query_map(params![self.table, self.field], |r| {
+        let rows = stmt.query_map(params![self.table.as_str(), self.field.as_str()], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
@@ -238,7 +255,7 @@ impl VectorIndex for SQLiteVectorIndex {
         Ok(self.conn.with(|connection| {
             Ok(connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM _vectors WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3 AND vector_ordinal = 0)",
-                params![self.table, self.field, doc_id],
+                params![self.table.as_str(), self.field.as_str(), doc_id],
                 |row| row.get(0),
             )?)
         })?)
@@ -269,14 +286,20 @@ impl VectorIndex for SQLiteVectorIndex {
             tx.execute(
                 "DELETE FROM _vectors
                  WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                params![self.table, self.field, doc_id],
+                params![self.table.as_str(), self.field.as_str(), doc_id],
             )?;
             let mut stmt = tx.prepare(
                 "INSERT INTO _vectors (table_name, field, doc_id, vector_ordinal, vector)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
             for (ordinal, vector) in &encoded_vectors {
-                stmt.execute(params![self.table, self.field, doc_id, ordinal, vector,])?;
+                stmt.execute(params![
+                    self.table.as_str(),
+                    self.field.as_str(),
+                    doc_id,
+                    ordinal,
+                    vector,
+                ])?;
             }
             drop(stmt);
             tx.commit()?;
@@ -297,7 +320,7 @@ impl VectorIndex for SQLiteVectorIndex {
             c.execute(
                 "DELETE FROM _vectors
                  WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                params![self.table, self.field, doc_id],
+                params![self.table.as_str(), self.field.as_str(), doc_id],
             )?;
             Ok(())
         })?;
@@ -316,7 +339,7 @@ impl VectorIndex for SQLiteVectorIndex {
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2",
-                params![self.table, self.field],
+                params![self.table.as_str(), self.field.as_str()],
             )?;
             Ok(())
         })?;
@@ -359,7 +382,7 @@ impl VectorIndex for SQLiteVectorIndex {
         Ok(self.conn.with(|c| {
             let n: i64 = c.query_row(
                 "SELECT COUNT(*) FROM _vectors WHERE table_name = ?1 AND field = ?2",
-                params![self.table, self.field],
+                params![self.table.as_str(), self.field.as_str()],
                 |r| r.get(0),
             )?;
             i64_to_usize("vector count", n)

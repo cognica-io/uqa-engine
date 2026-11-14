@@ -9,7 +9,7 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use uqa_core::{memory::Budgeted, DocId};
 
-use super::{invalid, read_record, DiskANNPageSource, DiskANNRecordKey};
+use super::{invalid, read_record, DiskANNPageSource, DiskANNRecordKey, RecordInput};
 use crate::diskann_index::format::{
     DiskANNCanonicalOrigin, DiskANNManifest, DiskANNOriginLayout, DiskANNOriginSummary,
     ORIGIN_BATCH_DOCUMENTS,
@@ -47,17 +47,19 @@ impl OriginVerifier {
         })
     }
 
-    pub(super) fn batch(
+    pub(super) async fn batch_from(
         &mut self,
         first: u64,
         bytes: &[u8],
         control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
     ) -> StorageBackendResult<()> {
         if first != self.next {
             return Err(invalid("noncontiguous origin batches"));
         }
-        let batch = self.layout.decode(first, bytes, control)?;
+        let batch = self.layout.decode_from(first, bytes, control, work).await?;
         for index in 0..batch.len() {
+            work.checkpoint().await?;
             control.check()?;
             let entry = batch.entry(index).expect("validated origin batch");
             if self.previous.is_some_and(|last| last >= entry.document()) {
@@ -70,6 +72,7 @@ impl OriginVerifier {
             self.previous = Some(entry.document());
         }
         for chunk in batch.bytes().chunks(4096) {
+            work.checkpoint().await?;
             control.check()?;
             self.hash.update(chunk);
         }
@@ -122,26 +125,47 @@ impl DiskANNOriginReader {
         control: &StorageReadControl,
         owner: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let bytes = read_record(&*source, DiskANNRecordKey::Manifest, maximum, control)?;
-        let manifest = DiskANNManifest::decode(source.generation(), &bytes, control)?;
+        crate::image_io::work::inline(Self::open_from(
+            RecordInput::Provider(source),
+            maximum,
+            control,
+            owner,
+            &mut (),
+        ))
+    }
+
+    pub(in crate::diskann_index) async fn open_from(
+        source: RecordInput,
+        maximum: usize,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<Self> {
+        let bytes = source
+            .read_record(DiskANNRecordKey::Manifest, maximum, control, work)
+            .await?;
+        let manifest = DiskANNManifest::decode(source.source().generation(), &bytes, control)?;
         drop(bytes);
         let mut verifier = OriginVerifier::new(&manifest)?;
         let documents = verifier.summary.documents();
         let layout = verifier.layout;
         while verifier.next < documents {
             let first = verifier.next;
-            let bytes = read_record(
-                &*source,
-                DiskANNRecordKey::Origins(first),
-                maximum.min(DiskANNOriginLayout::MAX_ENCODED_BYTES),
-                control,
-            )?;
-            verifier.batch(first, &bytes, control)?;
+            work.checkpoint().await?;
+            let bytes = source
+                .read_record(
+                    DiskANNRecordKey::Origins(first),
+                    maximum.min(DiskANNOriginLayout::MAX_ENCODED_BYTES),
+                    control,
+                    work,
+                )
+                .await?;
+            verifier.batch_from(first, &bytes, control, work).await?;
         }
         verifier.finish()?;
         control.check()?;
         let retained = Retained {
-            source,
+            source: source.into_source(),
             control: owner.clone(),
             manifest,
             layout,

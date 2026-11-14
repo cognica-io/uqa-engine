@@ -206,8 +206,9 @@ impl Engine {
                     .as_deref()
                     .or(reset_path.as_deref())
                     .unwrap_or_default();
-                state.search_path =
-                    split_identifier_list(text, b',').expect("checked search path syntax");
+                state.search_path = split_identifier_list(text, b',')
+                    .expect("checked search path syntax")
+                    .into();
                 state.sql_statement_cache.clear();
             }
             "session_replication_role" => state.sql_statement_cache.clear(),
@@ -276,8 +277,9 @@ impl Engine {
                 self.check_parameter_change(definition)?;
                 let setting = self.checked_setting(definition, value)?;
                 if definition.name == "search_path" {
-                    self.session.state.write().search_path =
-                        split_identifier_list(&setting, b',').expect("checked search path syntax");
+                    self.session.state.write().search_path = split_identifier_list(&setting, b',')
+                        .expect("checked search path syntax")
+                        .into();
                 }
                 if definition.name == "client_min_messages" {
                     if let Some(level) = crate::state::message_level(&setting) {

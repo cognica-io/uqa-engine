@@ -683,3 +683,17 @@ impl MemoryCaptureSource for Box<dyn crate::InvertedIndex> {
         self.snapshot_with_control(control)
     }
 }
+
+impl MemoryCaptureSource for crate::StorageHandle<dyn crate::DocumentStore> {
+    type Frozen = Arc<dyn crate::DocumentStore>;
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        self.snapshot_with_control(control)
+    }
+}
+
+impl MemoryCaptureSource for crate::StorageHandle<dyn crate::InvertedIndex> {
+    type Frozen = Arc<dyn crate::InvertedIndex>;
+    fn freeze(&self, control: &StorageReadControl) -> StorageBackendResult<Self::Frozen> {
+        self.snapshot_with_control(control)
+    }
+}

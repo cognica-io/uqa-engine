@@ -6,11 +6,12 @@
 
 //! Foreign-key catalog rows have independent identities even when partition copies share enforcement.
 
+use super::validation;
 use crate::ast::{ColumnDef, ConstraintCatalogIdentity, TableConstraintSet};
 use crate::schema::constraint_metadata::{
     CatalogIdentityAllocator, ConstraintMetadataError, ConstraintMetadataResult,
 };
-use std::collections::BTreeSet;
+use uqa_core::memory::{OwnedSet, ProductionControl};
 use uqa_core::RelationIdentity;
 
 pub(crate) fn materialize(
@@ -49,61 +50,123 @@ pub fn identities<'a>(
     columns: &'a [ColumnDef],
     constraints: &'a TableConstraintSet,
 ) -> impl Iterator<Item = Option<ConstraintCatalogIdentity>> + 'a {
-    let references = columns
+    identity_slots(columns, &constraints.foreign_keys).filter_map(|slot| match slot {
+        IdentitySlot::Empty => None,
+        IdentitySlot::Required(identity) => Some(identity),
+    })
+}
+
+/// Empty declaration slots remain visible to bounded traversal even when they contribute no identity. An existing foreign key with no identity remains a distinct required claim.
+pub enum IdentitySlot {
+    Empty,
+    Required(Option<ConstraintCatalogIdentity>),
+}
+
+/// Borrow every declaration and derived partition slot in catalog validation order.
+pub fn identity_slots<'a>(
+    columns: &'a [ColumnDef],
+    keys: &'a [crate::ast::ForeignKey],
+) -> impl Iterator<Item = IdentitySlot> + 'a {
+    columns
         .iter()
-        .filter_map(|column| column.references.as_ref());
-    references
-        .clone()
-        .map(|reference| reference.catalog_identity)
+        .map(|column| {
+            column
+                .references
+                .as_ref()
+                .map_or(IdentitySlot::Empty, |reference| {
+                    IdentitySlot::Required(reference.catalog_identity)
+                })
+        })
         .chain(
-            constraints
-                .foreign_keys
-                .iter()
-                .map(|key| key.catalog_identity),
+            keys.iter()
+                .map(|key| IdentitySlot::Required(key.catalog_identity)),
         )
-        .chain(
-            references
-                .flat_map(|reference| &reference.referenced_partitions)
-                .chain(
-                    constraints
-                        .foreign_keys
+        .chain(columns.iter().flat_map(|column| {
+            std::iter::once(IdentitySlot::Empty).chain(column.references.iter().flat_map(
+                |reference| {
+                    reference
+                        .referenced_partitions
                         .iter()
-                        .flat_map(|key| &key.referenced_partitions),
-                )
-                .map(|derived| Some(derived.catalog_identity)),
-        )
+                        .map(|derived| IdentitySlot::Required(Some(derived.catalog_identity)))
+                },
+            ))
+        }))
+        .chain(keys.iter().flat_map(|key| {
+            std::iter::once(IdentitySlot::Empty).chain(
+                key.referenced_partitions
+                    .iter()
+                    .map(|derived| IdentitySlot::Required(Some(derived.catalog_identity))),
+            )
+        }))
 }
 
 pub fn validate(
     columns: &[ColumnDef],
     constraints: &TableConstraintSet,
 ) -> ConstraintMetadataResult<()> {
-    let mut objects = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for identity in identities(columns, constraints) {
+    validate_with_control(columns, constraints, &ProductionControl::uncontrolled())
+}
+
+/// Borrow the original row order and partition provenance under the supplied temporary allowance.
+pub fn validate_with_control(
+    columns: &[ColumnDef],
+    constraints: &TableConstraintSet,
+    control: &ProductionControl<'_>,
+) -> ConstraintMetadataResult<()> {
+    crate::catalog::work::inline(validate_from(columns, constraints, control, &mut ()))
+}
+
+pub async fn validate_from_input(
+    columns: &[ColumnDef],
+    constraints: &TableConstraintSet,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> ConstraintMetadataResult<()> {
+    validate_from(columns, constraints, control, input).await
+}
+
+pub(super) async fn validate_from(
+    columns: &[ColumnDef],
+    constraints: &TableConstraintSet,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> ConstraintMetadataResult<()> {
+    validation::check(control)?;
+    let mut objects = OwnedSet::new();
+    let mut oids = OwnedSet::new();
+    for slot in identity_slots(columns, &constraints.foreign_keys) {
+        validation::checkpoint(control, work).await?;
+        let IdentitySlot::Required(identity) = slot else {
+            continue;
+        };
         let identity = identity.ok_or_else(|| {
             ConstraintMetadataError::Invalid(
                 "foreign keys require an initial catalog identity migration".into(),
             )
         })?;
         validate_identity(identity)?;
-        if !objects.insert(identity.object_id) || !oids.insert(identity.oid) {
+        if !validation::insert(&mut objects, identity.object_id, control)?
+            || !validation::insert(&mut oids, identity.oid, control)?
+        {
             return Err(ConstraintMetadataError::Invalid(
                 "duplicate foreign-key catalog identity".into(),
             ));
         }
     }
     for inherited in &constraints.hierarchy.partition_inherited_foreign_keys {
-        if !constraints.foreign_keys.iter().any(|key| {
+        validation::checkpoint(control, work).await?;
+        if !validation::any(&constraints.foreign_keys, control, work, |key| {
             key.catalog_identity == inherited.catalog_identity
                 && key.object_id == inherited.object_id
-        }) {
+        })
+        .await?
+        {
             return Err(ConstraintMetadataError::Invalid(
                 "partition foreign-key provenance does not identify its catalog row".into(),
             ));
         }
     }
-    Ok(())
+    validation::check(control)
 }
 
 /// Capture missing identities before materialization so only legacy catalog rows retain name-derived OIDs.

@@ -11,6 +11,7 @@ use crate::read_control::StorageReadControl;
 
 use super::*;
 
+mod errors;
 mod frames;
 mod inventories;
 mod records;

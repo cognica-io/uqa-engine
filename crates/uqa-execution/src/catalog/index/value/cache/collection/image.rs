@@ -7,7 +7,10 @@
 //! Named evaluated indexes adopt decoded registration ownership before table publication.
 
 use super::{Entry, NativeValueSources, ValueIndexCache, ValueIndexes};
-use uqa_core::memory::{Budgeted, MemoryBudget, OwnedMap};
+use uqa_core::{
+    image_io::AsyncImageInput,
+    memory::{Budgeted, MemoryBudget, OwnedMap},
+};
 use uqa_storage::{
     memory_capture::MemoryCaptureRegistry, read_control::StorageReadControl, StorageBackendError,
     StorageBackendResult, ValueIndexKey,
@@ -18,6 +21,7 @@ pub struct MemoryValueIndexesBuilder {
     indexes: OwnedMap<ValueIndexKey, Entry>,
     native: NativeValueSources,
     control: StorageReadControl,
+    selected: Option<input::Selected>,
 }
 
 impl MemoryValueIndexesBuilder {
@@ -26,15 +30,41 @@ impl MemoryValueIndexesBuilder {
             indexes: OwnedMap::new(),
             native: NativeValueSources::new(registry, control.memory()),
             control: control.clone(),
+            selected: None,
         }
     }
 
     pub fn add_index(
-        mut self,
+        self,
         name: Budgeted<String>,
         value: ValueIndexCache,
     ) -> StorageBackendResult<Self> {
+        let (key, entry) = self.prepare_index(name, value)?;
+        let next = self.native.with_entry(&key, &entry)?;
+        self.publish_index(key, entry, next)
+    }
+
+    async fn add_index_from(
+        self,
+        name: Budgeted<String>,
+        value: ValueIndexCache,
+        input: &mut AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        input.checkpoint().await?;
+        let (key, entry) = self.prepare_index(name, value)?;
+        let next = self.native.with_entry_from(&key, &entry, input).await?;
+        self.publish_index(key, entry, next)
+    }
+
+    fn prepare_index(
+        &self,
+        name: Budgeted<String>,
+        value: ValueIndexCache,
+    ) -> StorageBackendResult<(Budgeted<ValueIndexKey>, Entry)> {
         self.control.check()?;
+        if self.selected.is_some() {
+            return Err(invalid("evaluated index is missing declared values"));
+        }
         if !name.budget().shares_allowance(self.control.memory())
             || name.reserved_bytes() < name.capacity()
         {
@@ -52,7 +82,15 @@ impl MemoryValueIndexesBuilder {
                 .registry
                 .cell_with_control(value, &self.control)?,
         );
-        let next = self.native.with_entry(&key, &entry)?;
+        Ok((key, entry))
+    }
+
+    fn publish_index(
+        mut self,
+        key: Budgeted<ValueIndexKey>,
+        entry: Entry,
+        next: NativeValueSources,
+    ) -> StorageBackendResult<Self> {
         self.indexes.insert_admitted_key(key, entry)?;
         self.native = next;
         self.control.check()?;
@@ -61,6 +99,9 @@ impl MemoryValueIndexesBuilder {
 
     pub fn finish(self) -> StorageBackendResult<ValueIndexes> {
         self.control.check()?;
+        if self.selected.is_some() {
+            return Err(invalid("evaluated index is missing declared values"));
+        }
         Ok(ValueIndexes {
             indexes: self.indexes,
             native: Some(
@@ -71,9 +112,11 @@ impl MemoryValueIndexesBuilder {
     }
 }
 
-fn invalid(message: &'static str) -> StorageBackendError {
+pub(super) fn invalid(message: &'static str) -> StorageBackendError {
     StorageBackendError::Other(message.into())
 }
+
+mod input;
 
 #[cfg(test)]
 mod tests;

@@ -14,21 +14,43 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_validation;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup_validation::verify_backup_validation_continuation;
+mod catalog_analyzer_input;
+pub use catalog_analyzer_input::verify_catalog_analyzer_input;
+mod catalog_graph_names;
 mod catalog_index_input;
+pub use catalog_graph_names::verify_catalog_graph_name_input;
+mod catalog_sequence_input;
+pub use catalog_sequence_input::verify_catalog_sequence_input;
+mod catalog_schema_input;
+pub use catalog_schema_input::verify_catalog_schema_input;
+mod catalog_statistics_input;
+pub use catalog_statistics_input::verify_catalog_statistics_input;
 mod catalog_revisions;
 mod catalog_table_input;
 mod catalog_text_input;
-pub use catalog_index_input::verify_catalog_index_input;
+pub use catalog_index_input::{verify_catalog_index_input, verify_catalog_index_load};
 pub use catalog_table_input::{verify_catalog_table_input, verify_catalog_table_load};
 pub use catalog_text_input::verify_catalog_text_input;
 mod foreign_servers;
 pub use catalog_revisions::verify_catalog_record_revisions;
+mod key_mapping;
+mod metadata_input;
 mod metadata_reads;
+mod table_metadata;
 pub use foreign_servers::{verify_foreign_server_reopen, verify_foreign_server_rows};
+pub use key_mapping::verify_integer_key_mapping_input;
+pub use metadata_input::verify_controlled_metadata_reads;
 pub use metadata_reads::verify_catalog_metadata_visits;
+pub use table_metadata::verify_table_metadata_input;
 mod fixed_catalog_reads;
 pub use fixed_catalog_reads::verify_catalog_read_boundaries;
+mod document_maximum;
 mod documents;
+pub use document_maximum::verify_document_maximum_input;
 pub use documents::{verify_document_ownership, verify_document_reopen};
 mod projections;
 pub use projections::{verify_document_projections, verify_document_projections_reopen};
@@ -239,3 +261,6 @@ where
 
 mod vector_spill;
 pub use vector_spill::verify_vector_transaction_spill;
+
+mod catalog_foreign_table_input;
+pub use catalog_foreign_table_input::verify_catalog_foreign_table_input;

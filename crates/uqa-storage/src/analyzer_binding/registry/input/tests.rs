@@ -149,3 +149,63 @@ fn rejected_field_input_consumes_candidate_and_keeps_no_partial_image_or_runtime
         .is_err());
     assert_eq!(input.memory().used(), 0);
 }
+
+#[test]
+fn retained_field_selection_copies_only_the_lower_bound_and_borrows_exact_revisions() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+    struct NoRead;
+    impl std::io::Read for NoRead {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            panic!("field selection must not read source bytes")
+        }
+    }
+    let source_control = StorageReadControl::with_limit(4 << 20);
+    let table = format!("public.\"{}\"", "한🙂".repeat(8192));
+    let wire = wire();
+    let mut catalog = FieldAnalyzerCatalog::new(source_control.memory());
+    for table in ["public.before", table.as_str(), "public.zzz"] {
+        catalog = catalog
+            .insert_image(
+                key(table, "body", &source_control),
+                binding(&wire, &source_control),
+                &source_control,
+            )
+            .unwrap();
+    }
+    let expected = catalog
+        .get(&(table.clone(), "body".into()))
+        .unwrap()
+        .index
+        .compiled
+        .clone();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut input: ImageDecoder<_, StorageBackendError> = ImageDecoder::new(
+        control.memory(),
+        control.cancellation(),
+        |mut reader| async move {
+            let mut input = reader.input();
+            let mut selected = catalog.durable_fields_from(&table, &mut input).await?;
+            let (name, value) = selected.next().unwrap();
+            assert_eq!(name, "body");
+            assert!(Arc::ptr_eq(&value.index.compiled, &expected));
+            assert!(selected.next().is_none());
+            Ok(())
+        },
+    )
+    .unwrap();
+    let mut calls = 0;
+    loop {
+        calls += 1;
+        if input
+            .advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps: 1 })
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    assert!(calls > 10);
+    drop(input);
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(source_control.memory().used(), 0);
+}

@@ -89,7 +89,7 @@ fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
     let writable_calls = store.writable_snapshot_calls.clone();
     {
         let table = eng.table("docs").unwrap().expect("table");
-        *table.document_store.write() = Box::new(store);
+        *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(store));
     }
 
     eng.begin().unwrap();
@@ -272,7 +272,7 @@ fn parameter_expression_index_probes_do_not_enumerate_the_document_store() {
         .unwrap()
         .unwrap()
         .document_store
-        .write() = Box::new(probe);
+        .write() = uqa_storage::StorageHandle::new(Box::new(probe));
     for parameter in [3, 31, 999] {
         let result = engine
             .sql(
@@ -345,17 +345,17 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         .unwrap()
         .expect("portal_used")
         .document_store
-        .write() = Box::new(used);
+        .write() = uqa_storage::StorageHandle::new(Box::new(used));
     *eng.table("portal_unrelated")
         .unwrap()
         .expect("portal_unrelated")
         .document_store
-        .write() = Box::new(unrelated);
+        .write() = uqa_storage::StorageHandle::new(Box::new(unrelated));
     *eng.table("portal_right")
         .unwrap()
         .expect("portal_right")
         .document_store
-        .write() = Box::new(right);
+        .write() = uqa_storage::StorageHandle::new(Box::new(right));
 
     eng.sql("BEGIN", &[]).unwrap();
     eng.sql("DECLARE constant_cursor CURSOR FOR SELECT 1", &[])
@@ -493,8 +493,9 @@ fn sql_update_reports_stale_document_ids() {
     eng.sql("SELECT id FROM docs WHERE id = '1'", &[]).unwrap();
     {
         let table = eng.table("docs").unwrap().expect("table");
-        *table.document_store.write() =
-            Box::new(StoreWithMissingDocId::from_table(&eng, "docs", 99));
+        *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(
+            StoreWithMissingDocId::from_table(&eng, "docs", 99),
+        ));
         // Corrupt the selected index support itself. An unrelated identity in a full relation scan is no longer a candidate of this bounded update.
         table
             .value_indexes
@@ -628,8 +629,9 @@ fn upsert_reinsert_failure_rolls_back_instead_of_losing_the_row() {
     .unwrap();
     {
         let table = eng.table("engine_meta").unwrap().expect("table");
-        *table.document_store.write() =
-            Box::new(FailingPutStore::from_table(&eng, "engine_meta", 1));
+        *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(
+            FailingPutStore::from_table(&eng, "engine_meta", 1),
+        ));
     }
 
     let err = eng
@@ -717,7 +719,7 @@ fn prepared_document_writes_check_presence_without_copying_payloads() {
     let probe = PortalSnapshotProbeStore::from_table(&engine, "presence_writes");
     let row_reads = probe.row_reads.clone();
     let table = engine.table("presence_writes").unwrap().unwrap();
-    *table.document_store.write() = Box::new(probe);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(probe));
     for id in [1, 2, 1, 2] {
         engine
             .add_prepared_document_without_fts_impl(
@@ -768,7 +770,7 @@ fn prepared_document_presence_failure_does_not_publish_a_write() {
     probe.presence_error = Some(|| StorageBackendError::Other("injected presence failure".into()));
     let row_reads = probe.row_reads.clone();
     let table = engine.table("presence_failure").unwrap().unwrap();
-    *table.document_store.write() = Box::new(probe);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(probe));
     let error = engine
         .add_prepared_document_without_fts_impl(
             "presence_failure",

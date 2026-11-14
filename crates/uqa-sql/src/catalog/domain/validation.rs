@@ -51,11 +51,25 @@ pub fn begin_validation<'a>(
     impl Iterator<Item = (&'a String, &'a StoredDomain)>,
     impl Iterator<Item = (&'a String, &'a RoleDefinition)>,
 > {
+    from_iter(
+        registry.iter(),
+        (mode == DomainValidationMode::Complete).then(|| registry.iter()),
+        roles.iter(),
+        control,
+    )
+}
+
+fn from_iter<I, R>(
+    entries: I,
+    required: Option<I>,
+    roles: R,
+    control: ProductionControl<'_>,
+) -> DomainRegistryValidation<'_, I, R> {
     DomainRegistryValidation {
         active: Some(Work {
-            entries: registry.iter(),
-            required: (mode == DomainValidationMode::Complete).then(|| registry.iter()),
-            roles: roles.iter(),
+            entries,
+            required,
+            roles,
             role_index: ProductionMap::new(control),
             control,
             identities: ProductionMap::new(control),
@@ -66,6 +80,30 @@ pub fn begin_validation<'a>(
             required_phase: false,
         }),
         complete: false,
+    }
+}
+
+/// Drive the same native validation state through retained input without changing role, constraint or required-field precedence.
+pub async fn validate_from_input(
+    registry: &crate::catalog::type_definitions::TypeDefinitions<StoredDomain>,
+    roles: &RoleDefinitions,
+    mode: DomainValidationMode,
+    control: &ProductionControl<'_>,
+    work: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> ConstraintMetadataResult<()> {
+    let mut validation = from_iter(
+        registry.iter(),
+        (mode == DomainValidationMode::Complete).then(|| registry.iter()),
+        roles.iter(),
+        *control,
+    );
+    loop {
+        work.checkpoint()
+            .await
+            .map_err(|error| ConstraintMetadataError::Execution(Box::new(error.into())))?;
+        if validation.advance()? == DomainValidationStep::Complete {
+            return Ok(());
+        }
     }
 }
 

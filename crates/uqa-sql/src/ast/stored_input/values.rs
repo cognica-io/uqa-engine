@@ -89,20 +89,54 @@ impl<'a> Input<'a, '_> {
         first: JsonToken<'a>,
         mut read: impl FnMut(&mut Self, JsonToken<'a>) -> Result<Produced<T>, InputError>,
     ) -> Result<Produced<Vec<T>>, InputError> {
+        let mut values = ProductionVec::new(self.control);
+        self.visit_array(first, |input, token| {
+            values.push_produced(read(input, token)?)?;
+            Ok(())
+        })?;
+        Ok(values.finish()?)
+    }
+
+    /// Validate and visit each original array item without constructing a second collection.
+    pub fn visit_array(
+        &mut self,
+        first: JsonToken<'a>,
+        mut visit: impl FnMut(&mut Self, JsonToken<'a>) -> Result<(), InputError>,
+    ) -> Result<(), InputError> {
+        let mut cursor = self.array_cursor(first)?;
+        while let Some(token) = cursor.next(self)? {
+            visit(self, token)?;
+        }
+        Ok(())
+    }
+
+    pub fn set<T: Ord>(
+        &mut self,
+        first: JsonToken<'a>,
+        mut read: impl FnMut(&mut Self, JsonToken<'a>) -> Result<T, InputError>,
+    ) -> Result<Produced<uqa_core::memory::OwnedSet<T>>, InputError> {
         if first != JsonToken::StartArray {
             return Err(invalid());
         }
         self.enter()?;
-        let mut values = ProductionVec::new(self.control);
+        let mut memory = self.control.empty_reservation();
+        let mut values = uqa_core::memory::OwnedSet::new();
         loop {
             let token = self.next()?;
             if token == JsonToken::EndArray {
                 break;
             }
-            values.push_produced(read(self, token)?)?;
+            let value = read(self, token)?;
+            if !values.contains(&value) {
+                let entry = self
+                    .control
+                    .reserve(uqa_core::memory::OwnedSet::<T>::entry_bytes())?;
+                memory = self.control.combine(memory, entry);
+                values.insert(value);
+            }
         }
         self.remaining_depth += 1;
-        Ok(values.finish()?)
+        Ok(self.control.finish(values, memory)?)
     }
 
     pub fn identity(&mut self, first: JsonToken<'a>) -> Result<[u8; 16], InputError> {

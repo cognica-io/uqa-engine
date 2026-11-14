@@ -8,6 +8,160 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Construct retained SQL routine parameter namespaces with bounded name comparison and type copying. Preserve visible and internal slots, duplicate-name ambiguity, empty relation namespaces and immutable ownership after cancellation or source retirement. Complete native routine body finalization remains in progress.
+
+- Share inline and retained type-copy construction for routine restoration, with bounded name copying, constant-stack array/domain traversal and complete partial-output retirement. Native routine body finalization remains in progress.
+
+- Share complete catalog read construction between ordinary Engine capture and retained input. Preserve immutable definition roots, prepared catalog handles, selected table metadata and temporary namespace identity through admitted membership/header construction. Native routine finalization and complete backup restoration remain in progress.
+- Share routine declaration validation between inline execution and retained input, admitting type names and yielding across every parameter visit without reading source bodies. Correct PostgreSQL diagnostic precedence for polymorphic and `internal` results, inferred output types and language-specific pseudo-types. Native body finalization and complete backup restoration remain in progress.
+- Retain original table array-name metadata owners in catalog snapshots and construct table membership through shared inline and retained input. Preserve decoded identity order, replacement semantics, native key/node admission and source-independent metadata lifetime. Complete routine restore integration remains in progress.
+- Retain one immutable session search-path and role generation before producing catalog namespace inputs. Preserve setting, rollback and routine-configuration behavior while copying retained namespace names through bounded work with native admission and cancellation. Complete routine restore integration remains in progress.
+
+- Prepare stored routine placeholders through retained input, moving original declaration and name allocations into a private namespace. Preserve signature-sorted lookup, original finalization order, existing temporary routines and failure retirement. Engine publication and body finalization remain in progress.
+
+- Canonicalize stored routine declarations through one retained physical-input, authority, syntax, schema-membership and signature-binding operation. Preserve original type-identity grammar, object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Resolve native catalog type identities and usable namespaces with the original lookup and privilege order, without copying complete type descriptors. Failed candidates retire atomically; native routine body finalization and complete Engine restoration remain in progress.
+
+- Resume native relation-name parsing, decoded identity construction and routine-signature normalization through retained work. Preserve original quoting, schema defaults, aliases, modifiers, array identity and diagnostics while retaining typed memory/cancellation failures and exact native output ownership. Native routine finalization and complete Engine restoration remain in progress.
+
+- Complete typed routine catalog input through the original retained work channel. Move prepared legacy ACL buffers into outer declarations, preserve empty groups and migration flags, and validate all bodies before authority and object identities against the selected role generation. Native routine finalization and complete Engine restoration remain in progress.
+- Reconstruct projected statements, routine declarations and native values through retained work without serializing and reparsing their generic input. Preserve typed diagnostics, numeric visitors, flattened fields and cancellation ownership, including logical nesting beyond the physical JSON limit. Native routine finalization and complete Engine restoration remain in progress.
+- Resume physical, generic and raw-authority routine catalog input under its original work allowance, preserving repeated scalar projection, wrapper/version diagnostics, complete legacy ACL parsing and ordered role binding. Scalar input observes both cancellation owners after suspended work. Native routine finalization and Engine integration remain in progress.
+- Retain complete generic JSON documents through admitted input and output, preserving duplicate fields, numeric/raw scalar values and original diagnostics. Routine-catalog integration remains in progress.
+- Construct stored statements and routine declarations with admitted native ownership, preserving original defaults, legacy fields and nested statement depth. Complete routine-catalog loading and Engine restoration remain in progress.
+- Construct stored query expressions, windows and data-modifying CTEs as admitted native SQL syntax, preserving selected bindings, positional defaults and assignment alternatives. Native routine finalization and complete Engine restoration remain in progress.
+
+- Validate restored routine authority through shared grant-path and role-incarnation traversal. Retained validation admits scratch and resumes through work windows; ordinary validation no longer copies role names that it immediately discards. Native routine finalization and private Engine integration remain in progress.
+
+- Preserve original analyzer descriptor syntax, typed-field diagnostics and byte-based locations through ordinary and retained input. Keep duplicate-key validation first, retain public numeric/raw JSON values, and retire admitted diagnostic payloads at the backup boundary.
+
+- Preserve complete stored analyzer-binding envelope diagnostics through retained input, including missing/duplicate/unknown fields, positional forms, unit enums and numeric versions. Original error order, numeric spelling and source positions survive work suspension; error redaction releases admitted input names.
+
+- Preserve raw analyzer descriptor spans and their original syntax diagnostics through bounded input. Strict enclosing names and fields retain their own string validation, while raw descriptors keep their original escape and nesting rules until revision validation.
+
+- Preserve native GIN key and option diagnostics, including original type messages, byte-based positions and syntax/EOF classification. Retain memory and cancellation error types through field reconstruction; remove original scalar values at the backup error boundary. Other stored-owner diagnostic conversion remains in progress.
+
+- Restore persistent GIN analyzer ownership through bounded native input on native SQLite, SQLite Key/Value and redb. Share ordinary validation order, retain selected exact revisions, publish complete private field generations and transfer admitted ownership directly to field reconstruction. Interrupted reconstruction retires its private transaction; later writes use independent admission.
+
+- Validate complete stored index-key syntax, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content, untagged alternatives, sorted analyzer options and Unicode trimming. GIN, named analyzer diagnostic JSON and type marker diagnostics retain their original parser observations; conversion of other stored owners remains in progress.
+
+- Share ordered field analyzer installation between ordinary reopening and retained backup reconstruction. Preserve historical index/search revisions, exact column and name checks, legacy migrations and first physical failures; publish complete private field catalogs with independent later mutation ownership.
+
+- Move persistent field binding and compatibility-label assembly into Execution. Preserve complete physical tuple order, canonical identity checks and interleaved label/GIN validation, while retained input transfers original admitted keys and exact revisions to the native field catalog.
+
+- Restore complete named analyzer catalogs through retained physical input, exact stored revisions and native diagnostic comparison. Preserve provider result order and original validation boundaries, then publish paired runtime/image roots at the existing Engine stage with independent later mutation ownership.
+
+- Share retained generic JSON validation between catalog markers and analyzer diagnostics. Compare saved analyzer configurations with the original native public fields, preserving omitted defaults, duplicate-key semantics, raw/numeric scalar representations and bounded work without another value tree.
+
+- Retain field analyzer bindings and compatibility labels from one selected native SQLite, SQLite KV or redb catalog view. Bound physical reads, preserve original field bytes and the binding-before-label validation boundary, and retire both streams together on failure or cancellation.
+
+- Resume stored analyzer and field revision preparation through the original work channel, preserving exact descriptor/resource validation, historical index/search sides, admitted names and complete paired catalog publication.
+
+- Persistent system-relation authority restoration now retains independent table and column ACL tuples through complete physical input and original role/grant validation, adopts native buffers and preserves private transaction cleanup.
+
+- Restore persistent database authority through admitted generic JSON field projection and the existing owner/ACL validation order. Preserve sorted last-value fields and installed numeric/raw scalar representations, and transfer native ACL buffers into the private Engine before routine restoration.
+
+- Restore current built-in routine ACL records through retained physical input and shared native field/authority validation, transferring decoded buffers into the private Engine generation at its original position after routine placeholders. Preserve the selected transaction and independent later mutation allowance.
+
+- Share ordinary and retained authority validation, preserving database endpoint order and built-in routine tuple, grant-path and role checks while allowing traversal to stop at work, memory and cancellation boundaries.
+
+- Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.
+
+- Restore persistent domain definitions and exact OID claims through retained input, preserving marker precedence, native defaults and CHECK expressions, owner and constraint validation, private snapshots and later writable mutations. Keep the original delayed cross-catalog constraint validation before publication.
+- Restore persistent enum, shell, range and composite catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot. Restore object comments in their original position between range and composite definitions, retaining admitted text and independent future mutation ownership.
+
+- Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.
+- Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation. Share ordered identity, OID, label and owner validation between ordinary loading and retained input, with admitted scratch and terminal cleanup. Move decoded buffers into immutable type roots without copying, preserving captured predecessors and independent later mutation allowances.
+
+- Reconstruct stored graph catalog OIDs through retained native input, preserving label and relation identities, duplicate-map semantics and the selected persistent snapshot across bounded decoding.
+
+- Reconstruct persistent sequence definitions, generation values, bound authority and recorded catalog OIDs through retained input on native SQLite, SQLite KV and redb, preserving validation order, the selected snapshot and subsequent sequence mutations.
+
+- Reconstruct persistent graph catalogs through retained name, native label and identifier input, preserving selected membership, original allocation rules and terminal transaction cleanup without materializing ignored Key/Value payloads.
+
+- Reconstruct legacy partition counters through retained native hierarchy input, validating the complete hierarchy before private counter publication. Include migrated durable child reservations so reopening SQLite KV or redb cannot restart a shared parent below those reservations.
+
+- Validate complete persistent constraint catalogs through retained native input, preserving format and physical-row error order, cross-table identity uniqueness and terminal transaction cleanup.
+
+- Observe legacy stored function dispatches, array-slice omissions and range predicates without copying or rewriting declarations during load-only validation. Initial-open migration shares the same selection rules.
+
+- Decode stored foreign declarations under their original restore allowance, preserving current and legacy formats, SQL field semantics, option order and server-reference fences.
+
+- Retain complete foreign-table records and independent ACL replacements through the shared catalog input lifecycle on native SQLite, SQLite KV and redb. Preserve physical and stable relation ordering, private snapshots and original validation of overwritten authority fields without copying arbitrary-precision numbers that are discarded.
+
+- Resume native constraint identity and inherited-key validation between declaration slots and bounded name comparisons. Physical attribute validation uses the fixed PostgreSQL slot domain without allocating a temporary number vector or tree.
+
+- Restore persistent schema catalogs through bounded provider input and shared authority validation, preserving original ordering, snapshot identities and subsequent writable grants. Cancellation deferral checks use the existing inline lock instead of allocating a platform mutex on their first call.
+
+- Admit stored schema names, tuple identities and bound or named grants through the existing authority grammar, retaining original field/default rules and allocation ownership.
+
+- Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.
+- Retain stored role definitions and membership bindings under their original restore allowance, preserving incarnation identities, tuple revisions and existing declaration formats.
+
+- Expose Engine/uqa-api restore, recovery and cancellation entry points and connect native SQLite, SQLite KV and redb restore jobs to retained table input and private catalog validation, with exact-request recovery and shared runtime activation. The Engine import capability remains false until bounded catalog loading, logical closure and final restore qualification are complete.
+
+- Reconstruct memory backup catalogs, resources and evaluated table data into the ordinary Engine state, retaining original allocation ownership through validation, publication, later writes and repeated backup. Complete restore qualification remains in progress.
+
+- Preserve stored query, routine, rule, scalar and table definitions across native input windows, including paired foreign-table metadata and authority, without SQL replay or rebinding.
+
+- Resume native catalog metadata, authority, sequence, expression, trigger, index, comment and scoring input within retained byte/work windows, preserving existing encodings and terminal cleanup.
+
+- Retain private native SQLite, SQLite KV and redb restore destinations through logical validation, preserving original cancellation, exact-request recovery and later published writes.
+
+- Keep a verified archive component selected until native reconstruction explicitly completes, and decode table lifecycle metadata through the same bounded input grammar.
+
+- Resume complete table data reconstruction without changing selected component identities, replaying completed input or publishing incomplete native owners.
+
+- Preserve evaluated-index metadata, value ownership and comparison policy through cooperative reconstruction; enforce independent child cancellation before resumed input work.
+
+- Resume evaluated vector reconstruction through native input, validation, spill and DiskANN preparation, preserving existing images, search results and writable capture ownership.
+
+- Reconstruct evaluated text images and historical analyzer bindings through bounded native progress, preserving posting occurrences, counters, writable snapshots and terminal cleanup.
+
+- Reconstruct native document images through bounded input and conversion progress, preserving tuple boundaries, shared field layouts and both cancellation owners through post-input work.
+
+- Retain original table lookup names and map nodes through native registry publication, snapshots and runtime replacement; admit lookup/source nodes before binding capture updates and keep later mutation budgets independent of construction.
+
+- Assemble native table state without copying retained definitions or physical handles; keep state, catalog and capture-source headers under their own allocation lifetimes through snapshots and later writes.
+
+- Preserve integer-key mapping metadata through bounded reads, keeping original empty/present marker semantics, declared key types and transaction visibility.
+
+- Read stored statistics maintenance and legacy document reservations through bounded metadata input, preserving relation identities, full-width counters, defaults and original cancellation.
+
+- Reconstruct stored analyzer JSON through admitted native fields while preserving defaults, aliases, positional forms and duplicate handling; retire source text before canonical image publication.
+
+- Publish admitted native analyzer configurations with their original owners and a canonical image, using bounded field/text progress and no complete intermediate JSON tree.
+
+- Read persistent visible document maxima through retained key-only progress, including deleted slots, without collecting document identities or substituting autonomous allocator watermarks.
+
+- Read exact persistent metadata records under caller-selected encoded record and memory limits, retaining original text through private rollback and source retirement.
+
+- Restore persistent vector field catalogs through bounded input, retaining original keys and physical owners while preserving repeated-field selection.
+
+- Keep original admitted vector field, map-node and physical-handle owners through writable collection replacement, removal and reinsertion, preserving existing memory captures.
+
+- Retain canonical vector handle names, concrete allocations and shared SQLite cache state under their original reconstruction allowance while preserving subsequent writes and rollback.
+
+- Prepare every stored table column declaration and its bound authority before physical hydration. Decode columns once, retire their JSON immediately and retain original physical fields until native table assembly.
+
+- Keep admitted document and text-index handles in Engine table, snapshot and capture cells. Replacing a physical handle retires its own allocation allowance while retained tables keep their original handles alive.
+
+- Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation and exhaustion; later SQLite snapshots retain their ordinary provider policy.
+
+- Resume stored table-authority validation across bounded work windows while preserving role incarnations, grant-path order and original allocation ownership.
+
+- Restore independently retained table authority without copying ACL payloads, and decode current key names from separate relation, identity and constraint fields. Preserve load-only migration rejection and original resource diagnostics.
+
+- Transfer retained persistent table definitions into independently owned fields without copying their buffers. Field visits use the original input work channel, and decoded JSON can retire separately from native table metadata.
+
+- Admit stored table-authority name projection and grant-path validation under the original memory and cancellation controls while preserving existing validation order and diagnostics.
+
+- Decode stored column statistics in Planner and retain their original payload allowance through immutable publication. Preserve legacy wide-value omission, paired frequencies, numeric representations and catalog diagnostic order.
+
+- Retain stored-statistics controls across input steps, discard the complete unpublished generation on failure, and publish its exact retained footprint without scanning prior rows.
+
+- Retain physical column-statistics rows in Storage and native SQLite under their original allowance and committed/private view, preserving encoded values while consuming one physical record per input step.
+
+- Native constraint identity validation retains temporary object/OID claims under the original allowance and cancellation owners while preserving ordinary validation order and borrowed table syntax.
 - Publish stored table constraints as independent native field owners, retaining their original payload allowances and exact capture footprints through current key-name restoration and publication without revisiting their entries. Failed construction retires every unpublished field.
 
 - Publish stored column declarations directly into native immutable definitions, retaining their original payload allowances through shared snapshots, backup capture and later schema changes.
@@ -307,6 +461,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
 

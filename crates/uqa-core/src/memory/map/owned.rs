@@ -6,7 +6,9 @@
 
 //! Ordinary ordered owners expose exact allocation layouts for later immutable retention.
 
+mod input;
 mod iter_mut;
+pub use input::MapKeyInput;
 mod serialization;
 mod set;
 #[cfg(test)]
@@ -189,10 +191,20 @@ impl<K: Ord, V> OwnedMap<K, V> {
         key: Budgeted<K>,
         value: V,
     ) -> Result<Option<V>, MemoryError> {
+        self.insert_admitted_key_with(key, |_| Ok(value))
+    }
+
+    /// Admit the original key and any new node before invoking its value producer. The producer borrows that input key; failures and unwinding preserve the map and release every provisional owner. Successful replacement keeps the existing key, node and reservation.
+    pub fn insert_admitted_key_with<E: From<MemoryError>>(
+        &mut self,
+        key: Budgeted<K>,
+        produce: impl FnOnce(&K) -> Result<V, E>,
+    ) -> Result<Option<V>, E> {
         if let Some(previous) = self.get_mut(&*key) {
-            return Ok(Some(std::mem::replace(previous, value)));
+            return Ok(Some(std::mem::replace(previous, produce(&key)?)));
         }
         let mut memory = key.budget().reserve(Self::entry_bytes())?;
+        let value = produce(&key)?;
         let (key, payload) = key.into_parts();
         memory.absorb(payload);
         let entry = OwnedNode {
@@ -389,6 +401,11 @@ pub struct OwnedMapIntoIter<K, V> {
 }
 
 impl<K, V> OwnedMapIntoIter<K, V> {
+    /// Move the next entry while preserving any key-payload lease attached by admitted-key insertion. The freed tree node releases only its own layout; the original key keeps its remaining reservation. Values and separately funded payloads retain their existing owners. Ordinary entries remain explicitly uncontrolled. No key/value copy, comparison or allocation occurs.
+    pub fn next_retained(&mut self) -> Option<(crate::memory::Produced<K>, V)> {
+        self.next_node().map(tree::into_retained_entry)
+    }
+
     fn push_left(&mut self, mut link: Link<K, V>) {
         while let Some(mut node) = link {
             link = node.value.left.take();

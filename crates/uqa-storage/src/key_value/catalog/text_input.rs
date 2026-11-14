@@ -15,9 +15,75 @@ use crate::{
     read_control::StorageReadControl,
     StorageBackendResult,
 };
-use uqa_core::memory::Budgeted;
+use uqa_core::memory::{Budgeted, BudgetedString, MemoryError};
 
 impl KeyValueCatalog {
+    pub(super) fn metadata_input(
+        &self,
+        prefix: &str,
+        limits: CatalogTextLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogTextInput> {
+        control.check()?;
+        limits.validate()?;
+        if !self.store.transaction_model().is_versioned() {
+            return Err(crate::StorageBackendError::Other(
+                "retained catalog input requires a versioned read owner".into(),
+            ));
+        }
+        let read = crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            read.retain(&[&[TAG_METADATA]])
+        })?;
+        CatalogTextInput::new_prefix_filtered(
+            read,
+            &[TAG_METADATA],
+            (prefix, select_metadata),
+            decode_metadata,
+            limits,
+            control,
+        )
+    }
+
+    pub(super) fn metadata_with_control(
+        &self,
+        name: &str,
+        limits: CatalogTextLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Budgeted<String>>> {
+        control.check()?;
+        limits.validate()?;
+        control.check_value_size(
+            name.len().checked_add(5).ok_or(MemoryError::SizeOverflow)?,
+            limits.maximum_key_bytes,
+        )?;
+        let key = crate::key_value::codec::single_str_key_prefix(
+            TAG_METADATA,
+            name,
+            name.len(),
+            control.memory(),
+        )?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut result = None;
+            read.visit_value_bounded(&key, limits.maximum_value_bytes, control, &mut |value| {
+                if let Some(value) = value {
+                    let text = std::str::from_utf8(value).map_err(|error| {
+                        crate::key_value::codec::other_error(format!(
+                            "invalid utf-8 value: {error}"
+                        ))
+                    })?;
+                    let mut owned = BudgetedString::new(control.memory());
+                    owned.push_str(text)?;
+                    let (text, memory) = owned.into_parts();
+                    result = Some(Budgeted::new(text, memory));
+                }
+                Ok(())
+            })?;
+            control.check()?;
+            read.control().check()?;
+            Ok(result)
+        })
+    }
+
     pub(super) fn text_input(
         &self,
         family: CatalogTextFamily,
@@ -33,7 +99,7 @@ impl KeyValueCatalog {
             CatalogTextFamily::PathIndexes => TAG_PATH_INDEX,
         };
         self.row_input(
-            tag,
+            &[tag],
             if matches!(family, CatalogTextFamily::Metadata) {
                 decode_metadata
             } else {
@@ -43,6 +109,15 @@ impl KeyValueCatalog {
             control,
         )
     }
+}
+
+fn select_metadata(
+    key: &[u8],
+    prefix: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<bool> {
+    control.check()?;
+    Ok(super::schema_table::metadata_key(key)?.starts_with(prefix))
 }
 
 fn decode_metadata(

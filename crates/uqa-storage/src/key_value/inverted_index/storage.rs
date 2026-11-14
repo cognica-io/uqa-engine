@@ -15,6 +15,15 @@ pub trait OccurrenceStorage: Send + Sync {
     fn mutate(&self, operation: &mut KeyValueMutation<'_>) -> StorageBackendResult<()>;
 }
 
+impl<T: OccurrenceStorage> OccurrenceStorage for uqa_core::memory::Budgeted<T> {
+    fn read(&self, operation: &mut KeyValueReadScope<'_>) -> StorageBackendResult<()> {
+        T::read(self, operation)
+    }
+    fn mutate(&self, operation: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
+        T::mutate(self, operation)
+    }
+}
+
 pub(super) struct KeyValueOccurrences(pub(super) Arc<dyn KeyValueStore>);
 
 impl OccurrenceStorage for KeyValueOccurrences {

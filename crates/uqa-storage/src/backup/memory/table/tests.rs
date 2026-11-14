@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod input;
+
 fn properties() -> MemoryTableProperties {
     MemoryTableProperties {
         object_id: [0x11; 16],

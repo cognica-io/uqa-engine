@@ -224,7 +224,7 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertIn("run: python3 scripts/c_validation.py --kind " + kind, source)
             self.assertIn("-p test_c_validation.py", source)
             self.assertEqual(source.count("    needs: scope\n"), len(SCOPE.JOBS[kind]))
-            self.assertEqual(source.count("    if: needs.scope.outputs.required == 'true'\n"), len(SCOPE.JOBS[kind]))
+            self.assertEqual(source.count("    if: needs.scope.outputs.required == 'true'"), len(SCOPE.JOBS[kind]))
             self.assertNotIn("    paths:\n", source)
             SCOPE.execution_definition(kind, source.encode())
 

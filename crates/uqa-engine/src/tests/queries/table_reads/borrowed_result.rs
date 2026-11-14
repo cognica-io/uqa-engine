@@ -19,12 +19,12 @@ struct Counts {
     borrowed: AtomicUsize,
 }
 
-struct Observed {
-    inner: Arc<dyn DocumentStore>,
+struct Observed<T> {
+    inner: T,
     counts: Arc<Counts>,
 }
 
-impl DocumentStore for Observed {
+impl<T: std::ops::Deref<Target = dyn DocumentStore> + Send + Sync> DocumentStore for Observed<T> {
     fn put_stored(&mut self, _: DocId, _: StoredDocument) -> StorageBackendResult<()> {
         panic!("read-only query")
     }
@@ -44,7 +44,7 @@ impl DocumentStore for Observed {
         self.inner.len()
     }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
-        Ok(Arc::new(Self {
+        Ok(Arc::new(Observed {
             inner: self.inner.snapshot()?,
             counts: Arc::clone(&self.counts),
         }))
@@ -89,12 +89,12 @@ fn public_sql_collects_stored_values_without_per_row_shared_ownership() {
         let mut documents = table.document_store.write();
         let inner = std::mem::replace(
             &mut *documents,
-            Box::new(uqa_storage::MemoryDocumentStore::new()),
+            uqa_storage::StorageHandle::new(Box::new(uqa_storage::MemoryDocumentStore::new())),
         );
-        *documents = Box::new(Observed {
-            inner: inner.into(),
+        *documents = uqa_storage::StorageHandle::new(Box::new(Observed {
+            inner,
             counts: Arc::clone(&counts),
-        });
+        }));
     }
     let result = engine
         .sql("SELECT body AS same, id AS same FROM native_results", &[])

@@ -216,7 +216,7 @@ fn system_security_preserves_public_settings_updates_and_private_role_catalogs()
                 && !matches!(
                     relation,
                     SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid)
-                        | SystemRelation::PgShadow
+                        | SystemRelation::Projected(crate::catalog::VirtualRelation::PgShadow)
                         | SystemRelation::Projected(
                             VirtualRelation::AgGraph | VirtualRelation::AgLabel
                         )

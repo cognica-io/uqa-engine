@@ -74,7 +74,7 @@ pub(crate) async fn check_encoded_size(
     while let Some(frame) = stack.pop() {
         work.checkpoint().await?;
         match frame {
-            Encoding::Value(value) => match value.form(false)? {
+            Encoding::Value(value) => match value.form(false) {
                 Form::Object(values) => {
                     size.add(1)?;
                     stack.push(Encoding::Object(values, true));
@@ -84,8 +84,17 @@ pub(crate) async fn check_encoded_size(
                     stack.push(Encoding::Array(values, true));
                 }
                 Form::Text(value) => size.string(value, work).await?,
-                Form::Scalar(Value::String(value)) => size.string(&value, work).await?,
-                Form::Scalar(value) => size.add(serde_json::to_vec(&value)?.len())?,
+                Form::Path(value) => {
+                    size.string(
+                        value.to_str().ok_or_else(super::output::invalid_path)?,
+                        work,
+                    )
+                    .await?;
+                }
+                Form::Scalar(value) => match serde_json::to_value(value)? {
+                    Value::String(value) => size.string(&value, work).await?,
+                    value => size.add(serde_json::to_vec(&value)?.len())?,
+                },
             },
             Encoding::Object(mut values, first) => {
                 if let Some((key, value)) = values.next() {
@@ -132,7 +141,7 @@ pub(crate) async fn matches_snapshot(
     while let Some(frame) = stack.pop() {
         work.checkpoint().await?;
         match frame {
-            Comparison::Value(expected, actual) => match (expected.form(true)?, actual) {
+            Comparison::Value(expected, actual) => match (expected.form(true), actual) {
                 (Form::Object(values), Value::Object(actual)) if values.len() == actual.len() => {
                     stack.push(Comparison::Object(values, actual));
                 }
@@ -146,7 +155,21 @@ pub(crate) async fn matches_snapshot(
                         return Ok(false);
                     }
                 }
-                (Form::Scalar(expected), actual) if expected == *actual => (),
+                (Form::Path(expected), Value::String(actual)) => {
+                    if !crate::json::bytes_equal(
+                        expected
+                            .to_str()
+                            .ok_or_else(super::output::invalid_path)?
+                            .as_bytes(),
+                        actual.as_bytes(),
+                        work,
+                    )
+                    .await?
+                    {
+                        return Ok(false);
+                    }
+                }
+                (Form::Scalar(expected), actual) if serde_json::to_value(expected)? == *actual => {}
                 _ => return Ok(false),
             },
             Comparison::Object(mut values, actual) => {

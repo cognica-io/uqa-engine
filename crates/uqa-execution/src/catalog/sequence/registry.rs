@@ -20,6 +20,8 @@ use uqa_sql::{
 
 mod image;
 pub use image::SequenceCatalogInput;
+mod persistent;
+pub use persistent::PersistentSequenceCatalogInput;
 pub mod publication;
 mod records;
 use records::SequenceRecords;
@@ -46,6 +48,15 @@ impl Default for SequenceCatalog {
 }
 
 impl SequenceCatalog {
+    fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+        Self {
+            records: self.records.into_mutation_budget(memory),
+            security: self.security.into_mutation_budget(memory),
+            catalog_oids: self.catalog_oids.into_mutation_budget(memory),
+            durable_objects: self.durable_objects.into_mutation_budget(memory),
+            temporary_objects: self.temporary_objects.into_mutation_budget(memory),
+        }
+    }
     pub fn try_from_iter(
         entries: impl IntoIterator<Item = (RelationIdentity, SequenceRecord, BoundSequenceSecurity)>,
     ) -> Result<Self, SQLError> {

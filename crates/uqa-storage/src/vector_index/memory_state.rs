@@ -22,11 +22,23 @@ pub(super) struct MemoryVectorState {
 }
 
 fn tensor_bytes(vectors: &Vec<Vec<f32>>) -> u128 {
-    vectors.capacity() as u128 * size_of::<Vec<f32>>() as u128
-        + vectors
-            .iter()
-            .map(|vector| vector.capacity() as u128 * size_of::<f32>() as u128)
-            .sum::<u128>()
+    crate::image_io::work::inline(tensor_bytes_from::<std::convert::Infallible>(
+        vectors,
+        &mut (),
+    ))
+    .unwrap_or_else(|never| match never {})
+}
+
+async fn tensor_bytes_from<E>(
+    vectors: &Vec<Vec<f32>>,
+    work: &mut impl crate::image_io::work::Work<E>,
+) -> Result<u128, E> {
+    let mut bytes = vectors.capacity() as u128 * size_of::<Vec<f32>>() as u128;
+    for vector in vectors {
+        work.checkpoint().await?;
+        bytes += vector.capacity() as u128 * size_of::<f32>() as u128;
+    }
+    Ok(bytes)
 }
 
 impl MemoryVectorState {
@@ -35,18 +47,38 @@ impl MemoryVectorState {
     }
 
     pub(super) fn replace(&mut self, document: DocId, vectors: Vec<Vec<f32>>) {
+        crate::image_io::work::inline(self.replace_from::<std::convert::Infallible>(
+            document,
+            vectors,
+            &mut (),
+        ))
+        .unwrap_or_else(|never| match never {});
+    }
+
+    pub(super) async fn replace_from<E>(
+        &mut self,
+        document: DocId,
+        vectors: Vec<Vec<f32>>,
+        work: &mut impl crate::image_io::work::Work<E>,
+    ) -> Result<(), E> {
+        let new_bytes = tensor_bytes_from(&vectors, work).await?;
+        let old_bytes = match self.vectors.get(&document) {
+            Some(previous) => tensor_bytes_from(previous, work).await?,
+            None => 0,
+        };
         self.fingerprint.take();
         let previous = if vectors.is_empty() {
             self.vectors.remove(&document)
         } else {
-            self.payload_bytes += tensor_bytes(&vectors);
+            self.payload_bytes += new_bytes;
             self.vector_count += vectors.len() as u128;
             self.vectors.insert(document, vectors)
         };
         if let Some(previous) = previous {
-            self.payload_bytes -= tensor_bytes(&previous);
+            self.payload_bytes -= old_bytes;
             self.vector_count -= previous.len() as u128;
         }
+        Ok(())
     }
 }
 

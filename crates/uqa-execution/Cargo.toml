@@ -38,6 +38,7 @@ tempfile = "3.13"
 thiserror = { workspace = true }
 
 [dev-dependencies]
+uqa-storage-sqlite = { workspace = true }
 allocation-counter = "=0.8.1"
 proptest = { workspace = true }
 

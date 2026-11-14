@@ -5,47 +5,34 @@
 //
 
 //! Validation of persisted role keys and membership identities.
-use super::{
-    identity::{RoleBinding, RoleSubject},
-    RoleDefinition, RoleMembership,
-};
+use super::{identity::RoleBinding, RoleDefinition, RoleMembership};
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::memory::ProductionControl;
+
+pub mod input;
+pub mod validation;
 
 pub fn restore_role_definitions(roles: &mut RoleDefinitions) -> Result<(), String> {
-    if !roles
+    let bootstrap = roles
         .iter()
-        .any(|(name, role)| role.oid == 10 && role.name == *name)
-    {
+        .any(|(name, role)| role.oid == 10 && role.name == *name);
+    if needs_bootstrap(roles, bootstrap)? {
+        roles
+            .insert("uqa".into(), RoleDefinition::bootstrap())
+            .map_err(|error| error.to_string())?;
+    }
+    validation::finish(roles, validation::RoleValidationMode::Definitions)
+}
+
+fn needs_bootstrap(roles: &RoleDefinitions, bootstrap: bool) -> Result<bool, String> {
+    if !bootstrap {
         if roles.get("uqa").is_some_and(|role| role.oid != 10) {
             return Err("persisted bootstrap role must have OID 10".into());
         }
-        if !roles.contains_key("uqa") {
-            roles
-                .insert("uqa".into(), RoleDefinition::bootstrap())
-                .map_err(|error| error.to_string())?;
-        }
+        return Ok(!roles.contains_key("uqa"));
     }
-    let mut oids = BTreeSet::new();
-    for (name, role) in roles.iter() {
-        if role.name != *name {
-            return Err(format!(
-                "persisted role key `{name}` does not match role name `{}`",
-                role.name
-            ));
-        }
-        if role.oid <= 0 || role.oid > i64::from(u32::MAX) {
-            return Err(format!(
-                "persisted role `{name}` has an invalid OID {}",
-                role.oid
-            ));
-        }
-        if !oids.insert(role.oid) {
-            return Err(format!("persisted role OID {} is duplicated", role.oid));
-        }
-    }
-    Ok(())
+    Ok(false)
 }
 
 /// The former aggregate resolves names exactly once during initial-open conversion.
@@ -108,47 +95,16 @@ fn restore_memberships(
     memberships: impl Iterator<Item = Result<RoleMembership, String>>,
 ) -> Result<RoleMemberships, String> {
     let mut membership_map = super::RoleMemberships::new();
-    let mut membership_oids = BTreeSet::new();
-    let mut identities = roles
-        .values()
-        .map(|role| (role.object_id, role.oid))
-        .collect::<BTreeMap<_, _>>();
+    let mut checks = validation::MembershipChecks::new(ProductionControl::uncontrolled());
+    for role in roles.values() {
+        checks.role(role).map_err(|error| error.to_string())?;
+    }
     for membership in memberships {
         let membership = membership?;
-        for binding in [&membership.role, &membership.member, &membership.grantor] {
-            let oid = i64::from(binding.oid);
-            if binding.oid == 0
-                || binding.object_id == [0; 16]
-                || (binding.oid == 10 && binding.object_id != RoleDefinition::bootstrap().object_id)
-                || identities
-                    .insert(binding.object_id, oid)
-                    .is_some_and(|previous| previous != oid)
-            {
-                return Err("persisted role membership has an invalid role identity".into());
-            }
-        }
-        if membership.grantor.role_definition(roles).is_none() {
-            return Err(format!(
-                "persisted role membership `{}` -> `{}` has a missing grantor identity",
-                membership.member.name, membership.role.name
-            ));
-        }
-        if membership.oid <= 0 || membership.oid > i64::from(u32::MAX) {
-            return Err(format!(
-                "persisted role membership has an invalid OID {}",
-                membership.oid
-            ));
-        }
-        if !membership_oids.insert(membership.oid) {
-            return Err(format!(
-                "persisted role membership OID {} is duplicated",
-                membership.oid
-            ));
-        }
+        checks
+            .membership(&membership)
+            .map_err(|error| error.to_string())?;
         let key = membership.key();
-        if membership_map.contains_key(&key) {
-            return Err("persisted role membership identity is duplicated".into());
-        }
         membership_map
             .insert(key, membership)
             .map_err(|error| error.to_string())?;
@@ -157,25 +113,7 @@ fn restore_memberships(
 }
 
 pub fn validate_role_identities(roles: &RoleDefinitions) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    for (name, role) in roles {
-        if role.object_id == [0; 16] {
-            return Err(format!("persisted role `{name}` has no object identity"));
-        }
-        if role.oid == 10 && role.object_id != RoleDefinition::bootstrap().object_id {
-            return Err("persisted bootstrap role has an invalid object identity".into());
-        }
-        if !identities.insert(role.object_id) {
-            return Err("persisted role object identity is duplicated".into());
-        }
-    }
-    if roles
-        .values()
-        .any(|role| role.oid != 10 && role.object_id == RoleDefinition::bootstrap().object_id)
-    {
-        return Err("persisted bootstrap role has an invalid object identity".into());
-    }
-    Ok(())
+    validation::finish(roles, validation::RoleValidationMode::Identities)
 }
 
 #[cfg(test)]

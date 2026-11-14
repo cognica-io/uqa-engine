@@ -36,6 +36,43 @@ pub(super) fn produce(
             .iter()
             .enumerate()
             .all(|(position, slot)| position == *slot);
+    publish(
+        columns,
+        identities,
+        types,
+        slots,
+        Publication {
+            physical_width,
+            metadata,
+            indexes,
+            identity_layout,
+        },
+        control,
+    )
+}
+
+pub(super) struct Publication {
+    pub physical_width: usize,
+    pub metadata: SchemaBuildMetadata,
+    pub indexes: indexes::Indexes,
+    pub identity_layout: bool,
+}
+
+pub(super) fn publish(
+    columns: Produced<Vec<String>>,
+    identities: Produced<Vec<ColumnIdentity>>,
+    types: Produced<Vec<Option<ColumnType>>>,
+    slots: Produced<Vec<usize>>,
+    publication: Publication,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    control.check()?;
+    let Publication {
+        physical_width,
+        metadata,
+        indexes,
+        identity_layout,
+    } = publication;
     let columns = boxed_slice(columns, control)?;
     let identities = boxed_slice(identities, control)?;
     let types = boxed_slice(types, control)?;

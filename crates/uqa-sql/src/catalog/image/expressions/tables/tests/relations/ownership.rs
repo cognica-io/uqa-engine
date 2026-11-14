@@ -194,3 +194,42 @@ fn native_table_metadata_input_owns_deep_partition_scalars() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn native_table_metadata_input_resumes_deep_partition_scalars_on_small_stacks() {
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(|| {
+            let mut expression = Expr::Star;
+            for _ in 0..10000 {
+                expression = Expr::Not(Box::new(expression));
+            }
+            let component = Component::Hierarchy(TableHierarchy {
+                partition_bound: Some(PartitionBound::List(vec![expression])),
+                ..TableHierarchy::default()
+            });
+            let bytes = component.encode(127);
+            drop(component);
+            let memory = MemoryBudget::new(64 << 20);
+            let token = CancellationToken::new();
+            let native = crate::catalog::image::input::window_tests::read_windowed(
+                crate::catalog::table_definition::TableDefinition::<TableHierarchy>::image_input(
+                    &memory, &token,
+                )
+                .unwrap(),
+                &bytes,
+                17,
+                3,
+            );
+            let encoded = super::collect(
+                image::table_hierarchy_image_reader(&native, &memory, &token).unwrap(),
+                31,
+            );
+            assert_eq!(encoded, bytes);
+            drop(native);
+            assert_eq!(memory.used(), 0);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

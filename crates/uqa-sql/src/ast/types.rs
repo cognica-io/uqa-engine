@@ -20,7 +20,7 @@ mod production;
 mod references;
 
 pub use display::TypeDisplayScope;
-pub use identity::{UserTypeIdentity, UserTypeKind};
+pub use identity::{TypeIdentityInputError, UserTypeIdentity, UserTypeKind};
 
 pub(crate) use modifiers::split_type_modifier_with_control;
 

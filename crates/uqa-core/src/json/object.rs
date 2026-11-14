@@ -6,9 +6,14 @@
 
 //! Ordered object projection retains admitted names while values borrow their original bytes.
 
-use super::{decode_json_string, JsonReadError, JsonReader, JsonToken};
+use super::{
+    decode_json_string_with_work,
+    work::{inline, Work},
+    JsonReadError, JsonReader, JsonToken,
+};
 use crate::{
-    memory::{MemoryBudget, OwnedMap},
+    image_io::AsyncImageInput,
+    memory::{MemoryBudget, OwnedMap, ProductionControl},
     CancellationToken,
 };
 
@@ -24,21 +29,63 @@ impl<'a> JsonObjectProjection<'a> {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Self, JsonReadError> {
-        let mut reader = JsonReader::from_slice(bytes, memory, cancellation).with_depth_limit(127);
-        if reader.next_event()?.map(|event| event.token) != Some(JsonToken::StartObject) {
+        let control = ProductionControl::new(memory, cancellation, cancellation);
+        inline(Self::read_with_work(bytes, &control, &mut ()))
+    }
+
+    /// Project one physically bounded object with both production cancellation owners. The supplied control must carry an allocation allowance for the retained field names.
+    pub fn read_with_control(
+        bytes: &'a [u8],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, JsonReadError> {
+        inline(Self::read_with_work(bytes, control, &mut ()))
+    }
+
+    /// Project the same object through the enclosing work channel. Both cancellation owners remain active; keys retain the supplied allowance and values continue to borrow the original bytes.
+    pub async fn read_from(
+        bytes: &'a [u8],
+        memory: &MemoryBudget,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self, JsonReadError> {
+        let control = ProductionControl::new(memory, original, input.cancellation);
+        Self::read_with_work(bytes, &control, input).await
+    }
+
+    async fn read_with_work<W: Work<Error = JsonReadError>>(
+        bytes: &'a [u8],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, JsonReadError> {
+        let mut reader = JsonReader::from_slice_with_control(bytes, control).with_depth_limit(127);
+        if reader
+            .next_event_with_work(work)
+            .await?
+            .map(|event| event.token)
+            != Some(JsonToken::StartObject)
+        {
             return Err(JsonReadError::InvalidJson);
         }
         let mut fields = OwnedMap::new();
         loop {
-            let event = reader.next_event()?.ok_or(JsonReadError::InvalidJson)?;
+            let event = reader
+                .next_event_with_work(work)
+                .await?
+                .ok_or(JsonReadError::InvalidJson)?;
             if event.token == JsonToken::EndObject {
                 break;
             }
             let JsonToken::Key(name) = event.token else {
                 return Err(JsonReadError::InvalidJson);
             };
-            let name = decode_json_string(name, memory, cancellation)?;
-            let event = reader.next_event()?.ok_or(JsonReadError::InvalidJson)?;
+            let name = decode_json_string_with_work(name, control, work)
+                .await?
+                .into_budgeted()
+                .unwrap_or_else(|_| unreachable!("object projection requires admitted input"));
+            let event = reader
+                .next_event_with_work(work)
+                .await?
+                .ok_or(JsonReadError::InvalidJson)?;
             let start = event.range.start;
             let mut end = event.range.end;
             let mut depth = usize::from(matches!(
@@ -46,7 +93,10 @@ impl<'a> JsonObjectProjection<'a> {
                 JsonToken::StartArray | JsonToken::StartObject
             ));
             while depth != 0 {
-                let event = reader.next_event()?.ok_or(JsonReadError::InvalidJson)?;
+                let event = reader
+                    .next_event_with_work(work)
+                    .await?
+                    .ok_or(JsonReadError::InvalidJson)?;
                 match event.token {
                     JsonToken::StartArray | JsonToken::StartObject => depth += 1,
                     JsonToken::EndArray | JsonToken::EndObject => depth -= 1,
@@ -56,10 +106,10 @@ impl<'a> JsonObjectProjection<'a> {
             }
             fields.insert_admitted_key(name, &bytes[start..end])?;
         }
-        if reader.next_event()?.is_some() {
+        if reader.next_event_with_work(work).await?.is_some() {
             return Err(JsonReadError::InvalidJson);
         }
-        cancellation.check()?;
+        control.check()?;
         Ok(Self { fields })
     }
 

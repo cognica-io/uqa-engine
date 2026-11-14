@@ -108,7 +108,7 @@ impl DocumentStore for SQLiteDocumentStore {
         let should_probe =
             doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
         if should_probe {
-            let leading = [rusqlite::types::Value::Text(self.table.clone())];
+            let leading = [rusqlite::types::Value::Text(self.table.as_str().to_owned())];
             let sql = format!(
                 "SELECT doc_id, body, tuple_xmin FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
@@ -136,7 +136,7 @@ impl DocumentStore for SQLiteDocumentStore {
                  WHERE table_name = ?1
                  ORDER BY doc_id",
             )?;
-            let mut rows = statement.query(params![self.table])?;
+            let mut rows = statement.query(params![self.table.as_str()])?;
             while let Some(row) = rows.next()? {
                 let doc_id = read_doc_id(row, 0)?;
                 if requested.binary_search(&doc_id).is_err() {
@@ -161,7 +161,7 @@ impl DocumentStore for SQLiteDocumentStore {
                     "SELECT tuple_xmin FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, sqlite_doc_id], |row| {
+                .query_row(params![self.table.as_str(), sqlite_doc_id], |row| {
                     row.get::<_, Option<i64>>(0)
                 })
                 .optional()?)
@@ -198,7 +198,7 @@ impl DocumentStore for SQLiteDocumentStore {
                          WHERE table_name = ?1 AND doc_id = ?2
                          LIMIT 1",
                 )?
-                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
+                .query_row(params![self.table.as_str(), sqlite_doc_id], |r| r.get(0))
                 .optional()?;
             Ok(found.is_some())
         })?)
@@ -391,7 +391,7 @@ impl DocumentStore for SQLiteDocumentStore {
         let should_probe =
             doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
         if should_probe {
-            let leading = [rusqlite::types::Value::Text(self.table.clone())];
+            let leading = [rusqlite::types::Value::Text(self.table.as_str().to_owned())];
             let sql = format!(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
@@ -418,7 +418,7 @@ impl DocumentStore for SQLiteDocumentStore {
                  WHERE table_name = ?1
                  ORDER BY doc_id",
             )?;
-            let mut rows = stmt.query(params![self.table])?;
+            let mut rows = stmt.query(params![self.table.as_str()])?;
             while let Some(row) = rows.next()? {
                 let doc_id = read_doc_id(row, 0)?;
                 if requested.binary_search(&doc_id).is_err() {
@@ -474,7 +474,7 @@ impl DocumentStore for SQLiteDocumentStore {
         let should_probe =
             doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
         if should_probe {
-            let leading = [rusqlite::types::Value::Text(self.table.clone())];
+            let leading = [rusqlite::types::Value::Text(self.table.as_str().to_owned())];
             let sql = format!(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
@@ -502,7 +502,7 @@ impl DocumentStore for SQLiteDocumentStore {
                  WHERE table_name = ?1
                  ORDER BY doc_id",
             )?;
-            let mut rows = stmt.query(params![self.table])?;
+            let mut rows = stmt.query(params![self.table.as_str()])?;
             while let Some(row) = rows.next()? {
                 let doc_id = read_doc_id(row, 0)?;
                 if requested.binary_search(&doc_id).is_err() {
@@ -546,9 +546,9 @@ impl DocumentStore for SQLiteDocumentStore {
                 "DELETE FROM {DOCUMENT_BLOBS_TABLE}
                  WHERE table_name = ?1 AND doc_id = ?2"
             ))?
-            .execute(params![self.table, sqlite_doc_id])?;
+            .execute(params![self.table.as_str(), sqlite_doc_id])?;
             c.prepare_cached("DELETE FROM _documents WHERE table_name = ?1 AND doc_id = ?2")?
-                .execute(params![self.table, sqlite_doc_id])?;
+                .execute(params![self.table.as_str(), sqlite_doc_id])?;
             Ok(())
         })?;
         Ok(())
@@ -564,11 +564,11 @@ impl DocumentStore for SQLiteDocumentStore {
         self.conn.with(|c| {
             c.execute(
                 &format!("DELETE FROM {DOCUMENT_BLOBS_TABLE} WHERE table_name = ?1"),
-                params![self.table],
+                params![self.table.as_str()],
             )?;
             c.execute(
                 "DELETE FROM _documents WHERE table_name = ?1",
-                params![self.table],
+                params![self.table.as_str()],
             )?;
             Ok(())
         })?;
@@ -583,7 +583,7 @@ impl DocumentStore for SQLiteDocumentStore {
             let mut stmt = c.prepare_cached(
                 "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id",
             )?;
-            let rows = stmt.query_map(params![self.table], |r| r.get::<_, i64>(0))?;
+            let rows = stmt.query_map(params![self.table.as_str()], |r| r.get::<_, i64>(0))?;
             let mut out = Vec::new();
             for row in rows {
                 out.push(document_id_from_sqlite(row?)?);
@@ -605,7 +605,9 @@ impl DocumentStore for SQLiteDocumentStore {
                          WHERE table_name = ?1 AND doc_id > ?2
                          ORDER BY doc_id LIMIT 1",
                     )?
-                    .query_row(params![self.table, after], |row| row.get::<_, i64>(0))
+                    .query_row(params![self.table.as_str(), after], |row| {
+                        row.get::<_, i64>(0)
+                    })
                     .optional()?,
                 None => connection
                     .prepare_cached(
@@ -613,7 +615,7 @@ impl DocumentStore for SQLiteDocumentStore {
                          WHERE table_name = ?1
                          ORDER BY doc_id LIMIT 1",
                     )?
-                    .query_row(params![self.table], |row| row.get::<_, i64>(0))
+                    .query_row(params![self.table.as_str()], |row| row.get::<_, i64>(0))
                     .optional()?,
             };
             doc_id.map(document_id_from_sqlite).transpose()
@@ -641,7 +643,7 @@ impl DocumentStore for SQLiteDocumentStore {
                      WHERE table_name = ?1 AND doc_id > ?2
                      ORDER BY doc_id LIMIT ?3",
                 )?;
-                let rows = stmt.query_map(params![self.table, after, limit], |row| {
+                let rows = stmt.query_map(params![self.table.as_str(), after, limit], |row| {
                     row.get::<_, i64>(0)
                 })?;
                 for row in rows {
@@ -653,8 +655,9 @@ impl DocumentStore for SQLiteDocumentStore {
                      WHERE table_name = ?1
                      ORDER BY doc_id LIMIT ?2",
                 )?;
-                let rows =
-                    stmt.query_map(params![self.table, limit], |row| row.get::<_, i64>(0))?;
+                let rows = stmt.query_map(params![self.table.as_str(), limit], |row| {
+                    row.get::<_, i64>(0)
+                })?;
                 for row in rows {
                     out.push(document_id_from_sqlite(row?)?);
                 }
@@ -674,6 +677,14 @@ impl DocumentStore for SQLiteDocumentStore {
 
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         SQLiteDocumentStore::max_doc_id(self)
+    }
+
+    fn begin_max_doc_id_input(
+        &self,
+        maximum_key_bytes: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::document_store::maximum::MaximumDocIdInput> {
+        super::native::maximum::begin(self, maximum_key_bytes, control)
     }
 
     fn for_each_next_fields(
@@ -722,7 +733,7 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(self.conn.with(|c| {
             let n: i64 = c
                 .prepare_cached("SELECT COUNT(*) FROM _documents WHERE table_name = ?1")?
-                .query_row(params![self.table], |r| r.get(0))?;
+                .query_row(params![self.table.as_str()], |r| r.get(0))?;
             usize::try_from(n).map_err(|_| {
                 SQLiteError::StorageBackend(format!(
                     "document count {n} is outside the addressable range"

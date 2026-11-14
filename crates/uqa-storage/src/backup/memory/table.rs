@@ -7,12 +7,15 @@
 //! Table lifecycle properties and borrowed field names have one native wire representation.
 
 use crate::{
-    image_io::{ImageInput, ImageRead, ImageReader},
+    image_io::{ImageRead, ImageReader},
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
 };
 use std::io::Read;
-use uqa_core::memory::{Budgeted, BudgetedVec};
+use uqa_core::{
+    image_io::{decode_image, AsyncImageInput, ImageDecoder},
+    memory::{Budgeted, BudgetedVec},
+};
 
 const MAGIC: &[u8; 8] = b"UQAMTM01";
 
@@ -212,17 +215,19 @@ impl ImageRead for Output<'_> {
     }
 }
 
-fn flag(input: &mut ImageInput<'_>) -> StorageBackendResult<bool> {
-    match input.array::<1>()?[0] {
+async fn flag(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<bool> {
+    match input.array::<1>().await?[0] {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(invalid()),
     }
 }
-fn optional_oid(input: &mut ImageInput<'_>) -> StorageBackendResult<Option<u32>> {
-    flag(input)?
-        .then(|| input.array().map(u32::from_le_bytes))
-        .transpose()
+async fn optional_oid(input: &mut AsyncImageInput<'_>) -> StorageBackendResult<Option<u32>> {
+    if flag(input).await? {
+        Ok(Some(u32::from_le_bytes(input.array().await?)))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Reconstruct one exact metadata image with admitted native payloads; reject malformed discriminants, truncated payloads and trailing bytes before returning it.
@@ -231,27 +236,51 @@ pub fn read_memory_table_metadata(
     control: &StorageReadControl,
 ) -> StorageBackendResult<Budgeted<DecodedMemoryTableMetadata>> {
     control.check()?;
-    let memory = control
-        .memory()
+    decode_image(
+        reader,
+        control.memory(),
+        control.cancellation(),
+        async |input| read_memory_table_metadata_from(input).await,
+    )
+}
+
+/// Retain incomplete table header fields under the caller's current byte/poll limits.
+pub fn memory_table_metadata_input(
+    control: &StorageReadControl,
+) -> StorageBackendResult<ImageDecoder<Budgeted<DecodedMemoryTableMetadata>, StorageBackendError>> {
+    control.check()?;
+    Ok(ImageDecoder::new(
+        control.memory(),
+        control.cancellation(),
+        |mut reader| async move { read_memory_table_metadata_from(reader.input()).await },
+    )?)
+}
+
+/// Decode the same native header grammar on an enclosing image continuation.
+pub async fn read_memory_table_metadata_from(
+    mut input: AsyncImageInput<'_>,
+) -> StorageBackendResult<Budgeted<DecodedMemoryTableMetadata>> {
+    input.cancellation.check()?;
+    let memory = input
+        .memory
         .reserve(size_of::<DecodedMemoryTableMetadata>())?;
-    let mut input = ImageInput { reader, control };
-    if &input.array::<8>()? != MAGIC {
+    if &input.array::<8>().await? != MAGIC {
         return Err(invalid());
     }
-    let object_id = input.array()?;
-    let storage_generation = input.array()?;
-    let catalog_oids = if flag(&mut input)? {
+    let object_id = input.array().await?;
+    let storage_generation = input.array().await?;
+    let catalog_oids = if flag(&mut input).await? {
         Some(MemoryRelationIdentities {
-            relation: u32::from_le_bytes(input.array()?),
-            row_type: optional_oid(&mut input)?,
-            array_type: optional_oid(&mut input)?,
-            rule: optional_oid(&mut input)?,
+            relation: u32::from_le_bytes(input.array().await?),
+            row_type: optional_oid(&mut input).await?,
+            array_type: optional_oid(&mut input).await?,
+            rule: optional_oid(&mut input).await?,
         })
     } else {
         None
     };
-    let persistence = input.array::<1>()?[0];
-    let on_commit = input.array::<1>()?[0];
+    let persistence = input.array::<1>().await?[0];
+    let on_commit = input.array::<1>().await?[0];
     if persistence > 1 || on_commit > 2 {
         return Err(invalid());
     }
@@ -261,34 +290,34 @@ pub fn read_memory_table_metadata(
         catalog_oids,
         persistence,
         on_commit,
-        columns_declared: flag(&mut input)?,
-        maps_integer_keys: flag(&mut input)?,
+        columns_declared: flag(&mut input).await?,
+        maps_integer_keys: flag(&mut input).await?,
         statistics: MemoryTableStatistics {
-            loaded: flag(&mut input)?,
-            dirty: flag(&mut input)?,
+            loaded: flag(&mut input).await?,
+            dirty: flag(&mut input).await?,
         },
-        next_id: u128::from_le_bytes(input.array()?),
+        next_id: u128::from_le_bytes(input.array().await?),
     };
-    let count = input.count()?;
-    let mut field_payloads = control.memory().empty_reservation();
-    let mut fts_fields = BudgetedVec::new(control.memory());
+    let count = input.count().await?;
+    let mut field_payloads = input.memory.empty_reservation();
+    let mut fts_fields = BudgetedVec::new(input.memory);
     fts_fields.reserve(count)?;
     for _ in 0..count {
-        let (field, memory) = input.text()?.into_parts();
+        let (field, memory) = input.text().await?.into_parts();
         fts_fields.push(field)?;
         field_payloads.absorb(memory);
     }
     let (fields, mut fields_memory) = fts_fields.into_parts();
     fields_memory.absorb(field_payloads);
     let fts_fields = Budgeted::new(fields, fields_memory);
-    let analyzer = input.bytes()?;
-    let row_type_array_name = if flag(&mut input)? {
-        let (name, memory) = input.text()?.into_parts();
+    let analyzer = input.bytes().await?;
+    let row_type_array_name = if flag(&mut input).await? {
+        let (name, memory) = input.text().await?.into_parts();
         Budgeted::new(Some(name), memory)
     } else {
-        Budgeted::new(None, control.memory().empty_reservation())
+        Budgeted::new(None, input.memory.empty_reservation())
     };
-    input.end()?;
+    input.end().await?;
     Ok(Budgeted::new(
         DecodedMemoryTableMetadata {
             properties,

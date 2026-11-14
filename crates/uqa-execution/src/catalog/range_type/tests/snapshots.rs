@@ -124,7 +124,7 @@ fn range_claim_validation_borrows_unrelated_catalog_identities_without_projectin
             table.catalog_oids.relation = 200_000 + index;
             table.catalog_oids.row_type = Some(100_000 + index * 2);
             table.catalog_oids.array_type = Some(100_001 + index * 2);
-            table.row_type_array_name = Some(format!("_{name}"));
+            table.row_type_array_name = Some(format!("_{name}")).into();
             snapshot
                 .tables
                 .insert(RelationIdentity::new("public", name), table);

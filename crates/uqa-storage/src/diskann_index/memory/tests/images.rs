@@ -7,11 +7,11 @@
 //! Fresh memory images preserve sealed generations, exact-side inputs and uncovered origins.
 
 use super::*;
-use crate::{
-    image_io::ImageInput,
-    vector_index::image::{read_vector_image, read_vector_image_with_temporary, tests::encode},
+use crate::vector_index::image::{
+    read_vector_image, read_vector_image_with_temporary, tests::encode,
 };
 
+mod input;
 mod stream;
 
 fn populated(control: &StorageReadControl) -> DiskANNMemoryIndex {
@@ -39,13 +39,21 @@ fn restore(
     temporary: &DiskANNTemporaryBudget,
 ) -> DiskANNMemoryIndex {
     let mut bytes = &bytes[13..];
-    let mut input = ImageInput {
-        reader: &mut bytes,
-        control,
-    };
-    let result = super::super::image::read(&mut input, 2, temporary).unwrap();
-    input.end().unwrap();
-    result
+    uqa_core::image_io::decode_image(
+        &mut bytes,
+        control.memory(),
+        control.cancellation(),
+        async |mut source| {
+            let mut input = crate::vector_index::image::Input {
+                source: &mut source,
+                control,
+            };
+            let result = super::super::image::read(&mut input, 2, temporary).await?;
+            input.source.end().await?;
+            Ok::<_, crate::StorageBackendError>(result)
+        },
+    )
+    .unwrap()
 }
 
 #[test]

@@ -11,9 +11,22 @@ use crate::{
     CancellationToken, QueryCancelled,
 };
 
+mod diagnostics;
+mod document;
+pub use document::{JsonDocument, JsonValue, JsonValueKind};
+mod input;
 mod lexical;
+pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
+pub use input::{JsonDiagnostic, JsonInputError, JsonMessageFormat};
 mod object;
+mod raw;
 mod string;
+mod typed;
+mod value;
+pub use value::{
+    observe_json_text, observe_json_value, read_json_number_text, read_json_unsigned,
+    JsonFieldProjection, JsonScalarProtocol, JsonValueObservation,
+};
 mod work;
 pub use object::JsonObjectProjection;
 use work::Work;
@@ -82,6 +95,12 @@ enum Frame {
     ObjectAfter,
 }
 
+enum ReadStep<'a> {
+    End,
+    Event(JsonEvent<'a, &'a [u8]>),
+    Value,
+}
+
 /// Open containers. A bounded stack keeps ordinary nesting inline and charges only deeper nesting.
 enum Stack {
     Unbounded(Vec<Frame>),
@@ -120,6 +139,9 @@ impl Stack {
 pub struct JsonReader<'a, 'c> {
     input: &'a [u8],
     position: usize,
+    line: usize,
+    line_start: usize,
+    syntax_error: Option<JsonSyntaxError>,
     stack: Stack,
     cancellation: Option<&'c CancellationToken>,
     production: Option<ProductionControl<'c>>,
@@ -147,6 +169,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Bounded(BudgetedSmallVec::new(memory)),
             cancellation: Some(cancellation),
             production: None,
@@ -162,6 +187,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input: input.as_bytes(),
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Unbounded(Vec::new()),
             cancellation: None,
             production: None,
@@ -186,6 +214,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: control.budget().map_or_else(
                 || Stack::Unbounded(Vec::new()),
                 |budget| Stack::Bounded(BudgetedSmallVec::new(budget)),
@@ -238,6 +269,26 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         &mut self,
         work: &mut W,
     ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        self.next_event_with_policy(work, false).await
+    }
+
+    async fn next_event_with_policy<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        match self.next_step(work, raw).await? {
+            ReadStep::End => Ok(None),
+            ReadStep::Event(event) => Ok(Some(event)),
+            ReadStep::Value => self.value(work, raw).await.map(Some),
+        }
+    }
+
+    async fn next_step<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<ReadStep<'a>, W::Error> {
         work.checkpoint().await?;
         self.check()?;
         self.skip_whitespace(work).await?;
@@ -255,62 +306,109 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         match frame {
             None if self.root_started => {
                 return if self.position == self.input.len() {
-                    Ok(None)
+                    Ok(ReadStep::End)
                 } else {
-                    Err(JsonReadError::InvalidJson.into())
+                    Err(self.reject(JsonSyntaxKind::TrailingCharacters, true).into())
                 };
             }
             None => self.root_started = true,
-            Some(Frame::ArrayFirst) if self.peek() == Some(b']') => {
-                return self.close(JsonToken::EndArray).map_err(Into::into)
+            Some(Frame::ArrayFirst | Frame::ArrayAfter) => {
+                if let Some(event) = self.array_step(work).await? {
+                    return Ok(ReadStep::Event(event));
+                }
             }
             Some(Frame::ObjectFirst) if self.peek() == Some(b'}') => {
-                return self.close(JsonToken::EndObject).map_err(Into::into)
+                return self.close_step(JsonToken::EndObject).map_err(Into::into)
             }
-            Some(Frame::ArrayAfter) => match self.peek() {
-                Some(b']') => return self.close(JsonToken::EndArray).map_err(Into::into),
-                Some(b',') => {
-                    self.advance(work).await?;
-                    self.skip_whitespace(work).await?;
-                    self.replace(Frame::ArrayValue);
-                    self.expected = JsonExpected::Value;
-                }
-                _ => return Err(JsonReadError::InvalidJson.into()),
-            },
             Some(Frame::ObjectAfter) => match self.peek() {
-                Some(b'}') => return self.close(JsonToken::EndObject).map_err(Into::into),
+                Some(b'}') => return self.close_step(JsonToken::EndObject).map_err(Into::into),
                 Some(b',') => {
                     self.advance(work).await?;
                     self.skip_whitespace(work).await?;
                     self.replace(Frame::ObjectKey);
                     self.expected = JsonExpected::Key;
                 }
-                _ => return Err(JsonReadError::InvalidJson.into()),
+                None => return Err(self.reject(JsonSyntaxKind::EndOfObject, false).into()),
+                _ => {
+                    return Err(self
+                        .reject(JsonSyntaxKind::ExpectedObjectSeparator, true)
+                        .into())
+                }
             },
             _ => {}
         }
         match self.stack.frames().last().copied() {
             Some(Frame::ObjectFirst | Frame::ObjectKey) => {
-                let start = self.position;
-                let key = self.string(work).await?;
-                self.replace(Frame::ObjectValue);
-                return Ok(Some(self.event(start, JsonToken::Key(key))));
+                return self.key(work, raw).await.map(ReadStep::Event);
             }
             Some(Frame::ObjectValue) => {
-                self.consume(b':', work).await?;
+                if self.peek() != Some(b':') {
+                    let kind = if self.peek().is_none() {
+                        JsonSyntaxKind::EndOfObject
+                    } else {
+                        JsonSyntaxKind::ExpectedColon
+                    };
+                    return Err(self.reject(kind, true).into());
+                }
+                self.advance(work).await?;
                 self.skip_whitespace(work).await?;
                 self.replace(Frame::ObjectAfter);
                 self.expected = JsonExpected::Value;
             }
+            Some(Frame::ArrayValue) if self.peek() == Some(b']') => {
+                let kind = if raw {
+                    JsonSyntaxKind::ExpectedValue
+                } else {
+                    JsonSyntaxKind::TrailingComma
+                };
+                return Err(self.reject(kind, true).into());
+            }
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}
         }
-        self.value(work).await.map(Some)
+        Ok(ReadStep::Value)
     }
 
-    async fn value<W: Work>(&mut self, work: &mut W) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+    fn close_step(
+        &mut self,
+        token: JsonToken<'a, &'a [u8]>,
+    ) -> Result<ReadStep<'a>, JsonReadError> {
+        self.close(token)
+            .map(|event| ReadStep::Event(event.expect("closing delimiter event")))
+    }
+
+    async fn key<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+        if self.peek() != Some(b'"') {
+            let kind = match self.peek() {
+                None if self.expected == JsonExpected::Key && !raw => JsonSyntaxKind::EndOfValue,
+                None => JsonSyntaxKind::EndOfObject,
+                Some(b'}') if !raw => JsonSyntaxKind::TrailingComma,
+                _ => JsonSyntaxKind::ExpectedKey,
+            };
+            return Err(self.reject(kind, true).into());
+        }
         let start = self.position;
-        let token = match self.peek().ok_or(JsonReadError::InvalidJson)? {
+        let key = self
+            .string(work, raw || self.ignored_string_escapes)
+            .await?;
+        self.replace(Frame::ObjectValue);
+        Ok(self.event(start, JsonToken::Key(key)))
+    }
+
+    async fn value<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+        let start = self.position;
+        let Some(byte) = self.peek() else {
+            return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into());
+        };
+        let token = match byte {
             b'n' => {
                 self.keyword(b"null", work).await?;
                 JsonToken::Null
@@ -323,14 +421,18 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 self.keyword(b"false", work).await?;
                 JsonToken::Bool(false)
             }
-            b'"' => JsonToken::String(self.string(work).await?),
-            b'-' | b'0'..=b'9' => JsonToken::Number(self.number(work).await?),
+            b'"' => JsonToken::String(
+                self.string(work, raw || self.ignored_string_escapes)
+                    .await?,
+            ),
+            b'-' | b'0'..=b'9' => JsonToken::Number(self.number_with_policy(work, raw).await?),
             b'[' | b'{' => {
-                if self
-                    .depth_limit
-                    .is_some_and(|limit| self.stack.frames().len() >= limit)
+                if !raw
+                    && self
+                        .depth_limit
+                        .is_some_and(|limit| self.stack.frames().len() >= limit)
                 {
-                    return Err(JsonReadError::InvalidJson.into());
+                    return Err(self.reject(JsonSyntaxKind::DepthLimit, true).into());
                 }
                 let array = self.peek() == Some(b'[');
                 self.stack.push(if array {
@@ -345,7 +447,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                     JsonToken::StartObject
                 }
             }
-            _ => return Err(JsonReadError::InvalidJson.into()),
+            _ => return Err(self.reject(JsonSyntaxKind::ExpectedValue, true).into()),
         };
         self.check()?;
         Ok(self.event(start, token))

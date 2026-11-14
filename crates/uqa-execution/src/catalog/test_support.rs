@@ -14,6 +14,8 @@ use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
 
 mod services;
 pub(crate) use services::CatalogServices;
+pub(crate) mod input;
+pub(crate) mod type_names;
 
 pub(crate) fn table_snapshot(
     object_id: [u8; 16],
@@ -29,7 +31,7 @@ pub(crate) fn table_snapshot(
                 &object_id,
             )
         }),
-        row_type_array_name: constraints.row_type_array_name,
+        row_type_array_name: constraints.row_type_array_name.into(),
         security: Arc::new(super::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         ))

@@ -18,6 +18,22 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn begin_analyzer_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::analyzer_input::CatalogAnalyzerInput> {
+        self.native_analyzer_input(limits, control)
+    }
+
+    fn begin_foreign_table_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::foreign_load::CatalogForeignTableLoad> {
+        self.native_foreign_table_load(limits, control)
+    }
+
     fn begin_table_load(
         &self,
         limits: uqa_storage::catalog::input::CatalogInputLimits,
@@ -49,6 +65,31 @@ impl CatalogFacade for Catalog {
         self.native_index_input(limits, control)
     }
 
+    fn begin_index_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::index_load::CatalogIndexLoad> {
+        uqa_storage::catalog::index_load::CatalogIndexLoad::new(
+            self.native_index_input(limits, control)?,
+            uqa_storage::catalog::index_load::CatalogIndexOrder::Physical,
+            control,
+        )
+    }
+
+    fn begin_text_load(
+        &self,
+        family: uqa_storage::catalog::text_input::CatalogTextFamily,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::catalog::text_load::CatalogTextLoad> {
+        uqa_storage::catalog::text_load::CatalogTextLoad::new(
+            self.native_text_input(family, limits, control)?,
+            uqa_storage::catalog::text_load::CatalogTextOrder::Physical,
+            control,
+        )
+    }
+
     fn begin_text_input(
         &self,
         family: uqa_storage::catalog::text_input::CatalogTextFamily,
@@ -56,6 +97,15 @@ impl CatalogFacade for Catalog {
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> StorageBackendResult<uqa_storage::catalog::text_input::CatalogTextInput> {
         self.native_text_input(family, limits, control)
+    }
+
+    fn begin_metadata_input(
+        &self,
+        prefix: &str,
+        limits: uqa_storage::catalog::text_input::CatalogTextLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::text_input::CatalogTextInput> {
+        self.native_metadata_input(prefix, limits, control)
     }
 
     fn transaction_model(&self) -> uqa_storage::StorageTransactionModel {
@@ -215,6 +265,15 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::get_metadata(self, key))
     }
 
+    fn get_metadata_with_control(
+        &self,
+        key: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.native_metadata_with_control(key, limits, control)
+    }
+
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {
         into_storage_result(self.native_metadata_has_private_changes(key))
     }
@@ -337,6 +396,22 @@ impl CatalogFacade for Catalog {
 
     fn load_schema_rows(&self) -> StorageBackendResult<Vec<uqa_storage::catalog::SchemaRow>> {
         into_storage_result(Catalog::load_schema_rows(self))
+    }
+
+    fn begin_sequence_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::sequence_load::CatalogSequenceLoad> {
+        self.native_sequence_load(limits, control)
+    }
+
+    fn begin_schema_load(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::schema::load::CatalogSchemaLoad> {
+        self.native_schema_load(limits, control)
     }
 
     fn schema_has_private_changes(&self, name: &str) -> StorageBackendResult<bool> {
@@ -537,11 +612,28 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::drop_named_graph(self, name))
     }
 
+    fn begin_graph_name_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::input::CatalogInput<String>> {
+        self.native_graph_name_input(limits, control)
+    }
+
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         into_storage_result(Catalog::load_named_graphs(self))
     }
     fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool> {
         into_storage_result(Catalog::named_graph_exists(self, name))
+    }
+
+    fn named_graph_exists_with_control(
+        &self,
+        name: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.native_graph_name_exists_with_control(name, limits, control)
     }
 
     fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
@@ -870,6 +962,15 @@ impl CatalogFacade for Catalog {
         stats: &[ColumnStatsInput<'_>],
     ) -> StorageBackendResult<()> {
         into_storage_result(Catalog::replace_column_stats(self, table_name, stats))
+    }
+
+    fn begin_column_stats_input(
+        &self,
+        table_name: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::catalog::input::CatalogInput<ColumnStatsRow>> {
+        self.native_column_stats_input(table_name, limits, control)
     }
 
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {

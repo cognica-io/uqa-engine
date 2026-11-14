@@ -22,13 +22,23 @@ impl References {
 
 impl Frame {
     pub(super) fn validate(&self, input: &Input<'_>) -> Result<(), SQLError> {
+        let mut position = 0;
+        loop {
+            input.binary.cancellation.check()?;
+            if self.validate_step(position)? {
+                return Ok(());
+            }
+            position += 1;
+        }
+    }
+
+    pub(super) fn validate_step(&self, position: usize) -> Result<bool, SQLError> {
         match &self.node {
             Node::Query(value) => match &value.root {
                 RelationalPlan::QueryBlock(block) => {
                     self.references
                         .validate(block.subqueries.len(), block.windows.len())?;
-                    for (position, window) in block.windows.iter().enumerate() {
-                        input.binary.cancellation.check()?;
+                    if let Some(window) = block.windows.get(position) {
                         if window.spec.definition.is_some() {
                             return Err(invalid("canonical window call address"));
                         }
@@ -37,17 +47,22 @@ impl Frame {
                                 return Err(invalid("native window inheritance address"));
                             }
                         }
+                        Ok(false)
+                    } else {
+                        Ok(true)
                     }
-                    Ok(())
                 }
                 RelationalPlan::SetOp { subqueries, .. }
                 | RelationalPlan::Values { subqueries, .. } => {
-                    self.references.validate(subqueries.len(), 0)
+                    self.references.validate(subqueries.len(), 0).map(|()| true)
                 }
             },
-            Node::Expression(value) => self.references.validate(value.subqueries.len(), 0),
-            Node::Cte(_) => self.references.validate(0, 0),
-            Node::Source(_) => Ok(()), // Direct sources borrow the enclosing query or mutation arena; attachment transfers their observed addresses.
+            Node::Expression(value) => self
+                .references
+                .validate(value.subqueries.len(), 0)
+                .map(|()| true),
+            Node::Cte(_) => self.references.validate(0, 0).map(|()| true),
+            Node::Source(_) => Ok(true), // Direct sources borrow the enclosing query or mutation arena; attachment transfers their observed addresses.
             Node::Command(value) => {
                 let (queries, rule) = match value {
                     CommandPlan::Insert(value) => {
@@ -65,6 +80,7 @@ impl Frame {
                 self.references.validate(queries.len(), 0)?;
                 self.rule_references
                     .validate(rule.map_or(0, |value| value.subqueries.len()), 0)
+                    .map(|()| true)
             }
             Node::Empty => unreachable!("completed native plan"),
         }

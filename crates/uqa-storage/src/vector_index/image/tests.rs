@@ -13,6 +13,7 @@ use crate::{
 };
 use std::io::{Read, Write};
 
+mod input;
 mod ownership;
 
 pub(crate) fn encode(index: &dyn VectorIndex) -> Vec<u8> {

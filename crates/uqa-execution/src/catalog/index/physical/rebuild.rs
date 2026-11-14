@@ -13,7 +13,7 @@ use uqa_core::{DocId, Value};
 use uqa_storage::{DocumentStore, StorageBackendError, StorageBackendResult, ValueIndexKey};
 
 pub trait IndexDocuments {
-    fn read(&self) -> Box<dyn Deref<Target = Box<dyn DocumentStore>> + '_>;
+    fn read(&self) -> Box<dyn Deref<Target = uqa_storage::StorageHandle<dyn DocumentStore>> + '_>;
 }
 
 pub fn project(

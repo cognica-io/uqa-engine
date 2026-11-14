@@ -12,14 +12,17 @@ fn tagged_conversion_suboperations_check_both_cancellation_owners() {
         let memory = MemoryBudget::new(1 << 20);
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
-        let mut workspace = Workspace::bounded(memory.empty_reservation(), &original, &invoking);
+        let mut workspace = Workspace::new(
+            Some(memory.empty_reservation()),
+            ProductionControl::new(&memory, &original, &invoking),
+        );
         if original_cancelled {
             original.cancel();
         } else {
             invoking.cancel();
         }
         assert!(matches!(
-            workspace.check(),
+            inline(workspace.checkpoint(&mut ())),
             Err(ValueRetentionError::Cancelled(_))
         ));
         assert!(matches!(
@@ -27,15 +30,15 @@ fn tagged_conversion_suboperations_check_both_cancellation_owners() {
             Err(ValueRetentionError::Cancelled(_))
         ));
         assert!(matches!(
-            workspace.decimal("1e400"),
+            inline(workspace.decimal("1e400", &mut ())),
             Err(ValueRetentionError::Cancelled(_))
         ));
         assert!(matches!(
-            workspace.shape(&[Value::Int(1)], 1),
+            inline(workspace.shape(&[Value::Int(1)], 1, &mut ())),
             Err(ValueRetentionError::Cancelled(_))
         ));
         assert!(matches!(
-            workspace.retained(&Value::Int(1)),
+            inline(workspace.retained(&Value::Int(1), &mut ())),
             Err(ValueRetentionError::Cancelled(_))
         ));
         drop(workspace);

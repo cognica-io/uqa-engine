@@ -337,3 +337,4 @@ fn native_view_images_capture_deep_query_retirement_without_stack_growth() {
 }
 
 mod resources;
+mod windows;

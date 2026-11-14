@@ -11,6 +11,7 @@ use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::catalog::table_metadata::SharedTableMetadata;
+pub mod analyzers;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -18,6 +19,8 @@ pub mod enum_type;
 pub mod foreign;
 pub mod hierarchy;
 pub mod identity;
+#[cfg(test)]
+mod image_input_tests;
 pub mod image_validation;
 pub mod range_type;
 pub mod security;
@@ -25,6 +28,7 @@ pub mod sequence;
 pub mod shell_type;
 pub mod table_capture;
 pub mod table_image;
+pub(crate) mod text_records;
 pub mod tuples;
 pub mod type_identity_restoration;
 pub(crate) mod type_records;
@@ -42,9 +46,11 @@ mod graph_reads;
 pub mod namespaces;
 mod prepared_dependencies;
 mod production;
+pub use production::CatalogReadCapture;
 mod read;
 pub mod relation_names;
 pub mod schema;
+pub(crate) mod selection_work;
 mod snapshot_read;
 
 /// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.
@@ -96,7 +102,7 @@ pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
-    pub row_type_array_name: Option<String>,
+    pub row_type_array_name: SharedTableMetadata<Option<String>>,
     pub security: uqa_sql::catalog::table_metadata::SharedTableMetadata<
         crate::catalog::security::BoundTableSecurity,
     >,

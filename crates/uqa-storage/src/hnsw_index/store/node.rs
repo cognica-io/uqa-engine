@@ -49,6 +49,15 @@ impl Record for HNSWNode {
     }
 
     fn encode(&self, bytes: &mut Vec<u8>) {
+        crate::image_io::work::inline(self.encode_from(bytes, &mut ()))
+            .expect("inline native record encoding cannot fail");
+    }
+
+    async fn encode_from(
+        &self,
+        bytes: &mut Vec<u8>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         #[cfg(test)]
         super::ENCODED_NODES.set(super::ENCODED_NODES.get() + 1);
         bytes.extend_from_slice(&self.id.to_le_bytes());
@@ -58,11 +67,16 @@ impl Record for HNSWNode {
         bytes.push(u8::from(self.deleted));
         bytes.extend_from_slice(&(self.neighbors.len() as u64).to_le_bytes());
         for layer in &self.neighbors {
+            work.checkpoint().await?;
             bytes.extend_from_slice(&(layer.len() as u64).to_le_bytes());
-            for value in layer {
-                bytes.extend_from_slice(&value.to_le_bytes());
+            for part in layer.chunks(512) {
+                work.checkpoint().await?;
+                for value in part {
+                    bytes.extend_from_slice(&value.to_le_bytes());
+                }
             }
         }
+        Ok(())
     }
 
     fn decode(mut bytes: &[u8]) -> StorageBackendResult<Self> {

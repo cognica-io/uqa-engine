@@ -8,6 +8,8 @@ use super::*;
 use crate::{ast::RelationPersistence, catalog::security::BoundSequenceSecurity};
 use uqa_core::{catalog_sequence::SequencePrivileges, RelationIdentity};
 
+mod windows;
+
 fn singleton(acl: Option<Vec<BoundAclEntry<SequencePrivileges>>>) -> SequenceSecurities {
     SequenceSecurities::try_from_iter([(
         RelationIdentity::new("s", "q"),

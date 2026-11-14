@@ -32,7 +32,7 @@ impl SQLiteInvertedIndex {
         let format: Option<String> = conn
             .query_row(
                 "SELECT format FROM _occurrence_formats WHERE table_name = ?1",
-                [&self.table],
+                [self.table.as_str()],
                 |row| row.get(0),
             )
             .optional()?;
@@ -76,7 +76,7 @@ impl SQLiteInvertedIndex {
     }
 
     pub(super) fn publish_graph_format(&self, conn: &rusqlite::Connection) -> SQLiteResult<()> {
-        conn.execute("INSERT INTO _occurrence_formats(table_name, format) VALUES (?1, 'occurrences-v2') ON CONFLICT(table_name) DO UPDATE SET format = excluded.format", [&self.table])?;
+        conn.execute("INSERT INTO _occurrence_formats(table_name, format) VALUES (?1, 'occurrences-v2') ON CONFLICT(table_name) DO UPDATE SET format = excluded.format", [self.table.as_str()])?;
         Ok(())
     }
 
@@ -85,7 +85,7 @@ impl SQLiteInvertedIndex {
             if table_exists(conn, table)? {
                 conn.execute(
                     &format!("DELETE FROM {table} WHERE table_name = ?1"),
-                    [&self.table],
+                    [self.table.as_str()],
                 )?;
             }
         }
