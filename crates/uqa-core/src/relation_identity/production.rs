@@ -44,13 +44,26 @@ impl RelationReference<'_> {
         inline(render(*self, control, &mut ()))
     }
 
+    /// Keep the native output allowance independent of the retained work channel's temporary storage.
+    pub async fn render_from_input(
+        &self,
+        control: &ProductionControl<'_>,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<String>, ValueRetentionError> {
+        control.check()?;
+        work::Work::checkpoint(input).await?;
+        control.check()?;
+        render(*self, control, input).await
+    }
+
     /// Render the same canonical spelling through a retained input's work channel without reading source bytes.
     pub async fn render_from(
         &self,
         input: &mut crate::image_io::AsyncImageInput<'_>,
     ) -> Result<crate::memory::Budgeted<String>, ValueRetentionError> {
         let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
-        Ok(render(*self, &control, input)
+        Ok(self
+            .render_from_input(&control, input)
             .await?
             .into_budgeted()
             .expect("native relation rendering retains its allowance"))

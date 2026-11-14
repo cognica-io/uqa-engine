@@ -67391,6 +67391,188 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_mutable_map_selection_preserves_keys_nodes_and_original_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/input/tests.rs",
+      "capability": "Retained mutable catalog selection",
+      "workload": "Select existing and absent keys through suspended comparisons, including failure and abandonment.",
+      "invariant": "Only the selected value becomes mutable; key/node addresses and original reservations survive every unsuccessful selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_mutable_map_selection_failure_and_abandonment_preserve_the_complete_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/owned/input/tests.rs",
+      "capability": "Retained mutable catalog selection",
+      "workload": "Select existing and absent keys through suspended comparisons, including failure and abandonment.",
+      "invariant": "Only the selected value becomes mutable; key/node addresses and original reservations survive every unsuccessful selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_relation_rendering_separates_native_output_from_work_admission",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Independent canonical-name ownership",
+      "workload": "Render an empty native name with separate output and work allowances, including cancellation before admission.",
+      "invariant": "Output retains only its native allowance; work cancellation rejects publication even when the production tokens remain active.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_matches_original_complete_statement_migration",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests.rs",
+      "capability": "Retained complete routine migration observation",
+      "workload": "Observe defaults, complete statements, command CTEs, MERGE, windows, legacy range/slice/table-function bindings, wide empty children and deep syntax.",
+      "invariant": "The observer agrees with original migration without rewriting or interpreting source bodies; borrowed traversal bounds work and retires every pending frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_preserves_source_bodies_and_user_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests.rs",
+      "capability": "Retained complete routine migration observation",
+      "workload": "Observe defaults, complete statements, command CTEs, MERGE, windows, legacy range/slice/table-function bindings, wide empty children and deep syntax.",
+      "invariant": "The observer agrees with original migration without rewriting or interpreting source bodies; borrowed traversal bounds work and retires every pending frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_preserves_range_slice_cte_and_table_function_predicates",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests.rs",
+      "capability": "Retained complete routine migration observation",
+      "workload": "Observe defaults, complete statements, command CTEs, MERGE, windows, legacy range/slice/table-function bindings, wide empty children and deep syntax.",
+      "invariant": "The observer agrees with original migration without rewriting or interpreting source bodies; borrowed traversal bounds work and retires every pending frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_bounds_empty_children_and_native_depth",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests.rs",
+      "capability": "Retained complete routine migration observation",
+      "workload": "Observe defaults, complete statements, command CTEs, MERGE, windows, legacy range/slice/table-function bindings, wide empty children and deep syntax.",
+      "invariant": "The observer agrees with original migration without rewriting or interpreting source bodies; borrowed traversal bounds work and retires every pending frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_retires_every_pending_frame_and_typed_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests.rs",
+      "capability": "Retained complete routine migration observation",
+      "workload": "Observe defaults, complete statements, command CTEs, MERGE, windows, legacy range/slice/table-function bindings, wide empty children and deep syntax.",
+      "invariant": "The observer agrees with original migration without rewriting or interpreting source bodies; borrowed traversal bounds work and retires every pending frame.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_canonicalization_preserves_alias_groups_overload_order_and_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests.rs",
+      "capability": "Retained routine catalog canonicalization",
+      "workload": "Construct canonical alias groups and ordered overloads, compare original diagnostic precedence and test wide identities, native pointers, cancellation and quota denial.",
+      "invariant": "Complete private candidates preserve original identity/signature selection and parameter/body allocations; failure consumes the candidate while retained diagnostics keep their own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_canonicalization_transfers_original_parameter_and_body_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests.rs",
+      "capability": "Retained routine catalog canonicalization",
+      "workload": "Construct canonical alias groups and ordered overloads, compare original diagnostic precedence and test wide identities, native pointers, cancellation and quota denial.",
+      "invariant": "Complete private candidates preserve original identity/signature selection and parameter/body allocations; failure consumes the candidate while retained diagnostics keep their own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_canonicalization_preserves_original_diagnostic_and_migration_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests.rs",
+      "capability": "Retained routine catalog canonicalization",
+      "workload": "Construct canonical alias groups and ordered overloads, compare original diagnostic precedence and test wide identities, native pointers, cancellation and quota denial.",
+      "invariant": "Complete private candidates preserve original identity/signature selection and parameter/body allocations; failure consumes the candidate while retained diagnostics keep their own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_canonicalization_bounds_wide_names_signatures_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests.rs",
+      "capability": "Retained routine catalog canonicalization",
+      "workload": "Construct canonical alias groups and ordered overloads, compare original diagnostic precedence and test wide identities, native pointers, cancellation and quota denial.",
+      "invariant": "Complete private candidates preserve original identity/signature selection and parameter/body allocations; failure consumes the candidate while retained diagnostics keep their own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_canonicalization_retires_native_sources_on_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests.rs",
+      "capability": "Retained routine catalog canonicalization",
+      "workload": "Construct canonical alias groups and ordered overloads, compare original diagnostic precedence and test wide identities, native pointers, cancellation and quota denial.",
+      "invariant": "Complete private candidates preserve original identity/signature selection and parameter/body allocations; failure consumes the candidate while retained diagnostics keep their own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_dispatch_observation_bounds_legacy_range_marker_spelling",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/legacy_dispatch/input/tests/markers.rs",
+      "capability": "Retained legacy routine marker selection",
+      "workload": "All original range operations and subtypes with empty and long underscore separators, invalid spellings, and cancellation at each pending boundary.",
+      "invariant": "Retained observation preserves the original marker grammar while scanning at most 4096 separator bytes per work step and retiring every borrowed frame.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

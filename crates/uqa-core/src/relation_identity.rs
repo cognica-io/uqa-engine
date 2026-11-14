@@ -66,6 +66,20 @@ impl RelationIdentity {
         .await
     }
 
+    /// Render the canonical name under its native production allowance while borrowing a separate input continuation.
+    pub async fn qualified_name_from_input(
+        &self,
+        control: &crate::memory::ProductionControl<'_>,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::memory::Produced<String>, crate::ValueRetentionError> {
+        RelationReference {
+            schema: Some(RelationName::decoded(&self.schema)),
+            name: RelationName::decoded(&self.name),
+        }
+        .render_from_input(control, input)
+        .await
+    }
+
     /// Physical owner keys that can refer to this relation. New writes use
     /// only the canonical qualified name. Catalog cleanup also accepts the
     /// former unqualified key for `public` relations so data written before

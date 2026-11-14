@@ -11,6 +11,8 @@ use super::{
     CTE,
 };
 
+mod input;
+
 fn upgrade_exprs(expressions: &mut [Expr]) -> bool {
     expressions.iter_mut().fold(false, |changed, expression| {
         expression.upgrade_legacy_serialized_dispatches() | changed

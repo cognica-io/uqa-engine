@@ -331,3 +331,55 @@ fn retained_empty_relation_identity_observes_cancelled_input_admission() {
     ));
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn retained_relation_rendering_separates_native_output_from_work_admission() {
+    for cancelled_work in [false, true] {
+        let native = MemoryBudget::new(1024);
+        let work = MemoryBudget::new(1 << 20);
+        let retained = native.clone();
+        let invoking = CancellationToken::new();
+        let cancelled = invoking.clone();
+        let original = CancellationToken::new();
+        let mut input = ImageDecoder::new(&work, &invoking, |mut reader| async move {
+            let control = ProductionControl::new(&retained, &original, &original);
+            let mut input = reader.input();
+            if cancelled_work {
+                cancelled.cancel();
+            }
+            RelationReference {
+                schema: None,
+                name: RelationName::decoded(""),
+            }
+            .render_from_input(&control, &mut input)
+            .await
+            .map_err(|error| match error {
+                ValueRetentionError::Memory(error) => ImageIoError::Memory(error),
+                ValueRetentionError::Cancelled(error) => ImageIoError::Cancelled(error),
+                error @ ValueRetentionError::Malformed { .. } => {
+                    panic!("native rendering failed: {error}")
+                }
+            })
+        })
+        .unwrap();
+        loop {
+            match input.advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps: 1 }) {
+                Ok(None) => {}
+                Ok(Some(value)) => {
+                    assert!(!cancelled_work);
+                    assert_eq!(value.as_str(), "\"\"");
+                    assert_eq!(native.used(), value.capacity());
+                    assert_eq!(work.used(), 0);
+                    drop(value);
+                    break;
+                }
+                Err(ImageIoError::Cancelled(_)) => {
+                    assert!(cancelled_work);
+                    break;
+                }
+                Err(error) => panic!("unexpected native rendering failure: {error}"),
+            }
+        }
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}

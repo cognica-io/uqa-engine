@@ -113,6 +113,71 @@ fn retained_map_comparisons_preserve_order_balancing_and_original_entry_ownershi
 }
 
 #[test]
+fn retained_mutable_map_selection_preserves_keys_nodes_and_original_allocation() {
+    let budget = MemoryBudget::new(1 << 20);
+    let mut map = OwnedMap::new();
+    for key in 0..257 {
+        map.insert_budgeted(key, key * 2, &budget).unwrap();
+    }
+    let used = budget.used();
+    let mut input = Input::default();
+    for key in -1..=258 {
+        let pointer = map.get(&key).map(std::ptr::from_ref);
+        let selected = finish(map.get_mut_from(&key, &mut input)).unwrap();
+        assert_eq!(
+            selected.as_ref().map(|value| std::ptr::from_ref(&**value)),
+            pointer
+        );
+        if let Some(value) = selected {
+            *value += 1;
+        }
+        assert_eq!(budget.used(), used);
+    }
+    assert!(map.iter().all(|(key, value)| *value == key * 2 + 1));
+    assert_eq!(super::super::super::tests::verify(&map.root).0, map.len());
+    drop(map);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn retained_mutable_map_selection_failure_and_abandonment_preserve_the_complete_owner() {
+    let budget = MemoryBudget::new(1 << 20);
+    let mut map = OwnedMap::new();
+    for key in 0..63 {
+        map.insert_budgeted(key, key, &budget).unwrap();
+    }
+    let used = budget.used();
+    for key in [32, 70] {
+        let mut preview = Input::default();
+        finish(map.get_mut_from(&key, &mut preview)).unwrap();
+        for step in 1..=preview.steps {
+            for fail in [false, true] {
+                let mut input = Input {
+                    fail: fail.then_some(step),
+                    ..Input::default()
+                };
+                let future = map.get_mut_from(&key, &mut input);
+                if fail {
+                    assert!(finish(future).is_err());
+                } else {
+                    let mut future = std::pin::pin!(future);
+                    for _ in 0..step {
+                        assert!(future
+                            .as_mut()
+                            .poll(&mut Context::from_waker(Waker::noop()))
+                            .is_pending());
+                    }
+                }
+                assert!(map.iter().all(|(key, value)| key == value));
+                assert_eq!(budget.used(), used);
+            }
+        }
+    }
+    drop(map);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn retained_map_comparison_failure_abandonment_and_denial_leave_selected_root_unchanged() {
     for key in [32, 63] {
         for outcome in ["fail", "drop", "unwind", "memory"] {
@@ -235,6 +300,16 @@ fn retained_map_publication_never_repeats_comparisons_or_replaces_key_leases() {
     let query = key("alpha", &replacement);
     let measured = {
         let mut future = std::pin::pin!(map.get_from(&*query, &mut input));
+        allocation_counter::measure(|| {
+            while Pin::as_mut(&mut future)
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+            {}
+        })
+    };
+    assert_eq!(measured.count_total, 0);
+    let measured = {
+        let mut future = std::pin::pin!(map.get_mut_from(&*query, &mut input));
         allocation_counter::measure(|| {
             while Pin::as_mut(&mut future)
                 .poll(&mut Context::from_waker(Waker::noop()))

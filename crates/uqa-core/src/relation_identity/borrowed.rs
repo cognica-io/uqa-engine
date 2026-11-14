@@ -93,6 +93,18 @@ pub struct RelationReferenceError<'a> {
     kind: InvalidReference,
     input: &'a str,
 }
+impl RelationReferenceError<'_> {
+    /// Borrow the original diagnostic fragments for admitted or resumable output without copying its complete source name.
+    pub fn message_parts(&self) -> [&str; 3] {
+        match self.kind {
+            InvalidReference::Empty => ["persisted relation name is empty", "", ""],
+            InvalidReference::Unterminated => {
+                ["unterminated quoted relation name `", self.input, "`"]
+            }
+            InvalidReference::Invalid => ["invalid persisted relation name `", self.input, "`"],
+        }
+    }
+}
 impl fmt::Debug for RelationReferenceError<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, formatter)
@@ -100,19 +112,10 @@ impl fmt::Debug for RelationReferenceError<'_> {
 }
 impl fmt::Display for RelationReferenceError<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
-            InvalidReference::Empty => formatter.write_str("persisted relation name is empty"),
-            InvalidReference::Unterminated => write!(
-                formatter,
-                "unterminated quoted relation name `{}`",
-                self.input
-            ),
-            InvalidReference::Invalid => write!(
-                formatter,
-                "invalid persisted relation name `{}`",
-                self.input
-            ),
+        for part in self.message_parts() {
+            formatter.write_str(part)?;
         }
+        Ok(())
     }
 }
 

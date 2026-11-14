@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{EnumFunctionOperation, RangeSubtype};
 
 mod input;
+mod legacy;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {
@@ -385,81 +386,6 @@ impl FunctionDispatch {
             _ => None,
         }
     }
-
-    /// Decode function spellings in older durable expressions. This is a catalog migration primitive, never a SQL routine lookup path.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn from_legacy_serialized_name(name: &str) -> Option<Self> {
-        let fixed = match name {
-            "merge_action" => Self::MergeAction,
-            "__named_arg" => Self::NamedArgument,
-            "__variadic_arg" => Self::VariadicArgument,
-            "__array_subscripts" => Self::ArraySubscripts,
-            "__array_slices" => Self::ArraySlices,
-            "__subscript" => Self::Subscript,
-            "__slice" => Self::Slice,
-            "__any_op" => Self::AnyOperator,
-            "__all_op" => Self::AllOperator,
-            "__is_distinct" => Self::IsDistinct,
-            "__between_symmetric" => Self::BetweenSymmetric,
-            "__to_bin_int4" => Self::ToBinInt4,
-            "__to_bin_int8" => Self::ToBinInt8,
-            "__to_hex_int4" => Self::ToHexInt4,
-            "__to_hex_int8" => Self::ToHexInt8,
-            "__to_oct_int4" => Self::ToOctInt4,
-            "__to_oct_int8" => Self::ToOctInt8,
-            "__random_int4_range" => Self::RandomInt4Range,
-            "__random_int8_range" => Self::RandomInt8Range,
-            "__random_numeric_range" => Self::RandomNumericRange,
-            "__array_sort_json" => Self::ArraySortJson,
-            _ => return Self::legacy_range_dispatch(name),
-        };
-        Some(fixed)
-    }
-
-    fn legacy_range_dispatch(name: &str) -> Option<Self> {
-        let encoded = name.strip_prefix("__range_")?;
-        let subtypes = [
-            RangeSubtype::Integer,
-            RangeSubtype::BigInteger,
-            RangeSubtype::Numeric,
-            RangeSubtype::Date,
-            RangeSubtype::Timestamp,
-            RangeSubtype::TimestampTz,
-        ];
-        for subtype in subtypes {
-            for (type_name, multirange) in [
-                (subtype.multirange_name(), true),
-                (subtype.range_name(), false),
-            ] {
-                let Some(operation) = encoded.strip_suffix(type_name) else {
-                    continue;
-                };
-                let operation = match operation.trim_end_matches('_') {
-                    "lower" => RangeFunctionOperation::Lower,
-                    "upper" => RangeFunctionOperation::Upper,
-                    "isempty" => RangeFunctionOperation::IsEmpty,
-                    "lower_inc" => RangeFunctionOperation::LowerInclusive,
-                    "upper_inc" => RangeFunctionOperation::UpperInclusive,
-                    "lower_inf" => RangeFunctionOperation::LowerInfinite,
-                    "upper_inf" => RangeFunctionOperation::UpperInfinite,
-                    "merge" => RangeFunctionOperation::Merge,
-                    "multirange" => RangeFunctionOperation::Multirange,
-                    "overlap" => RangeFunctionOperation::Overlap,
-                    "contains" => RangeFunctionOperation::Contains,
-                    "contained_by" => RangeFunctionOperation::ContainedBy,
-                    "adjacent" => RangeFunctionOperation::Adjacent,
-                    _ => continue,
-                };
-                return Some(Self::Range {
-                    operation,
-                    subtype,
-                    multirange,
-                });
-            }
-        }
-        None
-    }
 }
 
 /// Numeric operator syntax, kept separate from ordinary calls such as `mod` or `abs`.
@@ -692,10 +618,10 @@ impl FunctionBinding {
         display_name: &str,
         binding: Option<&Self>,
     ) -> Option<FunctionDispatch> {
-        if binding.is_some_and(|binding| binding.dispatch.is_some() || !binding.builtin) {
-            None
-        } else {
+        if Self::accepts_legacy_dispatch(binding) {
             FunctionDispatch::from_legacy_serialized_name(display_name)
+        } else {
+            None
         }
     }
 

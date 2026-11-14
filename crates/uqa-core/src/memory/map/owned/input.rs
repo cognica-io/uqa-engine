@@ -42,6 +42,26 @@ impl<K: Ord, V> OwnedMap<K, V> {
         Ok(None)
     }
 
+    /// Borrow only the selected mutable value after retained comparisons finish. Pending, failed and abandoned searches preserve every key, node and value; the exclusive map borrow keeps the selected path valid throughout suspension.
+    pub async fn get_mut_from<Q: ?Sized, C: MapKeyInput<Q, K>>(
+        &mut self,
+        query: &Q,
+        input: &mut C,
+    ) -> Result<Option<&mut V>, C::Error> {
+        input.checkpoint().await?;
+        let mut link = &mut self.root;
+        while let Some(node) = link {
+            let order = input.compare(query, &node.key).await?;
+            let node = &mut *node.value;
+            match order {
+                Ordering::Less => link = &mut node.left,
+                Ordering::Greater => link = &mut node.right,
+                Ordering::Equal => return Ok(Some(&mut node.value)),
+            }
+        }
+        Ok(None)
+    }
+
     /// Adopt one admitted key after all comparisons complete. The exclusive borrow keeps the selected path valid across suspension. Replacement preserves the original key and node; a new node is admitted before allocation and then published without further comparison or fallible work.
     pub async fn insert_admitted_key_from<C>(
         &mut self,

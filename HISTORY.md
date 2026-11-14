@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Canonicalize prepared routine declarations through retained SQL work, preserving original object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Failed candidates retire atomically; schema type binding, placeholder/finalization integration and complete Engine restoration remain in progress.
+
 - Resume native relation-name parsing, decoded identity construction and routine-signature normalization through retained work. Preserve original quoting, schema defaults, aliases, modifiers, array identity and diagnostics while retaining typed memory/cancellation failures and exact native output ownership. Routine catalog canonicalization and complete Engine restoration remain in progress.
 
 - Complete typed routine catalog input through the original retained work channel. Move prepared legacy ACL buffers into outer declarations, preserve empty groups and migration flags, and validate all bodies before authority and object identities against the selected role generation. Canonicalization, placeholders and complete Engine restoration remain in progress.
