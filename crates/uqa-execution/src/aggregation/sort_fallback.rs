@@ -233,7 +233,7 @@ pub(super) fn observe_target(
         return Ok(());
     };
     if let Some(filter) = filter.as_deref() {
-        if !uqa_sql::expr::truthy(&eval_scalar(filter, context)?) {
+        if !uqa_sql::expr::truthy(&eval_scalar(filter, context)?)? {
             return Ok(());
         }
     }

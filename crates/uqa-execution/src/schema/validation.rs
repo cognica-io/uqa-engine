@@ -228,7 +228,7 @@ pub fn validate_check_rows(
             &mut document,
         )?;
         let value = scope.evaluate(context.expressions, expression, &document, &[])?;
-        if !matches!(value, Value::Null) && !uqa_sql::expr::truthy(&value) {
+        if !matches!(value, Value::Null) && !uqa_sql::expr::truthy(&value)? {
             let relation = uqa_core::RelationIdentity::from_legacy_name(table)
                 .map_or_else(|_| table.to_string(), |identity| identity.name);
             return Err(constraint_error(

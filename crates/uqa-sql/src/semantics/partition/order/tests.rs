@@ -165,7 +165,7 @@ impl crate::schema::SchemaExpressionCatalog for Unused {
     fn plan_schema_expression(
         &self,
         _: &crate::ast::Expr,
-        _: &[crate::ast::ColumnDef],
+        _: &crate::RowSchema,
     ) -> std::result::Result<crate::schema::expressions::PlannedSchemaExpression, crate::SQLError>
     {
         unreachable!("this fixture does not plan stored expressions")

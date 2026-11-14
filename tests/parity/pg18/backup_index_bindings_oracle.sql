@@ -51,4 +51,45 @@ CREATE INDEX bad ON backup_items((CASE WHEN id THEN label ELSE 'x' END));
 \echo nested_condition :SQLSTATE
 ROLLBACK TO bad_expression;
 \set ON_ERROR_STOP on
+CREATE DOMAIN pg_temp.backup_truth AS boolean;
+CREATE DOMAIN pg_temp.backup_nested_truth AS pg_temp.backup_truth;
+CREATE TEMP TABLE backup_flags(id integer, enabled pg_temp.backup_nested_truth);
+CREATE TEMP TABLE backup_rows(id integer, enabled pg_temp.backup_nested_truth);
+INSERT INTO backup_flags VALUES(1,true),(-1,false);
+INSERT INTO backup_rows VALUES(1,true),(-1,false);
+CREATE FUNCTION pg_temp.backup_row_key(x backup_rows) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).id $$;
+CREATE FUNCTION pg_temp.backup_row_enabled(x backup_rows) RETURNS pg_temp.backup_nested_truth LANGUAGE SQL IMMUTABLE AS $$ SELECT (x).enabled $$;
+CREATE UNIQUE INDEX backup_flag_saved ON backup_flags(id) WHERE enabled;
+\echo domain_index_created :SQLSTATE
+CREATE UNIQUE INDEX backup_row_saved ON backup_rows(pg_temp.backup_row_key(backup_rows)) WHERE pg_temp.backup_row_enabled(backup_rows);
+\echo whole_row_index_created :SQLSTATE
+SAVEPOINT rename_rollback;
+ALTER TABLE backup_rows RENAME TO backup_rolled_back_rows;
+ROLLBACK TO rename_rollback;
+ALTER DOMAIN pg_temp.backup_truth RENAME TO backup_renamed_truth;
+ALTER DOMAIN pg_temp.backup_nested_truth RENAME TO backup_renamed_nested_truth;
+ALTER FUNCTION pg_temp.backup_row_key(backup_rows) RENAME TO backup_renamed_key;
+ALTER FUNCTION pg_temp.backup_row_enabled(backup_rows) RENAME TO backup_renamed_enabled;
+ALTER TABLE backup_flags RENAME TO backup_renamed_flags;
+ALTER TABLE backup_rows RENAME TO backup_renamed_rows;
+SAVEPOINT typed_duplicate;
+\set ON_ERROR_STOP off
+INSERT INTO backup_renamed_flags VALUES(1,true);
+\echo domain_index_duplicate :SQLSTATE
+ROLLBACK TO typed_duplicate;
+INSERT INTO backup_renamed_rows VALUES(1,true);
+\echo whole_row_index_duplicate :SQLSTATE
+ROLLBACK TO typed_duplicate;
+\set ON_ERROR_STOP on
+INSERT INTO backup_renamed_flags VALUES(1,false),(1,NULL),(2,true);
+INSERT INTO backup_renamed_rows VALUES(1,false),(1,NULL),(2,true);
+SAVEPOINT typed_update;
+\set ON_ERROR_STOP off
+UPDATE backup_renamed_rows SET id=1 WHERE id=2;
+\echo whole_row_index_update :SQLSTATE
+ROLLBACK TO typed_update;
+\set ON_ERROR_STOP on
+SELECT 'domain_index_rows', count(*), count(*) FILTER (WHERE enabled) FROM backup_renamed_flags;
+SELECT 'whole_row_index_rows', count(*), count(*) FILTER (WHERE pg_temp.backup_renamed_enabled(backup_renamed_rows)) FROM backup_renamed_rows;
+SELECT 'whole_row_values', pg_temp.backup_renamed_key(backup_renamed_rows) FROM backup_renamed_rows WHERE pg_temp.backup_renamed_enabled(backup_renamed_rows) ORDER BY 2;
 ROLLBACK;

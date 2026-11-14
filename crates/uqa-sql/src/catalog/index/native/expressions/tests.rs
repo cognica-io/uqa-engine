@@ -43,7 +43,28 @@ fn check(
     let columns = [
         ColumnDef::nullable("id", ColumnType::Integer),
         ColumnDef::nullable("label", ColumnType::Text),
+        ColumnDef::nullable(
+            "flag",
+            ColumnType::Domain {
+                schema: "public".into(),
+                name: "truth".into(),
+                oid: 50001,
+                array_oid: Some(50002),
+                collation_oid: None,
+                base: Box::new(ColumnType::Boolean),
+            },
+        ),
     ];
+    let relation = crate::RelationIdentity::new("public", "items");
+    let row_type = crate::catalog::relation_oids::RelationCatalogOids {
+        relation: 80001,
+        row_type: Some(80002),
+        array_type: Some(80003),
+        rule: None,
+    }
+    .row_type_reference(&relation)
+    .map(ColumnType::Composite)
+    .unwrap();
     validate_bindings(
         &index.columns,
         &IndexDefinition {
@@ -53,6 +74,8 @@ fn check(
         },
         declared.then_some(columns.as_slice()),
         &IndexBindingContext {
+            relation: Some(&relation),
+            row_type: Some(&row_type),
             routines: &NoRoutines,
             references: &references,
             types: &types_catalog,
@@ -71,6 +94,8 @@ fn stored_index_bindings_preserve_original_expressions_without_evaluation() {
         ("CREATE INDEX saved ON items ((id / 0)) WHERE NULL", vec![]),
         ("CREATE INDEX saved ON items ((CASE WHEN id > 0 THEN label ELSE 'fallback' END)) WHERE label IS NOT NULL", vec![ColumnType::Text]),
         ("CREATE INDEX saved ON items ((ARRAY[id, id])) WHERE id IS NOT NULL", vec![ColumnType::Array(Box::new(ColumnType::Integer))]),
+        ("CREATE INDEX saved ON items (((items).id)) WHERE flag", vec![ColumnType::Integer]),
+        ("CREATE INDEX saved ON items (((items).label)) WHERE (items).flag", vec![ColumnType::Text]),
     ] {
         let index = declaration(sql);
         let original = serde_json::to_value(&index).unwrap();

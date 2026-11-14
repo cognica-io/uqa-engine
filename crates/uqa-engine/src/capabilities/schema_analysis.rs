@@ -134,13 +134,13 @@ impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
     fn plan_schema_expression(
         &self,
         expression: &Expr,
-        columns: &[ColumnDef],
+        schema: &uqa_sql::RowSchema,
     ) -> Result<uqa_sql::schema::expressions::PlannedSchemaExpression, SQLError> {
         uqa_planner::statement_planning::schema_expressions::plan_schema_expression(
             &self.statement_planning_context(),
             self,
             expression,
-            columns,
+            schema,
         )
     }
 

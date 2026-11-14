@@ -480,7 +480,7 @@ impl Engine {
         drop(tables);
         *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
-        *self.durable.catalog_indexes.write() = indexes;
+        indexes.publish(self)?;
         *self.durable.table_field_analyzers.write() = analyzers;
         if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;

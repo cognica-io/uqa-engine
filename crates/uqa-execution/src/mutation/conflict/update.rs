@@ -100,7 +100,7 @@ fn build_conflict_update<S: Clone + 'static>(
             Some(&conflict_row),
             params,
         )?;
-        if !uqa_sql::expr::truthy(&keep) {
+        if !uqa_sql::expr::truthy(&keep)? {
             return Ok(BuiltConflictUpdate::Skip);
         }
     }

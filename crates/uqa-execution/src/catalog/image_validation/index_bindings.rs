@@ -70,12 +70,6 @@ pub fn validate(
         non_returning_ctes: BindingNameSet::new(),
         scalar_subqueries: &[],
     };
-    let context = IndexBindingContext {
-        routines,
-        references: &references,
-        types: &types,
-        binding: &binding,
-    };
     for row in snapshot.definitions.catalog_indexes.values() {
         control.check()?;
         let name = bound_relation_identity_with_control(&row.table_name, &control)?;
@@ -90,6 +84,22 @@ pub fn validate(
             cancellation,
             cancellation,
         )?;
+        let row_type = table
+            .catalog_oids
+            .row_type_reference_with_control(&name, &control)?
+            .map(|reference| {
+                let (reference, memory) = reference.into_parts();
+                control.finish(uqa_sql::ColumnType::Composite(reference), memory)
+            })
+            .transpose()?;
+        let context = IndexBindingContext {
+            relation: Some(&name),
+            row_type: row_type.as_deref(),
+            routines,
+            references: &references,
+            types: &types,
+            binding: &binding,
+        };
         validate_bindings(
             &keys,
             &definition,

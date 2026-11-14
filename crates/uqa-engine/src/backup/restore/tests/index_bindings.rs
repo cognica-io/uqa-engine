@@ -15,6 +15,8 @@ use uqa_sql::{
 };
 use uqa_storage::PersistentStorageProvider;
 
+mod typed_rows;
+
 fn destination(provider: Provider, path: &Path) -> RestoreDestination {
     use uqa_storage_sqlite::{SQLiteBackupMapping, SQLiteBackupTarget};
     let target: Arc<dyn PersistentBackupTarget> = match provider {

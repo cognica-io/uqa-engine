@@ -119,7 +119,7 @@ impl WindowAggregate {
                             if !uqa_sql::expr::truthy(&crate::eval_scalar(
                                 filter,
                                 &(*context).with_function_states(filter.calls()),
-                            )?) {
+                            )?)? {
                                 return Ok(());
                             }
                         }

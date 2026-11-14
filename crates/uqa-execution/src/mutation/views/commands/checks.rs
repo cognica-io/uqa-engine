@@ -44,7 +44,7 @@ impl<S: Clone + 'static> TriggerViewChecks<'_, S> {
                 Some(&row),
                 self.params,
             )?;
-            if !uqa_sql::expr::truthy(&value) {
+            if !uqa_sql::expr::truthy(&value)? {
                 return Err(trigger_view_check_violation(
                     self.constraints,
                     &check.view,

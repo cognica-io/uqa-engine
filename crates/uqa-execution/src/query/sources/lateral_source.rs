@@ -271,7 +271,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 &right.row,
                 predicate.calls(),
             )?,
-        ))
+        )?)
     }
 
     fn rows_for(
@@ -374,7 +374,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 &joined.row,
                 filter.calls(),
             )?,
-        ))
+        )?)
     }
 
     fn close(&mut self) -> crate::ExecResult<()> {

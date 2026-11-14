@@ -114,5 +114,24 @@ pub fn rename_column_references(
     Ok(())
 }
 
+/// Retain the indexed relation's whole-row bindings through a table rename.
+pub fn rename_relation_references(
+    keys: &mut [IndexKey],
+    definition: &mut IndexDefinition,
+    from: &uqa_core::RelationIdentity,
+    to: &str,
+) -> Result<(), String> {
+    use crate::schema::dependencies::rewrites::rename_schema_expr_relation;
+    for key in keys {
+        if let IndexKey::Expression(expression) = key {
+            rename_schema_expr_relation(expression, from, to)?;
+        }
+    }
+    if let Some(predicate) = definition.predicate.as_deref_mut() {
+        rename_schema_expr_relation(predicate, from, to)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

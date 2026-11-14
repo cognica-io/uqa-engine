@@ -17,6 +17,8 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub struct IndexBindingContext<'a, 'b> {
+    pub relation: Option<&'a crate::RelationIdentity>,
+    pub row_type: Option<&'a ColumnType>,
     pub routines: &'a dyn RoutineResolution,
     pub references: &'a NativeRoutineReferences<'b>,
     pub types: &'a crate::catalog::type_references::TypeReferences<'b>,
@@ -38,17 +40,12 @@ pub fn validate_bindings(
     for ty in &definition.key_types {
         context.types.column_type(ty)?;
     }
-    let mut schema = RowSchema::with_column_metadata_with_control(
-        None,
-        columns
-            .into_iter()
-            .flatten()
-            .map(|column| (column.name.as_str(), Some(&column.ty), column.collation_oid)),
+    let schema = crate::schema::indexes::row_schema_with_control(
+        context.relation.map(|relation| relation.name.as_str()),
+        columns,
+        context.row_type,
         control,
     )?;
-    if columns.is_none() {
-        schema = RowSchema::with_open_columns_with_control(&schema, None, control)?;
-    }
     for (position, key) in keys.iter().enumerate() {
         control.check()?;
         let expected = definition.key_types.get(position);
@@ -77,7 +74,10 @@ pub fn validate_bindings(
     }
     if let Some(predicate) = &definition.predicate {
         let ty = expression_type(predicate, &schema, context, control)?;
-        if !matches!(ty.as_deref(), Some(ColumnType::Boolean) | None) {
+        if !matches!(
+            ty.as_deref().map(crate::type_resolution::base_type),
+            Some(ColumnType::Boolean) | None
+        ) {
             return Err(invalid("non-boolean predicate"));
         }
         if ty.is_none() {

@@ -500,7 +500,7 @@ impl<'a> HashJoin<'a> {
                     row,
                     predicate.calls(),
                 )?,
-            ))
+            )?)
         })
     }
 

@@ -73,7 +73,10 @@ pub fn prepare_generated_column(
             .is_some()
     })?;
     bind_schema_column_references(&mut prepared.expression, qualifier);
-    let planned = engine.plan_schema_expression(&prepared.expression, snapshot)?;
+    let planned = engine.plan_schema_expression(
+        &prepared.expression,
+        &super::expressions::row_schema(snapshot),
+    )?;
     if !planned.immutable {
         return Err(eligibility::non_immutable_function());
     }

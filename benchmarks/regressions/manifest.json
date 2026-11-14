@@ -21807,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -68578,6 +68578,74 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_index_bindings_preserve_boolean_domains_and_named_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/index_bindings/typed_rows.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Build partial indexes over nested boolean domains and named table rows, rename their types/functions/tables, restore actual archives on all four providers, then insert, update and roll back.",
+      "invariant": "Declared whole-row types and boolean-domain predicates survive source retirement and restoration; exact index metadata and unique enforcement remain intact without retained input reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "renamed_relation_preserves_whole_row_scope_without_rebinding_column_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Rename an indexed relation with a same-named column and whole-row key/predicate arguments.",
+      "invariant": "Only bound relation references change; key display names and included columns remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_rename_prepares_whole_row_bindings_without_changing_the_live_registry",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/references/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Prepare one index-registry successor with renamed whole-row keys and predicates.",
+      "invariant": "The original registry remains immutable and the complete prepared definition follows the renamed table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_conditions_observe_retained_fields_and_preserve_short_circuit_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/tests.rs",
+      "capability": "Retained Boolean conditions",
+      "workload": "Observe retained true/false fields in direct, negated, AND/OR and lazy conditions; reject reached truncated fields.",
+      "invariant": "Physical and inline Boolean conditions agree, malformed input keeps XX001, and unreachable operands remain unread.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_boolean_conditions_match_scalar_and_projected_truth_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Retained Boolean conditions",
+      "workload": "Observe retained true/false fields in direct, negated, AND/OR and lazy conditions; reject reached truncated fields.",
+      "invariant": "Physical and inline Boolean conditions agree, malformed input keeps XX001, and unreachable operands remain unread.",
+      "case_names": [
+        ""
       ]
     }
   ]

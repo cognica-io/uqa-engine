@@ -110,7 +110,7 @@ impl NestedLoopJoin<'_> {
                                 &joined,
                                 predicate.calls(),
                             )?,
-                        ),
+                        )?,
                     };
                     Ok(matched.then_some(joined))
                 })?;
