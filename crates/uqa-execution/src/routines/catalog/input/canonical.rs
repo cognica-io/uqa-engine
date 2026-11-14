@@ -6,6 +6,9 @@
 
 //! Physical input, complete authority/syntax construction and canonical declarations share one retained load-only operation.
 
+mod types;
+pub use types::RoutineCatalogTypeNames;
+
 use super::{
     CatalogFacade, CatalogInputLimits, ImageDecodeWindow, ImageDecoder, MemoryBudget,
     StorageBackendError, StorageBackendResult, StorageReadControl,

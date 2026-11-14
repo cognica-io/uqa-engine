@@ -27,7 +27,9 @@ pub use authority::RoutineCatalogAuthority;
 mod definitions;
 pub use definitions::RoutineCatalogDefinitions;
 mod canonical;
-pub use canonical::{RoutineCatalogCanonicalInput, RoutineRestoreSchemaInput};
+pub use canonical::{
+    RoutineCatalogCanonicalInput, RoutineCatalogTypeNames, RoutineRestoreSchemaInput,
+};
 
 /// Select and retain the physical routine record before interpreting any definition. A failed or abandoned input is terminal and publishes no registry state.
 pub struct RoutineCatalogInput {

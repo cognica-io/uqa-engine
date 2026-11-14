@@ -49,10 +49,11 @@ pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
 
 pub use type_names::{
     catalog_routine_type_oid, catalog_routine_type_oid_with_control, catalog_user_type_identity,
-    catalog_user_type_identity_with_control, catalog_user_type_name_with_control,
-    named_type_exists, resolve_catalog_column_type, resolve_catalog_column_type_name_with_control,
-    resolve_catalog_column_type_with_control, resolve_catalog_user_type_by_oid,
-    resolve_catalog_user_type_by_oid_with_control, CatalogEnumLabels,
+    catalog_user_type_identity_with_control, catalog_user_type_name_identity_from_input,
+    catalog_user_type_name_with_control, named_type_exists, resolve_catalog_column_type,
+    resolve_catalog_column_type_name_with_control, resolve_catalog_column_type_with_control,
+    resolve_catalog_user_type_by_oid, resolve_catalog_user_type_by_oid_with_control,
+    routine_type_name_identity_from_input, CatalogEnumLabels,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {

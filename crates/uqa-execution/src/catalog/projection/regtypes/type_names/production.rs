@@ -20,80 +20,20 @@ pub fn catalog_user_type_name_with_control(
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    for definition in catalog.ranges() {
-        control.check()?;
-        for (identity, array, multi) in [
-            (&definition.identity, &definition.array_name, false),
-            (
-                &definition.multirange.identity,
-                &definition.multirange.array_name,
-                true,
-            ),
-        ] {
-            if identity.schema != schema || (identity.name != name && array != name) {
-                continue;
-            }
-            let ty = if multi {
-                definition.multirange_type_with_control(control)?
-            } else {
-                definition.column_type_with_control(control)?
-            };
-            return array_type(ty, array == name, control).map(Some);
-        }
-    }
-    for definition in catalog.domains() {
-        control.check()?;
-        if definition.identity.schema != schema {
-            continue;
-        }
-        let array = definition.array_name.as_deref().map_or_else(
-            || {
-                uqa_sql::catalog::array_type_names::default_array_type_name_matches(
-                    &definition.identity.name,
-                    name,
-                )
-            },
-            |array| array == name,
-        );
-        if definition.identity.name == name || array {
-            return array_type(
-                definition.column_type_with_control(control)?,
-                definition.identity.name != name,
-                control,
-            )
-            .map(Some);
-        }
-    }
-    for definition in catalog.enums() {
-        control.check()?;
-        if definition.identity.schema == schema
-            && (definition.identity.name == name || definition.array_name == name)
-        {
-            return array_type(
-                definition.column_type_with_control(control)?,
-                definition.identity.name != name,
-                control,
-            )
-            .map(Some);
-        }
-    }
-    for definition in catalog.composites() {
-        control.check()?;
-        if definition.identity.schema == schema
-            && (definition.identity.name == name || definition.array_name == name)
-        {
-            return array_type(
-                definition.column_type_with_control(control)?,
-                definition.identity.name != name,
-                control,
-            )
-            .map(Some);
-        }
-    }
-    crate::catalog::composite_type::relations::by_name_with_control(catalog, schema, name, control)
+    let selected = crate::catalog::selection_work::inline(super::selection::select(
+        catalog,
+        schema,
+        name,
+        control,
+        &mut (),
+    ))?;
+    selected
+        .map(|selected| selected.project(control))
+        .transpose()
+        .map(Option::flatten)
 }
 
-fn array_type(
+pub(super) fn array_type(
     ty: Produced<ColumnType>,
     array: bool,
     control: &ProductionControl<'_>,

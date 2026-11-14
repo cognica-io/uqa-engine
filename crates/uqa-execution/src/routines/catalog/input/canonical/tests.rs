@@ -26,6 +26,8 @@ use uqa_sql::{
     },
 };
 
+mod catalog_types;
+
 const LIMITS: CatalogInputLimits = CatalogInputLimits {
     maximum_key_bytes: 4096,
     maximum_value_bytes: 1 << 20,

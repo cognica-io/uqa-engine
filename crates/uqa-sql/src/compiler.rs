@@ -57,7 +57,8 @@ pub(crate) use types::compile_retained_type_reference;
 pub use types::parse_regobject_name_with_control;
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regprocedure_name_with_control,
-    parse_regtype_name, parse_regtype_name_with_control, ParsedRegprocedureName, ParsedRegtypeName,
+    parse_regtype_name, parse_regtype_name_from_input, parse_regtype_name_with_control,
+    ParsedRegprocedureName, ParsedRegtypeName,
 };
 
 pub(crate) fn compile_pg_expression(node: &Node) -> Result<Expr> {

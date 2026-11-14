@@ -17,6 +17,7 @@ use uqa_core::Value;
 pub mod command;
 mod production;
 pub use production::role_inherits_with_control;
+pub(crate) use production::role_reaches_from;
 mod grants;
 #[cfg(test)]
 pub(crate) mod test_support;

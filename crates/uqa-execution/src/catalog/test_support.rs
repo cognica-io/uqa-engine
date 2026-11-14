@@ -14,6 +14,8 @@ use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
 
 mod services;
 pub(crate) use services::CatalogServices;
+pub(crate) mod input;
+pub(crate) mod type_names;
 
 pub(crate) fn table_snapshot(
     object_id: [u8; 16],

@@ -7,6 +7,7 @@
 //! Role incarnations and authorization subjects over an explicit role catalog.
 
 use super::RoleDefinition;
+mod input;
 use crate::catalog::roles::RoleDefinitions;
 use crate::SQLError;
 use serde::{Deserialize, Serialize};
@@ -374,20 +375,7 @@ impl RoleSubject for RoleBinding {
         roles: &'a RoleDefinitions,
         control: &ProductionControl<'_>,
     ) -> Result<Option<&'a RoleDefinition>, SQLError> {
-        control.check()?;
-        if let Some(role) = roles
-            .get(&self.name)
-            .filter(|role| self.matches_definition(role))
-        {
-            return Ok(Some(role));
-        }
-        for role in roles.values() {
-            control.check()?;
-            if self.matches_definition(role) {
-                return Ok(Some(role));
-            }
-        }
-        Ok(None)
+        crate::catalog::work::inline(input::bound(self, roles, control, &mut ()))
     }
 }
 

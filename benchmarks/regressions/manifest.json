@@ -67729,6 +67729,214 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_namespace_selection_preserves_implicit_order_temporary_graphs_and_invalid_acl",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/namespaces/input/tests.rs",
+      "capability": "Retained namespace selection",
+      "workload": "Original explicit and implicit namespaces with temporary allocation, graph schemas, invalid ACLs, missing roles and repeated wide Unicode names.",
+      "invariant": "Usable namespace order and duplicate suppression match ordinary lookup; name comparison/copying consumes bounded work and pending output is completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_namespaces_bound_long_comparisons_copies_and_all_retirement_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/namespaces/input/tests.rs",
+      "capability": "Retained namespace selection",
+      "workload": "Original explicit and implicit namespaces with temporary allocation, graph schemas, invalid ACLs, missing roles and repeated wide Unicode names.",
+      "invariant": "Usable namespace order and duplicate suppression match ordinary lookup; name comparison/copying consumes bounded work and pending output is completely retired.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_native_type_selection_matches_original_families_arrays_and_relation_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests.rs",
+      "capability": "Retained native catalog type selection",
+      "workload": "Original range, multirange, domain, enum, composite and table/view/foreign row-type selection, spelling collisions, namespace and shell shadows, wide borrowed fields and every pending boundary.",
+      "invariant": "Identity selection preserves family/order/array semantics without descriptor copying, propagates cancellation and memory failure and releases each private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_routine_type_names_match_original_namespace_shadowing_quoting_and_modifiers",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/resolution.rs",
+      "capability": "Retained native catalog type selection",
+      "workload": "Original range, multirange, domain, enum, composite and table/view/foreign row-type selection, spelling collisions, namespace and shell shadows, wide borrowed fields and every pending boundary.",
+      "invariant": "Identity selection preserves family/order/array semantics without descriptor copying, propagates cancellation and memory failure and releases each private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_identity_selection_borrows_wide_names_and_domain_bases_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/retention.rs",
+      "capability": "Retained native catalog type selection",
+      "workload": "Original range, multirange, domain, enum, composite and table/view/foreign row-type selection, spelling collisions, namespace and shell shadows, wide borrowed fields and every pending boundary.",
+      "invariant": "Identity selection preserves family/order/array semantics without descriptor copying, propagates cancellation and memory failure and releases each private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_catalog_type_lookup_retires_every_pending_parser_namespace_and_selection_state",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/retention.rs",
+      "capability": "Retained native catalog type selection",
+      "workload": "Original range, multirange, domain, enum, composite and table/view/foreign row-type selection, spelling collisions, namespace and shell shadows, wide borrowed fields and every pending boundary.",
+      "invariant": "Identity selection preserves family/order/array semantics without descriptor copying, propagates cancellation and memory failure and releases each private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_input_uses_selected_native_catalog_types_after_source_replacement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests/catalog_types.rs",
+      "capability": "Native catalog routine type binding",
+      "workload": "Complete stored routine catalog with every user-type family and relation owner, generated arrays, builtins, existing identities and unresolved names; replace physical and catalog sources after selection.",
+      "invariant": "Canonical declarations match ordinary restoration over the selected generation and keep their original allowance after work-channel retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_schema_privileges_preserve_native_roles_inheritance_cycles_and_acl_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema/production/input_tests.rs",
+      "capability": "Retained schema privilege selection",
+      "workload": "Native named and bound roles, renamed or missing incarnations, inheritance cycles and disabled edges, PUBLIC ACL validation and external subject callback order.",
+      "invariant": "Complete ACL validation precedes privilege selection; native traversal retains original results and error order and releases admitted scratch on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_schema_privileges_release_traversal_at_each_pending_boundary",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema/production/input_tests.rs",
+      "capability": "Retained schema privilege selection",
+      "workload": "Native named and bound roles, renamed or missing incarnations, inheritance cycles and disabled edges, PUBLIC ACL validation and external subject callback order.",
+      "invariant": "Complete ACL validation precedes privilege selection; native traversal retains original results and error order and releases admitted scratch on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_schema_privilege_subject_callbacks_keep_their_original_sequence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/security/schema/production/input_tests.rs",
+      "capability": "Retained schema privilege selection",
+      "workload": "Native named and bound roles, renamed or missing incarnations, inheritance cycles and disabled edges, PUBLIC ACL validation and external subject callback order.",
+      "invariant": "Complete ACL validation precedes privilege selection; native traversal retains original results and error order and releases admitted scratch on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "builtin_name_occupancy_matches_original_qualified_type_projection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_metadata/builtins.rs",
+      "capability": "Retained native catalog type selection",
+      "workload": "Original range, multirange, domain, enum, composite and table/view/foreign row-type selection, spelling collisions, namespace and shell shadows, wide borrowed fields and every pending boundary.",
+      "invariant": "Identity selection preserves family/order/array semantics without descriptor copying, propagates cancellation and memory failure and releases each private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_regtype_projection_matches_original_parser_scanner_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/compiler/types/regtype/tests.rs",
+      "capability": "Retained catalog type-name projection",
+      "workload": "Original PostgreSQL parser/scanner observations across quoting, aliases, modifiers, arrays and malformed input; bounded owned projection and every pending cancellation/denial boundary.",
+      "invariant": "Retained projection preserves original results and diagnostics, keeps dependency parsing at its existing boundary and releases partial output independently of work ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_regtype_projection_bounds_owned_work_and_retires_every_pending_state",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/compiler/types/regtype/tests.rs",
+      "capability": "Retained catalog type-name projection",
+      "workload": "Original PostgreSQL parser/scanner observations across quoting, aliases, modifiers, arrays and malformed input; bounded owned projection and every pending cancellation/denial boundary.",
+      "invariant": "Retained projection preserves original results and diagnostics, keeps dependency parsing at its existing boundary and releases partial output independently of work ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_role_lookup_preserves_long_named_order_and_renamed_bound_incarnations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/identity/input/tests.rs",
+      "capability": "Retained native lookup admission",
+      "workload": "Named and bound role lookup over long keys, renamed and reused incarnations, missing catalogs and independently cancelled original/invoking owners.",
+      "invariant": "Native lookup retains original identity selection without copying source fields and rejects cancelled operations even when the selected catalog is empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_role_lookup_observes_both_cancellation_owners_even_for_empty_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/roles/identity/input/tests.rs",
+      "capability": "Retained native lookup admission",
+      "workload": "Named and bound role lookup over long keys, renamed and reused incarnations, missing catalogs and independently cancelled original/invoking owners.",
+      "invariant": "Native lookup retains original identity selection without copying source fields and rejects cancelled operations even when the selected catalog is empty.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_type_lookup_observes_both_cancellation_owners_even_for_empty_catalogs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/retention.rs",
+      "capability": "Retained native lookup admission",
+      "workload": "Named and bound role lookup over long keys, renamed and reused incarnations, missing catalogs and independently cancelled original/invoking owners.",
+      "invariant": "Native lookup retains original identity selection without copying source fields and rejects cancelled operations even when the selected catalog is empty.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -49,6 +49,7 @@ mod production;
 mod read;
 pub mod relation_names;
 pub mod schema;
+pub(crate) mod selection_work;
 mod snapshot_read;
 
 /// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.

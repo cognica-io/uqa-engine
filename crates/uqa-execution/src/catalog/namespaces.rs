@@ -7,7 +7,9 @@
 //! Effective search-path selection over the caller's retained catalog and role.
 
 use super::{CatalogReadView, RelationNameResolution};
+mod input;
 mod production;
+pub use input::current_schema_names_from_input;
 pub use production::{
     current_schema_names_with_control, namespace_schema_exists,
     require_schema_privilege_with_control, schema_has_privilege_with_control,

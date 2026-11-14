@@ -20,6 +20,12 @@ pub use builtins::{
 };
 pub use production::routine_type_oid_with_control;
 
+/// Whether an exact identifier occupies the built-in `pg_catalog` type namespace, including generated array names. Modifier validation remains separate from name occupancy.
+pub fn builtin_catalog_type_name_exists(name: &str) -> bool {
+    builtin_scalar_type_by_name(name).is_some()
+        || crate::ast::builtin_array_element_name(name).is_some()
+}
+
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {
         16 => "boolean",

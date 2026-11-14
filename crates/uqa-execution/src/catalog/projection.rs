@@ -414,8 +414,9 @@ use pg_namespace::build_pg_namespace;
 pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
 use pg_settings::build_pg_settings;
 pub use regtypes::{
-    catalog_user_type_identity_with_control, catalog_user_type_name_with_control,
-    format_type_object, named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
+    catalog_user_type_identity_with_control, catalog_user_type_name_identity_from_input,
+    catalog_user_type_name_with_control, format_type_object, named_type_exists,
+    resolve_bound_regclass_oid, resolve_catalog_column_type,
     resolve_catalog_column_type_name_with_control, resolve_catalog_column_type_with_control,
     resolve_catalog_user_type_by_oid, resolve_catalog_user_type_by_oid_with_control,
     resolve_expression_collation_oid, resolve_expression_collation_oid_with_control,
@@ -423,8 +424,8 @@ pub use regtypes::{
     resolve_regcollation_oid, resolve_regnamespace_oid, resolve_regobject_oid,
     resolve_regproc_input_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
     resolve_regtype_output, resolve_type_object_oid, resolved_relation_dependency_with_control,
-    row_type_relation, shell_type_oid, type_object_array_element, type_privilege_oid,
-    RegtypeOutputCatalog,
+    routine_type_name_identity_from_input, row_type_relation, shell_type_oid,
+    type_object_array_element, type_privilege_oid, RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(

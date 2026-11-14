@@ -217,7 +217,7 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
             .map(|value| &**value)
     }
 
-    pub(crate) async fn get_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
+    pub async fn get_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
         &self,
         name: &Q,
         input: &mut C,

@@ -20,7 +20,10 @@ use super::SchemaSecurity;
 use crate::catalog::roles::role_inherits;
 
 mod production;
-pub use production::{role_has_schema_privilege_with_control, SchemaPrivilegeView};
+pub use production::{
+    role_has_schema_privilege_from_input, role_has_schema_privilege_with_control,
+    SchemaPrivilegeView,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SchemaAclPrivilege {

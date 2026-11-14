@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Canonicalize stored routine declarations through one retained physical-input, authority, syntax, schema-membership and signature-binding operation. Preserve original type-identity grammar, object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Failed candidates retire atomically; actual catalog type projection, placeholder/finalization integration and complete Engine restoration remain in progress.
+- Canonicalize stored routine declarations through one retained physical-input, authority, syntax, schema-membership and signature-binding operation. Preserve original type-identity grammar, object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Resolve native catalog type identities and usable namespaces with the original lookup and privilege order, without copying complete type descriptors. Failed candidates retire atomically; Engine capture, placeholder/finalization integration and complete restoration remain in progress.
 
 - Resume native relation-name parsing, decoded identity construction and routine-signature normalization through retained work. Preserve original quoting, schema defaults, aliases, modifiers, array identity and diagnostics while retaining typed memory/cancellation failures and exact native output ownership. Routine catalog canonicalization and complete Engine restoration remain in progress.
 

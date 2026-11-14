@@ -55,6 +55,7 @@ mod table_alteration;
 mod type_lifecycle;
 mod type_privileges;
 mod types;
+pub(crate) use types::builtin_array_element_name;
 
 pub use acl_role_specification::AclRoleSpecification;
 pub use array_access::{ArrayAccess, ArraySliceBounds, MAX_ARRAY_SUBSCRIPT_DIMENSIONS};
