@@ -46,6 +46,7 @@ mod graph_reads;
 pub mod namespaces;
 mod prepared_dependencies;
 mod production;
+pub use production::CatalogReadCapture;
 mod read;
 pub mod relation_names;
 pub mod schema;

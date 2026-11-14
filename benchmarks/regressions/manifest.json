@@ -68284,6 +68284,61 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_catalog_read_capture_preserves_all_selected_roots_and_temporary_identity",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/capture/tests.rs",
+      "capability": "Retained complete catalog read capture",
+      "workload": "Capture complete definition roots and selected table membership, preserve temporary namespace identity, retire the source Engine, and interleave DDL on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Inline and retained capture use the same admitted table/header construction; each selected root keeps its original owner, names yield within input windows, and failures or cancellation retire only the private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_catalog_read_capture_retires_all_prefixes_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/capture/tests.rs",
+      "capability": "Retained complete catalog read capture",
+      "workload": "Capture complete definition roots and selected table membership, preserve temporary namespace identity, retire the source Engine, and interleave DDL on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Inline and retained capture use the same admitted table/header construction; each selected root keeps its original owner, names yield within input windows, and failures or cancellation retire only the private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_catalog_read_capture_admits_empty_view_headers_and_retires_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/production/capture/tests.rs",
+      "capability": "Retained complete catalog read capture",
+      "workload": "Capture complete definition roots and selected table membership, preserve temporary namespace identity, retire the source Engine, and interleave DDL on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Inline and retained capture use the same admitted table/header construction; each selected root keeps its original owner, names yield within input windows, and failures or cancellation retire only the private candidate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_engine_catalog_capture_keeps_completed_generations_after_ddl_and_engine_retirement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Retained complete catalog read capture",
+      "workload": "Capture complete definition roots and selected table membership, preserve temporary namespace identity, retire the source Engine, and interleave DDL on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "Inline and retained capture use the same admitted table/header construction; each selected root keeps its original owner, names yield within input windows, and failures or cancellation retire only the private candidate.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

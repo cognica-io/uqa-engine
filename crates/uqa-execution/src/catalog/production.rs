@@ -50,3 +50,6 @@ fn default_shared<T: Default>(
 }
 
 mod tables;
+
+mod capture;
+pub use capture::CatalogReadCapture;
