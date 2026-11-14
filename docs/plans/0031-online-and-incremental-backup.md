@@ -2,6 +2,47 @@
 
 Status: implementation in progress under [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). The [design](../design/online-and-incremental-backup.md) was established against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`) and merged in [#1320](https://github.com/cognica-io/uqa-engine/pull/1320). Implementation depends on current storage/snapshot/restore owners, not on a replication or CDC implementation, journal, or API.
 
+
+## Delivery backlog and actual PR boundaries
+
+**Historical pre-publication snapshot.** The following source inventory predates publication and consolidation. The current delivery state and integration boundary below supersede its queue and policy status.
+
+The source inventory on 2026-11-14 contains 150,107 committed additions plus deletions against main `7a2efa492fd53a40aec9509dc9543853786ddf8f`, ending at `7a222c5dd3fd37931bb7f4abf3ba409cd9f196c3`. A further 635 changed lines in three local files implement an unfinished retained type-copy unit; these files are excluded from the committed inventory and are not delivered. Neither total is the diff of PR #1380. At that checkpoint no integration exception covered this backlog.
+
+PR #1380 was the only open backup implementation candidate at that checkpoint. Its original 9,705-line diff targeted main; the delivery inventory was added within the same limit. The later source and logical commits were subsequently published and consolidated as recorded below.
+
+This historical table records the original local branch boundaries before publication. Interval counts did not establish actual PR size or independent qualification. The retained commits and current candidate still require their final-source checks; a pending, failed, skipped or cancelled result supplies no passing evidence.
+
+| Local branch | Prerequisite source | Head source | Interval additions + deletions |
+| --- | --- | --- | ---: |
+| `feature/backup-native-table-declarations` | `7a2efa492fd5` | `672cfd6ecac6` | 9,705 |
+| `feature/backup-persistent-table-owners` | `672cfd6ecac6` | `39bb90d5a304` | 9,212 |
+| `feature/backup-persistent-table-input` | `39bb90d5a304` | `e1d4f6658bd5` | 6,464 |
+| `feature/backup-engine-table-assembly` | `e1d4f6658bd5` | `da089476b65f` | 9,824 |
+| `feature/backup-restore-continuation` | `da089476b65f` | `9ae19b8f816d` | 2,706 |
+| `feature/backup-catalog-continuation` | `9ae19b8f816d` | `858f00ff8293` | 6,277 |
+| `feature/backup-plan-continuation` | `858f00ff8293` | `8fc4683fde98` | 9,249 |
+| `feature/backup-memory-engine-restore` | `8fc4683fde98` | `a7b24a8f40fe` | 7,229 |
+| `feature/backup-persistent-engine-restore` | `a7b24a8f40fe` | `650e9dd5e6d1` | 9,142 |
+| `feature/backup-constraint-catalog-input` | `650e9dd5e6d1` | `c92b13e86395` | 6,000 |
+| `feature/backup-partition-watermark-input` | `c92b13e86395` | `ceb7f1a4b4a1` | 1,286 |
+| `feature/backup-graph-catalog-input` | `ceb7f1a4b4a1` | `302230e7a5fa` | 2,326 |
+| `feature/backup-sequence-catalog-input` | `302230e7a5fa` | `ceaa2f8604ac` | 4,744 |
+| `feature/backup-graph-oid-input` | `ceaa2f8604ac` | `3b2bcda0ac84` | 1,415 |
+| `feature/backup-type-catalog-input` | `3b2bcda0ac84` | `9c11bddfcb15` | 8,512 |
+| `feature/backup-authority-catalog-input` | `9c11bddfcb15` | `43e439738cd3` | 5,114 |
+| `feature/backup-analyzer-catalog-input` | `43e439738cd3` | `67ff5422f785` | 7,241 |
+| `feature/backup-field-analyzer-installation` | `67ff5422f785` | `7f8c5b37eb61` | 2,167 |
+| `feature/backup-gin-analyzer-input` | `7f8c5b37eb61` | `be0f0b12b2ae` | 8,263 |
+| `feature/backup-binding-envelope-input` | `be0f0b12b2ae` | `f45bfc5457f5` | 8,528 |
+| `feature/backup-routine-catalog-input` | `f45bfc5457f5` | `aa8b088134ee` | 5,529 |
+| `feature/backup-projected-routine-construction` | `aa8b088134ee` | `45d9070299fa` | 7,040 |
+| `feature/backup-routine-canonicalization` | `45d9070299fa` | `9ced2fd251e2` | 5,281 |
+| `feature/backup-routine-type-identities` | `9ced2fd251e2` | `0fbe3408b433` | 6,158 |
+| `feature/backup-routine-placeholder-ownership` | `0fbe3408b433` | `7a222c5dd3fd` | 4,533 |
+
+This inventory does not complete any original backup requirement. Complete persistent loading, logical closure, public restoration, snapshot-qualified fingerprints and end-to-end acceptance remain in #1322.
+
 ## Current scope and progress
 
 **Live checklist: 87 of 100 items are checked; 13 remain unchecked. Delivery: 13 of the 18 original requirements are merged; five remain open. Native catalog input: 24 of 24 components are implemented and locally verified. Table metadata input: all 10 slots, including the header, are locally verified. Native document input/adoption, evaluated-text input/publication, evaluated-index input/key conversion/registration, complete native vector input/adoption, historical field population, native dictionary frame decoding, fixed dictionary tables, lexical validation, native dictionary string input, Japanese completion-index construction, provenance token/string input and canonicalization/structural validation, descriptor fingerprint/runtime-profile validation, native configuration construction/validation, common executable and Korean/Japanese user-rule preparation, exact resolved analyzer/dictionary reconstruction, native graph/path input/adoption and native model input/adoption and complete named/field analyzer input/publication are also locally verified.** These are separate progress measures. A checked implementation subtask records only its stated local evidence; its parent remains open until integration, required final-source qualification and delivery are complete. Public Engine import and snapshot-qualified fingerprints remain disabled.
@@ -10,9 +51,9 @@ Status: implementation in progress under [#1322](https://github.com/cognica-io/u
 
 **Earlier component checkpoint:** ML/Engine source `ff5da9fd786fe35367c050ea19e933e3f5d14246`, completes retained native model image input, numerical validation, per-layer footprint accounting and native catalog adoption through each current archive byte/poll window. The 1,104-line unit passes all 51 ML cases and 98 Engine backup cases, including all persistent-provider mapping/file-mode regressions. All seven new selectors execute exactly once; strict ML/Engine library/test Clippy, repository policies and 39 inventory-verifier cases pass. An actual archive first reproduced a complete model being read in one call; the corrected owner retains exact scalar bits, labels, layer order, original name/weight allocation and terminal cleanup without retraining. This source includes the separately verified graph/path input product `cce1e38b0d152f4815d13f65ab6531d4998bb29e`. Both remain outside #1373 and are not delivered. The earlier Analysis descriptor/profile source is `0f28d1cc2c1b769ef1011d01024a7b8233576c2a`; the current configuration/input verification is recorded below. The current Analysis unit completes executable preparation and resolved-image reconstruction; Storage framing and native catalog publication are locally verified below; Engine field/resource integration now passes the actual archive and lifecycle cases recorded below.
 
-**Current delivery state:** Twenty backup PRs remain open after consolidating five drafts into [#1385](https://github.com/cognica-io/uqa-engine/pull/1385), [#1393](https://github.com/cognica-io/uqa-engine/pull/1393) and [#1397](https://github.com/cognica-io/uqa-engine/pull/1397). Their combined diffs contain 8,983, 9,701 and 9,360 changed lines respectively. Each actual-base diff remains below 10,000 lines; the largest is 9,824. Original logical commits and component verification records are preserved. #1380 is the only ready candidate and is undergoing automatic final-source qualification at `e60bd5db2494a570b0a1bcbe6964f48a2ac63b5b`; every successor remains draft. Publication and consolidation do not establish final qualification or delivery.
+**Current delivery state:** #1380 is the only ready candidate and is undergoing automatic final-source qualification at `e60bd5db2494a570b0a1bcbe6964f48a2ac63b5b`. Its nineteen dependent drafts are consolidated into the existing #1404 source through `7334ce08207838fc274f9f818a85451fb88d1470`; every component head matches its remote and is an ancestor of that source. The integration-only exception in [AGENTS.md](../../AGENTS.md) covers 142,562 changed lines across 1,262 files against #1380. Component commits and their local evidence are preserved. The eighteen superseded drafts will close after #1380 delivery and the integrated candidate will receive one final-source matrix. Remaining #1322 product scope is excluded from this fixed integration boundary.
 
-**Current work:** Finish qualification and delivery of #1380 and reconcile existing dependent units with their delivered prerequisites. Its final-source Linux workspace shards, Linux work/memory/output regression, all six FDW configurations and both native ASan jobs pass; all C configurations pass; macOS workspace and regression remain in progress. The retained parameter namespace unit in #1404 passes local SQL qualification; the delivery records include the five consolidated drafts. Native routine finalization, complete Engine catalog loading, cross-record validation, public activation, captured-unit fingerprints and final backup acceptance remain open.
+**Current work:** Finish #1380 qualification and delivery, retarget #1404 to delivered main, reconcile the eighteen superseded drafts and review the complete integrated source before its normal ready transition. #1380 Linux workspace shards, Linux work/memory/output regression, all six FDW configurations and every C/native sanitizer configuration pass; macOS workspace and regression remain in progress. The final retained parameter namespace unit passes all 3,761 SQL cases and strict local checks. Native routine body finalization, complete Engine loading, cross-record validation, public activation, captured-unit fingerprints and final backup acceptance remain open outside the fixed integration scope.
 
 **Current local routine parameter namespaces:** SQL constructs retained parameter schemas and routine scopes with bounded name comparisons, type copies and index publication. Qualified and unqualified lookup, duplicate-name diagnostics, physical/executor slots, complete type metadata, empty namespaces and outer-scope shadowing match the ordinary constructors. The shared retained index keeps ordinary schema allocations within the existing regression ceiling. All 3,761 SQL unit/integration cases pass with zero skipped tests, including six new retained-namespace cases and the unchanged execution-binding allocation regression. Strict SQL library/test Clippy and all eight ownership/dependency policy checks pass. All 11,671 non-prose source inputs remain unchanged through qualification; source-map SHA-256 `390b81f328191c08b9d7fe0d950247c33edea388f0fa706b0e5a33caf109af9f` and case-set SHA-256 `b56418f312b6f225836931d9f50f34756ac3db61ef2ecd7b34b7a7106c8590c7` identify this local evidence. The [namespace argument](../design/backup-image-format.md#retained-routine-parameter-namespaces) covers exact observations, independent ownership and every terminal prefix. Complete SQL-standard body finalization, Engine integration, automatic final-source qualification and delivery remain open; no parent requirement or delivery checkbox is completed by this unit.
 
@@ -46,13 +87,13 @@ Capture-specific Engine test modules and helpers now use the same native-platfor
 
 [PR #1375](https://github.com/cognica-io/uqa-engine/pull/1375) delivered constraint-family and event-reference validation at `44e9a37e0e8534e3d6f4573a6515243fce302f39`. Final head `903042c18d1c11f5a91bc0e738adcc4fce95c5d5`, test merge `5d76d78ea5ac9d9b6e1a18d383412b51c1f8cdaa` and delivery preserve tree `985c526d353f8240b78ef71190e56e6fbfd603e6`. [Workspace CI](https://github.com/cognica-io/uqa-engine/actions/runs/42904272761) passes 24,566 Linux tests, 24,581 macOS tests and 53 macOS documentation examples. [Performance regression CI](https://github.com/cognica-io/uqa-engine/actions/runs/42904273013) passes all 6,259 work/memory/output cases and independent-process claims on each platform. All selected checks pass; C, package and FDW runtime jobs were not selected. Complete logical closure and Engine restoration remain open.
 
-### Published delivery units
+### Component sources retained by #1404
 
 PR #1384 is consolidated into #1385; #1390–#1392 are consolidated into #1393; #1396 is consolidated into #1397. The five superseded drafts are closed. Each surviving PR retains its component scope, original commits and local evidence, with final-source qualification and delivery still required.
 
-These are actual PR bases, not local commit intervals. The size counts include additions and deletions for every file against the named base. All successors remain draft; only #1380 is ready for automatic qualification. The source-specific evidence below remains scoped to its recorded commits and does not qualify later changes. No original requirement or delivery checkbox becomes complete through publication.
+The following table records the published component boundaries before final consolidation. Counts include additions and deletions against each original actual base; they are not the integrated diff against main. Every successor remains draft while #1380 qualifies. The source-specific evidence below applies only to its recorded inputs and does not qualify later changes. Integration, publication and consolidation complete no original requirement or delivery checkbox.
 
-| PR | Owning unit | Actual base | Changed lines at recorded source |
+| Component PR | Owning unit | Original actual base | Changed lines at recorded source |
 | --- | --- | --- | --- |
 | [#1380](https://github.com/cognica-io/uqa-engine/pull/1380) | native table declarations | `main` | 9,744 |
 | [#1381](https://github.com/cognica-io/uqa-engine/pull/1381) | persistent table owners | [#1380](https://github.com/cognica-io/uqa-engine/pull/1380) | 9,212 |
@@ -75,7 +116,7 @@ These are actual PR bases, not local commit intervals. The size counts include a
 | [#1403](https://github.com/cognica-io/uqa-engine/pull/1403) | routine type identities | [#1402](https://github.com/cognica-io/uqa-engine/pull/1402) | 6,158 |
 | [#1404](https://github.com/cognica-io/uqa-engine/pull/1404) | routine placeholder and parameter namespace ownership | [#1403](https://github.com/cognica-io/uqa-engine/pull/1403) | 6,396 |
 
-The #1404 count includes the qualified retained parameter namespace unit and current delivery records; its final source inputs are identified by the qualification map above. The cumulative successor source contains 150,806 changed lines against main at that product head; it is not an individual delivery candidate or a size exception. The publication audit inspected all seventeen existing or partially retired backup worktree locations and matched the retained sources to their recorded commits.
+The original #1404 component contains 6,396 changed lines, including the final retained parameter namespace unit and its delivery records. The integration candidate through `7334ce082` contains 151,964 changed lines across 1,320 files against main `7a2efa492fd53a40aec9509dc9543853786ddf8f`, or 142,562 lines across 1,262 files after #1380. These cumulative counts are covered only by the fixed #1404 integration boundary above. All component commits remain present; their source and verification records stay distinct from final integrated qualification.
 
 ### Progress by scope
 
