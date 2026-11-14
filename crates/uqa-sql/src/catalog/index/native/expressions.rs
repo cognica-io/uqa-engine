@@ -105,7 +105,7 @@ fn expression_type(
         }
         match node {
             Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => {
-                context.types.stored_name(ty)?
+                context.types.stored_name(ty)?;
             }
             Expr::CompositeRow { binding, .. } => context.types.stored_name(&binding.ty)?,
             Expr::RetainedLiteral(literal) => {

@@ -7,6 +7,7 @@
 use super::*;
 use crate::ast::Statement;
 use crate::binding::fixture::{empty_binding_context, NoRoutines};
+use crate::catalog::type_definitions::TypeDefinitions;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 fn declaration(sql: &str) -> crate::ast::CreateIndex {
@@ -27,11 +28,11 @@ fn check(
     let binding = empty_binding_context().copy_with_control(&control)?;
     let references = NativeRoutineReferences::new(std::iter::empty(), memory, token)?;
     let type_input = crate::catalog::type_references::TypeReferenceInput {
-        domains: &Default::default(),
-        enums: &Default::default(),
-        composites: &Default::default(),
-        ranges: &Default::default(),
-        shells: &Default::default(),
+        domains: &TypeDefinitions::default(),
+        enums: &TypeDefinitions::default(),
+        composites: &TypeDefinitions::default(),
+        ranges: &TypeDefinitions::default(),
+        shells: &TypeDefinitions::default(),
     };
     let types_catalog = crate::catalog::type_references::TypeReferences::new(
         type_input,

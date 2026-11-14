@@ -77,14 +77,14 @@ fn corrupt(row: &mut CatalogIndexRow, kind: &str) {
             definition.predicate = Some(Box::new(Expr::IsNull {
                 expr: Box::new(Expr::Column("absent".into())),
                 negated: false,
-            }))
+            }));
         }
         "predicate_type" => definition.predicate = Some(Box::new(Expr::Column("id".into()))),
         "predicate_child" => {
             definition.predicate = Some(Box::new(Expr::And(vec![
                 Expr::Literal(Value::Bool(true)),
                 Expr::Column("id".into()),
-            ])))
+            ])));
         }
         _ => unreachable!(),
     }
