@@ -8,12 +8,15 @@
 
 use crate::{
     ast::{
-        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionBody, FunctionParamMode,
+        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionParamMode,
         FunctionReturns, RoutineColumnTypeReference,
     },
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
+
+mod validation;
+pub use validation::validate_routine_declaration_from_input;
 
 mod shells;
 pub use shells::RoutineShellTypes;
@@ -551,13 +554,7 @@ pub fn resolve_plpgsql_datum_types(
 }
 
 pub(super) fn validate_routine_declaration(def: &CreateFunction) -> Result<(), SQLError> {
-    let inputs = validate_routine_input_types(def)?;
-    if matches!(def.body, FunctionBody::Statements(_)) && inputs.any {
-        return Err(routine_definition_error(
-            "SQL function with unquoted function body cannot have polymorphic arguments",
-        ));
-    }
-    validate_routine_output_types(def, &inputs)
+    validation::validate_inline(def)
 }
 
 pub(super) fn routine_parameter_regrole_constants(
@@ -575,131 +572,6 @@ pub(super) fn routine_parameter_regrole_constants(
         constants.collect_expression(default, target.as_ref());
     }
     constants
-}
-
-#[derive(Default)]
-struct PolymorphicInputs {
-    simple: bool,
-    compatible: bool,
-    any: bool,
-}
-
-fn validate_routine_input_types(def: &CreateFunction) -> Result<PolymorphicInputs, SQLError> {
-    let mut inputs = PolymorphicInputs::default();
-    for parameter in &def.params {
-        let type_name = canonical_routine_type_name(&parameter.type_name);
-        let is_input = matches!(
-            parameter.mode,
-            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic
-        );
-        if let Some(family) = polymorphic_family(&type_name) {
-            inputs.any |= is_input;
-            if is_input {
-                match family {
-                    RoutinePolymorphicFamily::Simple => inputs.simple = true,
-                    RoutinePolymorphicFamily::Compatible => inputs.compatible = true,
-                }
-            }
-            continue;
-        }
-        if ROUTINE_PARAMETER_PSEUDO_TYPES.contains(&type_name.as_str()) {
-            let supported = match type_name.as_str() {
-                "record" => !is_input || def.language == "plpgsql",
-                "refcursor" => true,
-                _ => false,
-            };
-            if !supported {
-                return Err(pseudo_type_error(
-                    def,
-                    format!("cannot have arguments of type {type_name}"),
-                    format!("cannot accept type {type_name}"),
-                ));
-            }
-        }
-    }
-    Ok(inputs)
-}
-
-fn validate_routine_output_types(
-    def: &CreateFunction,
-    inputs: &PolymorphicInputs,
-) -> Result<(), SQLError> {
-    let declared = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            Some(type_name.as_str())
-        }
-        _ => None,
-    };
-    let output_types = def
-        .output_params()
-        .map(|parameter| parameter.type_name.as_str())
-        .chain(declared);
-    for output_type in output_types {
-        let type_name = canonical_routine_type_name(output_type);
-        match polymorphic_family(&type_name) {
-            Some(RoutinePolymorphicFamily::Simple) if !inputs.simple => {
-                return Err(polymorphic_result_error(
-                    &type_name,
-                    "anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange",
-                ));
-            }
-            Some(RoutinePolymorphicFamily::Compatible) if !inputs.compatible => {
-                return Err(polymorphic_result_error(&type_name, "anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange"));
-            }
-            None if ROUTINE_RESULT_PSEUDO_TYPES.contains(&type_name.as_str())
-                && !matches!(type_name.as_str(), "record" | "refcursor" | "void")
-                && !(type_name == "trigger"
-                    && def.language == "plpgsql"
-                    && !def.is_procedure
-                    && routine_returns_trigger(def)) =>
-            {
-                let message = format!("cannot return type {type_name}");
-                return Err(pseudo_type_error(def, message.clone(), message));
-            }
-            Some(_) | None => {}
-        }
-    }
-    Ok(())
-}
-
-fn polymorphic_result_error(result: &str, inputs: &str) -> SQLError {
-    SQLError::Diagnostic {
-        sqlstate: "42P13".into(),
-        message: "cannot determine result data type".into(),
-        detail: Some(format!(
-            "A result of type {result} requires at least one input of type {inputs}."
-        )),
-        hint: None,
-    }
-}
-
-/// A pseudo-type the routine's language rejects, reported as its validator reports it: `fmgr_sql_validator` as an invalid definition, and `plpgsql_validator` as an unsupported feature.
-fn pseudo_type_error(def: &CreateFunction, sql: String, plpgsql: String) -> SQLError {
-    if def.language == "plpgsql" {
-        SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: format!("PL/pgSQL functions {plpgsql}"),
-        }
-    } else {
-        routine_definition_error(format!("SQL functions {sql}"))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RoutinePolymorphicFamily {
-    Simple,
-    Compatible,
-}
-
-fn polymorphic_family(type_name: &str) -> Option<RoutinePolymorphicFamily> {
-    if !POLYMORPHIC_PSEUDO_TYPES.contains(&type_name) {
-        return None;
-    }
-    Some(if type_name.starts_with("anycompatible") {
-        RoutinePolymorphicFamily::Compatible
-    } else {
-        RoutinePolymorphicFamily::Simple
-    })
 }
 
 fn routine_declaration_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {

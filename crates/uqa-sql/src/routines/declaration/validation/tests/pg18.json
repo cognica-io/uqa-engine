@@ -1,0 +1,262 @@
+{
+  "reference": {
+    "postgresql": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "script_sha256": "e90949f1b6c07b5f2fd050255af0f8d092d93639b3dcc2854b6d004e6db1b46e",
+    "stdout_sha256": "f9ff8a7d87f82889a65a2b1fa7187cbe8f6ac4a7ebcacd9c4d1d21f6e77607bd",
+    "transaction_rolled_back": true
+  },
+  "cases": [
+    {
+      "id": "simple_source",
+      "sql": "CREATE FUNCTION simple_source(a anyelement) RETURNS anyelement LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "compatible_source",
+      "sql": "CREATE FUNCTION compatible_source(a anycompatible) RETURNS anycompatible LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "simple_standard",
+      "sql": "CREATE FUNCTION simple_standard(a anyelement) RETURNS anyelement LANGUAGE sql RETURN a",
+      "sqlstate": "42P13",
+      "message": "SQL function with unquoted function body cannot have polymorphic arguments",
+      "detail": null
+    },
+    {
+      "id": "compatible_standard",
+      "sql": "CREATE FUNCTION compatible_standard(a anycompatible) RETURNS anycompatible LANGUAGE sql RETURN a",
+      "sqlstate": "42P13",
+      "message": "SQL function with unquoted function body cannot have polymorphic arguments",
+      "detail": null
+    },
+    {
+      "id": "simple_without_input",
+      "sql": "CREATE FUNCTION simple_without_input(a integer) RETURNS anyelement LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "compatible_without_input",
+      "sql": "CREATE FUNCTION compatible_without_input(a integer) RETURNS anycompatible LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anycompatible requires at least one input of type anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange."
+    },
+    {
+      "id": "simple_wrong_family",
+      "sql": "CREATE FUNCTION simple_wrong_family(a anycompatible) RETURNS anyelement LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "compatible_wrong_family",
+      "sql": "CREATE FUNCTION compatible_wrong_family(a anyelement) RETURNS anycompatible LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anycompatible requires at least one input of type anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange."
+    },
+    {
+      "id": "sql_record_input",
+      "sql": "CREATE FUNCTION sql_record_input(a record) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot have arguments of type record",
+      "detail": null
+    },
+    {
+      "id": "plpgsql_record_input",
+      "sql": "CREATE FUNCTION plpgsql_record_input(a record) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "sql_void_input",
+      "sql": "CREATE FUNCTION sql_void_input(a void) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot have arguments of type void",
+      "detail": null
+    },
+    {
+      "id": "plpgsql_void_input",
+      "sql": "CREATE FUNCTION plpgsql_void_input(a void) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot accept type void",
+      "detail": null
+    },
+    {
+      "id": "sql_trigger_result",
+      "sql": "CREATE FUNCTION sql_trigger_result() RETURNS trigger LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type trigger",
+      "detail": null
+    },
+    {
+      "id": "plpgsql_trigger_result",
+      "sql": "CREATE FUNCTION plpgsql_trigger_result() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "plpgsql_trigger_set",
+      "sql": "CREATE FUNCTION plpgsql_trigger_set() RETURNS SETOF trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "output_without_family",
+      "sql": "CREATE FUNCTION output_without_family(a integer, OUT result anyelement) RETURNS anyelement LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "standard_before_input_pseudo",
+      "sql": "CREATE FUNCTION standard_before_input_pseudo(a void, b anyelement) RETURNS anycompatible LANGUAGE sql RETURN b",
+      "sqlstate": "42P13",
+      "message": "SQL function with unquoted function body cannot have polymorphic arguments",
+      "detail": null
+    },
+    {
+      "id": "standard_first_pseudo",
+      "sql": "CREATE FUNCTION standard_first_pseudo(a void, b cstring) RETURNS integer LANGUAGE sql RETURN 1",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot have arguments of type void",
+      "detail": null
+    },
+    {
+      "id": "source_first_pseudo",
+      "sql": "CREATE FUNCTION source_first_pseudo(a void, b anyelement) RETURNS anycompatible LANGUAGE sql AS 'SELECT b'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anycompatible requires at least one input of type anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange."
+    },
+    {
+      "id": "sql_result_before_input",
+      "sql": "CREATE FUNCTION sql_result_before_input(a void) RETURNS cstring LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type cstring",
+      "detail": null
+    },
+    {
+      "id": "plpgsql_result_before_input",
+      "sql": "CREATE FUNCTION plpgsql_result_before_input(a void) RETURNS cstring LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot return type cstring",
+      "detail": null
+    },
+    {
+      "id": "standard_result_before_input",
+      "sql": "CREATE FUNCTION standard_result_before_input(a void) RETURNS cstring LANGUAGE sql RETURN NULL",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type cstring",
+      "detail": null
+    },
+    {
+      "id": "source_family_before_input",
+      "sql": "CREATE FUNCTION source_family_before_input(a void) RETURNS anyelement LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "plpgsql_family_before_input",
+      "sql": "CREATE FUNCTION plpgsql_family_before_input(a void) RETURNS anyelement LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "standard_family_before_input",
+      "sql": "CREATE FUNCTION standard_family_before_input(a void) RETURNS anyelement LANGUAGE sql RETURN NULL",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "output_family_before_pseudo",
+      "sql": "CREATE FUNCTION output_family_before_pseudo(a void, OUT b cstring, OUT c anyelement) LANGUAGE sql AS 'SELECT NULL, NULL'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type",
+      "detail": "A result of type anyelement requires at least one input of type anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange."
+    },
+    {
+      "id": "single_output_pseudo",
+      "sql": "CREATE FUNCTION single_output_pseudo(OUT b cstring) LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type cstring",
+      "detail": null
+    },
+    {
+      "id": "multiple_output_pseudo",
+      "sql": "CREATE FUNCTION multiple_output_pseudo(OUT b cstring, OUT c integer) LANGUAGE sql AS $$SELECT 'x'::cstring, 1$$",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "output_procedure_pseudo",
+      "sql": "CREATE PROCEDURE output_procedure_pseudo(OUT b cstring) LANGUAGE plpgsql AS 'BEGIN b := NULL; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot accept type cstring",
+      "detail": null
+    },
+    {
+      "id": "sql_internal_unsafe",
+      "sql": "CREATE FUNCTION sql_internal_unsafe() RETURNS internal LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "unsafe use of pseudo-type \"internal\"",
+      "detail": "A result of type internal requires at least one input of type internal."
+    },
+    {
+      "id": "plpgsql_internal_unsafe",
+      "sql": "CREATE FUNCTION plpgsql_internal_unsafe() RETURNS internal LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "42P13",
+      "message": "unsafe use of pseudo-type \"internal\"",
+      "detail": "A result of type internal requires at least one input of type internal."
+    },
+    {
+      "id": "sql_internal_input",
+      "sql": "CREATE FUNCTION sql_internal_input(a internal) RETURNS internal LANGUAGE sql AS 'SELECT a'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type internal",
+      "detail": null
+    },
+    {
+      "id": "plpgsql_internal_input",
+      "sql": "CREATE FUNCTION plpgsql_internal_input(a internal) RETURNS internal LANGUAGE plpgsql AS 'BEGIN RETURN a; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot return type internal",
+      "detail": null
+    },
+    {
+      "id": "output_internal_unsafe",
+      "sql": "CREATE FUNCTION output_internal_unsafe(OUT b internal, OUT c integer) LANGUAGE sql AS 'SELECT NULL, 1'",
+      "sqlstate": "42P13",
+      "message": "unsafe use of pseudo-type \"internal\"",
+      "detail": "A result of type internal requires at least one input of type internal."
+    },
+    {
+      "id": "event_trigger_result",
+      "sql": "CREATE FUNCTION event_trigger_result() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN RETURN; END'",
+      "sqlstate": null,
+      "message": null,
+      "detail": null
+    },
+    {
+      "id": "plpgsql_internal_result",
+      "sql": "CREATE FUNCTION plpgsql_internal_result() RETURNS cstring LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot return type cstring",
+      "detail": null
+    }
+  ]
+}

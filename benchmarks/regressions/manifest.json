@@ -68232,6 +68232,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_declaration_preserves_postgresql_pseudo_types_polymorphic_families_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/validation/tests.rs",
+      "capability": "Retained routine declaration validation",
+      "workload": "Compare inline and retained declarations with PostgreSQL 18.4, then suspend long Unicode names and all parameter visits, cancel or drop each prefix and reject native allocation.",
+      "invariant": "Declared result families and language-specific pseudo-types retain their reference diagnostic order; source bodies stay unread, every type name is admitted, and terminal paths release only their own reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_declaration_bounds_type_names_and_all_parameter_visits_without_reading_source_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/validation/tests.rs",
+      "capability": "Retained routine declaration validation",
+      "workload": "Compare inline and retained declarations with PostgreSQL 18.4, then suspend long Unicode names and all parameter visits, cancel or drop each prefix and reject native allocation.",
+      "invariant": "Declared result families and language-specific pseudo-types retain their reference diagnostic order; source bodies stay unread, every type name is admitted, and terminal paths release only their own reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_declaration_retires_every_suspended_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/validation/tests.rs",
+      "capability": "Retained routine declaration validation",
+      "workload": "Compare inline and retained declarations with PostgreSQL 18.4, then suspend long Unicode names and all parameter visits, cancel or drop each prefix and reject native allocation.",
+      "invariant": "Declared result families and language-specific pseudo-types retain their reference diagnostic order; source bodies stay unread, every type name is admitted, and terminal paths release only their own reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_declaration_rejects_unadmitted_names_and_preserves_empty_signatures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/validation/tests.rs",
+      "capability": "Retained routine declaration validation",
+      "workload": "Compare inline and retained declarations with PostgreSQL 18.4, then suspend long Unicode names and all parameter visits, cancel or drop each prefix and reject native allocation.",
+      "invariant": "Declared result families and language-specific pseudo-types retain their reference diagnostic order; source bodies stay unread, every type name is admitted, and terminal paths release only their own reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

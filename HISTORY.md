@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share routine declaration validation between inline execution and retained input, admitting type names and yielding across every parameter visit without reading source bodies. Correct PostgreSQL diagnostic precedence for polymorphic and `internal` results, inferred output types and language-specific pseudo-types. Native body finalization and complete backup restoration remain in progress.
 - Retain original table array-name metadata owners in catalog snapshots and construct table membership through shared inline and retained input. Preserve decoded identity order, replacement semantics, native key/node admission and source-independent metadata lifetime. Complete routine restore integration remains in progress.
 - Retain one immutable session search-path and role generation before producing catalog namespace inputs. Preserve setting, rollback and routine-configuration behavior while copying retained namespace names through bounded work with native admission and cancellation. Complete routine restore integration remains in progress.
 
