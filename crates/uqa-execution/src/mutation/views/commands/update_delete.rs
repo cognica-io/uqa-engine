@@ -96,7 +96,7 @@ fn matching_source_context<S: Clone + Send + Sync + 'static>(
     let Some(source_rows) = source_rows else {
         let qualifies = predicate.map_or(Ok(true), |predicate| {
             eval_mutation_expr(expressions, ctes, predicate, Some(target_row), params)
-                .map(|value| uqa_sql::expr::truthy(&value))
+                .and_then(|value| uqa_sql::expr::truthy(&value))
         })?;
         return Ok(qualifies.then_some(ViewDmlSourceMatch::TargetOnly));
     };
@@ -108,7 +108,7 @@ fn matching_source_context<S: Clone + Send + Sync + 'static>(
         let joined = dml_join_rows(target_row, &source);
         let qualifies = predicate.map_or(Ok(true), |predicate| {
             eval_mutation_expr(expressions, ctes, predicate, Some(&joined), params)
-                .map(|value| uqa_sql::expr::truthy(&value))
+                .and_then(|value| uqa_sql::expr::truthy(&value))
         })?;
         if qualifies {
             return Ok(Some(ViewDmlSourceMatch::Source(source)));

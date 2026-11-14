@@ -121,7 +121,7 @@ impl<S: Clone + Send + Sync + 'static> RowQualification<S> {
             params,
             Some(&retrieval),
         )
-        .map(|value| uqa_sql::expr::truthy(&value))
+        .and_then(|value| uqa_sql::expr::truthy(&value))
     }
 }
 

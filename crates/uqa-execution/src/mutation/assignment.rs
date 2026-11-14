@@ -343,7 +343,7 @@ pub fn validate_view_checks<S: Clone + 'static>(
             Some(&row),
             params,
         )?;
-        if !uqa_sql::expr::truthy(&value) {
+        if !uqa_sql::expr::truthy(&value)? {
             return Err(super::constraints::view_check_violation(
                 constraints,
                 statement,

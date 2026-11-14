@@ -45,3 +45,31 @@ fn renamed_stored_index_preserves_identity_display_names_and_sql_references() {
     assert_eq!(definition.key_names, ["old", "kept"]);
     assert_eq!(definition.catalog, identity);
 }
+
+#[test]
+fn renamed_relation_preserves_whole_row_scope_without_rebinding_column_names() {
+    let original = declaration(
+        "CREATE INDEX i ON items(items, row_key(items.*)) INCLUDE(id) WHERE row_enabled(items.*)",
+    );
+    let expected = declaration(
+        "CREATE INDEX i ON renamed(items, row_key(renamed.*)) INCLUDE(id) WHERE row_enabled(renamed.*)",
+    );
+    let mut keys = original.columns;
+    let mut definition = IndexDefinition {
+        predicate: original.predicate,
+        included_columns: original.included_columns,
+        key_names: vec!["items".into(), "row_key".into(), "id".into()],
+        ..Default::default()
+    };
+    rename_relation_references(
+        &mut keys,
+        &mut definition,
+        &uqa_core::RelationIdentity::new("public", "items"),
+        "public.renamed",
+    )
+    .unwrap();
+    assert_eq!(keys, expected.columns);
+    assert_eq!(definition.predicate, expected.predicate);
+    assert_eq!(definition.included_columns, expected.included_columns);
+    assert_eq!(definition.key_names, ["items", "row_key", "id"]);
+}

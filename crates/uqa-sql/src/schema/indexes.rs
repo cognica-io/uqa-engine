@@ -47,7 +47,7 @@ pub(super) fn bind_index_predicate(
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
     match bind_index_expression(engine, binding, table, expression, true)? {
-        Some(ColumnType::Boolean) => Ok(()),
+        Some(ref ty) if crate::type_resolution::base_type(ty) == &ColumnType::Boolean => Ok(()),
         None => {
             if let Expr::Literal(value) = expression {
                 *value = crate::expr::cast_value(value, "boolean")?;
@@ -96,10 +96,18 @@ pub(super) fn bind_index_expression(
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let relation =
         uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    *expression = super::expressions::bind_relation_row_references(
+        expression,
+        table,
+        &relation.name,
+        &relation.name,
+        &columns,
+    )?;
     bind_schema_column_references(expression, &relation.name);
     bind_schema_column_references(expression, table);
     plan.scalar = ExpressionPlan::lower(expression.clone()).scalar;
-    let schema = RowSchema::with_column_definitions(None, &columns);
+    let row_type = crate::FunctionTypeResolver::resolve_type_name(engine, table)?;
+    let schema = row_schema(table, &columns, row_type.as_ref())?;
     if crate::semantics::sets::validation::expression_may_return_set(
         engine,
         engine,
@@ -134,7 +142,9 @@ pub(super) fn validate_index_expression_immutability(
     let columns = engine
         .schema_expression_columns(table)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    let planned = engine.plan_schema_expression(expression, &columns)?;
+    let row_type = crate::FunctionTypeResolver::resolve_type_name(engine, table)?;
+    let schema = row_schema(table, &columns, row_type.as_ref())?;
+    let planned = engine.plan_schema_expression(expression, &schema)?;
     if !planned.immutable {
         let context = if predicate { "predicate" } else { "expression" };
         return Err(index_error(
@@ -151,6 +161,45 @@ fn index_error(sqlstate: &str, message: String) -> SQLError {
         sqlstate: sqlstate.into(),
         message,
     }
+}
+
+/// The indexed relation supplies both its column namespace and its actual named row type.
+pub fn row_schema(
+    table: &str,
+    columns: &[crate::ast::ColumnDef],
+    row_type: Option<&ColumnType>,
+) -> Result<RowSchema, SQLError> {
+    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    row_schema_with_control(
+        Some(&relation.name),
+        Some(columns),
+        row_type,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+/// Restore analysis keeps the original admitted row layout without resolving a new declaration.
+pub fn row_schema_with_control(
+    qualifier: Option<&str>,
+    columns: Option<&[crate::ast::ColumnDef]>,
+    row_type: Option<&ColumnType>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let mut schema = RowSchema::with_column_metadata_with_control(
+        qualifier,
+        columns
+            .into_iter()
+            .flatten()
+            .map(|column| (column.name.as_str(), Some(&column.ty), column.collation_oid)),
+        control,
+    )?;
+    if columns.is_none() {
+        schema = RowSchema::with_open_columns_with_control(&schema, qualifier, control)?;
+    }
+    if let Some((qualifier, row_type)) = qualifier.zip(row_type) {
+        schema = schema.with_relation_row_type_with_control(qualifier, row_type, control)?;
+    }
+    Ok(schema)
 }
 
 pub mod keys;

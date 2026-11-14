@@ -114,7 +114,10 @@ pub fn restore_composite_constructors(
                 )?
             {
                 *expression = catalog
-                    .plan_schema_expression(expression, columns)?
+                    .plan_schema_expression(
+                        expression,
+                        &crate::schema::expressions::row_schema(columns),
+                    )?
                     .expression;
                 changed = true;
             }

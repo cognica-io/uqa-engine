@@ -485,9 +485,16 @@ fn run_alter_table_action<S: Clone + 'static>(
                 &to,
                 "ALTER TABLE RENAME",
             )?;
+            let indexes = crate::schema::indexes::relocation::prepare_table_indexes(
+                &context.schema_moves.indexes,
+                &context.schema_moves.creation,
+                context.schema_moves.names,
+                &source,
+                &target,
+            )?;
             if !context
                 .lifecycle
-                .rename_table(&stmt.table, &target.qualified_name())
+                .rename_table(&stmt.table, &target.qualified_name(), indexes)
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME", e))?
             {
                 return Err(SQLError::Unsupported(format!(
@@ -561,16 +568,18 @@ fn run_alter_table_action<S: Clone + 'static>(
                 let relocation = context
                     .schema_moves
                     .prepare(&source, &target, table.object_id)?;
-                if !context
-                    .lifecycle
-                    .rename_table(&stmt.table, &target.qualified_name())
-                    .map_err(|error| ddl_storage_error("ALTER TABLE SET SCHEMA", error))?
-                {
-                    return Err(SQLError::Internal(
-                        "table disappeared during schema movement".into(),
-                    ));
-                }
-                relocation.publish(&context.schema_moves)?;
+                relocation.publish_with_table_move(&context.schema_moves, |indexes| {
+                    if !context
+                        .lifecycle
+                        .rename_table(&stmt.table, &target.qualified_name(), indexes)
+                        .map_err(|error| ddl_storage_error("ALTER TABLE SET SCHEMA", error))?
+                    {
+                        return Err(SQLError::Internal(
+                            "table disappeared during schema movement".into(),
+                        ));
+                    }
+                    Ok(())
+                })?;
             }
         }
         AlterTableAction::SetDefault { name, default } => {

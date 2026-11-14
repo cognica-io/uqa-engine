@@ -193,9 +193,7 @@ fn trigger_condition_matches(
         condition,
         &mut TriggerVariableResolver { old, new, columns },
     )?;
-    Ok(uqa_sql::expr::truthy(
-        &context.expressions.evaluate(&condition)?,
-    ))
+    uqa_sql::expr::truthy(&context.expressions.evaluate(&condition)?)
 }
 
 struct TriggerInvocation<'a> {

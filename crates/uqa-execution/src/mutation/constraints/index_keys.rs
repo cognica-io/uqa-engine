@@ -52,17 +52,12 @@ pub fn index_predicate_accepts(
         .try_describe_table(table)
         .map_err(|error| SQLError::Internal(format!("index predicate columns: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    let schema = crate::RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let ty = context.catalog.relation_row_type(table)?;
+    let schema = uqa_sql::schema::indexes::row_schema(table, &columns, ty.as_ref())?;
     let result = context
         .expressions
         .evaluate_row(predicate, document, &schema, &[])?;
-    Ok(matches!(result, Value::Bool(true)))
+    uqa_sql::expr::truthy(&result)
 }
 
 pub fn index_key_values(
@@ -87,13 +82,8 @@ pub fn index_key_values(
         .try_describe_table(table)
         .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    let schema = crate::RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let ty = context.catalog.relation_row_type(table)?;
+    let schema = uqa_sql::schema::indexes::row_schema(table, &columns, ty.as_ref())?;
     keys.iter()
         .map(|key| match key {
             uqa_sql::ast::IndexKey::Column(column) => {

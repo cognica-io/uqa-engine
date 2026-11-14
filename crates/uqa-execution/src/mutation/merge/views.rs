@@ -81,7 +81,7 @@ fn build_view_merge_pairings<S: Clone + 'static>(
         if let Some(predicate) = &plan.target_predicate {
             let visible =
                 eval_mutation_expr(expressions, ctes, predicate, Some(&target_row), params)?;
-            if !uqa_sql::expr::truthy(&visible) {
+            if !uqa_sql::expr::truthy(&visible)? {
                 continue;
             }
         }
@@ -100,7 +100,7 @@ fn build_view_merge_pairings<S: Clone + 'static>(
                 Some(&joined),
                 params,
             )?;
-            if !uqa_sql::expr::truthy(&value) {
+            if !uqa_sql::expr::truthy(&value)? {
                 continue;
             }
             matched = true;
@@ -232,7 +232,7 @@ fn select_view_merge_action<S: Clone + 'static>(
                 Some(input.action_row),
                 input.params,
             )?;
-            if !uqa_sql::expr::truthy(&value) {
+            if !uqa_sql::expr::truthy(&value)? {
                 continue;
             }
         }

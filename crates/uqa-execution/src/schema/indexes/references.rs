@@ -11,21 +11,36 @@ use crate::catalog::index::{index_definition, index_references_column, registry:
 use uqa_sql::ast::IndexKey;
 use uqa_storage::{CatalogIndexRow, StorageBackendError, StorageBackendResult};
 
-pub fn table_rename(
-    rows: &CatalogIndexes,
-    from: &str,
-    to: &str,
-) -> StorageBackendResult<CatalogIndexes> {
-    let mut candidate = rows.clone();
-    for row in rows.values().filter(|row| row.table_name == from) {
-        let mut renamed = row.clone();
-        to.clone_into(&mut renamed.table_name);
-        candidate.replace(renamed)?;
+pub(super) fn table_rename(
+    row: &CatalogIndexRow,
+    from: &uqa_core::RelationIdentity,
+    to: &uqa_core::RelationIdentity,
+) -> StorageBackendResult<CatalogIndexRow> {
+    let mut keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)?;
+    let mut definition = index_definition(row)?;
+    uqa_sql::catalog::index::stored::rename_relation_references(
+        &mut keys,
+        &mut definition,
+        from,
+        &to.qualified_name(),
+    )
+    .map_err(StorageBackendError::Other)?;
+    let mut renamed = row.clone();
+    renamed.table_name = to.qualified_name();
+    renamed.relation.schema.clone_from(&to.schema);
+    if keys
+        .iter()
+        .any(|key| matches!(key, IndexKey::Expression(_)))
+    {
+        renamed.columns_json = serde_json::to_string(&keys)?;
     }
-    Ok(candidate)
+    if definition.predicate.is_some() {
+        renamed.definition_json = Some(serde_json::to_string(&definition)?);
+    }
+    Ok(renamed)
 }
 
-pub struct PreparedIndexColumnRename {
+pub struct PreparedIndexRename {
     rows: CatalogIndexes,
     updates: Vec<CatalogIndexRow>,
 }
@@ -35,7 +50,7 @@ pub fn column_rename(
     table: &str,
     from: &str,
     to: &str,
-) -> StorageBackendResult<PreparedIndexColumnRename> {
+) -> StorageBackendResult<PreparedIndexRename> {
     let mut candidate = rows.clone();
     let mut updates = Vec::new();
     for row in rows.values() {
@@ -57,13 +72,13 @@ pub fn column_rename(
         candidate.replace(renamed.clone())?;
         updates.push(renamed);
     }
-    Ok(PreparedIndexColumnRename {
+    Ok(PreparedIndexRename {
         rows: candidate,
         updates,
     })
 }
 
-impl PreparedIndexColumnRename {
+impl PreparedIndexRename {
     pub fn publish(self, publication: &dyn IndexRegistryPublication) -> StorageBackendResult<()> {
         if self.updates.is_empty() {
             return Ok(());
@@ -75,3 +90,6 @@ impl PreparedIndexColumnRename {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

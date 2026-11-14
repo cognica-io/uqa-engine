@@ -97,5 +97,5 @@ pub fn row_independent_mutation_qualification_count<S: Clone + 'static>(
     }
     Ok(Some(usize::from(uqa_sql::expr::truthy(
         &eval_mutation_expr(services, ctes, predicate, None, params)?,
-    ))))
+    )?)))
 }

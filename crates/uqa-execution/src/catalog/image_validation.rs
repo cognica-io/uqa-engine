@@ -23,6 +23,8 @@ mod namespaces;
 pub use namespaces::validate as validate_namespaces;
 mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
+mod index_bindings;
+pub use index_bindings::validate as validate_index_bindings;
 
 /// Join complete immutable ordinary/foreign row layouts, domains, constraint triggers and original index rows for SQL's constraint-reference predicate.
 pub fn validate_constraints(

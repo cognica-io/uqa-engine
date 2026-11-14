@@ -286,6 +286,9 @@ impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
+    fn relation_row_type(&self, table: &str) -> Result<Option<uqa_sql::ColumnType>, SQLError> {
+        uqa_sql::FunctionTypeResolver::resolve_type_name(self, table)
+    }
     fn with_column_metadata_with_control(
         &self,
         table: &str,

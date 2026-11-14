@@ -58,7 +58,7 @@ impl SchemaExpressionCatalog for Catalog {
     fn plan_schema_expression(
         &self,
         expression: &Expr,
-        _: &[ColumnDef],
+        _: &crate::RowSchema,
     ) -> Result<PlannedSchemaExpression, SQLError> {
         Ok(PlannedSchemaExpression {
             expression: expression.clone(),

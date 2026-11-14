@@ -131,7 +131,9 @@ impl IndexRegistryChange {
             candidate.rename(&previous.relation, renamed.clone())?;
         }
         for (previous, renamed) in changes {
-            publication.erase_index(previous, IndexPublicationKind::Names)?;
+            if previous.relation != renamed.relation {
+                publication.erase_index(previous, IndexPublicationKind::Names)?;
+            }
             publication.persist_index(renamed, IndexPublicationKind::Names)?;
         }
         publication.publish_indexes(candidate);

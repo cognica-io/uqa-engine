@@ -297,7 +297,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             predicate,
                             Some(&target_row),
                             params,
-                        )?) {
+                        )?)? {
                             continue;
                         }
                     }
@@ -314,7 +314,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             &stmt.join_condition,
                             Some(&joined),
                             params,
-                        )?) {
+                        )?)? {
                             target_matched = true;
                             let index_value = merge_source_index_value(idx);
                             let _ = matched_source
@@ -434,7 +434,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             predicate,
                             Some(&target_row),
                             params,
-                        )?),
+                        )?)?,
                         None => true,
                     };
                     if !target_visible {
@@ -464,7 +464,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         &stmt.join_condition,
                         Some(&joined),
                         params,
-                    )?)
+                    )?)?
                 {
                     pair.kind = MergePairKind::NotMatchedByTarget;
                     pair.storage_table = None;

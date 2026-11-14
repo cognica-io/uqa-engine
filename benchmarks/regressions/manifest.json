@@ -21807,7 +21807,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -68466,6 +68466,184 @@
       "capability": "Retained routine parameter namespaces",
       "workload": "Construct typed parameter namespaces with duplicate, empty and long Unicode names through one-step windows; visit every pending cancellation boundary and deny native buffer and index allocation.",
       "invariant": "Visible and internal slots match ordinary SQL binding, immutable publication preserves type metadata and selected names, and partial or shared owners retain exactly their original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_bindings_preserve_original_expressions_without_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/expressions/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Analyze arithmetic, calls, arrays and CASE with typed predicates.",
+      "invariant": "Original syntax stays unchanged; type validation never evaluates division by zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_bindings_reject_invalid_rows_predicates_and_non_scalar_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/expressions/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Inspect missing columns, invalid predicates, aggregate/set/window expressions, parameters and unknown calls.",
+      "invariant": "Every invalid scalar is rejected and the complete analysis allowance retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_bindings_compare_recorded_result_types_and_keep_legacy_absence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/expressions/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Compare complete, mismatched and legacy-absent recorded key types.",
+      "invariant": "Declared column and expression results agree with every retained key type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_bindings_preserve_open_document_fields_and_release_rejected_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/expressions/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Analyze open document fields; deny construction and cancel the request.",
+      "invariant": "Open fields remain valid and admission/cancellation failures retain no scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_index_key_decoder_preserves_scalar_payloads_and_rejects_query_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/expressions/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Decode original scalar keys, reject malformed query payloads and cancel the invoking read.",
+      "invariant": "Scalar syntax is byte-observably preserved and every decoder owner retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_index_binding_uses_the_original_row_layout_and_retires_failed_analysis",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/indexes.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Join an original index with its immutable table layout, then replace the predicate and cancel validation.",
+      "invariant": "Missing references fail without changing the catalog or retaining the analysis owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_index_bindings_reject_corrupt_archives_before_activation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/index_bindings.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Restore eight independently corrupted index archives on memory, native SQLite, SQLite KV and redb.",
+      "invariant": "No invalid candidate becomes prepared or published; failure removes the destination and releases all input ownership.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_index_bindings_preserve_renamed_routines_and_later_writes",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/index_bindings.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Restore expression/partial indexes after routine rename and source retirement on all four providers.",
+      "invariant": "Original definitions and rows remain exact; later unique checks and writes use the restored bindings.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_index_bindings_preserve_boolean_domains_and_named_rows",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/index_bindings/typed_rows.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Build partial indexes over nested boolean domains and named table rows, rename their types/functions/tables, restore actual archives on all four providers, then insert, update and roll back.",
+      "invariant": "Declared whole-row types and boolean-domain predicates survive source retirement and restoration; exact index metadata and unique enforcement remain intact without retained input reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "renamed_relation_preserves_whole_row_scope_without_rebinding_column_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/stored/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Rename an indexed relation with a same-named column and whole-row key/predicate arguments.",
+      "invariant": "Only bound relation references change; key display names and included columns remain intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "table_rename_prepares_whole_row_bindings_without_changing_the_live_registry",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/indexes/references/tests.rs",
+      "capability": "Restored index expression binding",
+      "workload": "Prepare one index-registry successor with renamed whole-row keys and predicates.",
+      "invariant": "The original registry remains immutable and the complete prepared definition follows the renamed table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "boolean_conditions_observe_retained_fields_and_preserve_short_circuit_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/tests.rs",
+      "capability": "Retained Boolean conditions",
+      "workload": "Observe retained true/false fields in direct, negated, AND/OR and lazy conditions; reject reached truncated fields.",
+      "invariant": "Physical and inline Boolean conditions agree, malformed input keeps XX001, and unreachable operands remain unread.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_boolean_conditions_match_scalar_and_projected_truth_and_errors",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/projected_predicate/evaluate/tests.rs",
+      "capability": "Retained Boolean conditions",
+      "workload": "Observe retained true/false fields in direct, negated, AND/OR and lazy conditions; reject reached truncated fields.",
+      "invariant": "Physical and inline Boolean conditions agree, malformed input keeps XX001, and unreachable operands remain unread.",
       "case_names": [
         ""
       ]

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Relocate an owner's index names without rebuilding physical keys or replacing their identities.
+//! Prepare complete index names and bound row references before their owner moves, preserving physical keys and identities.
 
 use super::registry::{IndexRegistryChange, IndexRegistryContext, IndexRegistryPublication};
 use crate::row_locks::RelationLockMode;
@@ -65,15 +65,13 @@ pub fn prepare_table_indexes(
         else {
             continue;
         };
-        if current.relation.schema == target.schema {
-            continue;
-        }
         let destination = RelationIdentity::new(&target.schema, &current.relation.name);
-        ensure_name_available(names, &destination)?;
-        creation.reserve_name(&destination.qualified_name())?;
-        let mut renamed = current.clone();
-        renamed.relation = destination;
-        renamed.table_name.clone_from(&to);
+        if destination != current.relation {
+            ensure_name_available(names, &destination)?;
+            creation.reserve_name(&destination.qualified_name())?;
+        }
+        let renamed = super::references::table_rename(&current, source, target)
+            .map_err(|error| storage_error("rename index row references", &error))?;
         rows.push((current, renamed));
     }
     Ok(PreparedIndexRelocations { rows })

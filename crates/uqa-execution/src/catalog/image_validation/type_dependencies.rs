@@ -14,11 +14,11 @@ use uqa_sql::{
     SQLError,
 };
 
-pub fn validate(
-    snapshot: &CatalogReadSnapshot,
-    memory: &MemoryBudget,
-    cancellation: &CancellationToken,
-) -> Result<(), SQLError> {
+pub(super) fn references<'a>(
+    snapshot: &'a CatalogReadSnapshot,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+) -> Result<TypeReferences<'a>, SQLError> {
     let d = &snapshot.definitions;
     let rows = snapshot
         .tables
@@ -30,7 +30,7 @@ pub fn validate(
                 .values()
                 .map(StoredForeignTable::relation_oids),
         );
-    let types = TypeReferences::new(
+    TypeReferences::new(
         TypeReferenceInput {
             domains: &d.domains,
             enums: &d.enums,
@@ -41,7 +41,16 @@ pub fn validate(
         rows,
         memory,
         cancellation,
-    )?;
+    )
+}
+
+pub fn validate(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), SQLError> {
+    let d = &snapshot.definitions;
+    let types = references(snapshot, memory, cancellation)?;
     for function in d.sql_user_functions.values().flatten() {
         for parameter in &function.def.params {
             types.stored_name(&parameter.type_name)?;
