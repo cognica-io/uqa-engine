@@ -45079,7 +45079,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/native.rs",
       "capability": "Native index operation recovery",
-      "workload": "Deny native admission during index creation, deletion and rename, table/column rename, column removal and table removal over all four providers.",
+      "workload": "Deny native admission during index creation, deletion and rename, table/column rename, table/schema movement, column removal and table removal over all four providers.",
       "invariant": "Every failed operation reports 53200, preserves original index rows, table handles, native leases and stored metadata through rollback reload failure, and leaves unchanged query results and subsequent funded DDL usable.",
       "case_names": [
         "case_1_memory",
