@@ -14,6 +14,11 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
 
+mod types;
+pub use types::{
+    identify_routine_signature_types_from_input, RoutineTypeBindingError, RoutineTypeIdentityInput,
+};
+
 mod input;
 pub use input::{
     persisted_registry_relation_from_input, validate_persisted_routine_schema_from_input,

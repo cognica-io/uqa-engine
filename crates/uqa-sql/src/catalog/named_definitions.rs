@@ -232,6 +232,15 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
             .map(|value| &**value))
     }
 
+    /// Select native membership through the caller's retained comparisons without copying a query key or changing either definition generation.
+    pub async fn contains_key_from<Q: ?Sized, C: uqa_core::memory::MapKeyInput<Q, K>>(
+        &self,
+        name: &Q,
+        input: &mut C,
+    ) -> Result<bool, C::Error> {
+        Ok(self.get_from(name, input).await?.is_some())
+    }
+
     pub fn contains_key<Q: Ord + ?Sized>(&self, name: &Q) -> bool
     where
         K: Borrow<Q>,

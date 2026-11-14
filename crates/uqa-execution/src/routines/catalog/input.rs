@@ -26,6 +26,8 @@ mod authority;
 pub use authority::RoutineCatalogAuthority;
 mod definitions;
 pub use definitions::RoutineCatalogDefinitions;
+mod canonical;
+pub use canonical::{RoutineCatalogCanonicalInput, RoutineRestoreSchemaInput};
 
 /// Select and retain the physical routine record before interpreting any definition. A failed or abandoned input is terminal and publishes no registry state.
 pub struct RoutineCatalogInput {
@@ -47,17 +49,12 @@ impl RoutineCatalogInput {
             control.cancellation(),
             |mut reader| async move {
                 let mut work = reader.input();
-                work.checkpoint().await?;
-                let json = catalog.get_metadata_with_control(
-                    super::FUNCTIONS_METADATA_KEY,
+                read_physical(
+                    catalog.as_ref(),
                     limits,
-                    &retained,
-                )?;
-                RoutineCatalogDocument::read_from(
-                    json.as_deref().map(String::as_str),
                     allows_migration,
                     retained.memory(),
-                    retained.cancellation(),
+                    &retained,
                     &mut work,
                 )
                 .await
@@ -73,6 +70,26 @@ impl RoutineCatalogInput {
         self.input
             .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })
     }
+}
+
+async fn read_physical(
+    catalog: &dyn CatalogFacade,
+    limits: CatalogInputLimits,
+    allows_migration: bool,
+    memory: &MemoryBudget,
+    control: &StorageReadControl,
+    input: &mut AsyncImageInput<'_>,
+) -> StorageBackendResult<RoutineCatalogDocument> {
+    input.checkpoint().await?;
+    let json = catalog.get_metadata_with_control(super::FUNCTIONS_METADATA_KEY, limits, control)?;
+    RoutineCatalogDocument::read_from(
+        json.as_deref().map(String::as_str),
+        allows_migration,
+        memory,
+        control.cancellation(),
+        input,
+    )
+    .await
 }
 
 struct DefinitionGroup {

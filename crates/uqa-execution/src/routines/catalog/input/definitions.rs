@@ -16,6 +16,8 @@ use uqa_sql::{
     ast::CreateFunction, routines::security::binding::validate_routine_authority_from_input,
 };
 
+mod canonical;
+
 struct DefinitionGroup {
     name: Budgeted<String>,
     overloads: BudgetedVec<Produced<CreateFunction>>,

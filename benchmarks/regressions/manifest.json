@@ -67573,6 +67573,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_identity_parsing_matches_original_whitespace_decimal_and_array_grammar",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/identity/input/tests.rs",
+      "capability": "Retained stored type identities",
+      "workload": "Compare 745 original type-identity parser observations; scan long Unicode whitespace, leading zeroes and array suffixes, then render exact admitted identities across bounded work windows.",
+      "invariant": "Ordinary and retained paths preserve the original grammar without parser allocation; output retains its original allowance and both cancellation owners retire pending work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_identity_parsing_bounds_long_zeroes_dimensions_and_unicode_whitespace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/identity/input/tests.rs",
+      "capability": "Retained stored type identities",
+      "workload": "Compare 745 original type-identity parser observations; scan long Unicode whitespace, leading zeroes and array suffixes, then render exact admitted identities across bounded work windows.",
+      "invariant": "Ordinary and retained paths preserve the original grammar without parser allocation; output retains its original allowance and both cancellation owners retire pending work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_type_identity_rendering_retains_native_allowance_and_exact_suffixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/identity/input/tests.rs",
+      "capability": "Retained stored type identities",
+      "workload": "Compare 745 original type-identity parser observations; scan long Unicode whitespace, leading zeroes and array suffixes, then render exact admitted identities across bounded work windows.",
+      "invariant": "Ordinary and retained paths preserve the original grammar without parser allocation; output retains its original allowance and both cancellation owners retire pending work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_binding_preserves_original_field_order_and_native_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/types/tests.rs",
+      "capability": "Native routine signature type binding",
+      "workload": "Replace selected parameter and Scalar/SetOf type spellings, retain existing identities and untouched declarations, and interrupt each replacement boundary with independent resource failures.",
+      "invariant": "Native declaration buffers retain their original allowance, lookup order and unselected fields; replacements transfer exact capacity and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_binding_preserves_unselected_returns_and_lookup_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/types/tests.rs",
+      "capability": "Native routine signature type binding",
+      "workload": "Replace selected parameter and Scalar/SetOf type spellings, retain existing identities and untouched declarations, and interrupt each replacement boundary with independent resource failures.",
+      "invariant": "Native declaration buffers retain their original allowance, lookup order and unselected fields; replacements transfer exact capacity and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_binding_retires_every_pending_replacement_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/types/tests.rs",
+      "capability": "Native routine signature type binding",
+      "workload": "Replace selected parameter and Scalar/SetOf type spellings, retain existing identities and untouched declarations, and interrupt each replacement boundary with independent resource failures.",
+      "invariant": "Native declaration buffers retain their original allowance, lookup order and unselected fields; replacements transfer exact capacity and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_routine_type_binding_denial_retires_the_original_unpublished_declaration",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/types/tests.rs",
+      "capability": "Native routine signature type binding",
+      "workload": "Replace selected parameter and Scalar/SetOf type spellings, retain existing identities and untouched declarations, and interrupt each replacement boundary with independent resource failures.",
+      "invariant": "Native declaration buffers retain their original allowance, lookup order and unselected fields; replacements transfer exact capacity and failed candidates retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_catalog_input_preserves_alias_groups_type_binding_and_original_validation_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests.rs",
+      "capability": "Canonical stored routine input",
+      "workload": "Read actual SQLite KV routine metadata, complete authority and syntax before schema/type binding, compare the ordinary restoration result and diagnostic order, and interrupt pending candidates.",
+      "invariant": "Immutable selected source/schema generations survive later edits; bounded schema comparison includes empty groups, and canonicalization preserves original failure ordering and independent output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_catalog_input_finishes_all_authority_and_typed_fields_before_name_callbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests.rs",
+      "capability": "Canonical stored routine input",
+      "workload": "Read actual SQLite KV routine metadata, complete authority and syntax before schema/type binding, compare the ordinary restoration result and diagnostic order, and interrupt pending candidates.",
+      "invariant": "Immutable selected source/schema generations survive later edits; bounded schema comparison includes empty groups, and canonicalization preserves original failure ordering and independent output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_catalog_input_retains_selected_source_and_independent_native_output",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests.rs",
+      "capability": "Canonical stored routine input",
+      "workload": "Read actual SQLite KV routine metadata, complete authority and syntax before schema/type binding, compare the ordinary restoration result and diagnostic order, and interrupt pending candidates.",
+      "invariant": "Immutable selected source/schema generations survive later edits; bounded schema comparison includes empty groups, and canonicalization preserves original failure ordering and independent output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_catalog_input_retires_candidates_at_each_pending_schema_and_type_transition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests.rs",
+      "capability": "Canonical stored routine input",
+      "workload": "Read actual SQLite KV routine metadata, complete authority and syntax before schema/type binding, compare the ordinary restoration result and diagnostic order, and interrupt pending candidates.",
+      "invariant": "Immutable selected source/schema generations survive later edits; bounded schema comparison includes empty groups, and canonicalization preserves original failure ordering and independent output ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "canonical_routine_catalog_input_bounds_schema_comparison_for_empty_overloads",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/canonical/tests.rs",
+      "capability": "Canonical stored routine input",
+      "workload": "Read actual SQLite KV routine metadata, complete authority and syntax before schema/type binding, compare the ordinary restoration result and diagnostic order, and interrupt pending candidates.",
+      "invariant": "Immutable selected source/schema generations survive later edits; bounded schema comparison includes empty groups, and canonicalization preserves original failure ordering and independent output ownership.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

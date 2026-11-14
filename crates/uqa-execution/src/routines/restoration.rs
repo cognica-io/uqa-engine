@@ -47,17 +47,12 @@ fn identify_signature_types(schemas: &dyn RoutineRestoreSchemas, def: &mut Creat
             }
         }
     };
-    for parameter in &mut def.params {
-        identify(&mut parameter.type_name);
-    }
-    if let uqa_sql::ast::FunctionReturns::Scalar { type_name }
-    | uqa_sql::ast::FunctionReturns::SetOf { type_name } = &mut def.returns
-    {
+    for type_name in def.signature_type_names_mut() {
         identify(type_name);
     }
 }
 
-fn canonicalize_persisted_sql_functions(
+pub(super) fn canonicalize_persisted_sql_functions(
     schemas: &dyn RoutineRestoreSchemas,
     definitions: BTreeMap<String, Vec<CreateFunction>>,
 ) -> StorageBackendResult<(BTreeMap<String, Vec<CreateFunction>>, bool)> {
