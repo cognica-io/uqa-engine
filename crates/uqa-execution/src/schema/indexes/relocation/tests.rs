@@ -85,7 +85,11 @@ fn prepared_namespace_publication_preserves_index_metadata_without_reloading_tab
         let mut renamed = previous.clone();
         renamed.relation.schema = schema.into();
         renamed.table_name = format!("{schema}.renamed_items");
-        let publication = Publication::default();
+        let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+        let publication = Publication {
+            rows: RefCell::new(CatalogIndexes::with_budget(&memory)),
+            ..Publication::default()
+        };
         publication
             .rows
             .borrow_mut()
@@ -94,11 +98,14 @@ fn prepared_namespace_publication_preserves_index_metadata_without_reloading_tab
                 uqa_sql::ast::RelationPersistence::Permanent,
             )
             .unwrap();
-        PreparedIndexRelocations {
+        let prepared = PreparedIndexRelocations {
             rows: vec![(previous.clone(), renamed)],
         }
-        .publish(&publication)
+        .prepare_publication(&publication)
         .unwrap();
+        let occupied = memory.reserve(memory.available()).unwrap();
+        prepared.publish(&publication).unwrap();
+        drop(occupied);
         if schema == "before" {
             assert!(publication.removed.borrow().is_empty());
             assert!(publication.rows.borrow().contains_key(&previous.relation));
@@ -157,8 +164,9 @@ fn failed_late_native_index_relocation_admission_precedes_every_persistent_write
     let used = memory.used();
     let occupied = memory.reserve(memory.available() - (16 << 10)).unwrap();
     let error = PreparedIndexRelocations { rows: changes }
-        .publish(&publication)
-        .unwrap_err();
+        .prepare_publication(&publication)
+        .err()
+        .unwrap();
     assert_eq!(error.sqlstate(), Some("53200"));
     assert!(publication.removed.borrow().is_empty());
     assert!(publication.persisted.borrow().is_empty());

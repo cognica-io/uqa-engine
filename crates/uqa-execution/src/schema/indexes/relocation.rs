@@ -22,9 +22,19 @@ pub struct PreparedIndexRelocations {
 }
 
 impl PreparedIndexRelocations {
+    /// Admit the complete native generation after all destination locks and refreshes, before the owning relation changes.
+    pub fn prepare_publication(
+        self,
+        publication: &dyn IndexRegistryPublication,
+    ) -> Result<super::registry::PreparedIndexNameChange, SQLError> {
+        IndexRegistryChange::prepare_name_changes(publication, self.rows)
+            .map_err(|error| storage_error("prepare index names", &error))
+    }
+
     /// Every identity and destination lock was retained before the owning relation moved. Publication must not reload the partly moved catalog.
     pub fn publish(self, publication: &dyn IndexRegistryPublication) -> Result<(), SQLError> {
-        IndexRegistryChange::rename_with_publication(publication, &self.rows)
+        self.prepare_publication(publication)?
+            .publish(publication)
             .map_err(|error| storage_error("move index namespace", &error))
     }
 }

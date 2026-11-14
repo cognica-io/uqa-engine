@@ -205,9 +205,10 @@ impl SchemaMemberRelocation for Engine {
                 let moved = self
                     .try_rename_table_inner(&relation.identity, &to, indexes)
                     .map_err(|error| {
-                        SQLError::Internal(format!(
-                            "move table `{from}` to schema `{schema}`: {error}"
-                        ))
+                        uqa_execution::storage_errors::storage_error(
+                            &format!("move table `{from}` to schema `{schema}`"),
+                            &error,
+                        )
                     })?;
                 if !moved {
                     return Err(SQLError::Internal(format!(

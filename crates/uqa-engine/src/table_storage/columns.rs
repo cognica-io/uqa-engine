@@ -465,6 +465,9 @@ impl Engine {
                     table.persistence != uqa_sql::ast::RelationPersistence::Temporary
                 })
         };
+        let indexes = indexes.prepare_publication(self).map_err(|error| {
+            StorageBackendError::backend("prepare table index publication", error)
+        })?;
         let analyzers = self
             .durable
             .table_field_analyzers
@@ -483,9 +486,7 @@ impl Engine {
         drop(tables);
         *state.row_type_array_name.write() = array_name;
         self.rewrite_relation_rename_dependents(from_relation, to_relation)?;
-        indexes
-            .publish(self)
-            .map_err(|error| StorageBackendError::backend("publish table index rename", error))?;
+        indexes.publish(self)?;
         *self.durable.table_field_analyzers.write() = analyzers;
         if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;
