@@ -19,6 +19,9 @@ use uqa_core::{
     CancellationToken, RelationIdentity,
 };
 
+mod expressions;
+pub use expressions::{validate_bindings, IndexBindingContext};
+
 #[derive(Clone, Copy)]
 pub struct NativeIndexTable<'a> {
     pub name: &'a RelationIdentity,

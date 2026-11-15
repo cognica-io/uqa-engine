@@ -25,6 +25,39 @@ use shapes::{Field, Kind, Shape};
 mod queries;
 
 impl IndexKey {
+    /// Decode original scalar keys under the invoking allowance. No names, calls or values are rebound; query-valued keys are invalid stored index expressions.
+    pub fn read_stored(
+        text: &str,
+        memory: &uqa_core::memory::MemoryBudget,
+        original: &uqa_core::CancellationToken,
+        invoking: &uqa_core::CancellationToken,
+    ) -> Result<uqa_core::memory::Produced<Vec<Self>>, crate::SQLError> {
+        let values = Values {
+            memory,
+            original,
+            invoking,
+        };
+        let control = values.control();
+        let mut input = Input::new(text, control);
+        let first = input.next()?;
+        let keys = input.array(first, |input, token| {
+            let (key, memory) = if matches!(token, JsonToken::String(_)) {
+                let (name, memory) = input.text(token)?.into_parts();
+                (Self::Column(name), memory)
+            } else {
+                let (expression, memory) = input
+                    .boxed(token, |input, token| {
+                        input.schema_expression(token, &values)
+                    })?
+                    .into_parts();
+                (Self::Expression(expression), memory)
+            };
+            Ok(control.finish(key, memory)?)
+        })?;
+        input.end()?;
+        Ok(keys)
+    }
+
     /// Validate the complete stored key grammar, including ignored query/window expressions, and retain only ordinary string-column keys in their original order. Expression-valued column references remain expressions. This performs no SQL evaluation or catalog binding.
     pub async fn read_stored_columns_from(
         text: &str,

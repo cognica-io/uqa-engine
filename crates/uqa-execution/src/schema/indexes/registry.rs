@@ -116,31 +116,19 @@ impl IndexRegistryChange {
         previous: &CatalogIndexRow,
         renamed: CatalogIndexRow,
     ) -> StorageBackendResult<()> {
-        Self::rename_with_publication(context.publication, &[(previous.clone(), renamed)])
+        Self::prepare_name_changes(context.publication, vec![(previous.clone(), renamed)])?
+            .publish(context.publication)
     }
 
-    pub(super) fn rename_with_publication(
+    pub(super) fn prepare_name_changes(
         publication: &dyn IndexRegistryPublication,
-        changes: &[(CatalogIndexRow, CatalogIndexRow)],
-    ) -> StorageBackendResult<()> {
-        if changes.is_empty() {
-            return Ok(());
-        }
+        changes: Vec<(CatalogIndexRow, CatalogIndexRow)>,
+    ) -> StorageBackendResult<PreparedIndexNameChange> {
         let mut candidate = publication.index_catalog().as_ref().clone();
-        for (previous, renamed) in changes {
+        for (previous, renamed) in &changes {
             candidate.rename(&previous.relation, renamed.clone())?;
         }
-        for (previous, renamed) in changes {
-            publication.erase_index(previous, IndexPublicationKind::Names)?;
-            publication.persist_index(renamed, IndexPublicationKind::Names)?;
-        }
-        publication.publish_indexes(candidate);
-        for (_, renamed) in changes {
-            if renamed.index_type.eq_ignore_ascii_case("diskann") {
-                publication.rebind_diskann_index(renamed)?;
-            }
-        }
-        Ok(())
+        Ok(PreparedIndexNameChange { candidate, changes })
     }
 
     /// All identity reservations and schema candidate writes precede this non-refreshing publication path. The caller's schema transaction restores both registries if persistence or physical hydration fails.
@@ -194,6 +182,34 @@ impl IndexRegistryChange {
         }
         for row in &self.upserts {
             builds::rebind(context, row)?;
+        }
+        Ok(())
+    }
+}
+
+/// A fully admitted native index generation retained before its owning table changes.
+pub struct PreparedIndexNameChange {
+    candidate: CatalogIndexes,
+    changes: Vec<(CatalogIndexRow, CatalogIndexRow)>,
+}
+
+impl PreparedIndexNameChange {
+    /// Persist and install the retained generation without another native index allocation.
+    pub fn publish(self, publication: &dyn IndexRegistryPublication) -> StorageBackendResult<()> {
+        if self.changes.is_empty() {
+            return Ok(());
+        }
+        for (previous, renamed) in &self.changes {
+            if previous.relation != renamed.relation {
+                publication.erase_index(previous, IndexPublicationKind::Names)?;
+            }
+            publication.persist_index(renamed, IndexPublicationKind::Names)?;
+        }
+        publication.publish_indexes(self.candidate);
+        for (_, renamed) in &self.changes {
+            if renamed.index_type.eq_ignore_ascii_case("diskann") {
+                publication.rebind_diskann_index(renamed)?;
+            }
         }
         Ok(())
     }

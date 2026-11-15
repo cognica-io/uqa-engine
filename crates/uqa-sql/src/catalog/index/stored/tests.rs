@@ -45,3 +45,45 @@ fn renamed_stored_index_preserves_identity_display_names_and_sql_references() {
     assert_eq!(definition.key_names, ["old", "kept"]);
     assert_eq!(definition.catalog, identity);
 }
+
+#[test]
+fn renamed_relation_preserves_whole_row_scope_without_rebinding_column_names() {
+    let original = declaration(
+        "CREATE INDEX i ON items(items, row_key(items.*), (items.id + 0)) INCLUDE(id) WHERE row_enabled(items.*) AND items.enabled",
+    );
+    for (destination, local) in [
+        ("public.renamed", "renamed"),
+        ("moved.renamed", "renamed"),
+        ("\"Moved.Schema\".\"Moved.Name\"", "\"Moved.Name\""),
+    ] {
+        let expected = declaration(&format!(
+            "CREATE INDEX i ON {destination}(items, row_key({local}.*), ({local}.id + 0)) INCLUDE(id) WHERE row_enabled({local}.*) AND {local}.enabled",
+        ));
+        let mut keys = original.columns.clone();
+        let mut definition = IndexDefinition {
+            predicate: original.predicate.clone(),
+            included_columns: original.included_columns.clone(),
+            key_names: vec![
+                "items".into(),
+                "row_key".into(),
+                "qualified_key".into(),
+                "id".into(),
+            ],
+            ..Default::default()
+        };
+        rename_relation_references(
+            &mut keys,
+            &mut definition,
+            &uqa_core::RelationIdentity::new("public", "items"),
+            destination,
+        )
+        .unwrap();
+        assert_eq!(keys, expected.columns);
+        assert_eq!(definition.predicate, expected.predicate);
+        assert_eq!(definition.included_columns, expected.included_columns);
+        assert_eq!(
+            definition.key_names,
+            ["items", "row_key", "qualified_key", "id"]
+        );
+    }
+}

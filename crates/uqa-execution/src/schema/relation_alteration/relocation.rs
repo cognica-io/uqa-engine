@@ -41,7 +41,20 @@ struct PreparedSequenceRelocation {
 impl PreparedRelationSchemaMove {
     /// Publish only retained definitions after the owner and its types have moved, without another lock wait or catalog refresh.
     pub fn publish(self, context: &RelationSchemaContext<'_>) -> Result<(), SQLError> {
-        self.indexes.publish(context.indexes.publication)?;
+        self.publish_with_table_move(context, |indexes| {
+            indexes.publish(context.indexes.publication)
+        })
+    }
+
+    /// Transfer the retained index transition into the table move before publishing its owned sequences.
+    pub fn publish_with_table_move(
+        self,
+        context: &RelationSchemaContext<'_>,
+        move_table: impl FnOnce(
+            crate::schema::indexes::relocation::PreparedIndexRelocations,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        move_table(self.indexes)?;
         for sequence in self.sequences {
             crate::schema::sequences::lifecycle::publish_relocation(
                 &context.sequences,

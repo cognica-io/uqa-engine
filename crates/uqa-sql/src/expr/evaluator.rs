@@ -321,7 +321,7 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                             ctx.enum_comparison_state_at(0),
                         )? == Some(true)
                     }
-                    None => truthy(&eval(cond, ctx)?),
+                    None => truthy(&eval(cond, ctx)?)?,
                 };
                 if matched {
                     return eval(result, ctx);
@@ -355,7 +355,7 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             if matches!(v, Value::Null) {
                 return Ok(Value::Null);
             }
-            Ok(Value::Bool(!truthy(&v)))
+            Ok(Value::Bool(!truthy(&v)?))
         }
         Expr::And(items) => {
             // Kleene AND: FALSE dominates, otherwise NULL taints.
@@ -364,7 +364,7 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 let v = eval(item, ctx)?;
                 if matches!(v, Value::Null) {
                     saw_null = true;
-                } else if !truthy(&v) {
+                } else if !truthy(&v)? {
                     return Ok(Value::Bool(false));
                 }
             }
@@ -380,7 +380,7 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 let v = eval(item, ctx)?;
                 if matches!(v, Value::Null) {
                     saw_null = true;
-                } else if truthy(&v) {
+                } else if truthy(&v)? {
                     return Ok(Value::Bool(true));
                 }
             }

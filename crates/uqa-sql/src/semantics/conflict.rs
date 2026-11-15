@@ -22,6 +22,10 @@ pub use production::prepare_inference_predicate_with_control;
 
 pub trait ConflictCatalog {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
+    /// The selected relation's named row type; catalogs without a type identity retain an anonymous row.
+    fn relation_row_type(&self, _table: &str) -> Result<Option<crate::ColumnType>, SQLError> {
+        Ok(None)
+    }
     /// Lend declaration metadata after observing the same stored sequence dependencies as a description. Consumers inspect names, types and constraints, never rewritten default expressions.
     fn with_column_metadata_with_control(
         &self,

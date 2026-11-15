@@ -158,9 +158,10 @@ pub fn rename_schema_expr_relation(
     walk_schema_expr_mut(expression, &mut |node| {
         match node {
             crate::ast::Expr::QualifiedColumn { qualifier, .. }
-                if stored_relation_reference_matches(qualifier, from) =>
+                if qualifier == &from.name
+                    || stored_relation_reference_matches(qualifier, from) =>
             {
-                *qualifier = to.to_string();
+                *qualifier = RelationIdentity::parse_reference(to)?.1;
             }
             crate::ast::Expr::QualifiedStar(qualifier)
                 if qualifier == &from.name

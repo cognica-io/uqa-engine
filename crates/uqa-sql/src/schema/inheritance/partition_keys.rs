@@ -168,7 +168,7 @@ fn check_expression_key(
     let planned = context
         .partitions
         .schema
-        .plan_schema_expression(expression, columns)?;
+        .plan_schema_expression(expression, &crate::schema::expressions::row_schema(columns))?;
     if !planned.immutable {
         return Err(error(
             "42P17",

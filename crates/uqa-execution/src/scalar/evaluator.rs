@@ -306,7 +306,7 @@ fn eval_and(
         let value = eval_scalar_inner(item, context, control)?;
         if matches!(*value, Value::Null) {
             saw_null = true;
-        } else if !truthy(&value) {
+        } else if !truthy(&value)? {
             return plain(Value::Bool(false), control);
         }
     }
@@ -330,7 +330,7 @@ fn eval_or(
         let value = eval_scalar_inner(item, context, control)?;
         if matches!(*value, Value::Null) {
             saw_null = true;
-        } else if truthy(&value) {
+        } else if truthy(&value)? {
             return plain(Value::Bool(true), control);
         }
     }
@@ -497,7 +497,7 @@ fn eval_case(
                     None,
                 )? == Some(true)
             }
-            None => truthy(&condition),
+            None => truthy(&condition)?,
         };
         if matched {
             return eval_scalar_inner(result, context, control);

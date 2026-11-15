@@ -10,6 +10,8 @@ use uqa_core::RelationIdentity;
 fn fixture(provider: Provider, path: &std::path::Path) -> Engine {
     let source = provider.open(path);
     source.sql("CREATE TABLE root_a(id bigint) PARTITION BY RANGE(id); CREATE TABLE child_a PARTITION OF root_a DEFAULT; CREATE TABLE root_b(id bigint) PARTITION BY RANGE(id); CREATE TABLE child_b PARTITION OF root_b DEFAULT", &[]).unwrap();
+    // Join background maintenance before checking that private input leaves the source catalog unchanged.
+    source.release_automatic_statistics_client();
     let catalog = source.storage.catalog.as_ref().unwrap();
     for mut row in catalog.load_tables().unwrap() {
         let mut columns: Vec<uqa_sql::ast::ColumnDef> =

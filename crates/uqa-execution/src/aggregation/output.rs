@@ -282,7 +282,7 @@ pub(super) fn finish_group(
             if !uqa_sql::expr::truthy(&eval_scalar(
                 &having.expression,
                 &context.with_function_states(having.expression.calls()),
-            )?) {
+            )?)? {
                 return Ok(None);
             }
         }

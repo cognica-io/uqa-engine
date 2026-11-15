@@ -20,7 +20,7 @@ pub trait SchemaExpressionCatalog:
     fn plan_schema_expression(
         &self,
         expression: &crate::ast::Expr,
-        columns: &[ColumnDef],
+        schema: &crate::RowSchema,
     ) -> Result<super::expressions::PlannedSchemaExpression, SQLError>;
     fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility>;
     fn schema_expression_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, SQLError>;

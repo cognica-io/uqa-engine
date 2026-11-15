@@ -8,7 +8,6 @@
 
 use crate::{
     ast::{ColumnDef, Expr},
-    plpgsql::{bind_expr, ResolvedVariable, VariableResolver},
     schema::{ColumnIdentity, SchemaBindingContext},
     ColumnType, RowSchema, SQLError,
 };
@@ -61,14 +60,12 @@ pub fn bind_stored_check_expression(
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let schema = check_row_schema(&relation.name, columns, &row_type)?;
-    let typed = bind_expr(
+    let typed = super::super::expressions::bind_relation_row_references(
         expression,
-        &mut RelationReferences {
-            table,
-            qualifier,
-            local: &relation.name,
-            columns,
-        },
+        table,
+        qualifier,
+        &relation.name,
+        columns,
     )?;
     crate::schema::defaults::bind_stored_schema_expression_with_schema(
         context, expression, typed, &schema,
@@ -86,14 +83,12 @@ pub fn validate_check_expression_with_type(
 ) -> Result<(), SQLError> {
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let schema = check_row_schema(&relation.name, columns, row_type)?;
-    *expression = bind_expr(
+    *expression = super::super::expressions::bind_relation_row_references(
         expression,
-        &mut RelationReferences {
-            table,
-            qualifier,
-            local: &relation.name,
-            columns,
-        },
+        table,
+        qualifier,
+        &relation.name,
+        columns,
     )?;
     bind_whole_row_fields(expression, &schema)?;
     let original = crate::plan::ExpressionPlan::lower(expression.clone());
@@ -174,62 +169,6 @@ fn require_boolean(
         };
     }
     Ok(())
-}
-
-/// Normalize known relation spellings without evaluating values or changing analysis error order. Unknown names remain for the ordered analyzer to reject.
-struct RelationReferences<'a> {
-    table: &'a str,
-    qualifier: &'a str,
-    local: &'a str,
-    columns: &'a [ColumnDef],
-}
-
-impl RelationReferences<'_> {
-    fn matches(&self, qualifier: &str) -> bool {
-        [self.table, self.qualifier, self.local].contains(&qualifier)
-    }
-}
-
-impl VariableResolver for RelationReferences<'_> {
-    fn resolve_name(&mut self, _: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        _: &str,
-        _: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
-        Ok(
-            (self.matches(name) && !self.columns.iter().any(|column| column.name == name))
-                .then(|| Expr::QualifiedStar(self.local.into())),
-        )
-    }
-
-    fn rewrite_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Expr>, SQLError> {
-        Ok(self.matches(qualifier).then(|| Expr::QualifiedColumn {
-            qualifier: self.local.into(),
-            column: column.into(),
-        }))
-    }
-
-    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
-        Ok(self
-            .matches(qualifier)
-            .then(|| Expr::QualifiedStar(self.local.into())))
-    }
 }
 
 #[cfg(test)]

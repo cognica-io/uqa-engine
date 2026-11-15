@@ -30,7 +30,7 @@ fn bounded(engine: &Engine) -> MemoryBudget {
 fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("native-index.db"));
-    engine.sql("CREATE TABLE items(id integer, kept integer); INSERT INTO items VALUES (7, 9); CREATE INDEX a_index ON items(id); CREATE INDEX b_index ON items(kept); CREATE INDEX c_index ON items(id, kept); CREATE FUNCTION identity_value(x integer) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT x $$; CREATE INDEX routine_index ON items(identity_value(id))", &[]).unwrap();
+    engine.sql("CREATE SCHEMA moved; CREATE TABLE items(id integer, kept integer); INSERT INTO items VALUES (7, 9); CREATE INDEX a_index ON items(id); CREATE INDEX b_index ON items(kept); CREATE INDEX c_index ON items(id, kept); CREATE FUNCTION identity_value(x integer) RETURNS integer LANGUAGE SQL IMMUTABLE AS $$ SELECT x $$; CREATE INDEX routine_index ON items(identity_value(id))", &[]).unwrap();
     let memory = bounded(&engine);
     let stored = || {
         engine
@@ -46,6 +46,8 @@ fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] pro
         "ALTER INDEX b_index RENAME TO renamed_index",
         "ALTER TABLE items RENAME COLUMN id TO renamed_id",
         "ALTER TABLE items RENAME TO renamed_items",
+        "ALTER TABLE items SET SCHEMA moved",
+        "ALTER SCHEMA public RENAME TO renamed_public",
         "ALTER TABLE items DROP COLUMN id",
         "DROP TABLE items",
         "ALTER FUNCTION identity_value(integer) RENAME TO renamed_value",
@@ -77,7 +79,9 @@ fn failed_native_index_admission_preserves_catalog_rows_and_recovery(#[case] pro
         assert_eq!(tables.len(), after.len());
         for (name, table) in tables.iter() {
             assert!(
-                Arc::ptr_eq(table, &after[name]),
+                after
+                    .get(name)
+                    .is_some_and(|current| Arc::ptr_eq(table, current)),
                 "{provider:?}, {statement}: original table {name:?}"
             );
         }

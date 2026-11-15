@@ -128,7 +128,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                 Some(action_row),
                 params,
             )?;
-            if !uqa_sql::expr::truthy(&value) {
+            if !uqa_sql::expr::truthy(&value)? {
                 continue;
             }
         }
