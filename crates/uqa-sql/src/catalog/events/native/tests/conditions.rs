@@ -60,6 +60,7 @@ fn native_rule_conditions_require_complete_distinct_event_row_bindings() {
     for broken in [
         "plan",
         "binding",
+        "unbound",
         "definition",
         "same",
         "zero",
@@ -70,6 +71,10 @@ fn native_rule_conditions_require_complete_distinct_event_row_bindings() {
         match broken {
             "plan" => value.condition_plan = None,
             "binding" => value.condition_binding = None,
+            "unbound" => {
+                value.condition_plan = None;
+                value.condition_binding = None;
+            }
             "definition" => value.definition.condition = None,
             "side" => value.definition.event = crate::ast::RuleEvent::Insert,
             _ => {

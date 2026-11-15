@@ -128,12 +128,17 @@ fn condition(
     catalog: &impl NativeEventCatalog,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    match (&rule.condition_plan, &rule.condition_binding) {
-        (None, None) => Ok(()),
-        (Some(plan), Some(binding)) if rule.definition.condition.is_some() => binding
-            .validate_captured(rule.definition.event, plan, control, &mut |column| {
+    match (
+        &rule.definition.condition,
+        &rule.condition_plan,
+        &rule.condition_binding,
+    ) {
+        (None, None, None) => Ok(()),
+        (Some(_), Some(plan), Some(binding)) => {
+            binding.validate_captured(rule.definition.event, plan, control, &mut |column| {
                 live_column(catalog, owner, column, control)
-            }),
+            })
+        }
         _ => Err(invalid("incomplete captured rule condition")),
     }
 }

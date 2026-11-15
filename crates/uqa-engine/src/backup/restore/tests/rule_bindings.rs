@@ -13,6 +13,11 @@ use uqa_sql::{catalog::events::StoredRule, ScalarExpr};
 mod preserved;
 
 fn corrupt(rule: &mut StoredRule, damage: &str) {
+    if damage == "unbound" {
+        rule.condition_plan = None;
+        rule.condition_binding = None;
+        return;
+    }
     if damage == "missing" {
         rule.condition_binding = None;
         return;
@@ -50,7 +55,7 @@ fn corrupt(rule: &mut StoredRule, damage: &str) {
 #[case::redb(Provider::Redb)]
 fn restored_rule_bindings_reject_invalid_original_row_references(
     #[case] provider: Provider,
-    #[values("identity", "attribute", "missing", "shared")] damage: &str,
+    #[values("identity", "attribute", "missing", "shared", "unbound")] damage: &str,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let repository = repository(&directory.path().join("repository"));
@@ -115,7 +120,7 @@ fn restored_rule_bindings_reject_invalid_original_row_references(
         .expect("rule validation must finish");
     let expected = if matches!(provider, Provider::Memory) {
         "rule condition"
-    } else if damage == "missing" {
+    } else if matches!(damage, "missing" | "unbound") {
         "rule expressions require an initial-open migration"
     } else {
         "is outside the bound row scope"
