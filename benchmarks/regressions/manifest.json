@@ -69135,6 +69135,35 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_relations_validate_original_syntax_independently_of_bound_plans",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Captured routine relation closure",
+      "workload": "Inspect original SQL-standard query, CTE, subquery and mutation targets independently of separately retained plans.",
+      "invariant": "A valid syntax owner cannot hide a missing relation in the bound plan, or the reverse; validation preserves both owners and retires its admitted workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_reject_missing_original_relations_with_valid_retained_plans",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine relation closure",
+      "workload": "Damage only the stored declaration of an originally valid routine and restore its archive on all four providers after retiring the source.",
+      "invariant": "Missing original relation references fail before publication and retire all restore allocations, including when an independently retained memory plan is valid.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

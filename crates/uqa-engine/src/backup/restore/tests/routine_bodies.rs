@@ -34,48 +34,61 @@ fn restored_routine_bodies_reject_parameters_outside_their_declared_scope(
         for ordinal in [0, 2] {
             let directory = tempfile::tempdir().unwrap();
             let repository = repository(&directory.path().join("repository"));
-            let source = provider.open(&directory.path().join("source"));
-            source.sql("CREATE FUNCTION saved(n integer) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT n; END", &[]).unwrap();
-            let root = if let Some(persistent) = source.storage.provider.clone() {
-                drop(source);
-                let session = persistent.open_session().unwrap();
-                let key = "sql_functions_json";
-                let mut record: serde_json::Value =
-                    serde_json::from_str(&session.catalog.get_metadata(key).unwrap().unwrap())
-                        .unwrap();
-                let selected = &mut record["definitions"]["public.saved"][0];
-                let mut definition: CreateFunction =
-                    serde_json::from_value(selected.clone()).unwrap();
-                damage(&mut definition, default, ordinal);
-                *selected = serde_json::to_value(definition).unwrap();
-                session
-                    .catalog
-                    .set_metadata(key, &record.to_string())
-                    .unwrap();
-                drop(session);
-                capture_provider(persistent.as_ref(), &repository)
-            } else {
-                {
-                    let mut routines = source.durable.sql_user_functions.write();
-                    let original = &routines["public.saved"][0];
-                    let mut definition = original.def.clone();
-                    damage(&mut definition, default, ordinal);
-                    let changed = SQLUserFunction::new(definition, original.body.clone()).shared();
-                    routines
-                        .insert("public.saved".into(), vec![changed])
-                        .unwrap();
-                }
-                let root = capture(&source, &repository, None);
-                drop(source);
-                root
-            };
+            let root = capture_changed_definition(
+                provider,
+                &directory.path().join("source"),
+                &repository,
+                |definition| damage(definition, default, ordinal),
+            );
             reject(
                 provider,
                 &repository,
                 root,
                 &directory.path().join("restored"),
+                "parameter",
             );
         }
+    }
+}
+
+fn capture_changed_definition(
+    provider: Provider,
+    path: &std::path::Path,
+    repository: &LocalRepository,
+    damage: impl FnOnce(&mut CreateFunction),
+) -> BackupRoot {
+    let source = provider.open(path);
+    source.sql("CREATE FUNCTION saved(n integer) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT n; END", &[]).unwrap();
+    if let Some(persistent) = source.storage.provider.clone() {
+        drop(source);
+        let session = persistent.open_session().unwrap();
+        let key = "sql_functions_json";
+        let mut record: serde_json::Value =
+            serde_json::from_str(&session.catalog.get_metadata(key).unwrap().unwrap()).unwrap();
+        let selected = &mut record["definitions"]["public.saved"][0];
+        let mut definition: CreateFunction = serde_json::from_value(selected.clone()).unwrap();
+        damage(&mut definition);
+        *selected = serde_json::to_value(definition).unwrap();
+        session
+            .catalog
+            .set_metadata(key, &record.to_string())
+            .unwrap();
+        drop(session);
+        capture_provider(persistent.as_ref(), repository)
+    } else {
+        {
+            let mut routines = source.durable.sql_user_functions.write();
+            let original = &routines["public.saved"][0];
+            let mut definition = original.def.clone();
+            damage(&mut definition);
+            let changed = SQLUserFunction::new(definition, original.body.clone()).shared();
+            routines
+                .insert("public.saved".into(), vec![changed])
+                .unwrap();
+        }
+        let root = capture(&source, repository, None);
+        drop(source);
+        root
     }
 }
 
@@ -84,6 +97,7 @@ fn reject(
     repository: &LocalRepository,
     root: BackupRoot,
     path: &std::path::Path,
+    expected: &str,
 ) {
     let control = StorageReadControl::with_limit(32 << 20);
     let authority = Engine::new();
@@ -104,7 +118,7 @@ fn reject(
         }
     };
     assert!(
-        error.to_string().contains("parameter"),
+        error.to_string().contains(expected),
         "{provider:?}: {error}"
     );
     assert_eq!(job.phase(), RestorePhase::Failed);
@@ -236,4 +250,33 @@ fn restored_routine_bodies_preserve_input_positions_effects_and_lazy_compilation
         reopened.sql("TRUNCATE routine_log", &[]).unwrap();
         assert_eq!(observations(&reopened), expected);
     }
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restored_routine_bodies_reject_missing_original_relations_with_valid_retained_plans(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = repository(&directory.path().join("repository"));
+    let root = capture_changed_definition(
+        provider,
+        &directory.path().join("source"),
+        &repository,
+        |definition| {
+            definition.body = FunctionBody::Statements(
+                uqa_sql::compile("SELECT id FROM public.missing").unwrap(),
+            );
+        },
+    );
+    reject(
+        provider,
+        &repository,
+        root,
+        &directory.path().join("restored"),
+        "missing",
+    );
 }
