@@ -123,6 +123,14 @@ pub trait PrivilegeCteCatalog {
     }
     fn privilege_subject(&self) -> Result<&RoleReference, SQLError>;
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AnalysisPurpose {
+    Authorization,
+    References,
+    StoredDependencies,
+}
+
 pub struct PrivilegeScope<'a, Queries = Vec<QueryPlan>> {
     pub catalog: &'a dyn PrivilegeCatalog,
     pub resolution: BindingResolution,
@@ -130,7 +138,7 @@ pub struct PrivilegeScope<'a, Queries = Vec<QueryPlan>> {
     pub scalar_subqueries: Queries,
     local_ctes: Named<Cow<'a, CtePlan>>,
     control: OwnedProductionControl,
-    pub(super) include_authorization_only_columns: bool,
+    pub(super) purpose: AnalysisPurpose,
     pub(super) relation_privilege_subject: Option<Produced<RoleReference>>,
 }
 impl<'a> PrivilegeScope<'a> {
@@ -147,7 +155,7 @@ impl<'a> PrivilegeScope<'a> {
             scalar_subqueries,
             local_ctes: Named::new(),
             control: ProductionControl::uncontrolled().capture(),
-            include_authorization_only_columns: true,
+            purpose: AnalysisPurpose::Authorization,
             relation_privilege_subject: None,
         }
     }
@@ -168,7 +176,7 @@ impl<'a> PrivilegeScope<'a, &'a [QueryPlan]> {
             scalar_subqueries,
             local_ctes: Named::new(),
             control: ProductionControl::uncontrolled().capture(),
-            include_authorization_only_columns: true,
+            purpose: AnalysisPurpose::Authorization,
             relation_privilege_subject: None,
         }
     }
@@ -189,7 +197,7 @@ impl<'a> PrivilegeScope<'a, &'a [QueryPlan]> {
             scalar_subqueries,
             local_ctes: Named::new(),
             control: control.capture(),
-            include_authorization_only_columns: true,
+            purpose: AnalysisPurpose::Authorization,
             relation_privilege_subject: None,
         }
     }
@@ -242,7 +250,7 @@ impl<'a, Queries: AsRef<[QueryPlan]>> PrivilegeScope<'a, Queries> {
             scalar_subqueries: self.scalar_subqueries.as_ref(),
             local_ctes,
             control: self.control.clone(),
-            include_authorization_only_columns: self.include_authorization_only_columns,
+            purpose: self.purpose,
             relation_privilege_subject: self
                 .relation_privilege_subject
                 .as_ref()

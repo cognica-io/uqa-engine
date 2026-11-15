@@ -14,6 +14,9 @@ use super::{
 
 use uqa_core::memory::{OwnedMap, OwnedSet, Produced};
 
+pub(super) mod stored;
+pub use stored::{stored_expression, stored_plan};
+
 pub type ColumnDependencies = OwnedMap<Produced<String>, OwnedSet<Produced<String>>>;
 
 pub fn required(
@@ -21,7 +24,7 @@ pub fn required(
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<ColumnDependencies, SQLError> {
     let mut scope = scope.reborrow()?;
-    scope.include_authorization_only_columns = false;
+    scope.purpose = super::context::AnalysisPurpose::References;
     let mut universe = SourceLineage::default();
     let mut required = Required::new();
     analyze_query_block(
@@ -89,7 +92,7 @@ pub fn for_source_expressions(
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<ColumnDependencies, SQLError> {
     let mut scope = scope.reborrow()?;
-    scope.include_authorization_only_columns = false;
+    scope.purpose = super::context::AnalysisPurpose::References;
     let (_, required) = super::source_expression_dependencies(source, expressions, &scope)?;
     by_relation(required, &scope)
 }
@@ -102,7 +105,7 @@ pub fn for_target_expressions(
     scope: &CteScope<'_, impl AsRef<[crate::plan::QueryPlan]>>,
 ) -> Result<ColumnDependencies, SQLError> {
     let mut scope = scope.reborrow()?;
-    scope.include_authorization_only_columns = false;
+    scope.purpose = super::context::AnalysisPurpose::References;
     let (_, required) = super::table_expression_dependencies(
         table,
         qualifiers.iter().map(String::as_str),

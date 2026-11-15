@@ -15,6 +15,9 @@ use crate::{
 };
 use uqa_core::{memory::ProductionControl, RelationIdentity};
 
+pub mod bindings;
+pub mod dependencies;
+
 /// Read the selected immutable catalog. Implementations supply existing native layouts and the ordinary virtual/graph metadata; they do not compile stored SQL or resolve a new search path.
 pub trait NativeEventCatalog {
     fn kind(&self, relation: &RelationIdentity) -> Result<Option<&'static str>, SQLError>;
@@ -64,6 +67,7 @@ pub fn validate(
             if !matches!(relation(catalog, owner, control)?, "table" | "view") {
                 return Err(invalid("rule owning relation kind"));
             }
+            condition(rule, owner, catalog, control)?;
             if let Some(dependencies) = &rule.dependencies {
                 for dependency in &dependencies.relations {
                     relation(catalog, dependency, control)?;
@@ -119,6 +123,34 @@ fn live_column(
     }
     control.check()?;
     Ok(())
+}
+
+fn condition(
+    rule: &StoredRule,
+    owner: &RelationIdentity,
+    catalog: &impl NativeEventCatalog,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    if let Some((plan, binding)) = condition_parts(rule)? {
+        binding.validate_captured(rule.definition.event, plan, control, &mut |column| {
+            live_column(catalog, owner, column, control)
+        })?;
+    }
+    Ok(())
+}
+
+fn condition_parts(
+    rule: &StoredRule,
+) -> Result<Option<(&ExpressionPlan, &super::RuleConditionBinding)>, SQLError> {
+    match (
+        &rule.definition.condition,
+        &rule.condition_plan,
+        &rule.condition_binding,
+    ) {
+        (None, None, None) => Ok(None),
+        (Some(_), Some(plan), Some(binding)) => Ok(Some((plan, binding))),
+        _ => Err(invalid("incomplete captured rule condition")),
+    }
 }
 
 /// Reuse native plan traversal for nested/mutation CTEs and fixed condition subqueries. OLD/NEW scalar references name no relation source; FROM items still require ordinary CTE or catalog resolution. Missing legacy dependency summaries cannot hide concrete action targets.

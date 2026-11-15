@@ -185,6 +185,7 @@ pub(super) struct SourceLineage {
     pub qualifiers: Named<Columns>,
     pub system_qualifiers: Named<Names>,
     pub tables: Named<Names>,
+    pub event_row: bool,
 }
 
 impl SourceLineage {
@@ -299,6 +300,7 @@ impl SourceLineage {
     pub fn copy(&self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
         let mut output = Self {
             output: self.output.copy(control)?,
+            event_row: self.event_row,
             ..Self::default()
         };
         for (name, columns) in &self.qualifiers {

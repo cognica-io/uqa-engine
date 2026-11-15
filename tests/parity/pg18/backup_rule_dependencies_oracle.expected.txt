@@ -1,0 +1,14 @@
+column:changed:items.item_id
+column:changed:items.value
+column:changed:lookup.id
+column:changed:rule_log.entry
+column:inserted:items.item_id
+column:inserted:lookup.id
+column:inserted:rule_log.entry
+column:physical:rule_log.entry
+column:quiet:rule_log.entry
+column:retained:items.item_id
+column:retained:lookup.id
+column:retained:rule_log.entry
+column:whole:rule_log.entry
+routine:quiet:rule_renamed_never()

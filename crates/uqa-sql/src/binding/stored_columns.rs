@@ -308,9 +308,7 @@ impl<'a> StoredColumnBinder<'a> {
         } else {
             scope.insert_qualifier(qualifier, &output);
             scope.insert_qualifier(name, &output);
-            if let Some((_, local)) = name.rsplit_once('.') {
-                scope.insert_qualifier(local.trim_matches('"'), &output);
-            }
+            scope.insert_qualifier(&relation.name, &output);
         }
         Ok(scope)
     }
@@ -639,7 +637,9 @@ impl<'a> StoredColumnBinder<'a> {
             self.bind_expr(expression, &scopes, &context)?;
         }
         for expression in &mut select.distinct_on {
-            self.bind_expr(expression, &scopes, &context)?;
+            if !is_output_alias(expression, &output_names) {
+                self.bind_expr(expression, &scopes, &context)?;
+            }
         }
         if let Some(set) = &mut select.set_op {
             if let Some(left) = &mut set.left {

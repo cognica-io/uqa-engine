@@ -210,6 +210,7 @@ impl RuleConditionBinding {
     }
 }
 
+mod native;
 mod production;
 
 #[cfg(test)]

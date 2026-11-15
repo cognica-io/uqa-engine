@@ -32,6 +32,76 @@ impl Catalog {
 }
 
 #[test]
+fn stored_distinct_on_keeps_output_aliases_and_qualified_input_columns() {
+    let catalog = Catalog(vec!["original".into(), "other".into()]);
+    for (distinct, expected) in [
+        ("other", vec!["original"]),
+        ("inputs.other", vec!["original", "other"]),
+    ] {
+        let mut statement = crate::compile(&format!(
+            "SELECT DISTINCT ON ({distinct}) original AS other FROM public.inputs ORDER BY {distinct}"
+        )).unwrap().remove(0);
+        bind_rule_action_column_dependencies(catalog.context(), &mut statement).unwrap();
+        let references = stored_statement_references(catalog.context(), &statement).unwrap();
+        assert!(
+            references.unresolved.is_empty(),
+            "{:?}",
+            references.unresolved
+        );
+        assert_eq!(
+            references.dependencies,
+            expected
+                .into_iter()
+                .map(|column| RuleColumnDependency {
+                    relation: RelationIdentity::new("public", "inputs"),
+                    column: column.into(),
+                })
+                .collect()
+        );
+        let Statement::Select(select) = statement else {
+            panic!("query")
+        };
+        if distinct == "other" {
+            assert!(matches!(&select.distinct_on[0], Expr::Column(name) if name == "other"));
+        }
+    }
+}
+
+#[test]
+fn stored_quoted_relation_names_do_not_shadow_correlated_aliases() {
+    struct Names;
+    impl StoredColumnCatalog for Names {
+        fn stored_relation_column_names(&self, _: &str) -> Result<Option<Vec<String>>, SQLError> {
+            Ok(Some(vec!["id".into()]))
+        }
+    }
+    impl crate::routines::merge_columns::StoredMergeColumnCatalog for Names {
+        fn stored_merge_target_definitions(&self, _: &str) -> Option<Vec<crate::ast::ColumnDef>> {
+            None
+        }
+    }
+    let context = StoredColumnBindingContext {
+        sources: &Names,
+        merge: &Names,
+    };
+    for (query, relation) in [
+        ("SELECT 1 FROM public.inputs AS b WHERE EXISTS (SELECT 1 FROM public.\"a.b\" WHERE b.id>0)", "public.inputs"),
+        ("SELECT \"a.b\".id FROM public.\"a.b\"", "public.\"a.b\""),
+        ("SELECT \"My Table\".id FROM public.\"My Table\"", "public.\"My Table\""),
+        ("SELECT \"a\"\"b\".id FROM public.\"a\"\"b\"", "public.\"a\"\"b\""),
+    ] {
+        let mut statement = crate::compile(query).unwrap().remove(0);
+        bind_rule_action_column_dependencies(context, &mut statement).unwrap();
+        let references = stored_statement_references(context, &statement).unwrap();
+        assert!(references.unresolved.is_empty(), "{query}: {:?}", references.unresolved);
+        assert_eq!(references.dependencies, BTreeSet::from([RuleColumnDependency {
+            relation: RelationIdentity::from_legacy_name(relation).unwrap(),
+            column: "id".into(),
+        }]), "{query}");
+    }
+}
+
+#[test]
 fn stored_lateral_join_tracks_preceding_columns_across_rename() {
     let original = Catalog(vec!["original".into(), "unused".into()]);
     let renamed = Catalog(vec!["renamed".into(), "unused".into()]);
