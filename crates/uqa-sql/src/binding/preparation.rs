@@ -449,6 +449,39 @@ pub(crate) fn analyze_stored_scalar_with_control(
     value.ty.map(|ty| ty.into_produced(control)).transpose()
 }
 
+/// Borrow a captured condition and its nested queries; retain only analysis scratch and never apply recorded input rewrites.
+pub(crate) fn validate_stored_rule_condition_with_control(
+    routines: &dyn RoutineResolution,
+    expression: &crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    whole_rows: [Option<crate::plan::OwnedScalarExpr>; 2],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    scope.scalar_binding = super::ScalarBindingMode::References;
+    scope.preserve_syntax_shape = true;
+    scope.stored_expression_outer = Some(input.clone());
+    scope.stored_whole_rows = whole_rows;
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut scope,
+        parameters: ParameterTypes::fixed_with_control(&[], control)?.with_reference_retention(),
+        schema_expression: None,
+        bound_condition_queries: None,
+    };
+    for query in &expression.subqueries {
+        analysis.query(query, Some(input))?;
+    }
+    analysis.boolean_expression(&expression.scalar, input, &expression.subqueries, "WHERE")?;
+    analysis
+        .parameters
+        .collations
+        .validate_expression(&expression.scalar)?;
+    control.check()?;
+    Ok(())
+}
+
 /// Share expression analysis with ordinary output binding while borrowing its lexical scope and fixed parameters.
 pub(super) fn projection_metadata(
     scope: &mut SchemaScope,

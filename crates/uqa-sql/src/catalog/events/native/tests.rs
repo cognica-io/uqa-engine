@@ -11,6 +11,8 @@ use crate::{
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod conditions;
+
 struct Catalog;
 
 impl NativeEventCatalog for Catalog {
@@ -240,12 +242,26 @@ fn native_rule_conditions_preserve_legacy_and_bound_reference_validation() {
                 rule.condition_plan = Some(ExpressionPlan::lower(
                     rule.definition.condition.as_ref().unwrap().clone(),
                 ));
-                rule.definition.condition = None;
+                rule.condition_binding = Some(super::super::RuleConditionBinding::for_event(
+                    &["id".into()],
+                    rule.definition.event,
+                ));
             }
-            assert_eq!(
-                check(&TriggerCatalog::new(), &rules(rule)).is_ok(),
-                target == "public.target"
-            );
+            let control = ProductionControl::uncontrolled();
+            let inspected = visit_rule_relations(&rule, &control, &mut |reference, _| {
+                let identity = bound_relation_identity_with_control(reference, &control)?;
+                relation(&Catalog, &identity, &control).map(|_| ())
+            });
+            assert_eq!(inspected.is_ok(), target == "public.target");
+            let admitted = check(&TriggerCatalog::new(), &rules(rule));
+            if bound {
+                assert_eq!(admitted.is_ok(), target == "public.target");
+            } else {
+                assert!(admitted
+                    .unwrap_err()
+                    .to_string()
+                    .contains("incomplete captured rule condition"));
+            }
         }
     }
 }

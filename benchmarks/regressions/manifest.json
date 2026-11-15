@@ -69016,6 +69016,358 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_rule_conditions_reject_unowned_captured_row_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_require_complete_distinct_event_row_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_visit_correlated_and_cte_query_row_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_reject_execution_only_implicit_row_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_work_retires_memory_on_denial_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_bindings_reject_invalid_original_row_references",
+      "cases": 48,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Reject twelve kinds of captured row, condition-type and dependency-summary corruption through all four actual provider archives.",
+      "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
+      "case_names": [
+        "case_1_memory::damage_01___identity__",
+        "case_1_memory::damage_02___attribute__",
+        "case_1_memory::damage_03___missing__",
+        "case_1_memory::damage_04___shared__",
+        "case_1_memory::damage_05___unbound__",
+        "case_1_memory::damage_06___type__",
+        "case_1_memory::damage_07___dependencies__",
+        "case_1_memory::damage_08___dependencies_column__",
+        "case_1_memory::damage_09___dependencies_extra_column__",
+        "case_1_memory::damage_10___dependencies_extra_relation__",
+        "case_1_memory::damage_11___dependencies_routine__",
+        "case_1_memory::damage_12___dependencies_routine_identity__",
+        "case_2_sqlite_native::damage_01___identity__",
+        "case_2_sqlite_native::damage_02___attribute__",
+        "case_2_sqlite_native::damage_03___missing__",
+        "case_2_sqlite_native::damage_04___shared__",
+        "case_2_sqlite_native::damage_05___unbound__",
+        "case_2_sqlite_native::damage_06___type__",
+        "case_2_sqlite_native::damage_07___dependencies__",
+        "case_2_sqlite_native::damage_08___dependencies_column__",
+        "case_2_sqlite_native::damage_09___dependencies_extra_column__",
+        "case_2_sqlite_native::damage_10___dependencies_extra_relation__",
+        "case_2_sqlite_native::damage_11___dependencies_routine__",
+        "case_2_sqlite_native::damage_12___dependencies_routine_identity__",
+        "case_3_sqlite_kv::damage_01___identity__",
+        "case_3_sqlite_kv::damage_02___attribute__",
+        "case_3_sqlite_kv::damage_03___missing__",
+        "case_3_sqlite_kv::damage_04___shared__",
+        "case_3_sqlite_kv::damage_05___unbound__",
+        "case_3_sqlite_kv::damage_06___type__",
+        "case_3_sqlite_kv::damage_07___dependencies__",
+        "case_3_sqlite_kv::damage_08___dependencies_column__",
+        "case_3_sqlite_kv::damage_09___dependencies_extra_column__",
+        "case_3_sqlite_kv::damage_10___dependencies_extra_relation__",
+        "case_3_sqlite_kv::damage_11___dependencies_routine__",
+        "case_3_sqlite_kv::damage_12___dependencies_routine_identity__",
+        "case_4_redb::damage_01___identity__",
+        "case_4_redb::damage_02___attribute__",
+        "case_4_redb::damage_03___missing__",
+        "case_4_redb::damage_04___shared__",
+        "case_4_redb::damage_05___unbound__",
+        "case_4_redb::damage_06___type__",
+        "case_4_redb::damage_07___dependencies__",
+        "case_4_redb::damage_08___dependencies_column__",
+        "case_4_redb::damage_09___dependencies_extra_column__",
+        "case_4_redb::damage_10___dependencies_extra_relation__",
+        "case_4_redb::damage_11___dependencies_routine__",
+        "case_4_redb::damage_12___dependencies_routine_identity__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_bindings_preserve_correlated_rows_and_live_column_layout",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings/preserved.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Compare PostgreSQL rule effects and exact catalog dependency edges after column changes, archive retirement, rollback and persistent reopen.",
+      "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_types_keep_captured_positions_and_nested_boolean_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Analyze stored conditions with moved live column positions, correlated subqueries, CTEs and unevaluated division.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_types_reject_invalid_scalar_and_nested_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Reject non-Boolean and invalid row, parameter, aggregate, window and set inputs across condition scopes.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_type_analysis_retires_denied_and_cancelled_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Deny analysis growth and cancel each owning request while inspecting a correlated condition.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_condition_types_join_original_table_and_view_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/event_bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Join immutable table and view descriptors with valid and corrupt stored conditions.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_condition_types_retire_denied_and_cancelled_catalog_analysis",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/event_bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Deny retained catalog analysis and cancel private view-condition verification.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_match_nested_columns_targets_and_shadowed_event_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_reject_missing_and_extra_summary_entries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependency_projection_retires_denial_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_validate_captured_query_columns_independently_of_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_preserve_captured_source_columns_after_layout_changes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_match_selected_routine_identity_name_and_signature",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "restored_analyzer_image_keeps_request_ownership_out_of_shared_pipeline_caches",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/shared.rs",
+      "capability": "Private restored analyzer image ownership",
+      "workload": "Restore from cold and populated shared pipeline caches, retain an unrelated ordinary reader, then retire the private image.",
+      "invariant": "The private image preserves exact bytes without replacing or adopting the shared cache; its allowance reaches zero while ordinary readers remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_distinct_on_keeps_output_aliases_and_qualified_input_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_quoted_relation_names_do_not_shadow_correlated_aliases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_preserve_output_aliases_and_quoted_relation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_scopes_preserve_distinct_aliases_and_quoted_correlations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings/scopes.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Restore six rules across memory, native SQLite, SQLite Key/Value and redb after source retirement; compare eight PostgreSQL effects and seven dependency edges before publication and after reopen.",
+      "invariant": "Original aliases and quoted relation scopes survive archive retirement, rollback, later writes and persistent reopen, and every restore reservation retires.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "captured_routine_parameter_scope_checks_each_original_syntax_and_plan_owner",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",

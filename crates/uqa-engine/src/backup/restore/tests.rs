@@ -306,3 +306,4 @@ mod persistent;
 mod providers;
 mod routine_bodies;
 mod routine_types;
+mod rule_bindings;

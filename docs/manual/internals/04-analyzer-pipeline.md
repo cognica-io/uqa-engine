@@ -271,6 +271,8 @@ Named definition and assignment publication advances catalog or table epochs. Ot
 
 Historical table-field bindings use Storage’s immutable `FieldAnalyzerCatalog`. Native publication records each resolved relation’s actual persistence and prepares both exact index/search image sides before analyzer effects. Temporary runtime membership remains separate from the durable encoded root; matching index/field capture retains those already selected roots without copying table membership. Selected children keep their original image admission and cancellation after parent and Engine retirement.
 
+Persistent restoration may borrow a compiled analyzer from the process cache, but prepares its encoded image under private request ownership. It neither adopts nor replaces that pipeline's cached image. Unrelated ordinary readers therefore cannot extend a restore candidate's allocation lifetime, and an existing cached image cannot bypass private image admission. A freshly reconstructed, privately owned pipeline can retain its own image cache because it is not reachable by other clients during preparation.
+
 
 ## Native dictionary input
 
