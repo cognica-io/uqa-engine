@@ -6,23 +6,24 @@
 
 //! Borrowed comparison kernels shared by declaration admission and captured bounds.
 
-use crate::{ast::PartitionRangeDatum, expr::SQLValueCatalog, SQLError};
+use crate::{ast::PartitionRangeDatum, expr::SQLValueCatalog, ColumnType, SQLError};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
 pub(super) fn range_points(
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
+    types: &[ColumnType],
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, SQLError> {
     control.check()?;
-    if left.len() != right.len() {
+    if left.len() != right.len() || left.len() != types.len() {
         return Err(SQLError::Internal(
             "partition range points have different widths".into(),
         ));
     }
-    for (left, right) in left.iter().zip(right) {
+    for ((left, right), ty) in left.iter().zip(right).zip(types) {
         control.check()?;
         let ordering = match (left, right) {
             (PartitionRangeDatum::MinValue, PartitionRangeDatum::MinValue)
@@ -34,9 +35,10 @@ pub(super) fn range_points(
                 Ordering::Greater
             }
             (PartitionRangeDatum::Value(left), PartitionRangeDatum::Value(right)) => {
-                crate::expr::compare_typed_values_with_enum_catalog(
+                crate::expr::compare_selected_values_with_catalog(
                     super::stored_datum(left)?,
                     super::stored_datum(right)?,
+                    Some(ty),
                     control,
                     catalog,
                     None,

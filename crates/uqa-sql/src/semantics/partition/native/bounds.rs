@@ -39,6 +39,7 @@ pub(super) fn validate(
                     if compare(
                         super::super::stored_datum(previous)?,
                         value,
+                        ty,
                         context,
                         control,
                     )?
@@ -53,7 +54,7 @@ pub(super) fn validate(
         (PartitionStrategy::Range, PartitionBound::Range { lower, upper }) => {
             range(lower, types, context, control)?;
             range(upper, types, context, control)?;
-            if range_order(lower, upper, context, control)? != Ordering::Less {
+            if range_order(lower, upper, types, context, control)? != Ordering::Less {
                 return Err(invalid("empty RANGE bound"));
             }
             Ok(())
@@ -121,6 +122,7 @@ fn range(
 pub(super) fn disjoint(
     left: &PartitionBound,
     right: &PartitionBound,
+    types: &[ColumnType],
     context: &NativePartitionContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
@@ -129,11 +131,15 @@ pub(super) fn disjoint(
         (PartitionBound::Default, PartitionBound::Default) => true,
         (PartitionBound::Default, _) | (_, PartitionBound::Default) => false,
         (PartitionBound::List(left), PartitionBound::List(right)) => {
+            let [ty] = types else {
+                return Err(invalid("LIST key width"));
+            };
             for left in left {
                 for right in right {
                     if compare(
                         super::super::stored_datum(left)?,
                         super::super::stored_datum(right)?,
+                        ty,
                         context,
                         control,
                     )?
@@ -155,8 +161,8 @@ pub(super) fn disjoint(
                 upper: right_upper,
             },
         ) => {
-            range_order(left_lower, right_upper, context, control)? == Ordering::Less
-                && range_order(right_lower, left_upper, context, control)? == Ordering::Less
+            range_order(left_lower, right_upper, types, context, control)? == Ordering::Less
+                && range_order(right_lower, left_upper, types, context, control)? == Ordering::Less
         }
         (
             PartitionBound::Hash {
@@ -192,17 +198,26 @@ pub(super) fn disjoint(
 fn compare(
     left: &Value,
     right: &Value,
+    ty: &ColumnType,
     context: &NativePartitionContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, SQLError> {
-    crate::expr::compare_typed_values_with_enum_catalog(left, right, control, context.values, None)
+    crate::expr::compare_selected_values_with_catalog(
+        left,
+        right,
+        Some(ty),
+        control,
+        context.values,
+        None,
+    )
 }
 
 fn range_order(
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
+    types: &[ColumnType],
     context: &NativePartitionContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, SQLError> {
-    super::super::comparison::range_points(left, right, context.values, control)
+    super::super::comparison::range_points(left, right, types, context.values, control)
 }

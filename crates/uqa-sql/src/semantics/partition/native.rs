@@ -79,7 +79,7 @@ pub fn validate<'a>(
                     )?;
                     bounds::validate(spec, &types, bound, context, &control)?;
                     for previous in &*siblings {
-                        bounds::disjoint(previous, bound, context, &control)?;
+                        bounds::disjoint(previous, bound, &types, context, &control)?;
                     }
                     siblings.push_copy(bound)?;
                 }

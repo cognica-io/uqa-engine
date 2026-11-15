@@ -12,6 +12,7 @@ use uqa_sql::ast::{Expr, PartitionBound, TableConstraintSet};
 
 mod corruption;
 mod preserved;
+mod range_keys;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

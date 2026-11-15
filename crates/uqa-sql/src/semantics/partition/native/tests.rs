@@ -129,6 +129,62 @@ fn range(lower: i64, upper: i64) -> PartitionBound {
 }
 
 #[test]
+fn native_partition_range_keys_keep_selected_comparison_semantics() {
+    for (ty, small, middle, large) in [
+        ("int4range", "[2,3)", "[5,6)", "[10,11)"),
+        ("int4multirange", "{[2,3)}", "{[5,6)}", "{[10,11)}"),
+    ] {
+        let declaration = format!("CREATE TABLE parent(id {ty}) PARTITION BY RANGE(id)");
+        let bound = |lower: &str, upper: &str| PartitionBound::Range {
+            lower: vec![PartitionRangeDatum::Value(Expr::Literal(Value::Str(
+                lower.into(),
+            )))],
+            upper: vec![PartitionRangeDatum::Value(Expr::Literal(Value::Str(
+                upper.into(),
+            )))],
+        };
+        accepted(&tables(&declaration, vec![bound(small, large)]));
+        rejected(&tables(&declaration, vec![bound(large, small)]));
+        rejected(&tables(
+            &declaration,
+            vec![bound(small, large), bound(middle, large)],
+        ));
+        accepted(&tables(
+            &declaration,
+            vec![bound(small, middle), bound(middle, large)],
+        ));
+    }
+}
+
+#[test]
+fn native_partition_list_range_keys_compare_values_instead_of_spellings() {
+    for (ty, left, right) in [
+        ("numrange", "[1.0,3.00)", "[1.00,3.0)"),
+        ("nummultirange", "{[1.0,3.00)}", "{[1.00,3.0)}"),
+    ] {
+        let declaration = format!("CREATE TABLE parent(id {ty}) PARTITION BY LIST(id)");
+        rejected(&tables(
+            &declaration,
+            vec![list(vec![
+                Value::Str(left.into()),
+                Value::Str(right.into()),
+            ])],
+        ));
+        rejected(&tables(
+            &declaration,
+            vec![
+                list(vec![Value::Str(left.into())]),
+                list(vec![Value::Str(right.into())]),
+            ],
+        ));
+        accepted(&tables(
+            &declaration,
+            vec![list(vec![Value::Str(left.into())]), PartitionBound::Default],
+        ));
+    }
+}
+
+#[test]
 fn native_partition_bindings_preserve_stored_types_and_unevaluated_keys() {
     for ty in ["smallint", "integer", "bigint"] {
         accepted(&tables(

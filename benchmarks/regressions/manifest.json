@@ -68941,6 +68941,77 @@
       "capability": "Native partition backup validation",
       "workload": "Six PostgreSQL LIST/RANGE declarations without default B-tree support on all four providers.",
       "invariant": "Declaration and restore share original type capability checks; rejected declarations preserve SQLSTATE 42704 and leave the same table name available."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_partition_range_keys_keep_selected_comparison_semantics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/native/tests.rs",
+      "capability": "Selected partition key comparison",
+      "workload": "Captured integer range and multirange endpoints in both orders and adjacent/overlapping siblings.",
+      "invariant": "Selected key types determine range order; definitions stay unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_partition_list_range_keys_compare_values_instead_of_spellings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/native/tests.rs",
+      "capability": "Selected partition key comparison",
+      "workload": "Numeric range and multirange LIST constants with distinct equal decimal spellings.",
+      "invariant": "Equivalent constants reject duplicate entries and sibling overlap under the selected type.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "range_key_partition_order_retains_selected_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/order/tests.rs",
+      "capability": "Selected partition key comparison",
+      "workload": "LIST and RANGE partition descriptor order for integer ranges and multiranges.",
+      "invariant": "Partition order follows selected bound values instead of the lexical order of their carriers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_range_keys_preserve_selected_order_and_routing",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings/range_keys.rs",
+      "capability": "Selected partition key comparison",
+      "workload": "Four built-in range/multirange families restored from actual archives on all four providers.",
+      "invariant": "PostgreSQL routing, invalid-bound diagnostics and exact definitions survive source/archive loss, later writes, rollback and reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "list_range_keys_preserve_equality_across_numeric_spellings",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings/range_keys.rs",
+      "capability": "Selected partition key comparison",
+      "workload": "Numeric range and multirange LIST partition declaration and routing on all four providers.",
+      "invariant": "Equivalent spellings deduplicate during declaration, reject overlap and route to the same partition.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

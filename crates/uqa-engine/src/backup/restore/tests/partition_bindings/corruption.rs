@@ -21,6 +21,8 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
         "range_overlap",
         "range_width",
         "range_null",
+        "range_key_order",
+        "multirange_key_order",
         "hash_chain",
         "hash_overlap",
         "hash_zero",
@@ -29,8 +31,14 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
         let directory = tempfile::tempdir().unwrap();
         let repository = repository(&directory.path().join("repository"));
         let source = provider.open(&directory.path().join("source"));
-        let declaration = if kind.starts_with("list") {
+        let declaration = if kind == "range_key_order" {
+            "CREATE TABLE parent(id int4range) PARTITION BY RANGE(id); CREATE TABLE child PARTITION OF parent FOR VALUES FROM('[2,3)') TO('[10,11)')"
+        } else if kind == "multirange_key_order" {
+            "CREATE TABLE parent(id int4multirange) PARTITION BY RANGE(id); CREATE TABLE child PARTITION OF parent FOR VALUES FROM('{[2,3)}') TO('{[10,11)}')"
+        } else if kind.starts_with("list") {
             "CREATE TABLE parent(id integer) PARTITION BY LIST(id); CREATE TABLE sibling PARTITION OF parent FOR VALUES IN(1); CREATE TABLE child PARTITION OF parent FOR VALUES IN(2)"
+        } else if kind == "hash_chain" {
+            "CREATE TABLE parent(id integer) PARTITION BY HASH(id); CREATE TABLE sibling PARTITION OF parent FOR VALUES WITH(MODULUS 4,REMAINDER 0); CREATE TABLE child PARTITION OF parent FOR VALUES WITH(MODULUS 4,REMAINDER 1)"
         } else if kind.starts_with("hash") {
             "CREATE TABLE parent(id integer) PARTITION BY HASH(id); CREATE TABLE sibling PARTITION OF parent FOR VALUES WITH(MODULUS 2,REMAINDER 0); CREATE TABLE child PARTITION OF parent FOR VALUES WITH(MODULUS 2,REMAINDER 1)"
         } else {
@@ -56,6 +64,17 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
         let mut checks = table.checks.to_vec();
         let point = |value| PartitionRangeDatum::Value(Expr::Literal(value));
         match kind {
+            "range_key_order" | "multirange_key_order" => {
+                let (lower, upper) = if kind == "range_key_order" {
+                    ("[10,11)", "[2,3)")
+                } else {
+                    ("{[10,11)}", "{[2,3)}")
+                };
+                hierarchy.partition_bound = Some(PartitionBound::Range {
+                    lower: vec![point(Value::Str(lower.into()))],
+                    upper: vec![point(Value::Str(upper.into()))],
+                });
+            }
             "list_overlap" => {
                 hierarchy.partition_bound =
                     Some(PartitionBound::List(vec![Expr::Literal(Value::Int(1))]));
@@ -84,7 +103,7 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
             }
             "hash_chain" => {
                 hierarchy.partition_bound = Some(PartitionBound::Hash {
-                    modulus: 3,
+                    modulus: 6,
                     remainder: 1,
                 });
             }
@@ -163,7 +182,11 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
             &repository,
             root,
             &directory.path().join("restored"),
-            "partition",
+            if kind == "hash_chain" {
+                "divisibility chain"
+            } else {
+                "partition"
+            },
         );
     }
 }

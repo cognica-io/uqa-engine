@@ -11,7 +11,7 @@ use super::datum_text::{range_bound_text, stored_datum};
 use super::PartitionContext;
 use crate::ast::{PartitionBound, PartitionRangeDatum};
 use crate::expr::EngineHook;
-use crate::SQLError;
+use crate::{ColumnType, SQLError};
 use std::cmp::Ordering;
 
 /// One existing partition of the parent with its stored bound.
@@ -28,6 +28,7 @@ pub fn validate_new_partition_bound(
     bound: &PartitionBound,
 ) -> Result<(), SQLError> {
     let (_, keys) = parent_partition_key(context, parent)?;
+    let types = keys.into_iter().map(|key| key.ty).collect::<Vec<_>>();
     let siblings = sibling_bounds(context, parent)?;
     let partition = local_relation_name(partition)?;
     let overlapping = match bound {
@@ -43,10 +44,9 @@ pub fn validate_new_partition_bound(
             }
             None
         }
-        PartitionBound::List(values) => list_overlap(context, values, &siblings)?,
+        PartitionBound::List(values) => list_overlap(context, values, &siblings, &types[0])?,
         PartitionBound::Range { lower, upper } => {
-            if compare_range_points(context, lower, upper)? != Ordering::Less {
-                let types = keys.iter().map(|key| key.ty.clone()).collect::<Vec<_>>();
+            if compare_range_points(context, lower, upper, &types)? != Ordering::Less {
                 let engine: &dyn EngineHook = context.assignment;
                 return Err(SQLError::Diagnostic {
                     sqlstate: "42P17".into(),
@@ -59,7 +59,7 @@ pub fn validate_new_partition_bound(
                     hint: None,
                 });
             }
-            range_overlap(context, lower, upper, &siblings)?
+            range_overlap(context, lower, upper, &siblings, &types)?
         }
         PartitionBound::Hash { modulus, remainder } => {
             hash_overlap(*modulus, *remainder, &siblings)?
@@ -95,6 +95,7 @@ fn list_overlap(
     context: &PartitionContext<'_>,
     values: &[crate::ast::Expr],
     siblings: &[Sibling],
+    ty: &ColumnType,
 ) -> Result<Option<String>, SQLError> {
     for value in values {
         let value = stored_datum(value)?;
@@ -103,7 +104,7 @@ fn list_overlap(
                 continue;
             };
             for candidate in existing {
-                if super::compare_values(context, stored_datum(candidate)?, value)?.is_eq() {
+                if super::compare_values(context, stored_datum(candidate)?, value, ty)?.is_eq() {
                     return Ok(Some(sibling.name.clone()));
                 }
             }
@@ -118,6 +119,7 @@ fn range_overlap(
     lower: &[PartitionRangeDatum],
     upper: &[PartitionRangeDatum],
     siblings: &[Sibling],
+    types: &[ColumnType],
 ) -> Result<Option<String>, SQLError> {
     let mut ranges = Vec::new();
     for sibling in siblings {
@@ -132,11 +134,11 @@ fn range_overlap(
     uqa_core::ordering::sort_by_with_control(
         &mut ranges,
         &mut || Ok::<_, SQLError>(()),
-        |left, right, _| compare_range_points(context, left.0, right.0),
+        |left, right, _| compare_range_points(context, left.0, right.0, types),
     )?;
     for (existing_lower, existing_upper, name) in ranges {
-        if compare_range_points(context, lower, existing_upper)? == Ordering::Less
-            && compare_range_points(context, existing_lower, upper)? == Ordering::Less
+        if compare_range_points(context, lower, existing_upper, types)? == Ordering::Less
+            && compare_range_points(context, existing_lower, upper, types)? == Ordering::Less
         {
             return Ok(Some(name.clone()));
         }
@@ -149,10 +151,12 @@ pub(super) fn compare_range_points(
     context: &PartitionContext<'_>,
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
+    types: &[ColumnType],
 ) -> Result<Ordering, SQLError> {
     super::comparison::range_points(
         left,
         right,
+        types,
         Some(&crate::expr::EngineValueCatalog(context.assignment)),
         &uqa_core::memory::ProductionControl::uncontrolled(),
     )

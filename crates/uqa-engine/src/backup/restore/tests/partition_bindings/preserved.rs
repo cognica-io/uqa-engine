@@ -27,7 +27,7 @@ fn postgres_observations(engine: &Engine) -> String {
     observations.join("\n") + "\n"
 }
 
-fn definitions(engine: &Engine) -> serde_json::Value {
+pub(super) fn definitions(engine: &Engine) -> serde_json::Value {
     let catalog = engine
         .restored_catalog_read_view_with_control(
             &uqa_core::memory::ProductionControl::uncontrolled(),
