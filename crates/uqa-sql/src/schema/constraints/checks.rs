@@ -8,7 +8,7 @@
 
 use crate::{
     ast::{ColumnDef, Expr},
-    schema::{ColumnIdentity, SchemaBindingContext},
+    schema::SchemaBindingContext,
     ColumnType, RowSchema, SQLError,
 };
 use uqa_core::Value;
@@ -19,21 +19,39 @@ pub fn check_row_schema(
     columns: &[ColumnDef],
     row_type: &ColumnType,
 ) -> Result<RowSchema, SQLError> {
-    let schema = RowSchema::with_column_definitions(Some(qualifier), columns)
-        .with_relation_row_type(qualifier, row_type.clone())?;
-    Ok(RowSchema::with_typed_virtual_identities(
+    check_row_schema_with_control(
+        qualifier,
+        columns,
+        Some(row_type),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+/// Retain the same CHECK row namespace under the caller's original allocation and cancellation owners.
+pub fn check_row_schema_with_control(
+    qualifier: &str,
+    columns: &[ColumnDef],
+    row_type: Option<&ColumnType>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let mut schema = RowSchema::with_column_metadata_with_control(
+        Some(qualifier),
+        columns
+            .iter()
+            .map(|column| (column.name.as_str(), Some(&column.ty), column.collation_oid)),
+        control,
+    )?;
+    if let Some(row_type) = row_type {
+        schema = schema.with_relation_row_type_with_control(qualifier, row_type, control)?;
+    }
+    RowSchema::with_virtual_columns_with_control(
         &schema,
-        &[
-            (
-                ColumnIdentity::unqualified("tableoid"),
-                Some(ColumnType::Oid),
-            ),
-            (
-                ColumnIdentity::qualified(qualifier, "tableoid"),
-                Some(ColumnType::Oid),
-            ),
+        [
+            (None, "tableoid", Some(&ColumnType::Oid)),
+            (Some(qualifier), "tableoid", Some(&ColumnType::Oid)),
         ],
-    ))
+        control,
+    )
 }
 
 pub fn validate_check_expression(

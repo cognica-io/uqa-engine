@@ -983,3 +983,5 @@ pub mod errors;
 pub mod sequence_functions;
 
 pub mod json_path;
+
+pub mod scalar_bindings;

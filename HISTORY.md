@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate restored column, table, foreign-table and domain CHECK bindings in their original typed scopes before private activation, including Boolean input beneath COLLATE. Preserve named rows, domain VALUE, selected routine/type identities and NOT VALID state without evaluating constraints or scanning existing rows. Complete public backup restoration remains in progress.
+
 - Validate restored index keys and predicates against their original row layouts, routine bindings and native type identities before private candidate activation. Preserve stored expressions, renamed objects, legacy absent type metadata and later index enforcement across memory, native SQLite, SQLite Key/Value and redb. Complete public backup restoration remains in progress.
 
 - Preserve the indexed relation's named row type through declaration, planning and index evaluation. Accept boolean domains in partial-index predicates, including routine results, and whole-row arguments in index keys and predicates. Preserve whole-row and qualified-column references through table rename and schema movement by admitting the complete index generation before table mutation and publishing the index and table namespace transition together. Resource denial preserves the original catalog owners and SQLSTATE. Observe retained Boolean fields through the shared SQL condition evaluator, so unique partial indexes enforce the same rows after rename, rollback, reopen and restoration.

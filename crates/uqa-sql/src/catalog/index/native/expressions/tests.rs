@@ -92,6 +92,7 @@ fn stored_index_bindings_preserve_original_expressions_without_evaluation() {
     for (sql, types) in [
         ("CREATE INDEX saved ON items (id, lower(label)) WHERE id > 0", vec![ColumnType::Integer, ColumnType::Text]),
         ("CREATE INDEX saved ON items ((id / 0)) WHERE NULL", vec![]),
+        ("CREATE INDEX saved ON items (id) WHERE 'true' COLLATE \"C\"", vec![ColumnType::Integer]),
         ("CREATE INDEX saved ON items ((CASE WHEN id > 0 THEN label ELSE 'fallback' END)) WHERE label IS NOT NULL", vec![ColumnType::Text]),
         ("CREATE INDEX saved ON items ((ARRAY[id, id])) WHERE id IS NOT NULL", vec![ColumnType::Array(Box::new(ColumnType::Integer))]),
         ("CREATE INDEX saved ON items (((items).id)) WHERE flag", vec![ColumnType::Integer]),
@@ -116,6 +117,7 @@ fn stored_index_bindings_reject_invalid_rows_predicates_and_non_scalar_inputs() 
         "CREATE INDEX saved ON items (id) WHERE id",
         "CREATE INDEX saved ON items (id) WHERE true AND id",
         "CREATE INDEX saved ON items (id) WHERE 'invalid_boolean'",
+        "CREATE INDEX saved ON items (id) WHERE 'invalid_boolean' COLLATE \"C\"",
         "CREATE INDEX saved ON items ((CASE WHEN id THEN label ELSE 'x' END))",
         "CREATE INDEX saved ON items ((unknown_routine(id)))",
         "CREATE INDEX saved ON items (($1 + id))",

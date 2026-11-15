@@ -68647,6 +68647,132 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_constraint_bindings_reject_non_boolean_checks_before_activation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/constraint_bindings.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Restore a non-Boolean CHECK archive on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Reject the candidate before preparation or publication, remove the destination and release all input reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_bindings_preserve_boolean_rows_and_unevaluated_expressions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/bindings/tests.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Analyze ten original table/domain CHECK declarations, including named rows and latent arithmetic errors.",
+      "invariant": "Retain syntax and native ownership; no constraint evaluation or budget leak.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_bindings_reject_wrong_types_and_non_scalar_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/bindings/tests.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Analyze invalid scalar, scope, aggregate, set, window and subquery CHECK forms.",
+      "invariant": "Reject every invalid binding without retaining partial analysis.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_constraint_bindings_release_denied_and_cancelled_analysis",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/bindings/tests.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Analyze named-row CHECKs under five budgets and pre-cancelled input.",
+      "invariant": "Report memory denial and cancellation and release every temporary reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_constraint_bindings_join_original_ordinary_foreign_and_domain_scopes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints/bindings.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Join original ordinary-table, foreign-table and domain CHECK catalogs.",
+      "invariant": "Accept Boolean declarations, reject integer conditions and retain NOT VALID state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_constraint_bindings_keep_table_and_domain_namespaces_distinct",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints/bindings.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Resolve CHECK names against ordinary, foreign and domain scopes.",
+      "invariant": "Domain VALUE does not leak into table scopes and table columns/tableoid do not leak into domains.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_constraint_bindings_release_catalog_workspace_on_denial_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/constraints/bindings.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Validate a retained domain snapshot under denial, cancellation and fresh control.",
+      "invariant": "Release all catalog workspace while retaining the original declaration for later validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_constraint_bindings_reject_table_foreign_and_domain_corruption",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/constraint_bindings/corruption.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Restore seven corrupt CHECK archives on each of four providers.",
+      "invariant": "Reject non-Boolean ordinary/foreign/domain CHECKs, invalid operands, aggregates and missing routines before preparation; remove destinations and retire input.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_constraint_bindings_preserve_named_rows_domains_and_not_valid_state",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/constraint_bindings/preserved.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Restore renamed/moved ordinary, foreign and scalar/composite domain CHECKs across all four providers.",
+      "invariant": "Retain exact original definitions, NOT VALID rows, later enforcement, delayed errors, rollback and durable reopen after source/archive retirement.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

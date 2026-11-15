@@ -13,20 +13,14 @@ use uqa_core::{
 };
 use uqa_sql::{
     ast::IndexKey,
-    binding::production::{
-        BindingMap, BindingNameSet, BindingResolution, ControlledBindingContext,
-    },
     catalog::{
         index::{
             native::{validate_bindings, IndexBindingContext},
             stored::input::definition,
         },
-        resolution::{
-            bound_relation_identity_with_control, RelationLookupMode, RelationNameResolution,
-        },
-        roles::RoleReference,
+        resolution::bound_relation_identity_with_control,
     },
-    routines::{native::NativeRoutineReferences, RoutineResolution},
+    routines::RoutineResolution,
     SQLError,
 };
 
@@ -39,37 +33,7 @@ pub fn validate(
     let control = ProductionControl::new(memory, cancellation, cancellation);
     control.check()?;
     let snapshot = catalog.snapshot();
-    let references = NativeRoutineReferences::new(
-        snapshot
-            .definitions
-            .sql_user_functions
-            .values()
-            .flatten()
-            .map(|routine| &routine.def),
-        memory,
-        cancellation,
-    )?;
-    let types = super::type_dependencies::references(snapshot, memory, cancellation)?;
-    // Scalar index expressions have no query or session namespace. Their declared row and concrete routine bindings supply every lookup.
-    let binding = ControlledBindingContext {
-        catalog: control
-            .finish(catalog.clone(), control.empty_reservation())?
-            .into_shared(&control)?,
-        resolution: BindingResolution::from_produced(control.finish(
-            RelationNameResolution {
-                search_path: Vec::new(),
-                temporary_schema: String::new(),
-                temporary_namespace_allocated: false,
-                current_user: RoleReference::Named(String::new()),
-                lookup_mode: RelationLookupMode::Bound,
-            },
-            control.empty_reservation(),
-        )?),
-        ctes: BindingMap::new(),
-        deferred_ctes: BindingMap::new(),
-        non_returning_ctes: BindingNameSet::new(),
-        scalar_subqueries: &[],
-    };
+    let scalar = super::scalar_bindings::ScalarBindings::new(catalog, memory, cancellation)?;
     for row in snapshot.definitions.catalog_indexes.values() {
         control.check()?;
         let name = bound_relation_identity_with_control(&row.table_name, &control)?;
@@ -96,9 +60,9 @@ pub fn validate(
             relation: Some(&name),
             row_type: row_type.as_deref(),
             routines,
-            references: &references,
-            types: &types,
-            binding: &binding,
+            references: &scalar.references,
+            types: &scalar.types,
+            binding: &scalar.binding,
         };
         validate_bindings(
             &keys,
