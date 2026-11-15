@@ -14,6 +14,8 @@ use uqa_sql::{
     ColumnType,
 };
 
+mod bodies;
+
 fn call(identity: u8) -> Expr {
     Expr::Func {
         name: "public.original".into(),

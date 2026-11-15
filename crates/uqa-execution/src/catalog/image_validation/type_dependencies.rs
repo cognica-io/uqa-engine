@@ -9,8 +9,9 @@
 use super::super::{foreign::StoredForeignTable, CatalogReadSnapshot};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{
-    ast::{FunctionReturns, RoutineDefaultType},
+    ast::{FunctionBody, FunctionReturns, RoutineDefaultType},
     catalog::type_references::{TypeReferenceInput, TypeReferences},
+    routines::{CompiledFunctionBody, RoutineBody},
     SQLError,
 };
 
@@ -54,8 +55,23 @@ pub fn validate(
     for function in d.sql_user_functions.values().flatten() {
         for parameter in &function.def.params {
             types.stored_name(&parameter.type_name)?;
+            if let Some(default) = &parameter.default {
+                types.expression(default)?;
+            }
             if let Some(RoutineDefaultType::Concrete(ty)) = &parameter.default_type {
                 types.column_type(ty)?;
+            }
+        }
+        if let FunctionBody::Statements(statements) = &function.def.body {
+            for statement in statements {
+                types.statement(statement)?;
+            }
+        }
+        if let RoutineBody::Bound(body) = &function.body {
+            if let CompiledFunctionBody::SQL(plans) = &***body {
+                for plan in plans {
+                    types.plan(plan.into())?;
+                }
             }
         }
         match &function.def.returns {

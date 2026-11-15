@@ -91,6 +91,14 @@ pub(super) fn validate(engine: &Engine, control: &StorageReadControl) -> BackupR
         control.cancellation(),
     )
     .map_err(sql_error)?;
+    uqa_execution::catalog::image_validation::validate_routine_bindings(
+        &catalog,
+        engine,
+        engine,
+        control.memory(),
+        control.cancellation(),
+    )
+    .map_err(sql_error)?;
     uqa_execution::catalog::image_validation::validate_event_bindings(
         &catalog,
         engine,

@@ -69364,6 +69364,423 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_parameter_scope_checks_each_original_syntax_and_plan_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_source_bodies_remain_lazy_and_defaults_have_no_parameter_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_body_form_statement_count_and_kind_must_match_the_declaration",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_parameter_slots_exclude_outputs_and_preserve_input_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_body_validation_retires_denied_and_cancelled_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_rejects_parameter_ordinals_in_each_captured_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_rejects_incomplete_and_wrong_kind_bound_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_reject_parameters_outside_their_declared_scope",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Restore native routines on memory, native SQLite, SQLite Key/Value and redb after source retirement, including corrupt parameter scopes, procedure outputs and lazy source bodies.",
+      "invariant": "Invalid images fail before activation; valid bodies retain PostgreSQL input positions, side effects, rollback, later writes and reopen without eager invocation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_preserve_input_positions_effects_and_lazy_compilation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Restore native routines on memory, native SQLite, SQLite Key/Value and redb after source retirement, including corrupt parameter scopes, procedure outputs and lazy source bodies.",
+      "invariant": "Invalid images fail before activation; valid bodies retain PostgreSQL input positions, side effects, rollback, later writes and reopen without eager invocation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_relations_validate_original_syntax_independently_of_bound_plans",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Captured routine relation closure",
+      "workload": "Inspect original SQL-standard query, CTE, subquery and mutation targets independently of separately retained plans.",
+      "invariant": "A valid syntax owner cannot hide a missing relation in the bound plan, or the reverse; validation preserves both owners and retires its admitted workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_reject_missing_original_relations_with_valid_retained_plans",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine relation closure",
+      "workload": "Damage only the stored declaration of an originally valid routine and restore its archive on all four providers after retiring the source.",
+      "invariant": "Missing original relation references fail before publication and retire all restore allocations, including when an independently retained memory plan is valid.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_types_validate_nested_syntax_and_table_function_outputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests/expressions.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_types_validate_independent_invocation_and_dispatch_metadata",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests/expressions.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_expression_type_lowering_retires_workspace_after_admission_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests/expressions.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_type_references_survive_native_images_and_reject_missing_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests/retained.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Round-trip retained literal syntax and executable scalars through native image encoding, independently remove their type or declaration claims, and retain the original owners.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_types_validate_original_defaults_syntax_and_retained_plans",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/routine_types.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_types_reject_missing_default_and_original_body_references",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_types.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_types_preserve_selected_identity_after_name_replacement",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_types.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Inspect independently retained defaults, original SQL syntax, executable metadata and actual archives after source retirement and type name replacement.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_checks_both_original_and_executable_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_preserves_parameter_names_ctes_windows_and_lazy_scalars",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_defaults_require_scalar_compatible_inputs_without_body_compilation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_admission_and_cancellation_retire_original_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bindings_reject_invalid_defaults_columns_and_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bindings.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bindings_preserve_defaults_renames_typed_results_and_laziness",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bindings.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_publication_resumes_long_comparisons_and_transfers_last_definition_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Publish long common-prefix names with repeated definitions and one continuation poll per call.",
+      "invariant": "Comparison work resumes without replay, last-definition keys and values keep their original allocations, and per-poll allocation remains bounded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_publication_retires_private_rows_and_paths_on_every_terminal_prefix",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Cancel, deny memory, invalidate a window, drop or unwind during retained native catalog insertion.",
+      "invariant": "No incomplete root is published and every private name, value and tree-path reservation retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_scoring_input_rejects_unversioned_sources_and_retires_the_selected_provider",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Reject empty record windows and an unversioned catalog source before private publication.",
+      "invariant": "Each failure preserves the required source-admission error, is terminal, leaves the source unchanged and releases the retained provider and scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_catalog_loading_yields_before_complete_cache_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Restore sixteen opaque scoring records on native SQLite, SQLite KV and redb, then retire the source and restoration allowance.",
+      "invariant": "One poll cannot complete the catalog; selected bytes, later replacements and final reservation retirement remain correct.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_input_keeps_one_snapshot_and_retires_every_terminal_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Write from a sibling session during scoring input and exercise cancellation, memory denial, invalid windows, drop and unwind.",
+      "invariant": "The private catalog observes its selected snapshot and every terminal path releases its read transaction without changing the source.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_input_rejects_oversized_records_without_publishing_a_private_engine",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Load a scoring record beyond the configured physical limit on each persistent provider.",
+      "invariant": "The private Engine never publishes, its read transaction and reservations retire, and the source remains readable.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }

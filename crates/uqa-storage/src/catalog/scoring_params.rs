@@ -11,6 +11,8 @@ use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, RetainedMap, Retaine
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 mod image;
+mod input;
+pub use input::ScoringParameterCatalogInput;
 
 /// Ordered, transactionally replaceable scoring metadata. Clones share an immutable root; updates copy only the affected tree path and never clone another entry's encoded payload.
 #[derive(Clone)]
@@ -25,6 +27,11 @@ impl Default for ScoringParameters {
 }
 
 impl ScoringParameters {
+    /// Allowance for future native edits; existing entries retain their original payload owners.
+    pub fn budget(&self) -> &MemoryBudget {
+        self.values.budget()
+    }
+
     /// Keep existing image payloads and reservations in place while selecting the allowance for future native replacements.
     pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
         Self {
