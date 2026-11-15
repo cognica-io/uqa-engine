@@ -69012,6 +69012,115 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_reject_unowned_captured_row_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_require_complete_distinct_event_row_bindings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_visit_correlated_and_cte_query_row_references",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_conditions_reject_execution_only_implicit_row_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_work_retires_memory_on_denial_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Validate original event row identities, nested references, column positions and admission without rebinding.",
+      "invariant": "Only event-owned live references pass; captured definitions remain unchanged and all scratch retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_bindings_reject_invalid_original_row_references",
+      "cases": 16,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Reject four kinds of captured rule binding corruption through all four actual provider archives.",
+      "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
+      "case_names": [
+        "case_1_memory::damage_1___identity__",
+        "case_1_memory::damage_2___attribute__",
+        "case_1_memory::damage_3___missing__",
+        "case_1_memory::damage_4___shared__",
+        "case_2_sqlite_native::damage_1___identity__",
+        "case_2_sqlite_native::damage_2___attribute__",
+        "case_2_sqlite_native::damage_3___missing__",
+        "case_2_sqlite_native::damage_4___shared__",
+        "case_3_sqlite_kv::damage_1___identity__",
+        "case_3_sqlite_kv::damage_2___attribute__",
+        "case_3_sqlite_kv::damage_3___missing__",
+        "case_3_sqlite_kv::damage_4___shared__",
+        "case_4_redb::damage_1___identity__",
+        "case_4_redb::damage_2___attribute__",
+        "case_4_redb::damage_3___missing__",
+        "case_4_redb::damage_4___shared__"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_bindings_preserve_correlated_rows_and_live_column_layout",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings/preserved.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Replay PostgreSQL correlated OLD/NEW and whole-row observations after column changes, archive retirement, rollback and persistent reopen.",
+      "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

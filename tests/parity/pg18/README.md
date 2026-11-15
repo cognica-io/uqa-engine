@@ -11,6 +11,10 @@ The [official upstream regression harness](upstream/README.md) separately import
 - `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
+## Captured backup rule rows
+
+`backup_rule_bindings_oracle.sql` and its five-line expected result record correlated UPDATE/DELETE row references, a local NEW alias, whole-row JSONB output and later column rename/add/drop. PostgreSQL 18.4 produced the reference with `psql -XqAt -v ON_ERROR_STOP=1`; the image identity is `sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15`, SQL SHA-256 `cfad78dfbb036bd82162b672c38e4e62562fd4a25574415660d3053ad2084449` and result SHA-256 `a8a7f1c653f7b649c48e437c51f98a5a6be043e7e4cc8ec0be2e409ffe648d67`. The Engine backup tests capture at the marked boundary and execute the remaining workload after source and archive retirement on all four providers. Memory compares exact stored row identities; persistent restore and reopen compare every stored field under their existing consistent process-local OLD/NEW renaming. Ordinary names, column ordinals and routine/type identities are not normalized.
+
 ## Foreign-column deletion
 
 `foreign_column_drop_oracle.expected.json` records 35 initial messages and four fresh-connection observations from PostgreSQL 18.4, captured with `capture_command_completion_oracle.py --rows --details --notices`. PostgreSQL setup registers `memory_fdw` to match UQA’s native wrapper. `sql_foreign_ddl::columns` replays both ALTER spellings, missing targets and notices, wrong relation kinds, system columns, multi-action atomicity, dependent-view RESTRICT/CASCADE, owned sequence cleanup, savepoint rollback and authority on all four providers, reopening each persistent provider before the final observations. A separate public Engine test retains loaded foreign row values through column deletion, prepared query reanalysis and rollback.
