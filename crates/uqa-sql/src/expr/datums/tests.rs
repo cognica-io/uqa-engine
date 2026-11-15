@@ -10,6 +10,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 mod bit_string;
 mod catalog_arrays;
 mod constant_copy;
+mod domains;
 mod legacy_vectors;
 
 const DEFAULT_COLLATION: u32 = crate::catalog::collations::DEFAULT_COLLATION_OID as u32;

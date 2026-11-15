@@ -43,6 +43,18 @@ pub fn compare_bounds(
 ) -> Result<std::cmp::Ordering, SQLError> {
     control.check()?;
     let definition = definition(view, range_oid)?;
+    compare_definition_bounds(definition, values, states, bounds, control)
+}
+
+/// Compare an already borrowed definition without constructing a catalog-wide OID index.
+pub(crate) fn compare_definition_bounds(
+    definition: &StoredRange,
+    values: &dyn SQLValueCatalog,
+    states: Option<&RangeComparisonStates>,
+    bounds: (&Value, &Value),
+    control: &ProductionControl<'_>,
+) -> Result<std::cmp::Ordering, SQLError> {
+    control.check()?;
     let selected = selected(definition, control)?;
     let state =
         (type_metadata::routine_pseudo_type_name(i64::from(selected.class().input_type_oid))

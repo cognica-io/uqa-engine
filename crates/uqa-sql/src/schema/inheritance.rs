@@ -412,6 +412,7 @@ pub fn merge_same_column(
 mod column_merge;
 mod partition_keys;
 use partition_keys::validate_partition_keys;
+pub(crate) use partition_keys::{validate_stored_key_references, PARTITION_MAX_KEYS};
 
 pub mod alter;
 
