@@ -45,7 +45,12 @@ fn restored_routine_types_reject_missing_default_and_original_body_references(
             &repository,
             root,
             &directory.path().join("restored"),
-            "missing type",
+            match provider {
+                Provider::Memory => "missing type or different type kind",
+                Provider::SQLiteNative | Provider::SQLiteKeyValue | Provider::Redb => {
+                    "type with OID 999999 does not exist"
+                }
+            },
         );
     }
 }
