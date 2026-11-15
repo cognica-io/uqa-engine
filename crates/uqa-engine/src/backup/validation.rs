@@ -18,86 +18,7 @@ pub(super) fn validate(engine: &Engine, control: &StorageReadControl) -> BackupR
     let catalog = engine
         .restored_catalog_read_view_with_control(&production)
         .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_namespaces(&catalog, &production)
-        .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_name_uniqueness(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_authority(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_types(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_plan_relations(&catalog, &production)
-        .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_routine_declarations(
-        catalog.snapshot(),
-        engine,
-        &production,
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_hierarchies(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_sequences(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_indexes(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_constraints(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_constraint_bindings(
-        &catalog,
-        engine,
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_index_bindings(
-        &catalog,
-        engine,
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_partition_bindings(
-        &catalog,
-        engine,
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_routines(
-        catalog.snapshot(),
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_routine_bindings(
+    uqa_execution::catalog::image_validation::validate_relationships(
         &catalog,
         engine,
         engine,
@@ -105,15 +26,6 @@ pub(super) fn validate(engine: &Engine, control: &StorageReadControl) -> BackupR
         control.cancellation(),
     )
     .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_event_bindings(
-        &catalog,
-        engine,
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_sequence_functions(&catalog, &production)
-        .map_err(sql_error)?;
     control.check()?;
     Ok(())
 }
