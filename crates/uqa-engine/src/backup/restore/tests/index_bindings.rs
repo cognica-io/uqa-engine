@@ -4,34 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::providers::{capture_provider, destination};
 use super::*;
 use crate::tests::providers::Provider;
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 use uqa_core::{catalog_index::CatalogIndexRow, RelationIdentity};
 use uqa_sql::{
     ast::{Expr, IndexKey},
     catalog::index::IndexDefinition,
     ColumnType,
 };
-use uqa_storage::PersistentStorageProvider;
 
 mod typed_rows;
-
-fn destination(provider: Provider, path: &Path) -> RestoreDestination {
-    use uqa_storage_sqlite::{SQLiteBackupMapping, SQLiteBackupTarget};
-    let target: Arc<dyn PersistentBackupTarget> = match provider {
-        Provider::Memory => return RestoreDestination::Memory,
-        Provider::SQLiteNative => Arc::new(SQLiteBackupTarget::new(SQLiteBackupMapping::Native)),
-        Provider::SQLiteKeyValue => {
-            Arc::new(SQLiteBackupTarget::new(SQLiteBackupMapping::KeyValue))
-        }
-        Provider::Redb => Arc::new(uqa_storage_redb::RedbBackupTarget::default()),
-    };
-    RestoreDestination::Persistent {
-        directory: path.to_path_buf(),
-        target,
-    }
-}
 
 fn fixture(provider: Provider, path: &Path) -> Engine {
     let engine = provider.open(path);
@@ -92,22 +76,6 @@ fn corrupt(row: &mut CatalogIndexRow, kind: &str) {
     }
     row.columns_json = serde_json::to_string(&keys).unwrap();
     row.definition_json = Some(serde_json::to_string(&definition).unwrap());
-}
-
-fn capture_provider(
-    provider: &dyn PersistentStorageProvider,
-    repository: &LocalRepository,
-) -> BackupRoot {
-    let control = StorageReadControl::with_limit(32 << 20);
-    let image = provider.capture_backup_image(&control).unwrap();
-    let mut job = repository
-        .begin_image_backup(image, None, 32 << 20, 16 << 20, &control)
-        .unwrap();
-    while job.advance(8, 4096).unwrap() == BackupCaptureStep::Pending {}
-    let root = job.publish().unwrap();
-    drop(job);
-    assert_eq!(control.memory().used(), 0);
-    root
 }
 
 #[rstest::rstest]

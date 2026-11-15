@@ -68647,6 +68647,22 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_constraint_bindings_reject_non_boolean_checks_before_activation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/constraint_bindings.rs",
+      "capability": "Restored CHECK expression binding",
+      "workload": "Restore a non-Boolean CHECK archive on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Reject the candidate before preparation or publication, remove the destination and release all input reservations.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
