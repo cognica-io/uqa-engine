@@ -15,6 +15,8 @@ use crate::{
     ast::{ColumnType, RangeAlignment, UserTypeIdentity, UserTypeKind},
     SQLError,
 };
+mod expressions;
+
 use uqa_core::{
     memory::{BudgetedMap, MemoryBudget, ProductionControl},
     CancellationToken,

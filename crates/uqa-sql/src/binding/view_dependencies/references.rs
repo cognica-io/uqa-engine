@@ -61,6 +61,45 @@ pub fn visit_stored_plan_function_bindings(
     })
 }
 
+/// Visit table-function declarations and retained VALUES types through the same admitted scopes as stored relation references.
+pub fn visit_stored_plan_output_types(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str) -> Result<(), SQLError>,
+    concrete: &mut impl FnMut(&crate::ast::ColumnType) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_references(plan, control, &mut |_, _| Ok(()), &mut |source| {
+        match source {
+            SourcePlan::Function { column_types, .. } => {
+                for ty in column_types {
+                    control.check()?;
+                    visit(ty)?;
+                }
+            }
+            SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    control.check()?;
+                    for ty in &function.column_types {
+                        control.check()?;
+                        visit(ty)?;
+                    }
+                }
+            }
+            SourcePlan::Values {
+                internal_column_types,
+                ..
+            } => {
+                for ty in internal_column_types.iter().flatten() {
+                    control.check()?;
+                    concrete(ty)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    })
+}
+
 fn visit_references(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,

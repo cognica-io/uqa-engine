@@ -51,7 +51,7 @@ fn restored_routine_bodies_reject_parameters_outside_their_declared_scope(
     }
 }
 
-fn capture_changed_definition(
+pub(super) fn capture_changed_definition(
     provider: Provider,
     path: &std::path::Path,
     repository: &LocalRepository,
@@ -92,7 +92,7 @@ fn capture_changed_definition(
     }
 }
 
-fn reject(
+pub(super) fn reject(
     provider: Provider,
     repository: &LocalRepository,
     root: BackupRoot,

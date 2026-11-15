@@ -8,6 +8,8 @@ use super::*;
 use crate::ast::{CreateDomain, EnumTypeReference};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
+mod expressions;
+
 #[derive(Default)]
 struct Types {
     domains: TypeDefinitions<StoredDomain>,

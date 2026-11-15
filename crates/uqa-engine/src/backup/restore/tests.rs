@@ -305,3 +305,4 @@ mod partition_bindings;
 mod persistent;
 mod providers;
 mod routine_bodies;
+mod routine_types;
