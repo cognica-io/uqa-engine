@@ -10,6 +10,9 @@ use crate::tests::providers::Provider;
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, Expr};
 
+mod corruption;
+mod preserved;
+
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]
@@ -59,14 +62,29 @@ fn restored_constraint_bindings_reject_non_boolean_checks_before_activation(
         drop(source);
         root
     };
-    let path = directory.path().join("restored");
+    reject_archive(
+        provider,
+        &repository,
+        root,
+        &directory.path().join("restored"),
+        "boolean",
+    );
+}
+
+fn reject_archive(
+    provider: Provider,
+    repository: &LocalRepository,
+    root: BackupRoot,
+    path: &std::path::Path,
+    expected: &str,
+) {
     let control = StorageReadControl::with_limit(32 << 20);
     let authority = Engine::new();
     let mut job = authority
         .begin_restore(
-            &repository,
+            repository,
             root.backup(),
-            destination(provider, &path),
+            destination(provider, path),
             RestoreOptions::new(16 << 20, 8 << 20),
             &control,
         )
@@ -79,12 +97,12 @@ fn restored_constraint_bindings_reject_non_boolean_checks_before_activation(
                 break;
             }
             Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
-            Ok(phase) => panic!("{provider:?}: non-boolean CHECK reached {phase:?}"),
+            Ok(phase) => panic!("{provider:?}: invalid CHECK reached {phase:?}"),
         }
     }
     let error = failure.expect("constraint validation must finish");
     assert!(
-        error.to_string().contains("native constraint") || error.to_string().contains("boolean"),
+        error.to_string().contains(expected),
         "{provider:?}: {error}"
     );
     assert_eq!(job.phase(), RestorePhase::Failed);

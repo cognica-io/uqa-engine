@@ -12,6 +12,8 @@ use uqa_sql::{
     ColumnType,
 };
 
+mod bindings;
+
 fn identity(id: u8) -> CatalogObjectIdentity {
     CatalogObjectIdentity {
         object_id: [id; 16],

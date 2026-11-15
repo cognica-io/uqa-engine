@@ -6,15 +6,15 @@
 
 //! Read stored index expressions against their original row and routine declarations.
 
+use crate::catalog::scalar_bindings::{expression_type, validate_boolean, NativeScalarContext};
 use crate::{
-    ast::{ColumnDef, Expr, IndexKey},
+    ast::{ColumnDef, IndexKey},
     binding::production::ControlledBindingContext,
     catalog::index::IndexDefinition,
-    plan::ExpressionPlan,
     routines::{native::NativeRoutineReferences, RoutineResolution},
-    ColumnType, RowSchema, SQLError, ScalarExpr,
+    ColumnType, SQLError,
 };
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::ProductionControl;
 
 pub struct IndexBindingContext<'a, 'b> {
     pub relation: Option<&'a crate::RelationIdentity>,
@@ -46,6 +46,13 @@ pub fn validate_bindings(
         context.row_type,
         control,
     )?;
+    let scalar = NativeScalarContext {
+        subject: "index",
+        routines: context.routines,
+        references: context.references,
+        types: context.types,
+        binding: context.binding,
+    };
     for (position, key) in keys.iter().enumerate() {
         control.check()?;
         let expected = definition.key_types.get(position);
@@ -62,7 +69,7 @@ pub fn validate_bindings(
                 }
             }
             IndexKey::Expression(expression) => {
-                let ty = expression_type(expression, &schema, context, control)?;
+                let ty = expression_type(expression, &schema, &scalar, control)?;
                 // Ordinary index declaration resolves an unknown result to text.
                 if expected.is_some_and(|expected| {
                     *expected != *ty.as_deref().unwrap_or(&ColumnType::Text)
@@ -73,85 +80,10 @@ pub fn validate_bindings(
         }
     }
     if let Some(predicate) = &definition.predicate {
-        let ty = expression_type(predicate, &schema, context, control)?;
-        if !matches!(
-            ty.as_deref().map(crate::type_resolution::base_type),
-            Some(ColumnType::Boolean) | None
-        ) {
-            return Err(invalid("non-boolean predicate"));
-        }
-        if ty.is_none() {
-            if let Expr::Literal(value) = predicate.as_ref() {
-                crate::expr::cast_value(value, "boolean")?;
-            }
-        }
+        validate_boolean(predicate, &schema, &scalar, control)?;
     }
     control.check()?;
     Ok(())
-}
-
-fn expression_type(
-    expression: &Expr,
-    schema: &RowSchema,
-    context: &IndexBindingContext<'_, '_>,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    crate::schema::dependencies::walk_schema_expr_with_control(expression, control, &mut |node| {
-        if matches!(
-            node,
-            Expr::Param(_) | Expr::Default | Expr::InternalColumn(_) | Expr::WindowCall { .. }
-        ) {
-            return Err(invalid("non-scalar index expression"));
-        }
-        match node {
-            Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => {
-                context.types.stored_name(ty)?;
-            }
-            Expr::CompositeRow { binding, .. } => context.types.stored_name(&binding.ty)?,
-            Expr::RetainedLiteral(literal) => {
-                if let Some(ty) = &literal.0.ty {
-                    context.types.column_type(ty)?;
-                }
-            }
-            _ => (),
-        }
-        Ok(())
-    })?;
-    context.references.expression(expression)?;
-    let plan = ExpressionPlan::lower_borrowed_for_rewrite(expression, control)?;
-    if !plan.queries().is_empty() {
-        return Err(invalid("query-valued index expression"));
-    }
-    plan.scalar().try_visit(&mut |node| {
-        control.check()?;
-        if let ScalarExpr::Func { name, binding, .. } = node {
-            if crate::semantics::is_builtin_aggregate_call(name, binding.as_ref())
-                || context
-                    .routines
-                    .has_registered_aggregate_function_with_control(name, control)?
-            {
-                return Err(invalid("aggregate index expression"));
-            }
-        }
-        Ok(true)
-    })?;
-    if crate::semantics::sets::validation::expression_may_return_set_with_control(
-        context.routines,
-        context.routines,
-        plan.scalar(),
-        schema,
-        &[],
-        control,
-    )? {
-        return Err(invalid("set-valued index expression"));
-    }
-    crate::binding::analyze_stored_scalar_with_control(
-        context.routines,
-        plan.scalar(),
-        schema,
-        context.binding.copy_with_control(control)?,
-        control,
-    )
 }
 
 fn invalid(detail: &str) -> SQLError {

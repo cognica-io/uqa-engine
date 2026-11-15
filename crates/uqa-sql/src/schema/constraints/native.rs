@@ -23,6 +23,7 @@ use uqa_core::{
     CancellationToken, RelationIdentity,
 };
 
+pub mod bindings;
 mod foreign_keys;
 mod identities;
 mod partitions;
