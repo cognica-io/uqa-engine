@@ -150,30 +150,12 @@ pub(super) fn compare_range_points(
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
 ) -> Result<Ordering, SQLError> {
-    if left.len() != right.len() {
-        return Err(SQLError::Internal(
-            "partition range points have different widths".into(),
-        ));
-    }
-    for (left, right) in left.iter().zip(right) {
-        let ordering = match (left, right) {
-            (PartitionRangeDatum::MinValue, PartitionRangeDatum::MinValue)
-            | (PartitionRangeDatum::MaxValue, PartitionRangeDatum::MaxValue) => Ordering::Equal,
-            (PartitionRangeDatum::MinValue, _) | (_, PartitionRangeDatum::MaxValue) => {
-                Ordering::Less
-            }
-            (PartitionRangeDatum::MaxValue, _) | (_, PartitionRangeDatum::MinValue) => {
-                Ordering::Greater
-            }
-            (PartitionRangeDatum::Value(left), PartitionRangeDatum::Value(right)) => {
-                super::compare_values(context, stored_datum(left)?, stored_datum(right)?)?
-            }
-        };
-        if ordering != Ordering::Equal {
-            return Ok(ordering);
-        }
-    }
-    Ok(Ordering::Equal)
+    super::comparison::range_points(
+        left,
+        right,
+        Some(&crate::expr::EngineValueCatalog(context.assignment)),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Check the modulus chain against the neighboring existing moduli, then report the first existing partition that covers a remainder the new partition would own.
@@ -230,23 +212,22 @@ fn hash_overlap(
         .map(|(modulus, _, _)| *modulus)
         .max()
         .unwrap_or(modulus);
-    let mut covered = if remainder >= greatest {
-        remainder % greatest
-    } else {
-        remainder
-    };
-    loop {
-        if let Some((_, _, name)) = existing
-            .iter()
-            .find(|(modulus, remainder, _)| covered % modulus == *remainder)
-        {
-            return Ok(Some((*name).clone()));
-        }
-        covered += modulus;
-        if covered >= greatest {
-            return Ok(None);
-        }
-    }
+    // The smallest shared residue is the first coverage position PostgreSQL checks.
+    // Equal positions retain the existing modulus/remainder order.
+    Ok(existing
+        .iter()
+        .filter_map(|(existing_modulus, existing_remainder, name)| {
+            super::comparison::first_shared_hash_residue(
+                modulus,
+                remainder,
+                *existing_modulus,
+                *existing_remainder,
+                greatest,
+            )
+            .map(|residue| (residue, *name))
+        })
+        .min_by_key(|(residue, _)| *residue)
+        .map(|(_, name)| name.clone()))
 }
 
 fn modulus_error(detail: String) -> SQLError {
@@ -307,5 +288,43 @@ mod tests {
             hash_overlap(16, 10, &existing).unwrap(),
             Some("mod8_r2".into())
         );
+    }
+
+    #[test]
+    fn hash_admission_preserves_coverage_order_without_remainder_enumeration() {
+        let existing = [hash("later", 8, 6), hash("earlier", 16, 2)];
+        assert_eq!(
+            hash_overlap(2, 0, &existing).unwrap(),
+            Some("earlier".into())
+        );
+        assert_eq!(
+            hash_overlap(i32::MAX, 1, &[hash("zero", i32::MAX, 0)]).unwrap(),
+            None
+        );
+        assert_eq!(
+            hash_overlap(2, 1, &[hash("zero", 1 << 30, 0)]).unwrap(),
+            None
+        );
+        for greatest in [2, 4, 8, 16, 32] {
+            for modulus in 1..=greatest {
+                if greatest % modulus != 0 {
+                    continue;
+                }
+                for remainder in 0..modulus {
+                    for existing_remainder in 0..greatest {
+                        let expected = (0..greatest).any(|value| {
+                            value % modulus == remainder && value == existing_remainder
+                        });
+                        let actual = hash_overlap(
+                            modulus,
+                            remainder,
+                            &[hash("existing", greatest, existing_remainder)],
+                        )
+                        .unwrap();
+                        assert_eq!(actual.is_some(), expected);
+                    }
+                }
+            }
+        }
     }
 }

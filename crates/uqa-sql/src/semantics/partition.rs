@@ -78,9 +78,11 @@ fn compare_values(
 
 mod admission;
 mod bounds;
+mod comparison;
 mod datum_text;
 mod hash;
 mod key;
+pub mod native;
 pub use key::key_type as partition_key_type;
 
 pub use admission::validate_new_partition_bound;

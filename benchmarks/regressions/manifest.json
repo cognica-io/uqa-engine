@@ -68773,6 +68773,158 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_partition_bindings_release_denied_and_cancelled_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/native/tests.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Original keys and bound constants under exact and denied admission.",
+      "invariant": "Validation preserves all borrowed definitions and retires scratch after success, quota denial and cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_partition_bindings_check_hash_chains_without_modulus_sized_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/native/tests.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Valid and overlapping hash chains through the largest signed modulus.",
+      "invariant": "Overlap uses divisibility and residues without modulus-sized loops, allocations or overflow.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "hash_admission_preserves_coverage_order_without_remainder_enumeration",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/partition/admission.rs",
+      "capability": "Native partition backup validation",
+      "workload": "First-overlap selection, independently enumerated small residue sets and large sparse moduli.",
+      "invariant": "Ordinary hash admission preserves the named first collision and terminates without scanning the residue interval.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_partition_catalog_validation_retires_denied_and_cancelled_metadata",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/partitions.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Parent/child catalog validation with insufficient, sufficient and cancelled allowances.",
+      "invariant": "All immutable metadata and scalar binding scratch retire without changing catalog owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_partition_value_metadata_admits_only_selected_labels_and_retires_scratch",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/partition_bindings/values/tests.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Two selected enum labels beside 16,384 unrelated labels under a 4 KiB allowance.",
+      "invariant": "Only selected metadata is copied, repeated lookup reuses admitted payload and terminal paths release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_partition_bounds_reject_mistyped_constants_before_activation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Actual archive with a Boolean constant for an integer partition key on all providers.",
+      "invariant": "Invalid bounds never prepare or publish a candidate and all restore admission retires.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings/corruption.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Nine list/range/hash/detached corruptions through each actual provider archive.",
+      "invariant": "Shape, disjointness and hidden detached predicates cannot bypass pre-publication validation or leak a destination.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_partition_bindings_preserve_original_constants_and_routing",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings/preserved.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Original definitions and ten PostgreSQL observations through capture, source retirement, restore and reopen.",
+      "invariant": "Renames, later domain/routine changes, routing, writes, rollback and resource retirement preserve the captured semantics.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_partition_constant_carriers_keep_array_rank_and_original_domains",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/semantics/partition/native/tests.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Multidimensional array bounds, array-valued domain elements and malformed carrier rank.",
+      "invariant": "Iterative observation preserves the original SQL rank and domain identity, rejects mismatched leaves and releases all scratch."
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_partition_range_comparison_uses_original_support_without_canonicalization",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-execution/src/catalog/image_validation/partition_bindings/values/tests.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Selected range and multirange endpoints with an intentionally unavailable canonical function.",
+      "invariant": "Original subtype comparison requires no input or canonicalization, respects cancellation and releases all admitted metadata."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "physical_domain_reads_select_base_layout_before_interpreting_payload",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/expr/datums/tests/domains.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Original domain Datums with fixed/varlena/nested bases, retained offsets and denied or cancelled reads.",
+      "invariant": "Physical domain output selects the base layout before reading bytes, preserves the source identity and retires all admitted metadata."
     }
   ]
 }

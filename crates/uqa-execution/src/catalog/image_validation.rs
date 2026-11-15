@@ -28,6 +28,8 @@ mod scalar_bindings;
 pub use constraint_bindings::validate as validate_constraint_bindings;
 mod index_bindings;
 pub use index_bindings::validate as validate_index_bindings;
+mod partition_bindings;
+pub use partition_bindings::validate as validate_partition_bindings;
 
 /// Join complete immutable ordinary/foreign row layouts, domains, constraint triggers and original index rows for SQL's constraint-reference predicate.
 pub fn validate_constraints(

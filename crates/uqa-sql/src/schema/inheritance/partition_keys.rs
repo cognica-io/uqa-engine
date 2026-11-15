@@ -15,7 +15,7 @@ use crate::SQLError;
 use std::collections::BTreeSet;
 
 /// `PARTITION_MAX_KEYS`.
-const PARTITION_MAX_KEYS: usize = 32;
+pub(crate) const PARTITION_MAX_KEYS: usize = 32;
 
 pub(super) fn validate_partition_keys(
     context: &InheritanceContext<'_>,
@@ -119,23 +119,64 @@ fn analyze_key_expression(
 }
 
 fn check_column_key(columns: &[ColumnDef], name: &str) -> Result<(), SQLError> {
+    check_column_key_with_control(
+        columns,
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+fn check_column_key_with_control(
+    columns: &[ColumnDef],
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     if POSTGRES_SYSTEM_COLUMNS.contains(&name) {
         return Err(error(
             "42P17",
             &format!("cannot use system column \"{name}\" in partition key"),
         ));
     }
-    let column = columns
-        .iter()
-        .find(|column| column.name == name)
-        .ok_or_else(|| {
-            error(
-                "42703",
-                &format!("column \"{name}\" named in partition key does not exist"),
-            )
-        })?;
+    let mut selected = None;
+    for column in columns {
+        control.check()?;
+        if column.name == name {
+            selected = Some(column);
+            break;
+        }
+    }
+    let column = selected.ok_or_else(|| {
+        error(
+            "42703",
+            &format!("column \"{name}\" named in partition key does not exist"),
+        )
+    })?;
     if column.generated.is_some() {
         return Err(generated_column_key(name));
+    }
+    Ok(())
+}
+
+/// Captured keys retain structural column restrictions without reapplying the declaration-time volatility of their selected functions.
+pub(crate) fn validate_stored_key_references(
+    expression: &Expr,
+    columns: &[ColumnDef],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let mut referenced = false;
+    crate::schema::dependencies::walk_schema_expr_with_control(expression, control, &mut |node| {
+        if let Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } = node {
+            check_column_key_with_control(columns, name, control)?;
+            referenced = true;
+        }
+        Ok(())
+    })?;
+    if !referenced {
+        return Err(error(
+            "42P17",
+            "cannot use constant expression as partition key",
+        ));
     }
     Ok(())
 }

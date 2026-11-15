@@ -87,7 +87,7 @@ pub(super) fn bound_matches(row_hash: u64, modulus: i32, remainder: i32) -> Resu
     Ok(row_hash % modulus == remainder)
 }
 
-fn validate_partition_key_type(ty: &ColumnType) -> Result<(), SQLError> {
+pub(super) fn validate_partition_key_type(ty: &ColumnType) -> Result<(), SQLError> {
     match ty {
         ColumnType::SmallInteger
         | ColumnType::Integer

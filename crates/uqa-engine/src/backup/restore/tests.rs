@@ -301,5 +301,6 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
 
 mod constraint_bindings;
 mod index_bindings;
+mod partition_bindings;
 mod persistent;
 mod providers;
