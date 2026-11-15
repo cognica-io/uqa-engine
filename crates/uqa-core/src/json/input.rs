@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{MemoryError, Produced, ProductionControl},
+    memory::{Budgeted, MemoryBudget, MemoryError, Produced, ProductionControl},
     QueryCancelled,
 };
 
@@ -172,6 +172,10 @@ enum Cause {
         format: &'static JsonMessageFormat,
         text: Option<Produced<String>>,
     },
+    Framed {
+        format: &'static JsonMessageFormat,
+        diagnostic: Budgeted<Box<JsonDiagnostic>>,
+    },
     Field(fields::FieldFailure),
     Type {
         expected: &'static str,
@@ -291,6 +295,32 @@ impl JsonDiagnostic {
         }
     }
 
+    /// Retain a typed field's diagnostic under its original allowance. Static framing avoids copying payloads; an admitted fixed-size owner keeps the common diagnostic representation independent of nesting.
+    pub fn with_context(
+        mut self,
+        format: &'static JsonMessageFormat,
+        position: JsonPosition,
+        memory: &MemoryBudget,
+    ) -> Result<Self, MemoryError> {
+        let reservation = memory.reserve(size_of::<Self>())?;
+        self.position = JsonPosition::unlocated();
+        Ok(Self {
+            position,
+            cause: Cause::Framed {
+                format,
+                diagnostic: Budgeted::new(Box::new(self), reservation),
+            },
+        })
+    }
+
+    /// Assign an enclosing visitor's completion position only to an unlocated conversion failure. Earlier physical syntax and typed input errors retain their original location.
+    pub fn at_position(mut self, position: JsonPosition) -> Self {
+        if self.position.line == 0 {
+            self.position = position;
+        }
+        self
+    }
+
     pub fn position(&self) -> JsonPosition {
         self.position
     }
@@ -378,6 +408,14 @@ impl JsonDiagnostic {
 
     /// Drop original scalar values before crossing a boundary that must not disclose input payloads. Syntax, expected type, error category and source position remain available.
     pub fn into_type_only(mut self) -> Self {
+        self.redact();
+        self
+    }
+
+    fn redact(&mut self) {
+        if let Cause::Framed { diagnostic, .. } = &mut self.cause {
+            diagnostic.as_mut().redact();
+        }
         if let Cause::RetainedMessage { text, .. } = &mut self.cause {
             *text = None;
         }
@@ -397,7 +435,6 @@ impl JsonDiagnostic {
                 _ => (),
             }
         }
-        self
     }
 }
 
@@ -432,6 +469,11 @@ impl std::fmt::Display for JsonDiagnostic {
                 } else {
                     f.write_str(format.redacted)?;
                 }
+            }
+            Cause::Framed { format, diagnostic } => {
+                f.write_str(format.prefix)?;
+                std::fmt::Display::fmt(&***diagnostic, f)?;
+                f.write_str(format.suffix)?;
             }
             Cause::Field(failure) => std::fmt::Display::fmt(failure, f)?,
             Cause::Type { expected, actual } => {

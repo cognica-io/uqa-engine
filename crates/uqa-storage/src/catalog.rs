@@ -28,6 +28,7 @@ mod identity;
 pub mod index_load;
 pub mod input;
 mod ordering;
+pub use ordering::compare_names;
 mod record_revisions;
 mod relation;
 pub mod relation_acl;

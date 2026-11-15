@@ -20,7 +20,9 @@ use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
 mod handle;
 mod input;
+mod persistent;
 pub use handle::{ModelHandle, ModelIdentity};
+pub use persistent::ModelCatalogInput;
 
 struct ModelSource {
     model: ModelHandle,
@@ -53,6 +55,10 @@ impl ModelCatalog {
 
     pub fn contains_key(&self, name: &str) -> bool {
         self.get(name).is_some()
+    }
+
+    pub fn budget(&self) -> &MemoryBudget {
+        self.values.budget()
     }
 
     pub fn insert(&mut self, name: String, model: Arc<DeepModel>) -> Result<(), MemoryError> {

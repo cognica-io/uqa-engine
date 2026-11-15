@@ -69781,6 +69781,249 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_json_f64_keeps_text_parser_bits_errors_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/typed/numbers/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Compare direct floating-point text conversion and errors with the installed public parser.",
+      "invariant": "Exact f64 bits, syntax positions and terminal cancellation match the ordinary typed boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_document_f64_matches_direct_number_visitation_and_exact_bits",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/numbers/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Project complete arbitrary-precision JSON numbers into floating-point scalars.",
+      "invariant": "Generic number conversion preserves signed zero, overflow and error classification independently of text conversion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_generic_maps_preserve_literal_keys_nested_protocols_and_replacement_order",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/typed_map.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Read typed string-keyed maps containing nested scalar protocols and overwritten values.",
+      "invariant": "Outer protocol-shaped names remain literal keys; complete nested values preserve original errors and last-value replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "typed_generic_map_continuation_preserves_parent_position_and_admitted_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/tests/typed_map.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Construct and retire a large generic map between adjacent typed sequence elements.",
+      "invariant": "Suspension preserves the enclosing cursor and admission; retirement completes before the following scalar is decoded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_unit_enums_preserve_cardinality_tag_and_payload_error_order",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Compare generic string and map enum values with the public typed deserializer.",
+      "invariant": "Map cardinality, variant selection and unit-payload errors retain their original order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "generic_field_context_preserves_admission_and_redacts_retained_payloads",
+      "cases": 1,
+      "source": "crates/uqa-core/src/json/document/typed/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Retain a long diagnostic payload through typed field framing and source retirement.",
+      "invariant": "Framing preserves original resource ownership and source position; redaction releases all sensitive payload admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_json_preserves_all_layer_fields_and_original_numeric_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_json/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Decode all sixteen layer kinds and direct versus generic floating-point observations.",
+      "invariant": "The native constructor matches the ordinary model parser, including scalar bits, defaults and declaration order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_json_preserves_defaults_duplicates_unknowns_and_first_failures",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_json/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Decode positional and named models with duplicate, omitted, unknown and malformed fields.",
+      "invariant": "Original first errors, positions, lazy ignored values and last layer-field definitions are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_json_preserves_truncation_and_nested_generic_protocols",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_json/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Truncate a complete model at every boundary and vary nested generic scalar protocols and depth.",
+      "invariant": "The native parser preserves physical depth, original source positions and complete overwritten-value validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_json_retains_admitted_weights_after_input_and_cancellation_retire",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_json/tests/resources.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Read a large embedding and retire its text, input continuation and cancellation owner.",
+      "invariant": "Exact signed-zero weights remain independently admitted until the completed model is dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_json_retires_every_selected_construction_prefix",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_json/tests/resources.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Interrupt multiple prefixes of native model construction by cancellation, denial, zero work, drop and unwind.",
+      "invariant": "Every terminal continuation releases private payloads and refuses further progress.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_publication_resumes_names_and_retains_exact_replacement_weights",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/persistent/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Insert repeated model identities with short and long common prefixes, then mutate after input retirement.",
+      "invariant": "Name comparison resumes, original order selects the last model, and native weights transfer without copying.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_publication_retires_every_terminal_prefix",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/persistent/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Interrupt private retained model publication at selected structural and name-comparison prefixes.",
+      "invariant": "Cancellation, denial, invalid work, drop and unwind release all names, models and tree paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-ml",
+      "kind": "lib",
+      "test": "stored_model_catalog_input_requires_versioned_physical_ownership",
+      "cases": 1,
+      "source": "crates/uqa-ml/src/model_catalog/persistent/tests.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Attempt persistent model loading without a selected versioned provider read owner.",
+      "invariant": "The unversioned source is rejected and its retained provider and continuation are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_model_catalog_loading_yields_before_complete_cache_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/models.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Restore sixteen models on native SQLite, SQLite KV and redb, then retire the source and edit a restored model.",
+      "invariant": "One poll cannot load the complete catalog; retained weights survive replacement and their original allowance retires exactly.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_model_input_keeps_the_snapshot_and_retires_terminal_transactions",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/models.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Restore the three persistent providers through later writes and all terminal outcomes.",
+      "invariant": "The selected model revision stays fixed and completion, cancellation, denial, zero work, drop and unwind release the read transaction.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_model_input_completes_physical_checks_before_semantics_and_rolls_back",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/models.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Restore malformed model JSON followed by an oversized physical record on each persistent provider.",
+      "invariant": "Complete physical checks precede semantic decoding; both failures consume the candidate and roll back without publication.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_models_keep_full_and_incremental_values_after_source_loss_and_rollback",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/models.rs",
+      "capability": "Retained model catalog restoration",
+      "workload": "Restore full and incremental model images on memory, native SQLite, SQLite KV and redb after removing the source and archives.",
+      "invariant": "Selected scalar bits and model membership survive rollback and later mutation; persistent destinations reopen with committed changes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

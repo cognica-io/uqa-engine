@@ -14,6 +14,7 @@ mod field_analyzers;
 mod gin_analyzers;
 mod graph_oids;
 mod graphs;
+mod models;
 mod scoring;
 mod sequences;
 mod system_authority;

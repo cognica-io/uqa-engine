@@ -102,6 +102,32 @@ impl JsonDocument {
         }
     }
 
+    /// Release a completed temporary generation through the same work owner as its construction, including overwritten and ignored typed fields.
+    pub async fn retire_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), JsonInputError> {
+        self.retire(self.root, control, work).await
+    }
+
+    /// Read a typed string-keyed map of generic values. Scalar protocol names remain ordinary keys in the outer map; each value retains its original generic decoding rules and last-value replacement.
+    pub async fn read_map_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        reader: &mut super::JsonReader<'_, '_>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        protocol: JsonScalarProtocol,
+    ) -> Result<Self, JsonInputError> {
+        let mut document = Self {
+            nodes: BudgetedMap::new(control.budget().expect("admitted JSON document")),
+            next: 0,
+            root: 0,
+        };
+        document.root = read::map(&mut document, reader, control, work, protocol).await?;
+        control.check().map_err(JsonReadError::from)?;
+        Ok(document)
+    }
+
     fn insert(&mut self, value: Value) -> Result<usize, JsonInputError> {
         let index = self.next;
         self.next = self.next.checked_add(1).ok_or(JsonInputError::Invalid)?;

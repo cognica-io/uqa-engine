@@ -68,6 +68,7 @@ enum Stage {
 
 enum CacheInput {
     Models,
+    LoadingModels(uqa_ml::model_catalog::ModelCatalogInput),
     Scoring(ScoringParameterCatalogInput),
 }
 
@@ -410,16 +411,32 @@ impl CacheInput {
                     .catalog
                     .as_ref()
                     .expect("persistent catalog");
-                session
-                    .engine
-                    .restore_models_from_catalog(catalog.as_ref())?;
-                CacheInput::Scoring(ScoringParameterCatalogInput::new(
+                CacheInput::LoadingModels(uqa_ml::model_catalog::ModelCatalogInput::new(
                     Arc::clone(catalog),
                     limits,
-                    session.engine.durable.scoring_params.read().budget(),
+                    session.engine.durable.models.read().budget(),
                     control,
                 )?)
             }
+            CacheInput::LoadingModels(mut input) => match input.advance(1)? {
+                Some(models) => {
+                    *session.engine.durable.models.write() = models;
+                    CacheInput::Scoring(ScoringParameterCatalogInput::new(
+                        Arc::clone(
+                            session
+                                .engine
+                                .storage
+                                .catalog
+                                .as_ref()
+                                .expect("persistent catalog"),
+                        ),
+                        limits,
+                        session.engine.durable.scoring_params.read().budget(),
+                        control,
+                    )?)
+                }
+                None => CacheInput::LoadingModels(input),
+            },
             CacheInput::Scoring(mut input) => match input.advance(1)? {
                 Some(parameters) => {
                     *session.engine.durable.scoring_params.write() = parameters;

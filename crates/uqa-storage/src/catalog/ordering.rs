@@ -10,7 +10,8 @@ use crate::StorageBackendResult;
 use std::cmp::Ordering;
 use uqa_core::image_io::AsyncImageInput;
 
-pub(crate) async fn compare_names(
+/// Compare catalog identities through an enclosing input continuation, including long common prefixes.
+pub async fn compare_names(
     left: &str,
     right: &str,
     progress: &mut AsyncImageInput<'_>,
