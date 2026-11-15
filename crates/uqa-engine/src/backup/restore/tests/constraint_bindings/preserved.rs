@@ -43,6 +43,7 @@ fn later_writes(engine: &Engine) {
         "UPDATE retained.renamed_items SET flag=false WHERE id=1",
         "INSERT INTO old_domain_values VALUES(-2)",
         "SELECT (-1)::positive",
+        "SELECT ROW(-1,true)::row_domain",
     ] {
         assert_eq!(
             engine.sql(sql, &[]).unwrap_err().sqlstate(),
@@ -86,7 +87,7 @@ fn restored_constraint_bindings_preserve_named_rows_domains_and_not_valid_state(
     let repository = repository(&directory.path().join("repository"));
     let source_path = directory.path().join("source");
     let source = provider.open(&source_path);
-    source.sql("CREATE DOMAIN truth AS boolean; CREATE DOMAIN nested_truth AS truth CHECK(VALUE); CREATE DOMAIN positive AS integer CHECK(VALUE>0); CREATE DOMAIN later AS integer; CREATE TABLE old_domain_values(id later); INSERT INTO old_domain_values VALUES(-1); ALTER DOMAIN later ADD CONSTRAINT later_positive CHECK(VALUE>0) NOT VALID; CREATE TABLE items(id integer,flag truth); INSERT INTO items VALUES(-1,false),(1,true); ALTER TABLE items ADD CONSTRAINT direct_guard CHECK(flag AND id>0) NOT VALID; CREATE FUNCTION row_guard(x items) RETURNS truth LANGUAGE SQL VOLATILE AS $$ SELECT (x).flag $$; ALTER TABLE items ADD CONSTRAINT row_guard_check CHECK(row_guard(items)) NOT VALID; CREATE TABLE latent(id integer CHECK(id/0>0)); CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE remote_items(id integer CHECK(id>0),flag truth,CONSTRAINT flag_guard CHECK(flag)) SERVER remote", &[]).unwrap();
+    source.sql("CREATE DOMAIN truth AS boolean; CREATE DOMAIN nested_truth AS truth CHECK(VALUE); CREATE DOMAIN positive AS integer CHECK(VALUE>0); CREATE DOMAIN later AS integer; CREATE TABLE old_domain_values(id later); INSERT INTO old_domain_values VALUES(-1); ALTER DOMAIN later ADD CONSTRAINT later_positive CHECK(VALUE>0) NOT VALID; CREATE TABLE items(id integer,flag truth); CREATE DOMAIN row_domain AS items CHECK((VALUE).id>0); INSERT INTO items VALUES(-1,false),(1,true); ALTER TABLE items ADD CONSTRAINT direct_guard CHECK(flag AND id>0) NOT VALID; CREATE FUNCTION row_guard(x items) RETURNS truth LANGUAGE SQL VOLATILE AS $$ SELECT (x).flag $$; ALTER TABLE items ADD CONSTRAINT row_guard_check CHECK(row_guard(items)) NOT VALID; CREATE TABLE latent(id integer CHECK(id/0>0)); CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE remote_items(id integer CHECK(id>0),flag truth,CONSTRAINT flag_guard CHECK(flag)) SERVER remote", &[]).unwrap();
     let initial = definitions(&source);
     source.sql("BEGIN; ALTER TABLE items RENAME TO rolled_back; ALTER DOMAIN truth RENAME TO rolled_back_truth; ROLLBACK", &[]).unwrap();
     assert_eq!(definitions(&source), initial);

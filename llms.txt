@@ -42,7 +42,7 @@ Foreign-table declaration and restoration scope live in Execution's `schema/fore
 
 SQL's `schema/columns/removal_metadata.rs` selects CHECK dependencies when a column is removed and preserves independent declarations with their existing identities and flags. Execution publishes the retained checks through ordinary and foreign column-removal paths; the column where a CHECK was written does not determine its lifetime.
 
-SQL CHECK analysis and borrowed reference traversal live in `schema/constraints/checks.rs` and `references.rs`. Execution supplies the physical row scope through `schema/check_rows.rs` and projects ordered attribute keys and dependencies from the SQL references. Engine only adapts borrowed expression rows.
+SQL CHECK analysis and borrowed reference traversal live in `schema/constraints/checks.rs` and `references.rs`. Stored CHECK and index bindings share admitted scalar analysis in `catalog/scalar_bindings.rs`; `schema/constraints/native/bindings.rs` retains original row and domain VALUE scopes without evaluation. Execution supplies the physical row scope through `schema/check_rows.rs` and projects ordered attribute keys and dependencies from the SQL references. Engine only adapts borrowed expression rows.
 
 Domain persistence and private catalog merging live in `crates/uqa-execution/src/catalog/domain/`. Independent domain definitions, domain OID claims and per-constraint identities share the existing storage metadata transaction; legacy constraint addresses finalize after complete catalog restoration; Engine supplies registry and catalog adapters.
 

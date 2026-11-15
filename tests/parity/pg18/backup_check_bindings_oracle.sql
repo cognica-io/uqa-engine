@@ -13,6 +13,7 @@ CREATE TABLE old_domain_values(id later);
 INSERT INTO old_domain_values VALUES(-1);
 ALTER DOMAIN later ADD CONSTRAINT later_positive CHECK(VALUE>0) NOT VALID;
 CREATE TABLE items(id integer,flag truth);
+CREATE DOMAIN row_domain AS items CHECK((VALUE).id>0);
 INSERT INTO items VALUES(-1,false),(1,true);
 ALTER TABLE items ADD CONSTRAINT direct_guard CHECK(flag AND id>0) NOT VALID;
 CREATE FUNCTION row_guard(x items) RETURNS truth LANGUAGE SQL VOLATILE AS $$ SELECT (x).flag $$;
@@ -51,6 +52,9 @@ INSERT INTO old_domain_values VALUES(-2);
 ROLLBACK TO invalid;
 SELECT (-1)::positive;
 \echo domain_cast :SQLSTATE
+ROLLBACK TO invalid;
+SELECT ROW(-1,true)::row_domain;
+\echo composite_domain_cast :SQLSTATE
 ROLLBACK TO invalid;
 INSERT INTO latent VALUES(1);
 \echo delayed_evaluation :SQLSTATE

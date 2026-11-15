@@ -68765,7 +68765,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/backup/restore/tests/constraint_bindings/preserved.rs",
       "capability": "Restored CHECK expression binding",
-      "workload": "Restore renamed/moved ordinary, foreign and domain CHECKs across all four providers.",
+      "workload": "Restore renamed/moved ordinary, foreign and scalar/composite domain CHECKs across all four providers.",
       "invariant": "Retain exact original definitions, NOT VALID rows, later enforcement, delayed errors, rollback and durable reopen after source/archive retirement.",
       "case_names": [
         "case_1_memory",
