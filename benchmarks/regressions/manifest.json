@@ -69557,6 +69557,19 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_type_references_survive_native_images_and_reject_missing_claims",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/type_references/tests/retained.rs",
+      "capability": "Captured routine type closure",
+      "workload": "Round-trip retained literal syntax and executable scalars through native image encoding, independently remove their type or declaration claims, and retain the original owners.",
+      "invariant": "Selected type identities must belong to the captured catalog; valid definitions remain unchanged, invalid images never publish, and admitted workspace retires on every terminal path.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "native_routine_types_validate_original_defaults_syntax_and_retained_plans",

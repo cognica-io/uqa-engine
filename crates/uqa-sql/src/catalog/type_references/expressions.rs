@@ -30,6 +30,7 @@ impl TypeReferences<'_> {
                     binding: Some(binding),
                     ..
                 } => self.function_types(binding),
+                Expr::RetainedLiteral(literal) => self.retained_literal(&literal.0),
                 _ => Ok(()),
             },
         )
@@ -51,6 +52,7 @@ impl TypeReferences<'_> {
                     binding: Some(binding),
                     ..
                 } => self.function_types(binding)?,
+                ScalarExpr::RetainedLiteral(literal) => self.retained_literal(literal)?,
                 _ => {}
             }
             match node {
@@ -67,6 +69,16 @@ impl TypeReferences<'_> {
             }
             Ok(true)
         })
+    }
+
+    fn retained_literal(&self, literal: &crate::ir::RetainedScalarLiteral) -> Result<(), SQLError> {
+        if let Some(ty) = &literal.ty {
+            self.column_type(ty)?;
+        }
+        if let Some(declaration) = &literal.declaration {
+            self.stored_name(declaration)?;
+        }
+        Ok(())
     }
 
     pub fn function_types(&self, binding: &FunctionBinding) -> Result<(), SQLError> {

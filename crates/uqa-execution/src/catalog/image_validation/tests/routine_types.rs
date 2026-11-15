@@ -23,48 +23,74 @@ fn cast(oid: u32) -> Expr {
     }
 }
 
+fn retained(oid: u32) -> Expr {
+    use uqa_sql::{
+        ast::{ColumnType, EnumTypeReference, RetainedInputLiteral},
+        ir::{RetainedConstantValue, RetainedScalarLiteral},
+    };
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let value = RetainedConstantValue::from_produced(
+        control.copy_value(&uqa_core::Value::Null).unwrap(),
+        &control,
+    )
+    .unwrap();
+    Expr::RetainedLiteral(Box::new(RetainedInputLiteral(RetainedScalarLiteral::new(
+        value,
+        Some(ColumnType::Enum(EnumTypeReference {
+            schema: "public".into(),
+            name: "mood".into(),
+            oid,
+            array_oid: 25_001,
+        })),
+        None,
+        None,
+    ))))
+}
+
 #[test]
 fn native_routine_types_validate_original_defaults_syntax_and_retained_plans() {
-    for location in 0..3 {
-        for oid in [25_000, 25_002] {
-            let mut snapshot = typed_snapshot();
-            snapshot.tables.clear();
-            let Statement::CreateFunction(mut definition) = uqa_sql::compile(
+    for (kind, make) in [("cast", cast as fn(u32) -> Expr), ("retained", retained)] {
+        for location in 0..3 {
+            for oid in [25_000, 25_002] {
+                let mut snapshot = typed_snapshot();
+                snapshot.tables.clear();
+                let Statement::CreateFunction(mut definition) = uqa_sql::compile(
                 "CREATE FUNCTION public.saved(n text DEFAULT NULL) RETURNS text LANGUAGE SQL AS 'unexamined source text'",
             ).unwrap().remove(0) else { panic!("routine definition") };
-            let statement = |oid| Statement::Values {
-                rows: vec![vec![cast(oid)]],
-            };
-            let body = if location == 0 {
-                definition.params[0].default = Some(cast(oid));
-                RoutineBody::Source
-            } else {
-                definition.body = FunctionBody::Statements(vec![statement(if location == 1 {
-                    oid
+                let statement = |oid| Statement::Values {
+                    rows: vec![vec![make(oid)]],
+                };
+                let body = if location == 0 {
+                    definition.params[0].default = Some(make(oid));
+                    RoutineBody::Source
                 } else {
-                    25_000
-                })]);
-                RoutineBody::Bound(
-                    CompiledFunctionBody::SQL(vec![UnifiedPlan::lower(statement(
-                        if location == 2 { oid } else { 25_000 },
-                    ))])
-                    .shared(),
-                )
-            };
-            RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
-                .insert(
-                    "public.saved".into(),
-                    vec![SQLUserFunction::new(*definition, body).shared()],
-                )
-                .unwrap();
-            let memory = MemoryBudget::new(1 << 20);
-            let result = validate_types(&snapshot, &memory, &CancellationToken::new());
-            assert_eq!(memory.used(), 0);
-            assert_eq!(
-                result.is_ok(),
-                oid == 25_000,
-                "location={location}, oid={oid}, result={result:?}"
-            );
+                    definition.body = FunctionBody::Statements(vec![statement(if location == 1 {
+                        oid
+                    } else {
+                        25_000
+                    })]);
+                    RoutineBody::Bound(
+                        CompiledFunctionBody::SQL(vec![UnifiedPlan::lower(statement(
+                            if location == 2 { oid } else { 25_000 },
+                        ))])
+                        .shared(),
+                    )
+                };
+                RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+                    .insert(
+                        "public.saved".into(),
+                        vec![SQLUserFunction::new(*definition, body).shared()],
+                    )
+                    .unwrap();
+                let memory = MemoryBudget::new(1 << 20);
+                let result = validate_types(&snapshot, &memory, &CancellationToken::new());
+                assert_eq!(memory.used(), 0);
+                assert_eq!(
+                    result.is_ok(),
+                    oid == 25_000,
+                    "kind={kind}, location={location}, oid={oid}, result={result:?}"
+                );
+            }
         }
     }
 }
