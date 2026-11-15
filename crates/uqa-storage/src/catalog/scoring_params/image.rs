@@ -93,8 +93,9 @@ impl ScoringParameters {
             let (encoded, encoded_memory) = encoded.into_parts();
             memory.absorb(encoded_memory);
             let encoded = Budgeted::new(encoded, memory);
-            let bytes = encoded.reserved_bytes();
-            result.values.insert(name, encoded, bytes)?;
+            result = result
+                .insert_restored_from(name, encoded, &mut input)
+                .await?;
         }
         input.end().await?;
         Ok(result.into_mutation_budget(mutations))

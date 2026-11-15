@@ -29,9 +29,10 @@ use uqa_execution::{
     },
 };
 use uqa_storage::{
-    catalog::input::CatalogInputLimits, key_value::KeyValueReadRevision,
-    read_control::StorageReadControl, CatalogCacheRevisions, PersistentStorageProvider,
-    StorageBackendError, StorageBackendResult,
+    catalog::{input::CatalogInputLimits, scoring_params::ScoringParameterCatalogInput},
+    key_value::KeyValueReadRevision,
+    read_control::StorageReadControl,
+    CatalogCacheRevisions, PersistentStorageProvider, StorageBackendError, StorageBackendResult,
 };
 
 pub(crate) struct PersistentEngineInput {
@@ -62,7 +63,12 @@ enum Stage {
     GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
     Registries(RestoredAuthorities),
-    Caches,
+    Caches(CacheInput),
+}
+
+enum CacheInput {
+    Models,
+    Scoring(ScoringParameterCatalogInput),
 }
 
 struct AfterNamedAnalyzers {
@@ -224,7 +230,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input and field installation consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input, field installation and scoring parameters consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -349,9 +355,9 @@ impl Candidate {
             Stage::Registries(retained) => {
                 self.session
                     .restore_remaining_registries(catalog.as_ref(), retained)?;
-                Stage::Caches
+                Stage::Caches(CacheInput::Models)
             }
-            Stage::Caches => return self.session.complete_catalog(control),
+            Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))
     }
@@ -389,15 +395,49 @@ impl Stage {
     }
 }
 
+impl CacheInput {
+    fn advance(
+        self,
+        session: PersistentEngineState,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Progress> {
+        let input = match self {
+            CacheInput::Models => {
+                let catalog = session
+                    .engine
+                    .storage
+                    .catalog
+                    .as_ref()
+                    .expect("persistent catalog");
+                session
+                    .engine
+                    .restore_models_from_catalog(catalog.as_ref())?;
+                CacheInput::Scoring(ScoringParameterCatalogInput::new(
+                    Arc::clone(catalog),
+                    limits,
+                    session.engine.durable.scoring_params.read().budget(),
+                    control,
+                )?)
+            }
+            CacheInput::Scoring(mut input) => match input.advance(1)? {
+                Some(parameters) => {
+                    *session.engine.durable.scoring_params.write() = parameters;
+                    return session.complete_catalog(control);
+                }
+                None => CacheInput::Scoring(input),
+            },
+        };
+        Ok(Progress::Pending(Candidate {
+            session,
+            stage: Stage::Caches(input),
+            limits,
+        }))
+    }
+}
+
 impl PersistentEngineState {
     fn complete_catalog(self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
-        let catalog = self
-            .engine
-            .storage
-            .catalog
-            .as_ref()
-            .expect("persistent catalog");
-        self.engine.restore_model_caches(catalog.as_ref())?;
         control.check()?;
         Ok(Progress::Complete(self))
     }

@@ -69364,6 +69364,90 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_publication_resumes_long_comparisons_and_transfers_last_definition_allocations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Publish long common-prefix names with repeated definitions and one continuation poll per call.",
+      "invariant": "Comparison work resumes without replay, last-definition keys and values keep their original allocations, and per-poll allocation remains bounded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scoring_publication_retires_private_rows_and_paths_on_every_terminal_prefix",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Cancel, deny memory, invalidate a window, drop or unwind during retained native catalog insertion.",
+      "invariant": "No incomplete root is published and every private name, value and tree-path reservation retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "stored_scoring_input_rejects_unversioned_sources_and_retires_the_selected_provider",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/scoring_params/input/tests.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Reject empty record windows and an unversioned catalog source before private publication.",
+      "invariant": "Each failure preserves the required source-admission error, is terminal, leaves the source unchanged and releases the retained provider and scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_catalog_loading_yields_before_complete_cache_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Restore sixteen opaque scoring records on native SQLite, SQLite KV and redb, then retire the source and restoration allowance.",
+      "invariant": "One poll cannot complete the catalog; selected bytes, later replacements and final reservation retirement remain correct.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_input_keeps_one_snapshot_and_retires_every_terminal_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Write from a sibling session during scoring input and exercise cancellation, memory denial, invalid windows, drop and unwind.",
+      "invariant": "The private catalog observes its selected snapshot and every terminal path releases its read transaction without changing the source.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_scoring_input_rejects_oversized_records_without_publishing_a_private_engine",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/scoring.rs",
+      "capability": "Retained scoring catalog restoration",
+      "workload": "Load a scoring record beyond the configured physical limit on each persistent provider.",
+      "invariant": "The private Engine never publishes, its read transaction and reservations retire, and the source remains readable.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
     }
   ]
 }
