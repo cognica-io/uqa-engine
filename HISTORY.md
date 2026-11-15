@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent scoring parameters through bounded native catalog input. Preserve opaque names and values, selected snapshots and original allocation ownership; native image publication also resumes long-name comparisons. Failed or abandoned private input releases its read transaction without publishing a partial catalog. Complete public backup restoration remains in progress.
+
 - Validate captured routine defaults, original SQL-standard statements and independently retained plans against their selected row and parameter types before private backup activation. Reuse SQL expression and return-layout analysis without executing bodies, applying rewrites or advancing default sequences. Preserve deferred source compilation, renamed columns, typed mutation results and later rollback. Complete public backup restoration remains in progress.
 
 - Validate captured SQL-standard routine statement counts, statement kinds and parameter positions before private backup activation. Both stored syntax and independently retained plans must use the declared input slots; output-only procedure arguments do not add slots, and parameter defaults have no argument scope. Validate relation and selected type references in the original SQL-standard syntax independently of separately retained execution plans, including defaults and invocation metadata. Source SQL and PL/pgSQL bodies retain lazy compilation. Complete public backup restoration remains in progress.
