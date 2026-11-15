@@ -40,6 +40,12 @@ pub(super) fn validate(engine: &Engine, control: &StorageReadControl) -> BackupR
     .map_err(sql_error)?;
     uqa_execution::catalog::image_validation::validate_plan_relations(&catalog, &production)
         .map_err(sql_error)?;
+    uqa_execution::catalog::image_validation::validate_routine_declarations(
+        catalog.snapshot(),
+        engine,
+        &production,
+    )
+    .map_err(sql_error)?;
     uqa_execution::catalog::image_validation::validate_hierarchies(
         catalog.snapshot(),
         control.memory(),

@@ -304,4 +304,5 @@ mod index_bindings;
 mod partition_bindings;
 mod persistent;
 mod providers;
+mod routine_declarations;
 mod rule_bindings;

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share routine language, parameter-order, default and pseudo-type checks between ordinary declarations and private backup validation. Reject invalid captured source declarations before activation while preserving deferred bodies and input/output names. Reject domains over arrays as VARIADIC parameter types, while preserving arrays of domains, matching PostgreSQL 18. Complete public backup restoration remains in progress.
+
 - Validate captured rewrite-rule OLD/NEW identities, referenced column positions and Boolean condition types before private backup activation. Reject incomplete bindings, invalid event sides, duplicate identities, external parameters and execution-only implicit row inputs. Analyze nested conditions and current table/view rows without executing expressions, and preserve unused historical column names, renamed Boolean domains and original routine identities. Require exact stored dependency summaries for rule syntax and captured conditions, preserving original relation, column and routine identities and rejecting missing or unrelated entries. Preserve DISTINCT ON output aliases and decoded quoted relation qualifiers through dependency capture, correlation and restoration. Complete public backup restoration remains in progress.
 
 - Keep encoded analyzer images prepared for persistent restoration privately owned. Ordinary readers of a shared compiled analyzer cannot acquire a restore candidate's allocations through the process cache; the candidate's allowance retires independently of those readers.

@@ -1,0 +1,313 @@
+{
+  "version": "18.4 (Debian 18.4-1.pgdg13+1)",
+  "cases": [
+    {
+      "mode": "on",
+      "id": "domain_array_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n declaration_ints) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be an array"
+    },
+    {
+      "mode": "on",
+      "id": "array_of_domain_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n declaration_int[]) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "unknown_language",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS integer LANGUAGE missing_language AS 'SELECT n'",
+      "sqlstate": "42704",
+      "message": "language \"missing_language\" does not exist"
+    },
+    {
+      "mode": "on",
+      "id": "lazy_sql",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS integer LANGUAGE sql AS 'SELECT missing(n)'",
+      "sqlstate": "42883",
+      "message": "function missing(integer) does not exist"
+    },
+    {
+      "mode": "on",
+      "id": "duplicate_inputs",
+      "sql": "CREATE FUNCTION f(n integer,n integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "parameter name \"n\" used more than once"
+    },
+    {
+      "mode": "on",
+      "id": "same_input_output_name",
+      "sql": "CREATE FUNCTION f(IN n integer,OUT n integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "default_output",
+      "sql": "CREATE FUNCTION f(OUT n integer DEFAULT 1) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "only input parameters can have default values"
+    },
+    {
+      "mode": "on",
+      "id": "nonarray_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be an array"
+    },
+    {
+      "mode": "on",
+      "id": "input_after_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer[],m integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be the last input parameter"
+    },
+    {
+      "mode": "on",
+      "id": "function_output_after_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer[],OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "procedure_output_after_variadic",
+      "sql": "CREATE PROCEDURE f(VARIADIC n integer[],OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be the last parameter"
+    },
+    {
+      "mode": "on",
+      "id": "input_after_default",
+      "sql": "CREATE FUNCTION f(n integer DEFAULT 1,m integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "input parameters after one with a default value must also have defaults"
+    },
+    {
+      "mode": "on",
+      "id": "procedure_output_after_default",
+      "sql": "CREATE PROCEDURE f(n integer DEFAULT 1,OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "procedure OUT parameters cannot appear after one with a default value"
+    },
+    {
+      "mode": "on",
+      "id": "polymorphic_result_without_input",
+      "sql": "CREATE FUNCTION f() RETURNS anyelement LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type"
+    },
+    {
+      "mode": "on",
+      "id": "polymorphic_sql_source",
+      "sql": "CREATE FUNCTION f(n anyelement) RETURNS anyelement LANGUAGE sql AS 'SELECT n'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "polymorphic_sql_standard",
+      "sql": "CREATE FUNCTION f(n anyelement) RETURNS anyelement LANGUAGE sql RETURN n",
+      "sqlstate": "42P13",
+      "message": "SQL function with unquoted function body cannot have polymorphic arguments"
+    },
+    {
+      "mode": "on",
+      "id": "sql_record_argument",
+      "sql": "CREATE FUNCTION f(n record) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot have arguments of type record"
+    },
+    {
+      "mode": "on",
+      "id": "plpgsql_record_argument",
+      "sql": "CREATE FUNCTION f(n record) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "plpgsql_trigger_argument",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "42P13",
+      "message": "trigger functions cannot have declared arguments"
+    },
+    {
+      "mode": "on",
+      "id": "sql_cstring_result",
+      "sql": "CREATE FUNCTION f() RETURNS cstring LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type cstring"
+    },
+    {
+      "mode": "on",
+      "id": "plpgsql_cstring_result",
+      "sql": "CREATE FUNCTION f() RETURNS cstring LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot return type cstring"
+    },
+    {
+      "mode": "on",
+      "id": "plpgsql_internal_input",
+      "sql": "CREATE FUNCTION f(n internal) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot accept type internal"
+    },
+    {
+      "mode": "off",
+      "id": "domain_array_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n declaration_ints) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be an array"
+    },
+    {
+      "mode": "off",
+      "id": "array_of_domain_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n declaration_int[]) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "unknown_language",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS integer LANGUAGE missing_language AS 'SELECT n'",
+      "sqlstate": "42704",
+      "message": "language \"missing_language\" does not exist"
+    },
+    {
+      "mode": "off",
+      "id": "lazy_sql",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS integer LANGUAGE sql AS 'SELECT missing(n)'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "duplicate_inputs",
+      "sql": "CREATE FUNCTION f(n integer,n integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "parameter name \"n\" used more than once"
+    },
+    {
+      "mode": "off",
+      "id": "same_input_output_name",
+      "sql": "CREATE FUNCTION f(IN n integer,OUT n integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "default_output",
+      "sql": "CREATE FUNCTION f(OUT n integer DEFAULT 1) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "only input parameters can have default values"
+    },
+    {
+      "mode": "off",
+      "id": "nonarray_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be an array"
+    },
+    {
+      "mode": "off",
+      "id": "input_after_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer[],m integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be the last input parameter"
+    },
+    {
+      "mode": "off",
+      "id": "function_output_after_variadic",
+      "sql": "CREATE FUNCTION f(VARIADIC n integer[],OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "procedure_output_after_variadic",
+      "sql": "CREATE PROCEDURE f(VARIADIC n integer[],OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "VARIADIC parameter must be the last parameter"
+    },
+    {
+      "mode": "off",
+      "id": "input_after_default",
+      "sql": "CREATE FUNCTION f(n integer DEFAULT 1,m integer) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "input parameters after one with a default value must also have defaults"
+    },
+    {
+      "mode": "off",
+      "id": "procedure_output_after_default",
+      "sql": "CREATE PROCEDURE f(n integer DEFAULT 1,OUT m integer) LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "procedure OUT parameters cannot appear after one with a default value"
+    },
+    {
+      "mode": "off",
+      "id": "polymorphic_result_without_input",
+      "sql": "CREATE FUNCTION f() RETURNS anyelement LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "cannot determine result data type"
+    },
+    {
+      "mode": "off",
+      "id": "polymorphic_sql_source",
+      "sql": "CREATE FUNCTION f(n anyelement) RETURNS anyelement LANGUAGE sql AS 'SELECT n'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "polymorphic_sql_standard",
+      "sql": "CREATE FUNCTION f(n anyelement) RETURNS anyelement LANGUAGE sql RETURN n",
+      "sqlstate": "42P13",
+      "message": "SQL function with unquoted function body cannot have polymorphic arguments"
+    },
+    {
+      "mode": "off",
+      "id": "sql_record_argument",
+      "sql": "CREATE FUNCTION f(n record) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot have arguments of type record"
+    },
+    {
+      "mode": "off",
+      "id": "plpgsql_record_argument",
+      "sql": "CREATE FUNCTION f(n record) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "plpgsql_trigger_argument",
+      "sql": "CREATE FUNCTION f(n integer) RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "sql_cstring_result",
+      "sql": "CREATE FUNCTION f() RETURNS cstring LANGUAGE sql AS 'SELECT NULL'",
+      "sqlstate": "42P13",
+      "message": "SQL functions cannot return type cstring"
+    },
+    {
+      "mode": "off",
+      "id": "plpgsql_cstring_result",
+      "sql": "CREATE FUNCTION f() RETURNS cstring LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot return type cstring"
+    },
+    {
+      "mode": "off",
+      "id": "plpgsql_internal_input",
+      "sql": "CREATE FUNCTION f(n internal) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
+      "sqlstate": "0A000",
+      "message": "PL/pgSQL functions cannot accept type internal"
+    }
+  ]
+}
