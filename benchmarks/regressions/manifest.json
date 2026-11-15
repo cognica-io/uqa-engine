@@ -69082,36 +69082,60 @@
       "package": "uqa-engine",
       "kind": "lib",
       "test": "restored_rule_bindings_reject_invalid_original_row_references",
-      "cases": 24,
+      "cases": 48,
       "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings.rs",
       "capability": "Captured rule row validation",
-      "workload": "Reject six kinds of captured rule binding and condition-type corruption through all four actual provider archives.",
+      "workload": "Reject twelve kinds of captured row, condition-type and dependency-summary corruption through all four actual provider archives.",
       "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
       "case_names": [
-        "case_1_memory::damage_1___identity__",
-        "case_1_memory::damage_2___attribute__",
-        "case_1_memory::damage_3___missing__",
-        "case_1_memory::damage_4___shared__",
-        "case_1_memory::damage_5___unbound__",
-        "case_1_memory::damage_6___type__",
-        "case_2_sqlite_native::damage_1___identity__",
-        "case_2_sqlite_native::damage_2___attribute__",
-        "case_2_sqlite_native::damage_3___missing__",
-        "case_2_sqlite_native::damage_4___shared__",
-        "case_2_sqlite_native::damage_5___unbound__",
-        "case_2_sqlite_native::damage_6___type__",
-        "case_3_sqlite_kv::damage_1___identity__",
-        "case_3_sqlite_kv::damage_2___attribute__",
-        "case_3_sqlite_kv::damage_3___missing__",
-        "case_3_sqlite_kv::damage_4___shared__",
-        "case_3_sqlite_kv::damage_5___unbound__",
-        "case_3_sqlite_kv::damage_6___type__",
-        "case_4_redb::damage_1___identity__",
-        "case_4_redb::damage_2___attribute__",
-        "case_4_redb::damage_3___missing__",
-        "case_4_redb::damage_4___shared__",
-        "case_4_redb::damage_5___unbound__",
-        "case_4_redb::damage_6___type__"
+        "case_1_memory::damage_01___identity__",
+        "case_1_memory::damage_02___attribute__",
+        "case_1_memory::damage_03___missing__",
+        "case_1_memory::damage_04___shared__",
+        "case_1_memory::damage_05___unbound__",
+        "case_1_memory::damage_06___type__",
+        "case_1_memory::damage_07___dependencies__",
+        "case_1_memory::damage_08___dependencies_column__",
+        "case_1_memory::damage_09___dependencies_extra_column__",
+        "case_1_memory::damage_10___dependencies_extra_relation__",
+        "case_1_memory::damage_11___dependencies_routine__",
+        "case_1_memory::damage_12___dependencies_routine_identity__",
+        "case_2_sqlite_native::damage_01___identity__",
+        "case_2_sqlite_native::damage_02___attribute__",
+        "case_2_sqlite_native::damage_03___missing__",
+        "case_2_sqlite_native::damage_04___shared__",
+        "case_2_sqlite_native::damage_05___unbound__",
+        "case_2_sqlite_native::damage_06___type__",
+        "case_2_sqlite_native::damage_07___dependencies__",
+        "case_2_sqlite_native::damage_08___dependencies_column__",
+        "case_2_sqlite_native::damage_09___dependencies_extra_column__",
+        "case_2_sqlite_native::damage_10___dependencies_extra_relation__",
+        "case_2_sqlite_native::damage_11___dependencies_routine__",
+        "case_2_sqlite_native::damage_12___dependencies_routine_identity__",
+        "case_3_sqlite_kv::damage_01___identity__",
+        "case_3_sqlite_kv::damage_02___attribute__",
+        "case_3_sqlite_kv::damage_03___missing__",
+        "case_3_sqlite_kv::damage_04___shared__",
+        "case_3_sqlite_kv::damage_05___unbound__",
+        "case_3_sqlite_kv::damage_06___type__",
+        "case_3_sqlite_kv::damage_07___dependencies__",
+        "case_3_sqlite_kv::damage_08___dependencies_column__",
+        "case_3_sqlite_kv::damage_09___dependencies_extra_column__",
+        "case_3_sqlite_kv::damage_10___dependencies_extra_relation__",
+        "case_3_sqlite_kv::damage_11___dependencies_routine__",
+        "case_3_sqlite_kv::damage_12___dependencies_routine_identity__",
+        "case_4_redb::damage_01___identity__",
+        "case_4_redb::damage_02___attribute__",
+        "case_4_redb::damage_03___missing__",
+        "case_4_redb::damage_04___shared__",
+        "case_4_redb::damage_05___unbound__",
+        "case_4_redb::damage_06___type__",
+        "case_4_redb::damage_07___dependencies__",
+        "case_4_redb::damage_08___dependencies_column__",
+        "case_4_redb::damage_09___dependencies_extra_column__",
+        "case_4_redb::damage_10___dependencies_extra_relation__",
+        "case_4_redb::damage_11___dependencies_routine__",
+        "case_4_redb::damage_12___dependencies_routine_identity__"
       ]
     },
     {
@@ -69121,7 +69145,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings/preserved.rs",
       "capability": "Captured rule row validation",
-      "workload": "Replay PostgreSQL correlated OLD/NEW and whole-row observations after column changes, archive retirement, rollback and persistent reopen.",
+      "workload": "Compare PostgreSQL rule effects and exact catalog dependency edges after column changes, archive retirement, rollback and persistent reopen.",
       "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
       "case_names": [
         "case_1_memory",
@@ -69191,6 +69215,97 @@
       "capability": "Captured rule condition typing",
       "workload": "Deny retained catalog analysis and cancel private view-condition verification.",
       "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_match_nested_columns_targets_and_shadowed_event_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_reject_missing_and_extra_summary_entries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependency_projection_retires_denial_and_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_validate_captured_query_columns_independently_of_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_preserve_captured_source_columns_after_layout_changes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_match_selected_routine_identity_name_and_signature",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Captured rule dependency equivalence",
+      "workload": "Project immutable stored relation, column and selected routine references across original lexical and captured row scopes.",
+      "invariant": "The original summary equals the complete reference set; rejection and cancellation retire scratch without altering the captured definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "restored_analyzer_image_keeps_request_ownership_out_of_shared_pipeline_caches",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/shared.rs",
+      "capability": "Private restored analyzer image ownership",
+      "workload": "Restore from cold and populated shared pipeline caches, retain an unrelated ordinary reader, then retire the private image.",
+      "invariant": "The private image preserves exact bytes without replacing or adopting the shared cache; its allowance reaches zero while ordinary readers remain live.",
       "case_names": [
         ""
       ]

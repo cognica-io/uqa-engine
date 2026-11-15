@@ -1,5 +1,6 @@
 change:20:21
 insert:3
 retain:2
+table:lookup
 whole:{"extra": "later", "value": 11, "item_id": 1}
 whole:{"extra": "later", "value": 21, "item_id": 2}

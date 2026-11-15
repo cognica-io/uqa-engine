@@ -6,6 +6,42 @@
 
 use super::*;
 
+fn verify_dependencies(engine: &Engine) {
+    let rules = engine.durable.rules.read();
+    let mut observations = Vec::new();
+    for (_, entries) in rules.iter() {
+        for rule in entries.values() {
+            let dependencies = rule.dependencies.as_ref().unwrap();
+            for column in &dependencies.columns {
+                observations.push(format!(
+                    "column:{}:{}.{}",
+                    rule.definition.name, column.relation.name, column.column
+                ));
+            }
+            for routine in &dependencies.routines {
+                observations.push(format!(
+                    "routine:{}:{}({})",
+                    rule.definition.name,
+                    routine
+                        .name
+                        .strip_prefix("public.")
+                        .unwrap_or(&routine.name),
+                    routine.argument_types.join(", ")
+                ));
+            }
+        }
+    }
+    observations.sort();
+    assert_eq!(
+        observations.join("\n"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/backup_rule_dependencies_oracle.expected.txt"
+        ))
+        .trim()
+    );
+}
+
 fn definitions(engine: &Engine, process_local: bool) -> serde_json::Value {
     let rules = engine.durable.rules.read();
     serde_json::to_value(
@@ -85,6 +121,7 @@ fn restored_rule_bindings_preserve_correlated_rows_and_live_column_layout(
     .split_once("-- capture boundary")
     .unwrap();
     source.sql(setup, &[]).unwrap();
+    verify_dependencies(&source);
     let process_local = !matches!(provider, Provider::Memory);
     let expected = definitions(&source, process_local);
     let root = capture(&source, &repository, None);
@@ -103,6 +140,7 @@ fn restored_rule_bindings_preserve_correlated_rows_and_live_column_layout(
         .unwrap();
     prepare(&mut job);
     let restored = job.publish().unwrap();
+    verify_dependencies(&restored);
     assert_eq!(definitions(&restored, process_local), expected);
     drop(job);
     repository
@@ -141,6 +179,7 @@ fn restored_rule_bindings_preserve_correlated_rows_and_live_column_layout(
     assert_eq!(control.memory().used(), 0);
     if !matches!(provider, Provider::Memory) {
         let reopened = provider.open(&path.join("database"));
+        verify_dependencies(&reopened);
         assert_eq!(definitions(&reopened, process_local), expected);
         assert_eq!(
             reopened

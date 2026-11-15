@@ -18,7 +18,7 @@ use crate::SQLError;
 use crate::ScalarExpr;
 
 pub mod context;
-use context::PrivilegeScope as CteScope;
+use context::{AnalysisPurpose, PrivilegeScope as CteScope};
 use enforcement::ensure_required_select;
 
 mod lineage;
@@ -45,17 +45,18 @@ fn collect_column(
     scopes: &[&SourceLineage],
     required: &mut Required,
     control: &ProductionControl<'_>,
+    purpose: AnalysisPurpose,
 ) -> Result<(), SQLError> {
     if let Some(qualifier) = qualifier {
         if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
             scope.require_qualified(qualifier, column, required, control)?;
-            if is_system_column(column) {
+            if is_system_column(column) && purpose != AnalysisPurpose::StoredDependencies {
                 scope.require_qualified_system(qualifier, column, required, control)?;
             }
         }
     } else if let Some(scope) = scopes.iter().find(|scope| scope.has_unqualified(column)) {
         scope.require_unqualified(column, required, control)?;
-    } else if is_system_column(column) {
+    } else if is_system_column(column) && purpose != AnalysisPurpose::StoredDependencies {
         if let Some(scope) = scopes
             .iter()
             .find(|scope| !scope.system_qualifiers.is_empty())
@@ -72,6 +73,7 @@ fn collect_expression_columns(
     direct_star: bool,
     required: &mut Required,
     control: &ProductionControl<'_>,
+    purpose: AnalysisPurpose,
 ) -> Result<OwnedSet<usize>, SQLError> {
     control.check()?;
     if direct_star {
@@ -95,11 +97,41 @@ fn collect_expression_columns(
     expression.try_visit(&mut |node| {
         control.check()?;
         match node {
-            ScalarExpr::Column(column) => collect_column(None, column, scopes, required, control)?,
+            ScalarExpr::Func { binding, args, .. }
+                if purpose == AnalysisPurpose::StoredDependencies =>
+            {
+                if let (Some(ScalarExpr::Column(qualifier)), Some(column)) = (
+                    args.first(),
+                    crate::semantics::projection::field_selection_name(
+                        binding.as_ref(),
+                        args.get(1),
+                    ),
+                ) {
+                    if scopes
+                        .iter()
+                        .find(|scope| scope.has_qualifier(qualifier))
+                        .is_some_and(|scope| scope.event_row)
+                    {
+                        collect_column(
+                            Some(qualifier),
+                            column,
+                            scopes,
+                            required,
+                            control,
+                            purpose,
+                        )?;
+                    }
+                }
+            }
+            ScalarExpr::Column(column) => {
+                collect_column(None, column, scopes, required, control, purpose)?;
+            }
             ScalarExpr::QualifiedColumn {
                 qualifier, column, ..
-            } => collect_column(Some(qualifier), column, scopes, required, control)?,
-            ScalarExpr::QualifiedStar(qualifier) => {
+            } => collect_column(Some(qualifier), column, scopes, required, control, purpose)?,
+            ScalarExpr::QualifiedStar(qualifier)
+                if purpose != AnalysisPurpose::StoredDependencies =>
+            {
                 if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
                     scope.require_qualified_all(qualifier, required, control)?;
                 }
@@ -125,9 +157,14 @@ fn collect_expression_and_subqueries(
     universe: &mut SourceLineage,
     required: &mut Required,
 ) -> Result<(), SQLError> {
-    for subquery in
-        collect_expression_columns(expression, scopes, direct_star, required, &ctes.control())?
-    {
+    for subquery in collect_expression_columns(
+        expression,
+        scopes,
+        direct_star,
+        required,
+        &ctes.control(),
+        ctes.purpose,
+    )? {
         let plan = subqueries.get(subquery).ok_or_else(|| {
             SQLError::Internal(format!(
                 "column privilege analysis cannot resolve scalar subquery slot {subquery}"
@@ -271,8 +308,16 @@ fn analyze_source_lineage(
             qualifier,
             alias,
             column_aliases,
+            bound_columns,
             ..
-        } => table_lineage(name, qualifier, alias.as_deref(), column_aliases, ctes),
+        } => table_lineage(
+            name,
+            qualifier,
+            alias.as_deref(),
+            column_aliases,
+            bound_columns.as_deref(),
+            ctes,
+        ),
         source @ SourcePlan::Join { .. } => {
             analyze_join_source_lineage(source, outer_scopes, subqueries, ctes, universe, required)
         }
@@ -369,7 +414,7 @@ fn analyze_query_block(
     for column in block
         .privilege_columns
         .iter()
-        .filter(|_| ctes.include_authorization_only_columns)
+        .filter(|_| ctes.purpose == AnalysisPurpose::Authorization)
     {
         collect_column(
             column.qualifier(),
@@ -377,6 +422,7 @@ fn analyze_query_block(
             &scopes,
             required,
             &ctes.control(),
+            ctes.purpose,
         )?;
     }
     for projection in &block.projections {
@@ -396,8 +442,36 @@ fn analyze_query_block(
         .chain(block.group_by.iter())
         .chain(block.grouping_sets.iter().flatten())
         .chain(block.having.iter())
-        .chain(block.order_by.iter().map(|order| &order.expr))
-        .chain(block.distinct_on.iter())
+    {
+        collect_expression_and_subqueries(
+            expression,
+            &scopes,
+            false,
+            &block.subqueries,
+            ctes,
+            universe,
+            required,
+        )?;
+    }
+    for order in &block.order_by {
+        if ctes.purpose == AnalysisPurpose::StoredDependencies
+            && columns::stored::is_output_alias(&order.expr, &block.projections, &ctes.control())?
+        {
+            continue;
+        }
+        collect_expression_and_subqueries(
+            &order.expr,
+            &scopes,
+            false,
+            &block.subqueries,
+            ctes,
+            universe,
+            required,
+        )?;
+    }
+    for expression in block
+        .distinct_on
+        .iter()
         .chain(block.limit.iter())
         .chain(block.offset.iter())
     {
@@ -422,14 +496,18 @@ fn analyze_query_plan(
     required: &mut Required,
 ) -> Result<(), SQLError> {
     let mut root_ctes = ctes.reborrow()?;
-    root_ctes
-        .resolution
-        .set_lookup_mode(if plan.relations_bound {
+    root_ctes.resolution.set_lookup_mode(
+        if plan.relations_bound || ctes.purpose == AnalysisPurpose::StoredDependencies {
             crate::catalog::resolution::RelationLookupMode::Bound
         } else {
             crate::catalog::resolution::RelationLookupMode::Dynamic
-        });
-    if let Some(subject) = &plan.relation_privilege_subject {
+        },
+    );
+    if let Some(subject) = plan
+        .relation_privilege_subject
+        .as_ref()
+        .filter(|_| ctes.purpose != AnalysisPurpose::StoredDependencies)
+    {
         root_ctes.relation_privilege_subject = Some(subject.clone_with_control(&ctes.control())?);
         let mut owned_universe = SourceLineage::default();
         let mut owned_required = Required::new();
@@ -452,6 +530,10 @@ fn analyze_query_plan_in_scope(
     universe: &mut SourceLineage,
     required: &mut Required,
 ) -> Result<(), SQLError> {
+    if ctes.purpose == AnalysisPurpose::StoredDependencies {
+        let root = columns::stored::ctes(&plan.ctes, ctes, outer_scopes, universe, required)?;
+        return analyze_relational_plan(&plan.root, &root, outer_scopes, universe, required);
+    }
     let reachable =
         crate::semantics::cte_order::analysis::CteAnalysis::query(plan, ctes.control())?
             .reachable()?;
@@ -474,11 +556,21 @@ fn analyze_query_plan_in_scope(
     for cte in &plan.ctes {
         root_ctes.insert_deferred_ref(cte)?;
     }
-    match &plan.root {
+    analyze_relational_plan(&plan.root, &root_ctes, outer_scopes, universe, required)
+}
+
+fn analyze_relational_plan(
+    plan: &RelationalPlan,
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+    outer_scopes: &[&SourceLineage],
+    universe: &mut SourceLineage,
+    required: &mut Required,
+) -> Result<(), SQLError> {
+    match plan {
         RelationalPlan::QueryBlock(block) => analyze_query_block(
             block,
             block.from.as_ref(),
-            &root_ctes,
+            ctes,
             outer_scopes,
             universe,
             required,
@@ -492,8 +584,8 @@ fn analyze_query_plan_in_scope(
             subqueries,
             ..
         } => {
-            analyze_query_plan(left, &root_ctes, outer_scopes, universe, required)?;
-            analyze_query_plan(right, &root_ctes, outer_scopes, universe, required)?;
+            analyze_query_plan(left, ctes, outer_scopes, universe, required)?;
+            analyze_query_plan(right, ctes, outer_scopes, universe, required)?;
             let result_scope = opaque_lineage(
                 query_columns(left, &[], &ctes.control())?,
                 None,
@@ -507,7 +599,7 @@ fn analyze_query_plan_in_scope(
                 .chain(offset.iter().map(Box::as_ref))
             {
                 collect_expression_and_subqueries(
-                    expression, &scopes, false, subqueries, &root_ctes, universe, required,
+                    expression, &scopes, false, subqueries, ctes, universe, required,
                 )?;
             }
             Ok(())
@@ -519,7 +611,7 @@ fn analyze_query_plan_in_scope(
                     outer_scopes,
                     false,
                     subqueries,
-                    &root_ctes,
+                    ctes,
                     universe,
                     required,
                 )?;

@@ -10,6 +10,7 @@ CREATE RULE changed AS ON UPDATE TO items WHERE EXISTS(WITH delta AS (SELECT NEW
 CREATE RULE quiet AS ON UPDATE TO items WHERE false AND rule_never() DO ALSO INSERT INTO rule_log VALUES('invalid eager call');
 CREATE RULE retained AS ON DELETE TO items WHERE OLD.id IN (SELECT id FROM lookup) DO INSTEAD INSERT INTO rule_log VALUES('retain:' || OLD.id);
 CREATE RULE whole AS ON UPDATE TO items WHERE OLD IS DISTINCT FROM NEW DO ALSO INSERT INTO rule_log VALUES('whole:' || to_jsonb(NEW)::text);
+CREATE RULE physical AS ON UPDATE TO items DO ALSO INSERT INTO rule_log SELECT 'table:' || tableoid::regclass::text FROM lookup;
 INSERT INTO items VALUES(1,10,0),(2,20,0);
 ALTER TABLE items RENAME COLUMN id TO item_id;
 ALTER TABLE items DROP COLUMN discarded;

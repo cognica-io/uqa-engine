@@ -10,7 +10,7 @@ use uqa_core::{memory::RetainedValue, RelationIdentity};
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence, Statement, TableConstraintSet},
     catalog::{
-        events::{RuleConditionBinding, RuleDependencies, StoredRule},
+        events::{RuleColumnDependency, RuleConditionBinding, RuleDependencies, StoredRule},
         roles::RoleIdentity,
         security::BoundTableSecurity,
         stored_view::{StoredView, StoredViewDefinition},
@@ -74,6 +74,16 @@ fn catalog(owner: &str, condition: &str) -> CatalogReadView {
         &["flag".into(), "id".into()],
         definition.event,
     ));
+    let mut dependencies = RuleDependencies::default();
+    dependencies.columns.insert(RuleColumnDependency {
+        relation: RelationIdentity::from_legacy_name(owner).unwrap(),
+        column: if condition.contains("flag") {
+            "flag"
+        } else {
+            "id"
+        }
+        .into(),
+    });
     RetainedValue::make_mut(&mut snapshot.definitions.rules)
         .insert_event(
             RelationIdentity::from_legacy_name(owner).unwrap(),
@@ -83,7 +93,7 @@ fn catalog(owner: &str, condition: &str) -> CatalogReadView {
                 condition_plan,
                 condition_binding,
                 enabled: uqa_sql::ast::EventEnableMode::default(),
-                dependencies: Some(RuleDependencies::default()),
+                dependencies: Some(dependencies),
                 catalog_oid: Some(31_000),
             },
         )

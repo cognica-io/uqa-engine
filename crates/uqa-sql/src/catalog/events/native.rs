@@ -16,6 +16,7 @@ use crate::{
 use uqa_core::{memory::ProductionControl, RelationIdentity};
 
 pub mod bindings;
+pub mod dependencies;
 
 /// Read the selected immutable catalog. Implementations supply existing native layouts and the ordinary virtual/graph metadata; they do not compile stored SQL or resolve a new search path.
 pub trait NativeEventCatalog {

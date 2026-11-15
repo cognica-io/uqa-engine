@@ -13,6 +13,35 @@ use uqa_sql::{catalog::events::StoredRule, ScalarExpr};
 mod preserved;
 
 fn corrupt(rule: &mut StoredRule, damage: &str) {
+    if damage.starts_with("dependencies") {
+        let dependencies = rule.dependencies.as_mut().unwrap();
+        match damage {
+            "dependencies" => rule.dependencies = None,
+            "dependencies_column" => dependencies.columns.clear(),
+            "dependencies_extra_column" => {
+                dependencies
+                    .columns
+                    .insert(uqa_sql::catalog::events::RuleColumnDependency {
+                        relation: RelationIdentity::new("public", "items"),
+                        column: "spare".into(),
+                    });
+            }
+            "dependencies_extra_relation" => {
+                dependencies
+                    .relations
+                    .insert(RelationIdentity::new("public", "unrelated"));
+            }
+            "dependencies_routine" => dependencies.routines.clear(),
+            "dependencies_routine_identity" => {
+                let mut routine = dependencies.routines.iter().next().unwrap().clone();
+                dependencies.routines.clear();
+                routine.object_id = Some([7; 16]);
+                dependencies.routines.insert(routine);
+            }
+            _ => unreachable!(),
+        }
+        return;
+    }
     if damage == "type" {
         rule.condition_plan.as_mut().unwrap().scalar = ScalarExpr::Literal(Value::Int(42));
         return;
@@ -59,12 +88,26 @@ fn corrupt(rule: &mut StoredRule, damage: &str) {
 #[case::redb(Provider::Redb)]
 fn restored_rule_bindings_reject_invalid_original_row_references(
     #[case] provider: Provider,
-    #[values("identity", "attribute", "missing", "shared", "unbound", "type")] damage: &str,
+    #[values(
+        "identity",
+        "attribute",
+        "missing",
+        "shared",
+        "unbound",
+        "type",
+        "dependencies",
+        "dependencies_column",
+        "dependencies_extra_column",
+        "dependencies_extra_relation",
+        "dependencies_routine",
+        "dependencies_routine_identity"
+    )]
+    damage: &str,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let repository = repository(&directory.path().join("repository"));
     let source = provider.open(&directory.path().join("source"));
-    source.sql("CREATE TABLE items(id integer); CREATE RULE saved AS ON UPDATE TO items WHERE OLD.id IS DISTINCT FROM NEW.id DO NOTHING", &[]).unwrap();
+    source.sql("CREATE TABLE items(id integer, spare integer); CREATE TABLE unrelated(id integer); CREATE FUNCTION rule_accepts(integer) RETURNS boolean LANGUAGE SQL IMMUTABLE AS 'SELECT $1 > 0'; CREATE RULE saved AS ON UPDATE TO items WHERE OLD.id IS DISTINCT FROM NEW.id AND rule_accepts(NEW.id) DO NOTHING", &[]).unwrap();
     let root = if let Some(persistent) = source.storage.provider.clone() {
         drop(source);
         let session = persistent.open_session().unwrap();
@@ -122,15 +165,24 @@ fn restored_rule_bindings_reject_invalid_original_row_references(
             Ok(phase) => panic!("{provider:?}: invalid rule reached {phase:?}"),
         })
         .expect("rule validation must finish");
-    let expected = if damage == "type" {
-        "argument of WHERE must be type boolean"
-    } else if matches!(provider, Provider::Memory) {
-        "rule condition"
-    } else if matches!(damage, "missing" | "unbound") {
-        "rule expressions require an initial-open migration"
-    } else {
-        "is outside the bound row scope"
-    };
+    let expected =
+        if damage == "dependencies_routine_identity" && matches!(provider, Provider::Memory) {
+            "missing bound identity"
+        } else if damage.starts_with("dependencies") {
+            if matches!(provider, Provider::Memory) {
+                "rule dependencies"
+            } else {
+                "persisted dependencies"
+            }
+        } else if damage == "type" {
+            "argument of WHERE must be type boolean"
+        } else if matches!(provider, Provider::Memory) {
+            "rule condition"
+        } else if matches!(damage, "missing" | "unbound") {
+            "rule expressions require an initial-open migration"
+        } else {
+            "is outside the bound row scope"
+        };
     assert!(
         error.to_string().contains(expected),
         "{provider:?}: {damage}: {error}"

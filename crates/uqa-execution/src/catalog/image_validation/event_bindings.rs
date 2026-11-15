@@ -58,6 +58,12 @@ pub fn validate(
         };
         for rule in rules.values() {
             validate_condition(rule, &row, &context, &control)?;
+            uqa_sql::catalog::events::native::dependencies::validate(
+                rule,
+                catalog,
+                &scalar.binding.resolution,
+                &control,
+            )?;
         }
     }
     control.check()?;
