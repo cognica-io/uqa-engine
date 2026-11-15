@@ -32,7 +32,7 @@ fn routine_declaration_diagnostics_match_postgresql_with_eager_and_lazy_bodies(
         )
         .unwrap();
     let cases = reference["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 44);
+    assert_eq!(cases.len(), 66);
     for case in cases {
         engine.sql("BEGIN", &[]).unwrap();
         engine

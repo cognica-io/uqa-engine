@@ -13,6 +13,11 @@ use uqa_sql::{
 
 fn damage(definition: &mut CreateFunction, kind: &str) {
     match kind {
+        "cost" => definition.cost = Some(0.0),
+        "rows" => definition.rows = Some(0.0),
+        "scalar_rows" => definition.rows = Some(2.0),
+        "support" => definition.support = Some("missing_support".into()),
+        "missing_language" => definition.language.clear(),
         "language" => definition.language = "missing_language".into(),
         "duplicate" => definition.params[1].name = definition.params[0].name.clone(),
         "output_default" => definition.params[1].mode = FunctionParamMode::Out,
@@ -75,6 +80,11 @@ fn capture_changed(
 #[case::redb(Provider::Redb)]
 fn restored_routine_declarations_reject_invalid_original_signatures(#[case] provider: Provider) {
     for (kind, expected) in [
+        ("cost", "COST must be positive"),
+        ("rows", "ROWS must be positive"),
+        ("scalar_rows", "ROWS is not applicable"),
+        ("support", "missing_support"),
+        ("missing_language", "no language specified"),
         ("language", "language"),
         ("duplicate", "used more than once"),
         ("output_default", "only input parameters"),

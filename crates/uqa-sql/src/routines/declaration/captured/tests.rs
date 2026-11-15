@@ -65,7 +65,7 @@ fn captured_declarations_preserve_postgresql_language_modes_defaults_and_polymor
     let reference: serde_json::Value =
         serde_json::from_str(include_str!("tests/pg18.json")).unwrap();
     let cases = reference["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 44);
+    assert_eq!(cases.len(), 66);
     let mut checked = 0;
     for case in cases.iter().filter(|case| case["mode"] == "off") {
         let definition = declaration(case["sql"].as_str().unwrap());
@@ -84,7 +84,7 @@ fn captured_declarations_preserve_postgresql_language_modes_defaults_and_polymor
         assert_eq!(memory.used(), 0);
         checked += 1;
     }
-    assert_eq!(checked, 22);
+    assert_eq!(checked, 33);
 }
 
 #[test]

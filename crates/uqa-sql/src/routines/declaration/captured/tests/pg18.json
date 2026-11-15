@@ -3,6 +3,83 @@
   "cases": [
     {
       "mode": "on",
+      "id": "missing_language",
+      "sql": "CREATE FUNCTION f() RETURNS integer AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "no language specified"
+    },
+    {
+      "mode": "on",
+      "id": "cost_zero",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 0 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "on",
+      "id": "cost_negative",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST -1 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "on",
+      "id": "cost_underflow",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 1e-50 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "on",
+      "id": "cost_infinity",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 1e40 AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "rows_zero",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS 0 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS must be positive"
+    },
+    {
+      "mode": "on",
+      "id": "rows_negative",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS -1 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS must be positive"
+    },
+    {
+      "mode": "on",
+      "id": "rows_scalar",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql ROWS 2 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS is not applicable when function does not return a set"
+    },
+    {
+      "mode": "on",
+      "id": "rows_infinity",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS 1e40 AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
+      "id": "missing_support",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql SUPPORT missing_support AS 'SELECT 1'",
+      "sqlstate": "42883",
+      "message": "function missing_support(internal) does not exist"
+    },
+    {
+      "mode": "on",
+      "id": "valid_support",
+      "sql": "CREATE FUNCTION f(n numeric) RETURNS numeric LANGUAGE sql SUPPORT numeric_support AS 'SELECT n'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "on",
       "id": "domain_array_variadic",
       "sql": "CREATE FUNCTION f(VARIADIC n declaration_ints) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
       "sqlstate": "42P13",
@@ -154,6 +231,83 @@
       "sql": "CREATE FUNCTION f(n internal) RETURNS integer LANGUAGE plpgsql AS 'BEGIN RETURN 1; END'",
       "sqlstate": "0A000",
       "message": "PL/pgSQL functions cannot accept type internal"
+    },
+    {
+      "mode": "off",
+      "id": "missing_language",
+      "sql": "CREATE FUNCTION f() RETURNS integer AS 'SELECT 1'",
+      "sqlstate": "42P13",
+      "message": "no language specified"
+    },
+    {
+      "mode": "off",
+      "id": "cost_zero",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 0 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "off",
+      "id": "cost_negative",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST -1 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "off",
+      "id": "cost_underflow",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 1e-50 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "COST must be positive"
+    },
+    {
+      "mode": "off",
+      "id": "cost_infinity",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql COST 1e40 AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "rows_zero",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS 0 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS must be positive"
+    },
+    {
+      "mode": "off",
+      "id": "rows_negative",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS -1 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS must be positive"
+    },
+    {
+      "mode": "off",
+      "id": "rows_scalar",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql ROWS 2 AS 'SELECT 1'",
+      "sqlstate": "22023",
+      "message": "ROWS is not applicable when function does not return a set"
+    },
+    {
+      "mode": "off",
+      "id": "rows_infinity",
+      "sql": "CREATE FUNCTION f() RETURNS SETOF integer LANGUAGE sql ROWS 1e40 AS 'SELECT 1'",
+      "sqlstate": null,
+      "message": null
+    },
+    {
+      "mode": "off",
+      "id": "missing_support",
+      "sql": "CREATE FUNCTION f() RETURNS integer LANGUAGE sql SUPPORT missing_support AS 'SELECT 1'",
+      "sqlstate": "42883",
+      "message": "function missing_support(internal) does not exist"
+    },
+    {
+      "mode": "off",
+      "id": "valid_support",
+      "sql": "CREATE FUNCTION f(n numeric) RETURNS numeric LANGUAGE sql SUPPORT numeric_support AS 'SELECT n'",
+      "sqlstate": null,
+      "message": null
     },
     {
       "mode": "off",

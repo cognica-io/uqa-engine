@@ -8,7 +8,8 @@
 
 use super::{parameters::ParameterLayout, validation, RoutineTypeCatalog};
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody},
+    ast::{ColumnType, CreateFunction},
+    routines::{attributes, registration},
     SQLError,
 };
 use uqa_core::memory::ProductionControl;
@@ -19,6 +20,11 @@ pub fn validate_captured_declaration(
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     control.check()?;
+    attributes::validate_cost(definition.cost)?;
+    attributes::validate_rows(definition.rows)?;
+    if let Some(support) = definition.support.as_deref() {
+        registration::validate_routine_support_identity(support)?;
+    }
     validate_language(definition)?;
     let mut layout = ParameterLayout::default();
     for (index, parameter) in definition.params.iter().enumerate() {
@@ -30,22 +36,13 @@ pub fn validate_captured_declaration(
             control,
         )?;
     }
+    attributes::validate_rows_applicability(definition.rows, definition.returns_set())?;
     validation::validate_with_control(definition, control)
 }
 
 pub(in crate::routines) fn validate_language(definition: &CreateFunction) -> Result<(), SQLError> {
-    if !matches!(definition.language.as_str(), "plpgsql" | "sql") {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("language \"{}\" does not exist", definition.language),
-        });
-    }
-    if definition.language == "plpgsql" && matches!(definition.body, FunctionBody::Statements(_)) {
-        return Err(super::routine_definition_error(
-            "inline SQL function body only valid for language SQL",
-        ));
-    }
-    Ok(())
+    attributes::validate_routine_language(definition)?;
+    attributes::validate_body_form(definition, &definition.attribute_clauses)
 }
 
 pub(super) fn variadic_array(
