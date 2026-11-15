@@ -64,6 +64,7 @@ pub fn validate(
             if !matches!(relation(catalog, owner, control)?, "table" | "view") {
                 return Err(invalid("rule owning relation kind"));
             }
+            condition(rule, owner, catalog, control)?;
             if let Some(dependencies) = &rule.dependencies {
                 for dependency in &dependencies.relations {
                     relation(catalog, dependency, control)?;
@@ -119,6 +120,22 @@ fn live_column(
     }
     control.check()?;
     Ok(())
+}
+
+fn condition(
+    rule: &StoredRule,
+    owner: &RelationIdentity,
+    catalog: &impl NativeEventCatalog,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    match (&rule.condition_plan, &rule.condition_binding) {
+        (None, None) => Ok(()),
+        (Some(plan), Some(binding)) if rule.definition.condition.is_some() => binding
+            .validate_captured(rule.definition.event, plan, control, &mut |column| {
+                live_column(catalog, owner, column, control)
+            }),
+        _ => Err(invalid("incomplete captured rule condition")),
+    }
 }
 
 /// Reuse native plan traversal for nested/mutation CTEs and fixed condition subqueries. OLD/NEW scalar references name no relation source; FROM items still require ordinary CTE or catalog resolution. Missing legacy dependency summaries cannot hide concrete action targets.
