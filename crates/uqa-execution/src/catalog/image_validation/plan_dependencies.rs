@@ -9,9 +9,10 @@
 use crate::catalog::{relation_names::RelationNameCatalog, CatalogReadView};
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
+    ast::FunctionBody,
     binding::view_dependencies::visit_stored_plan_relation_references,
     catalog::resolution::bound_relation_identity_with_control,
-    plan::PlanRef,
+    plan::{PlanRef, UnifiedPlan},
     routines::{CompiledFunctionBody, RoutineBody},
     SQLError,
 };
@@ -45,6 +46,13 @@ pub fn validate(
     }
     for routine in snapshot.definitions.sql_user_functions.values().flatten() {
         control.check()?;
+        if let FunctionBody::Statements(statements) = &routine.def.body {
+            for statement in statements {
+                let plan =
+                    UnifiedPlan::lower_borrowed_for_rewrite(statement, &|_: &str| false, control)?;
+                visit_stored_plan_relation_references(plan.as_plan_ref(), control, &mut reference)?;
+            }
+        }
         if let RoutineBody::Bound(body) = &routine.body {
             let CompiledFunctionBody::SQL(plans) = &***body else {
                 return Err(SQLError::Internal(

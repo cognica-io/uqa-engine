@@ -196,3 +196,36 @@ fn native_stored_relations_preserve_catalog_and_release_denied_workspace() {
         before
     );
 }
+
+#[test]
+fn native_routine_relations_validate_original_syntax_independently_of_bound_plans() {
+    for template in [
+        "SELECT id FROM $relation",
+        "WITH picked AS (SELECT id FROM $relation) SELECT id FROM picked",
+        "SELECT (SELECT id FROM $relation)",
+        "INSERT INTO $relation(id) VALUES(1) RETURNING id",
+        "UPDATE $relation SET id=1 RETURNING id",
+        "DELETE FROM $relation RETURNING id",
+        "MERGE INTO $relation AS t USING (VALUES(1)) AS s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=1 RETURNING t.id",
+    ] {
+        for (syntax_relation, plan_relation, valid) in [
+            ("public.items", "public.items", true),
+            ("public.missing", "public.items", false),
+            ("public.items", "public.missing", false),
+        ] {
+            let mut snapshot = catalog("SELECT id FROM public.items").snapshot().clone();
+            let syntax = template.replace("$relation", syntax_relation);
+            let plan = template.replace("$relation", plan_relation);
+            let Statement::CreateFunction(definition) = uqa_sql::compile(&format!(
+                "CREATE FUNCTION public.saved() RETURNS integer LANGUAGE SQL BEGIN ATOMIC {syntax}; END",
+            )).unwrap().remove(0) else { panic!("routine declaration") };
+            let plan = UnifiedPlan::lower(uqa_sql::compile(&plan).unwrap().remove(0));
+            RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+                .insert("public.saved".into(), vec![SQLUserFunction::new(
+                    *definition,
+                    RoutineBody::Bound(CompiledFunctionBody::SQL(vec![plan]).shared()),
+                ).shared()]).unwrap();
+            assert_eq!(check(&CatalogReadView::new(snapshot)).is_ok(), valid, "{syntax}, plan relation={plan_relation}");
+        }
+    }
+}

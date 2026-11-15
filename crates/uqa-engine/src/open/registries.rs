@@ -341,12 +341,20 @@ impl Engine {
         &self,
         catalog: &dyn uqa_storage::CatalogFacade,
     ) -> StorageBackendResult<()> {
+        self.restore_models_from_catalog(catalog)?;
+        for (name, json) in catalog.load_all_scoring_params()? {
+            self.durable.scoring_params.write().insert(name, json)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn restore_models_from_catalog(
+        &self,
+        catalog: &dyn uqa_storage::CatalogFacade,
+    ) -> StorageBackendResult<()> {
         for (name, json) in catalog.load_models()? {
             let model = super::Arc::new(serde_json::from_str::<super::DeepModel>(&json)?);
             self.durable.models.write().insert(name, model)?;
-        }
-        for (name, json) in catalog.load_all_scoring_params()? {
-            self.durable.scoring_params.write().insert(name, json)?;
         }
         Ok(())
     }

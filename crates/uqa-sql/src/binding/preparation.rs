@@ -44,8 +44,8 @@ pub use query_layouts::{restore_query_layouts, restore_query_layouts_owned};
 mod routines;
 mod rows;
 pub(crate) use routines::{
-    analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
-    prepare_routine_body_inputs, read_procedure_inputs,
+    analyze_routine_body_argument, analyze_routine_body_inputs, analyze_stored_routine_statement,
+    prepare_procedure_call, prepare_routine_body_inputs, read_procedure_inputs,
 };
 mod schema_expressions;
 mod set_contexts;

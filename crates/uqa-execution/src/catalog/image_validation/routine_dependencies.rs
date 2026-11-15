@@ -69,6 +69,10 @@ pub fn validate(
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
     let d = &snapshot.definitions;
+    let control = ProductionControl::new(memory, cancellation, cancellation);
+    for routine in d.sql_user_functions.values().flatten() {
+        uqa_sql::routines::native::validate_captured_body(routine, &control)?;
+    }
     let references = NativeRoutineReferences::new(
         d.sql_user_functions
             .values()
@@ -77,11 +81,7 @@ pub fn validate(
         memory,
         cancellation,
     )?;
-    visit(
-        snapshot,
-        &references,
-        &ProductionControl::new(memory, cancellation, cancellation),
-    )
+    visit(snapshot, &references, &control)
 }
 
 pub(super) fn visit(
