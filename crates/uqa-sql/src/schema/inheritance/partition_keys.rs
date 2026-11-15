@@ -10,7 +10,7 @@ use super::InheritanceContext;
 use crate::ast::{ColumnDef, CreateTable, Expr, PartitionStrategy};
 use crate::ir::ScalarExpr;
 use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
-use crate::semantics::partition::validate_hash_partition_spec;
+use crate::semantics::partition::{partition_key_type, validate_partition_key_type};
 use crate::SQLError;
 use std::collections::BTreeSet;
 
@@ -50,8 +50,9 @@ pub(super) fn validate_partition_keys(
             Expr::Column(name) => check_column_key(&table.columns, name)?,
             expression => *expression = check_expression_key(context, &table.columns, expression)?,
         }
+        let ty = partition_key_type(context.partitions.types, key, &table.columns)?;
+        validate_partition_key_type(spec.strategy, &ty)?;
     }
-    validate_hash_partition_spec(&context.partitions, spec, &table.columns)?;
     regroles.reject(context.roles)
 }
 

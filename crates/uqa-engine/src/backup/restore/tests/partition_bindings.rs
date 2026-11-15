@@ -73,6 +73,46 @@ fn restored_partition_bounds_reject_mistyped_constants_before_activation(
     );
 }
 
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn partition_key_types_require_original_ordering_support(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("source"));
+    engine
+        .sql("CREATE DOMAIN unsupported_key AS json", &[])
+        .unwrap();
+    // The PostgreSQL reference fixture independently rejects these six declarations with 42704.
+    for ty in ["json", "xml", "unsupported_key"] {
+        for strategy in ["LIST", "RANGE"] {
+            let sql = format!("CREATE TABLE rejected_key(id {ty}) PARTITION BY {strategy}(id)");
+            let error = engine.sql(&sql, &[]).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42704"), "{provider:?}: {sql}");
+            assert!(
+                error.to_string().contains("has no default operator class"),
+                "{error}"
+            );
+        }
+    }
+    for (keys, state) in [("id,(random()+n)", "42704"), ("(random()+n),id", "42P17")] {
+        let sql =
+            format!("CREATE TABLE rejected_key(id json,n integer) PARTITION BY RANGE({keys})");
+        assert_eq!(
+            engine.sql(&sql, &[]).unwrap_err().sqlstate(),
+            Some(state),
+            "{sql}"
+        );
+    }
+    engine
+        .sql(
+            "CREATE TABLE rejected_key(id integer) PARTITION BY LIST(id)",
+            &[],
+        )
+        .unwrap();
+}
+
 fn reject_archive(
     provider: Provider,
     repository: &LocalRepository,

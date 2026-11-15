@@ -8,7 +8,7 @@
 
 use crate::{
     assignment::AssignmentContext,
-    ast::{ColumnDef, Expr, TableHierarchy},
+    ast::{ColumnDef, ColumnType, Expr, TableHierarchy},
     schema::SchemaExpressionCatalog,
     type_resolution::FunctionTypeResolver,
     ResultRow, RowSchema, SQLError, SQLParam,
@@ -88,6 +88,17 @@ pub use key::key_type as partition_key_type;
 pub use admission::validate_new_partition_bound;
 pub use bounds::transform_partition_bound;
 pub use datum_text::{partition_datum_text, range_bound_text, stored_datum};
+
+pub(crate) fn validate_partition_key_type(
+    strategy: crate::ast::PartitionStrategy,
+    ty: &ColumnType,
+) -> Result<(), SQLError> {
+    if strategy == crate::ast::PartitionStrategy::Hash {
+        hash::validate_partition_key_type(ty)
+    } else {
+        crate::catalog::index::operator_classes::require_default_btree_operator_class(ty)
+    }
+}
 
 pub fn validate_hash_partition_spec(
     context: &PartitionContext<'_>,

@@ -139,9 +139,7 @@ fn key_types(
         )?
         .ok_or_else(|| invalid("unresolved partition key type"))?;
         context.scalar.types.column_type(&ty)?;
-        if spec.strategy == PartitionStrategy::Hash {
-            super::hash::validate_partition_key_type(&ty)?;
-        }
+        super::validate_partition_key_type(spec.strategy, &ty)?;
         types.push_produced(ty)?;
     }
     Ok(types.finish()?)

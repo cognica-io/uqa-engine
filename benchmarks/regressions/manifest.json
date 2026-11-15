@@ -68925,6 +68925,22 @@
       "capability": "Native partition backup validation",
       "workload": "Original domain Datums with fixed/varlena/nested bases, retained offsets and denied or cancelled reads.",
       "invariant": "Physical domain output selects the base layout before reading bytes, preserves the source identity and retires all admitted metadata."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "partition_key_types_require_original_ordering_support",
+      "cases": 4,
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ],
+      "source": "crates/uqa-engine/src/backup/restore/tests/partition_bindings.rs",
+      "capability": "Native partition backup validation",
+      "workload": "Six PostgreSQL LIST/RANGE declarations without default B-tree support on all four providers.",
+      "invariant": "Declaration and restore share original type capability checks; rejected declarations preserve SQLSTATE 42704 and leave the same table name available."
     }
   ]
 }

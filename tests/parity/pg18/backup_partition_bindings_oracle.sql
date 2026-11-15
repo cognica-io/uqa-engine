@@ -33,4 +33,30 @@ ALTER FUNCTION original_key(integer) VOLATILE;
 INSERT INTO function_parent VALUES (4), (12);
 SELECT 'function-volatility', provolatile FROM pg_proc WHERE oid = 'original_key(integer)'::regprocedure;
 SELECT 'function-row', id, tableoid::regclass FROM function_parent ORDER BY id;
+CREATE DOMAIN unsupported_key AS json;
+DO $verify$
+DECLARE key_type text; strategy text;
+BEGIN
+    FOREACH key_type IN ARRAY ARRAY['json','xml','unsupported_key'] LOOP
+        FOREACH strategy IN ARRAY ARRAY['LIST','RANGE'] LOOP
+            BEGIN
+                EXECUTE format('CREATE TABLE rejected_key(id %s) PARTITION BY %s(id)',key_type,strategy);
+                RAISE EXCEPTION 'partition declaration unexpectedly accepted';
+            EXCEPTION WHEN undefined_object THEN
+                IF SQLSTATE <> '42704' THEN RAISE; END IF;
+            END;
+        END LOOP;
+    END LOOP;
+    BEGIN
+        EXECUTE 'CREATE TABLE rejected_key(id json,n integer) PARTITION BY RANGE(id,(random()+n))';
+        RAISE EXCEPTION 'partition declaration unexpectedly accepted';
+    EXCEPTION WHEN undefined_object THEN NULL;
+    END;
+    BEGIN
+        EXECUTE 'CREATE TABLE rejected_key(id json,n integer) PARTITION BY RANGE((random()+n),id)';
+        RAISE EXCEPTION 'partition declaration unexpectedly accepted';
+    EXCEPTION WHEN invalid_object_definition THEN NULL;
+    END;
+END;
+$verify$;
 ROLLBACK;

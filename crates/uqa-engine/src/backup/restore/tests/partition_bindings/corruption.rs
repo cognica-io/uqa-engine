@@ -58,47 +58,47 @@ fn restored_partition_bindings_reject_corrupt_siblings_and_detached_conditions(
         match kind {
             "list_overlap" => {
                 hierarchy.partition_bound =
-                    Some(PartitionBound::List(vec![Expr::Literal(Value::Int(1))]))
+                    Some(PartitionBound::List(vec![Expr::Literal(Value::Int(1))]));
             }
             "list_expression" => {
                 hierarchy.partition_bound =
-                    Some(PartitionBound::List(vec![Expr::Column("id".into())]))
+                    Some(PartitionBound::List(vec![Expr::Column("id".into())]));
             }
             "range_overlap" => {
                 hierarchy.partition_bound = Some(PartitionBound::Range {
                     lower: vec![point(Value::Int(5))],
                     upper: vec![point(Value::Int(15))],
-                })
+                });
             }
             "range_width" => {
                 hierarchy.partition_bound = Some(PartitionBound::Range {
                     lower: vec![],
                     upper: vec![point(Value::Int(20))],
-                })
+                });
             }
             "range_null" => {
                 hierarchy.partition_bound = Some(PartitionBound::Range {
                     lower: vec![point(Value::Null)],
                     upper: vec![point(Value::Int(20))],
-                })
+                });
             }
             "hash_chain" => {
                 hierarchy.partition_bound = Some(PartitionBound::Hash {
                     modulus: 3,
                     remainder: 1,
-                })
+                });
             }
             "hash_overlap" => {
                 hierarchy.partition_bound = Some(PartitionBound::Hash {
                     modulus: 4,
                     remainder: 0,
-                })
+                });
             }
             "hash_zero" => {
                 hierarchy.partition_bound = Some(PartitionBound::Hash {
                     modulus: 0,
                     remainder: 0,
-                })
+                });
             }
             "detached" => {
                 let check = checks

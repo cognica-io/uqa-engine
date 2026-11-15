@@ -204,6 +204,15 @@ fn native_partition_bindings_reject_untyped_and_mismatched_constants() {
 
 #[test]
 fn native_partition_bindings_reject_invalid_key_scopes() {
+    for ty in ["json", "xml"] {
+        for strategy in ["LIST", "RANGE"] {
+            rejected(&tables(
+                &format!("CREATE TABLE parent(id {ty}) PARTITION BY {strategy}(id)"),
+                vec![PartitionBound::Default],
+            ));
+        }
+    }
+
     for key in [
         "1",
         "missing",
