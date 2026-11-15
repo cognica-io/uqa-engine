@@ -69613,6 +69613,90 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_checks_both_original_and_executable_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_preserves_parameter_names_ctes_windows_and_lazy_scalars",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_defaults_require_scalar_compatible_inputs_without_body_compilation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_binding_admission_and_cancellation_retire_original_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bindings/tests.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bindings_reject_invalid_defaults_columns_and_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bindings.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bindings_preserve_defaults_renames_typed_results_and_laziness",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bindings.rs",
+      "capability": "Captured routine expression bindings",
+      "workload": "Inspect original SQL-standard statements, independently retained plans and scalar defaults; restore valid and corrupted archives on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Invalid types, columns and result layouts fail before publication; valid syntax, parameter scopes, deferred effects, original catalog identities and resource retirement remain unchanged.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

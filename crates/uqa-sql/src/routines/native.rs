@@ -18,6 +18,8 @@ use uqa_core::{
 
 mod bodies;
 pub use bodies::validate_captured_body;
+mod bindings;
+pub use bindings::validate_captured_bindings;
 
 /// An admitted borrowed identity index for one immutable routine registry. Late-bound calls and deferred source bodies retain their existing execution contract; runtime resource availability is checked separately.
 pub struct NativeRoutineReferences<'a> {
