@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Validate captured SQL-standard routine statement counts, statement kinds and parameter positions before private backup activation. Both stored syntax and independently retained plans must use the declared input slots; output-only procedure arguments do not add slots, and parameter defaults have no argument scope. Source SQL and PL/pgSQL bodies retain lazy compilation. Complete public backup restoration remains in progress.
+
 - Validate restored partition keys, stored bound types and sibling membership before private activation. Preserve renamed enum labels, later domain constraints, selected routine identities and detached partition conditions without reevaluating bounds. Hash-bound admission now determines overlap without modulus-sized iteration or signed remainder overflow. Physical domain output uses the original base layout, including partition-bound catalog rendering. LIST/RANGE declarations and restoration share the default B-tree capability check. Bound admission, sibling ordering, row routing and restoration preserve the selected range/multirange key type, including numeric equality across different spellings. Complete public backup restoration remains in progress.
 
 - Validate restored column, table, foreign-table and domain CHECK bindings in their original typed scopes before private activation, including Boolean input beneath COLLATE. Preserve named rows, domain VALUE, selected routine/type identities and NOT VALID state without evaluating constraints or scanning existing rows. Complete public backup restoration remains in progress.

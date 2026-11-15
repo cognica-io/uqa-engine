@@ -69012,6 +69012,129 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_parameter_scope_checks_each_original_syntax_and_plan_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_source_bodies_remain_lazy_and_defaults_have_no_parameter_scope",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_body_form_statement_count_and_kind_must_match_the_declaration",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_parameter_slots_exclude_outputs_and_preserve_input_modes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_routine_body_validation_retires_denied_and_cancelled_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/bodies/tests.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_rejects_parameter_ordinals_in_each_captured_owner",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_routine_closure_rejects_incomplete_and_wrong_kind_bound_bodies",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Inspect original SQL-standard syntax, separately retained plans and parameter defaults under their declared input scope.",
+      "invariant": "Validation preserves lazy source text and original owners, rejects inconsistent body forms and undeclared parameter slots, and retires scratch on denial or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_reject_parameters_outside_their_declared_scope",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Restore native routines on memory, native SQLite, SQLite Key/Value and redb after source retirement, including corrupt parameter scopes, procedure outputs and lazy source bodies.",
+      "invariant": "Invalid images fail before activation; valid bodies retain PostgreSQL input positions, side effects, rollback, later writes and reopen without eager invocation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_bodies_preserve_input_positions_effects_and_lazy_compilation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine body scope",
+      "workload": "Restore native routines on memory, native SQLite, SQLite Key/Value and redb after source retirement, including corrupt parameter scopes, procedure outputs and lazy source bodies.",
+      "invariant": "Invalid images fail before activation; valid bodies retain PostgreSQL input positions, side effects, rollback, later writes and reopen without eager invocation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
