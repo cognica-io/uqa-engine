@@ -122,14 +122,11 @@ pub(super) fn table_lineage(
             &control,
         )?;
         if alias.is_none() {
-            for extra in [
-                Some(name),
-                name.rsplit_once('.')
-                    .map(|(_, local)| local.trim_matches('"')),
-            ]
-            .into_iter()
-            .flatten()
-            {
+            let identity = crate::catalog::resolution::bound_relation_identity_with_control(
+                &relation.canonical,
+                &control,
+            )?;
+            for extra in [name, identity.name.as_str()] {
                 insert(
                     &mut lineage.qualifiers,
                     extra,

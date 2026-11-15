@@ -69309,6 +69309,61 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_distinct_on_keeps_output_aliases_and_qualified_input_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_quoted_relation_names_do_not_shadow_correlated_aliases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_columns/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_dependencies_preserve_output_aliases_and_quoted_relation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/dependencies/tests.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Compare output aliases, qualified input columns and correlated quoted relation names under the original stored scope.",
+      "invariant": "Dependency capture and immutable validation select the same original columns as PostgreSQL without adding an unrelated input alias or shadowing an outer relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_rule_scopes_preserve_distinct_aliases_and_quoted_correlations",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings/scopes.rs",
+      "capability": "Stored rule lexical scopes",
+      "workload": "Restore six rules across memory, native SQLite, SQLite Key/Value and redb after source retirement; compare eight PostgreSQL effects and seven dependency edges before publication and after reopen.",
+      "invariant": "Original aliases and quoted relation scopes survive archive retirement, rollback, later writes and persistent reopen, and every restore reservation retires.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

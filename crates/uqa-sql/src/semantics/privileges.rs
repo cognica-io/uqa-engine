@@ -453,14 +453,19 @@ fn analyze_query_block(
             required,
         )?;
     }
-    for order in &block.order_by {
+    for expression in block
+        .order_by
+        .iter()
+        .map(|order| &order.expr)
+        .chain(&block.distinct_on)
+    {
         if ctes.purpose == AnalysisPurpose::StoredDependencies
-            && columns::stored::is_output_alias(&order.expr, &block.projections, &ctes.control())?
+            && columns::stored::is_output_alias(expression, &block.projections, &ctes.control())?
         {
             continue;
         }
         collect_expression_and_subqueries(
-            &order.expr,
+            expression,
             &scopes,
             false,
             &block.subqueries,
@@ -469,12 +474,7 @@ fn analyze_query_block(
             required,
         )?;
     }
-    for expression in block
-        .distinct_on
-        .iter()
-        .chain(block.limit.iter())
-        .chain(block.offset.iter())
-    {
+    for expression in block.limit.iter().chain(block.offset.iter()) {
         collect_expression_and_subqueries(
             expression,
             &scopes,

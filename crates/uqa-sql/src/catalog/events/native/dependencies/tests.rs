@@ -130,6 +130,28 @@ fn native_rule_dependencies_match_nested_columns_targets_and_shadowed_event_rows
 }
 
 #[test]
+fn native_rule_dependencies_preserve_output_aliases_and_quoted_relation_scopes() {
+    let cases = [
+        rule("SELECT DISTINCT ON (b) a AS b FROM public.target ORDER BY b", None, &["public.target"], &[("public.target", "a")]),
+        rule("SELECT DISTINCT ON (target.b) a AS b FROM public.target ORDER BY target.b", None, &["public.target"], &[("public.target", "a"), ("public.target", "b")]),
+        rule("SELECT 1 FROM public.source AS b WHERE EXISTS (SELECT 1 FROM public.\"a.b\" WHERE b.id>0)", None, &["public.source", "public.\"a.b\""], &[("public.source", "id")]),
+        rule("SELECT \"a.b\".id FROM public.\"a.b\"", None, &["public.\"a.b\""], &[("public.\"a.b\"", "id")]),
+        rule("SELECT \"My Table\".id FROM public.\"My Table\"", None, &["public.\"My Table\""], &[("public.\"My Table\"", "id")]),
+        rule("SELECT \"a\"\"b\".id FROM public.\"a\"\"b\"", None, &["public.\"a\"\"b\""], &[("public.\"a\"\"b\"", "id")]),
+    ];
+    let memory = MemoryBudget::new(2 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    for rule in cases {
+        let original = serde_json::to_vec(&rule).unwrap();
+        validate(&rule, &Catalog, &namespace(), &control)
+            .unwrap_or_else(|error| panic!("{:?}: {error}", rule.definition));
+        assert_eq!(serde_json::to_vec(&rule).unwrap(), original);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn native_rule_dependencies_reject_missing_and_extra_summary_entries() {
     let original = rule(
         "INSERT INTO public.target(a) VALUES (new.id)",

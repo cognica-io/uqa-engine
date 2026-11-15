@@ -11,6 +11,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{catalog::events::StoredRule, ScalarExpr};
 
 mod preserved;
+mod scopes;
 
 fn corrupt(rule: &mut StoredRule, damage: &str) {
     if damage.starts_with("dependencies") {
