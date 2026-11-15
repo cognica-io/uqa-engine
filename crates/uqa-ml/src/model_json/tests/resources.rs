@@ -38,6 +38,8 @@ fn stored_model_json_retains_admitted_weights_after_input_and_cancellation_retir
 #[test]
 fn stored_model_json_retires_every_selected_construction_prefix() {
     let text = text();
+    let mut memory_failures = 0;
+    let mut memory_completions = 0;
     for prefix in [1, 8, 64, 512, 4096, 32768] {
         for terminal in ["cancel", "memory", "zero", "drop", "unwind"] {
             let memory = MemoryBudget::new(8 << 20);
@@ -57,6 +59,7 @@ fn stored_model_json_retires_every_selected_construction_prefix() {
             if terminal == "cancel" {
                 cancellation.cancel();
             }
+            let mut completed = None;
             if terminal == "unwind" {
                 assert!(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -68,15 +71,19 @@ fn stored_model_json_retires_every_selected_construction_prefix() {
             } else {
                 if terminal != "drop" {
                     let result = finish(&mut input, usize::from(terminal != "zero"));
-                    assert!(
-                        matches!(
-                            (terminal, result),
-                            ("cancel", Err(JsonInputError::Cancelled(_)))
-                                | ("memory", Err(JsonInputError::Memory(_)))
-                                | ("zero", Err(JsonInputError::Image(_)))
+                    match (terminal, result) {
+                        ("cancel", Err(JsonInputError::Cancelled(_)))
+                        | ("zero", Err(JsonInputError::Image(_))) => (),
+                        ("memory", Err(JsonInputError::Memory(_))) => memory_failures += 1,
+                        ("memory", Ok(model)) => {
+                            memory_completions += 1;
+                            completed = Some(model);
+                        }
+                        (_, result) => panic!(
+                            "{prefix}/{terminal}: {:?}",
+                            result.as_ref().map(Budgeted::reserved_bytes)
                         ),
-                        "{prefix}/{terminal}"
-                    );
+                    }
                     assert!(input
                         .advance(
                             &mut std::io::empty(),
@@ -86,8 +93,23 @@ fn stored_model_json_retires_every_selected_construction_prefix() {
                 }
                 drop(input);
             }
+            if let Some(model) = completed {
+                assert!(model.budget().shares_allowance(&memory));
+                assert_eq!(
+                    memory.used(),
+                    occupied.as_ref().unwrap().bytes() + model.reserved_bytes()
+                );
+                let DeepLayerSpec::Embed { embedding } = &model.layers[0] else {
+                    panic!("completed stored embedding");
+                };
+                assert_eq!(embedding.len(), 8193);
+                assert_eq!(embedding[8192].to_bits(), (-0.0_f64).to_bits());
+                drop(model);
+            }
             drop(occupied);
             assert_eq!(memory.used(), 0, "{prefix}/{terminal}");
         }
     }
+    assert!(memory_failures > 0);
+    assert!(memory_completions > 0);
 }

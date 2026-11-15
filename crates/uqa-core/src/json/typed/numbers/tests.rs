@@ -51,7 +51,7 @@ fn typed_json_f64_keeps_text_parser_bits_errors_and_cancellation() {
         });
         match (expected, actual) {
             (Ok(expected), Ok(actual)) => {
-                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}")
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}");
             }
             (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
                 assert_eq!(actual.to_string(), expected.to_string(), "{text}");

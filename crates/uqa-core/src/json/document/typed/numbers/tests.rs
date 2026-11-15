@@ -198,7 +198,7 @@ fn generic_document_f64_matches_direct_number_visitation_and_exact_bits() {
         let actual = crate::json::work::inline(source.root().read_f64_with_work(&control, &mut ()));
         match (expected, actual) {
             (Ok(expected), Ok(actual)) => {
-                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}")
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}");
             }
             (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
                 assert_eq!(actual.to_string(), expected.to_string());

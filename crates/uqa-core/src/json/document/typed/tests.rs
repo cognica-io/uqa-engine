@@ -51,7 +51,7 @@ fn generic_unit_enums_preserve_cardinality_tag_and_payload_error_order() {
         ));
         match (expected, actual) {
             (Ok(expected), Ok(actual)) => {
-                assert_eq!(expected, if actual == 0 { Mode::One } else { Mode::Two })
+                assert_eq!(expected, if actual == 0 { Mode::One } else { Mode::Two });
             }
             (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
                 assert_eq!(actual.to_string(), expected.to_string(), "{text}");
@@ -66,6 +66,8 @@ fn generic_unit_enums_preserve_cardinality_tag_and_payload_error_order() {
 
 #[test]
 fn generic_field_context_preserves_admission_and_redacts_retained_payloads() {
+    static WEIGHT: crate::json::JsonMessageFormat =
+        crate::json::JsonMessageFormat::new("stored weight: ", "", "invalid stored weight");
     let secret = "private🙂".repeat(8192);
     let text = serde_json::to_string(&secret).unwrap();
     let memory = MemoryBudget::new(2 << 20);
@@ -91,8 +93,6 @@ fn generic_field_context_preserves_admission_and_redacts_retained_payloads() {
         line: 1,
         column: text.len(),
     };
-    static WEIGHT: crate::json::JsonMessageFormat =
-        crate::json::JsonMessageFormat::new("stored weight: ", "", "invalid stored weight");
     let error = error
         .with_context(&WEIGHT, JsonPosition::unlocated(), &diagnostics)
         .unwrap()
