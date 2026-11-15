@@ -11,6 +11,7 @@ use crate::{
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 mod retained;
+mod shared;
 
 #[test]
 fn analyzer_native_image_capture_is_constant_and_retires_the_executable_owner() {
