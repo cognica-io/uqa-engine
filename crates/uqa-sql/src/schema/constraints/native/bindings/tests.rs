@@ -77,10 +77,12 @@ fn stored_constraint_bindings_preserve_boolean_rows_and_unevaluated_expressions(
         "CREATE TABLE items(id integer, CHECK(1 / 0 = 0))",
         "CREATE TABLE items(id integer, CHECK(CASE WHEN id > 0 THEN true ELSE NULL END))",
         "CREATE TABLE items(id integer, CHECK(NULL), CHECK('true'))",
+        "CREATE TABLE items(id integer, CHECK('true' COLLATE \"C\"))",
         "CREATE DOMAIN positive AS integer CHECK(VALUE > 0)",
         "CREATE DOMAIN truth AS boolean CHECK(VALUE)",
         "CREATE DOMAIN latent AS integer CHECK(1 / 0 = VALUE)",
         "CREATE DOMAIN unknown_condition AS integer CHECK(NULL)",
+        "CREATE DOMAIN collated_condition AS integer CHECK('true' COLLATE \"C\")",
     ] {
         validate(sql, &memory, &token).unwrap_or_else(|error| panic!("{sql}: {error}"));
         assert_eq!(memory.used(), 0, "{sql}");
@@ -98,6 +100,7 @@ fn stored_constraint_bindings_reject_wrong_types_and_non_scalar_inputs() {
         "CREATE TABLE items(id integer, CHECK(other.id > 0))",
         "CREATE TABLE items(id integer, CHECK(missing > 0))",
         "CREATE TABLE items(id integer, CHECK('invalid_boolean'))",
+        "CREATE TABLE items(id integer, CHECK('invalid_boolean' COLLATE \"C\"))",
         "CREATE TABLE items(id integer, CHECK($1))",
         "CREATE TABLE items(id integer, CHECK(sum(id) > 0))",
         "CREATE TABLE items(id integer, CHECK(unnest(ARRAY[id]) > 0))",
@@ -106,6 +109,7 @@ fn stored_constraint_bindings_reject_wrong_types_and_non_scalar_inputs() {
         "CREATE DOMAIN positive AS integer CHECK(VALUE)",
         "CREATE DOMAIN positive AS integer CHECK(tableoid > 0)",
         "CREATE DOMAIN positive AS integer CHECK(other.value > 0)",
+        "CREATE DOMAIN collated_condition AS integer CHECK('invalid_boolean' COLLATE \"C\")",
     ] {
         assert!(validate(sql, &memory, &token).is_err(), "{sql}");
         assert_eq!(memory.used(), 0, "{sql}");

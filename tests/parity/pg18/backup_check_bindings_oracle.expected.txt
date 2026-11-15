@@ -10,6 +10,8 @@ domain_cast 23514
 composite_domain_cast 23514
 delayed_evaluation 22012
 non_boolean_column 42804
+collated_unknown_true 00000
+collated_unknown_invalid 22P02
 non_boolean_operand 42804
 non_boolean_domain 42804
 non_boolean_foreign 42804

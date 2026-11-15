@@ -62,6 +62,12 @@ ROLLBACK TO invalid;
 CREATE TABLE bad(id integer CHECK(id));
 \echo non_boolean_column :SQLSTATE
 ROLLBACK TO invalid;
+CREATE TABLE collated_condition(id integer, CHECK('true' COLLATE "C"));
+\echo collated_unknown_true :SQLSTATE
+ROLLBACK TO invalid;
+CREATE TABLE bad(id integer, CHECK('invalid_boolean' COLLATE "C"));
+\echo collated_unknown_invalid :SQLSTATE
+ROLLBACK TO invalid;
 CREATE TABLE bad(id integer, CHECK(true AND id));
 \echo non_boolean_operand :SQLSTATE
 ROLLBACK TO invalid;

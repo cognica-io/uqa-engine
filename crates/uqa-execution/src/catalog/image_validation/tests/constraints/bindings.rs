@@ -66,8 +66,25 @@ fn native_constraint_bindings_join_original_ordinary_foreign_and_domain_scopes()
         let invalid = with_check(kind, Expr::Column(name.into()));
         let error =
             validate_constraint_bindings(&invalid, &NoRoutines, &memory, &token).unwrap_err();
-        assert!(error.to_string().contains("non-boolean"), "{kind}: {error}");
+        assert_eq!(error.sqlstate(), Some("42804"), "{kind}: {error}");
         assert_eq!(memory.used(), 0);
+        for literal in ["true", "invalid_boolean"] {
+            let uqa_sql::ast::Statement::CreateDomain(mut domain) = uqa_sql::compile(&format!(
+                "CREATE DOMAIN condition AS integer CHECK('{literal}' COLLATE \"C\")"
+            ))
+            .unwrap()
+            .remove(0) else {
+                panic!("domain condition")
+            };
+            let collated = with_check(kind, domain.checks.remove(0).expression);
+            let result = validate_constraint_bindings(&collated, &NoRoutines, &memory, &token);
+            if literal == "true" {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("22P02"), "{kind}");
+            }
+            assert_eq!(memory.used(), 0);
+        }
         if kind == "domain" {
             assert!(
                 !invalid

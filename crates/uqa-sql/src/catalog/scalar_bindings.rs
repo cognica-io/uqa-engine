@@ -37,6 +37,16 @@ pub fn expression_type(
     context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    analyze(expression, schema, context, None, control)
+}
+
+fn analyze(
+    expression: &Expr,
+    schema: &RowSchema,
+    context: &NativeScalarContext<'_, '_>,
+    boolean_context: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     crate::schema::dependencies::walk_schema_expr_with_control(expression, control, &mut |node| {
         if matches!(
             node,
@@ -91,6 +101,7 @@ pub fn expression_type(
         plan.scalar(),
         schema,
         context.binding.copy_with_control(control)?,
+        boolean_context,
         control,
     )
 }
@@ -102,18 +113,5 @@ pub fn validate_boolean(
     context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    let ty = expression_type(expression, schema, context, control)?;
-    if !matches!(
-        ty.as_deref().map(crate::type_resolution::base_type),
-        Some(ColumnType::Boolean) | None
-    ) {
-        return Err(context.invalid("non-boolean condition"));
-    }
-    if ty.is_none() {
-        if let Expr::Literal(value) = expression {
-            crate::expr::cast_value(value, "boolean")?;
-        }
-    }
-    control.check()?;
-    Ok(())
+    analyze(expression, schema, context, Some(context.subject), control).map(|_| ())
 }

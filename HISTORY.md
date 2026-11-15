@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Validate restored column, table, foreign-table and domain CHECK bindings in their original typed scopes before private activation. Preserve named rows, domain VALUE, selected routine/type identities and NOT VALID state without evaluating constraints or scanning existing rows. Complete public backup restoration remains in progress.
+- Validate restored column, table, foreign-table and domain CHECK bindings in their original typed scopes before private activation, including Boolean input beneath COLLATE. Preserve named rows, domain VALUE, selected routine/type identities and NOT VALID state without evaluating constraints or scanning existing rows. Complete public backup restoration remains in progress.
 
 - Validate restored index keys and predicates against their original row layouts, routine bindings and native type identities before private candidate activation. Preserve stored expressions, renamed objects, legacy absent type metadata and later index enforcement across memory, native SQLite, SQLite Key/Value and redb. Complete public backup restoration remains in progress.
 

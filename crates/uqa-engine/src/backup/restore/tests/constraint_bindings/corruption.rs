@@ -32,6 +32,13 @@ fn restored_constraint_bindings_reject_table_foreign_and_domain_corruption(
         ("foreign_table", "id", "boolean"),
         ("domain", "value", "boolean"),
         ("table", "true AND id", "boolean"),
+        ("table", "'invalid_boolean' COLLATE \"C\"", "boolean"),
+        (
+            "foreign_table",
+            "'invalid_boolean' COLLATE \"C\"",
+            "boolean",
+        ),
+        ("domain", "'invalid_boolean' COLLATE \"C\"", "boolean"),
         ("table", "sum(id) > 0", "aggregate"),
         ("table", "absent_guard(id)", "absent_guard"),
     ] {
