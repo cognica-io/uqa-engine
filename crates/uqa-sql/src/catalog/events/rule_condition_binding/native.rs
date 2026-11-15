@@ -7,10 +7,89 @@
 //! Captured rule row identities are observed without reallocating or refreshing them.
 
 use super::RuleConditionBinding;
-use crate::{ast::RuleEvent, plan::ExpressionPlan, SQLError, ScalarExpr};
+use crate::{
+    ast::RuleEvent,
+    plan::{ExpressionPlan, OwnedScalarExpr},
+    RowSchema, SQLError, ScalarExpr,
+};
 use uqa_core::memory::{ProductionControl, ProductionMap};
 
 impl RuleConditionBinding {
+    pub(crate) fn captured_row_schema(
+        &self,
+        row: &RowSchema,
+        control: &ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let mut positions = ProductionMap::new(*control);
+        for (position, name) in self.columns.iter().enumerate() {
+            positions.insert_copy(name.as_str(), position)?;
+        }
+        let mut schema = RowSchema::empty_with_control(control)?;
+        for (side, relation) in [("old", self.old_relation), ("new", self.new_relation)] {
+            let Some(relation) = relation else { continue };
+            let current = RowSchema::with_column_metadata_with_control(
+                Some(side),
+                row.columns().iter().enumerate().map(|(index, name)| {
+                    (
+                        row.public_name(index).unwrap_or(name),
+                        row.column_type(index),
+                        row.column_collation(index),
+                    )
+                }),
+                control,
+            )?;
+            let current = RowSchema::with_physical_internal_aliases_with_control(
+                &current,
+                row.columns()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, name)| {
+                        let name = row.public_name(index).unwrap_or(name);
+                        positions.get(name).map(|position| {
+                            (relation.column(*position), index, row.column_type(index))
+                        })
+                    }),
+                control,
+            )?;
+            schema = RowSchema::join_with_control(&schema, &current, std::iter::empty(), control)?;
+        }
+        Ok(schema)
+    }
+
+    pub(crate) fn current_whole_row(
+        &self,
+        side: &str,
+        table: &str,
+        row: &RowSchema,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<OwnedScalarExpr>, SQLError> {
+        let present = match side {
+            "old" => self.old_relation.is_some(),
+            "new" => self.new_relation.is_some(),
+            _ => false,
+        };
+        if !present {
+            return Ok(None);
+        }
+        let mut columns = crate::production::Buffer::new(control);
+        for (index, name) in row.columns().iter().enumerate() {
+            columns.push(
+                OwnedScalarExpr::column(
+                    control.copy_text(row.public_name(index).unwrap_or(name))?,
+                    Some(control.copy_text(side)?),
+                    control,
+                )?,
+                control,
+            )?;
+        }
+        Ok(Some(OwnedScalarExpr::cast(
+            OwnedScalarExpr::row(columns.into_iter(), control)?,
+            control.copy_text(table)?,
+            false,
+            control,
+        )?))
+    }
+
     pub(crate) fn validate_captured(
         &self,
         event: RuleEvent,
@@ -45,6 +124,9 @@ impl RuleConditionBinding {
                 control.check()?;
                 let reference = match node {
                     ScalarExpr::InternalColumn(reference) => Some(*reference),
+                    ScalarExpr::Param(_) => {
+                        return Err(invalid("external parameter", control));
+                    }
                     ScalarExpr::Func {
                         binding: Some(binding),
                         ..

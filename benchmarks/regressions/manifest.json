@@ -69082,10 +69082,10 @@
       "package": "uqa-engine",
       "kind": "lib",
       "test": "restored_rule_bindings_reject_invalid_original_row_references",
-      "cases": 20,
+      "cases": 24,
       "source": "crates/uqa-engine/src/backup/restore/tests/rule_bindings.rs",
       "capability": "Captured rule row validation",
-      "workload": "Reject five kinds of captured rule binding corruption through all four actual provider archives.",
+      "workload": "Reject six kinds of captured rule binding and condition-type corruption through all four actual provider archives.",
       "invariant": "Private activation rejects corrupt references; valid definitions and rule effects retain their original semantics and terminal resources retire.",
       "case_names": [
         "case_1_memory::damage_1___identity__",
@@ -69093,21 +69093,25 @@
         "case_1_memory::damage_3___missing__",
         "case_1_memory::damage_4___shared__",
         "case_1_memory::damage_5___unbound__",
+        "case_1_memory::damage_6___type__",
         "case_2_sqlite_native::damage_1___identity__",
         "case_2_sqlite_native::damage_2___attribute__",
         "case_2_sqlite_native::damage_3___missing__",
         "case_2_sqlite_native::damage_4___shared__",
         "case_2_sqlite_native::damage_5___unbound__",
+        "case_2_sqlite_native::damage_6___type__",
         "case_3_sqlite_kv::damage_1___identity__",
         "case_3_sqlite_kv::damage_2___attribute__",
         "case_3_sqlite_kv::damage_3___missing__",
         "case_3_sqlite_kv::damage_4___shared__",
         "case_3_sqlite_kv::damage_5___unbound__",
+        "case_3_sqlite_kv::damage_6___type__",
         "case_4_redb::damage_1___identity__",
         "case_4_redb::damage_2___attribute__",
         "case_4_redb::damage_3___missing__",
         "case_4_redb::damage_4___shared__",
-        "case_4_redb::damage_5___unbound__"
+        "case_4_redb::damage_5___unbound__",
+        "case_4_redb::damage_6___type__"
       ]
     },
     {
@@ -69124,6 +69128,71 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_types_keep_captured_positions_and_nested_boolean_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Analyze stored conditions with moved live column positions, correlated subqueries, CTEs and unevaluated division.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_types_reject_invalid_scalar_and_nested_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Reject non-Boolean and invalid row, parameter, aggregate, window and set inputs across condition scopes.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_rule_condition_type_analysis_retires_denied_and_cancelled_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Deny analysis growth and cancel each owning request while inspecting a correlated condition.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_condition_types_join_original_table_and_view_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/event_bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Join immutable table and view descriptors with valid and corrupt stored conditions.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "native_event_condition_types_retire_denied_and_cancelled_catalog_analysis",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/event_bindings/tests.rs",
+      "capability": "Captured rule condition typing",
+      "workload": "Deny retained catalog analysis and cancel private view-condition verification.",
+      "invariant": "Immutable analysis preserves selected row and type identities, rejects invalid input without evaluation, and retires every temporary owner.",
+      "case_names": [
+        ""
       ]
     }
   ]

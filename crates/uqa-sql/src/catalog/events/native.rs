@@ -15,6 +15,8 @@ use crate::{
 };
 use uqa_core::{memory::ProductionControl, RelationIdentity};
 
+pub mod bindings;
+
 /// Read the selected immutable catalog. Implementations supply existing native layouts and the ordinary virtual/graph metadata; they do not compile stored SQL or resolve a new search path.
 pub trait NativeEventCatalog {
     fn kind(&self, relation: &RelationIdentity) -> Result<Option<&'static str>, SQLError>;
@@ -128,17 +130,24 @@ fn condition(
     catalog: &impl NativeEventCatalog,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    if let Some((plan, binding)) = condition_parts(rule)? {
+        binding.validate_captured(rule.definition.event, plan, control, &mut |column| {
+            live_column(catalog, owner, column, control)
+        })?;
+    }
+    Ok(())
+}
+
+fn condition_parts(
+    rule: &StoredRule,
+) -> Result<Option<(&ExpressionPlan, &super::RuleConditionBinding)>, SQLError> {
     match (
         &rule.definition.condition,
         &rule.condition_plan,
         &rule.condition_binding,
     ) {
-        (None, None, None) => Ok(()),
-        (Some(_), Some(plan), Some(binding)) => {
-            binding.validate_captured(rule.definition.event, plan, control, &mut |column| {
-                live_column(catalog, owner, column, control)
-            })
-        }
+        (None, None, None) => Ok(None),
+        (Some(_), Some(plan), Some(binding)) => Ok(Some((plan, binding))),
         _ => Err(invalid("incomplete captured rule condition")),
     }
 }
