@@ -46,7 +46,7 @@ pub(super) fn validate_partition_keys(
         }
     }
     for key in &mut spec.keys {
-        match key {
+        match &mut *key {
             Expr::Column(name) => check_column_key(&table.columns, name)?,
             expression => *expression = check_expression_key(context, &table.columns, expression)?,
         }

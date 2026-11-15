@@ -206,10 +206,17 @@ fn native_partition_bindings_reject_untyped_and_mismatched_constants() {
 fn native_partition_bindings_reject_invalid_key_scopes() {
     for ty in ["json", "xml"] {
         for strategy in ["LIST", "RANGE"] {
-            rejected(&tables(
+            let mut input = tables(
                 &format!("CREATE TABLE parent(id {ty}) PARTITION BY {strategy}(id)"),
                 vec![PartitionBound::Default],
-            ));
+            );
+            // Native declarations already carry the catalog-resolved XML identity.
+            if ty == "xml" {
+                for table in &mut input {
+                    table.columns[0].ty = ColumnType::Xml;
+                }
+            }
+            rejected(&input);
         }
     }
 
