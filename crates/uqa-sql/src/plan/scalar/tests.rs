@@ -309,7 +309,9 @@ fn original_and_invoking_cancellation_abort_before_and_during_container_producti
             &invoking
         };
         let mut lowering = Lowering {
-            control: Some(Control::new(&budget, &original, &invoking)),
+            control: Some(resources::Control::from_production(ProductionControl::new(
+                &budget, &original, &invoking,
+            ))),
             owned_children: None,
         };
         let mut count = 0;

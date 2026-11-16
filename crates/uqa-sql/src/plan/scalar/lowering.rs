@@ -23,8 +23,8 @@ impl super::super::ExpressionPlan {
         expression: &Expr,
         control: &ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
-        lower_owned(
-            Source::Borrowed(expression),
+        lower_scalar_with_arena(
+            expression,
             &super::super::NoRegisteredAggregates,
             &mut Vec::new(),
             *control,
@@ -87,6 +87,9 @@ pub(in crate::plan) fn lower_scalar_with_arena(
     subqueries: &mut dyn QueryLowering,
     control: ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr> {
+    if control.budget().is_some() {
+        return input::lower_inline(expression, aggregates, subqueries, control);
+    }
     lower_owned(
         Source::Borrowed(expression),
         aggregates,
@@ -97,3 +100,14 @@ pub(in crate::plan) fn lower_scalar_with_arena(
 
 #[cfg(test)]
 mod tests;
+
+pub(super) fn lower_immutable(
+    expression: &Expr,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ScalarExpr>> {
+    if control.budget().is_some() {
+        input::lower_inline_immutable(expression, control)
+    } else {
+        crate::plan::ExpressionPlan::lower_scalar_for_rewrite(expression, control)?.finish(control)
+    }
+}

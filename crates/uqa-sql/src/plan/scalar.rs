@@ -11,7 +11,7 @@ use super::{
     ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, WindowSpec,
 };
 use crate::schema::retention::CatalogRetentionError;
-use resources::{Control, Lowering, Result};
+use resources::{Lowering, Result};
 use source::{Node, Source};
 use uqa_core::{
     memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
@@ -72,18 +72,7 @@ impl super::ExpressionPlan {
         expression: &Expr,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ScalarExpr>> {
-        control.check()?;
-        let mut lowering = Lowering {
-            control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: None,
-        };
-        let scalar = lowering.expression(
-            Source::Borrowed(expression),
-            &super::NoRegisteredAggregates,
-            &mut Vec::new(),
-        )?;
-        let memory = lowering.control.map(|control| control.memory);
-        Ok(control.finish(scalar, memory)?)
+        lowering::lower_immutable(expression, control)
     }
 
     /// Lower a borrowed, validated column expression directly into admitted scalar IR. Destination strings, value payloads, bindings, vector capacities and boxes acquire the supplied allowance before allocation, and the result retains those leases. Both the retained definition's original cancellation and the invoking reader's cancellation remain active during lowering. This controls AST-to-IR production only; subsequent type binding and evaluation require their own resource contracts. Query children violate the validated column-expression invariant.
@@ -93,16 +82,10 @@ impl super::ExpressionPlan {
         original: &CancellationToken,
         invoking: &CancellationToken,
     ) -> Result<Budgeted<ScalarExpr>> {
-        let mut lowering = Lowering {
-            control: Some(Control::new(budget, original, invoking)),
-            owned_children: None,
-        };
-        let scalar = lowering.expression(
-            Source::Borrowed(expression),
-            &super::NoRegisteredAggregates,
-            &mut Vec::new(),
-        )?;
-        lowering.finish(scalar)
+        let control = ProductionControl::new(budget, original, invoking);
+        Ok(Self::lower_scalar_with_control(expression, &control)?
+            .into_budgeted()
+            .expect("controlled column expression"))
     }
 }
 

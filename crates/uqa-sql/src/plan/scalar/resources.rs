@@ -11,8 +11,8 @@ pub(super) mod input;
 use super::source::Source;
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, ProductionControl},
-    CancellationToken, QueryCancelled, Value,
+    memory::{BudgetedVec, MemoryReservation, ProductionControl},
+    QueryCancelled, Value,
 };
 
 pub(super) type Result<T> = std::result::Result<T, CatalogRetentionError>;
@@ -29,17 +29,6 @@ impl<'a> Control<'a> {
                 .empty_reservation()
                 .expect("controlled scalar copy"),
             production,
-        }
-    }
-
-    pub(super) fn new(
-        budget: &'a MemoryBudget,
-        original: &'a CancellationToken,
-        invoking: &'a CancellationToken,
-    ) -> Self {
-        Self {
-            memory: budget.empty_reservation(),
-            production: ProductionControl::new(budget, original, invoking),
         }
     }
 
@@ -180,11 +169,5 @@ impl Lowering<'_> {
                 Ok(value)
             }
         }
-    }
-
-    pub(super) fn finish<T>(self, value: T) -> Result<Budgeted<T>> {
-        self.check()?;
-        let control = self.control.expect("controlled lowering returns its lease");
-        Ok(Budgeted::new(value, control.memory))
     }
 }

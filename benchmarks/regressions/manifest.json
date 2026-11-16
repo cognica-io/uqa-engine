@@ -70748,6 +70748,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_preserves_ordinary_names_flags_and_independent_query_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Construct depth-first and breadth-first SEARCH metadata and independent mark/default scalar-query callbacks.",
+      "invariant": "Match ordinary and controlled CTE fields, original names and flags, and independent zero-based query slots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_bounds_wide_names_and_retires_each_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Construct empty and 2,048-column SEARCH/CYCLE vectors with long Unicode names; cancel or abandon each suspended prefix and deny destination allowances.",
+      "invariant": "Bound per-step work, retain exact names and release private reservations without allocating or consuming sibling leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_retires_deep_marks_after_late_default_and_text_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Reject a later default query or path callback after constructing an 8,192-level mark on a 256 KiB stack.",
+      "invariant": "Preserve the original callback error and retire every admitted scalar prefix iteratively.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_retires_deep_marks_after_body_construction_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Reject a malformed canonical window in a CTE body after constructing an 8,192-level cycle mark.",
+      "invariant": "The ordinary controlled CTE path preserves the body diagnostic and retires the mark before returning its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_scalar_construction_retires_deep_prefixes_and_preserves_typed_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/tests.rs",
+      "capability": "Controlled scalar construction",
+      "workload": "Lower an 8,192-level scalar prefix before a rejected query on a 256 KiB stack and deny small construction allowances.",
+      "invariant": "Use the shared iterative constructor while retaining typed subquery and memory errors and independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Expr, Lowering, SQLError, ScalarExpr, ScalarQueryInput};
+use super::{Expr, Lowering, ScalarExpr, ScalarQueryInput};
 use crate::plan::scalar::resources::input::{boxed_from, map_from};
 use crate::plan::scalar::ScalarInputWork;
 use crate::{
@@ -19,14 +19,14 @@ impl Lowering<'_> {
     )]
     pub(super) async fn scalar_node_from<
         's,
-        W: ScalarInputWork<Error = SQLError>,
-        Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>,
+        W: ScalarInputWork,
+        Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt, W::Error>,
     >(
         &mut self,
         source: &'s Expr,
         queries: &mut Q,
         work: &mut W,
-    ) -> Result<ScalarExpr, SQLError> {
+    ) -> Result<ScalarExpr, W::Error> {
         self.checkpoint(work).await?;
         Ok(match source {
             Expr::Star => ScalarExpr::Star,
@@ -153,34 +153,34 @@ impl Lowering<'_> {
         })
     }
 
-    async fn reference_from<W: ScalarInputWork<Error = SQLError>>(
+    async fn reference_from<W: ScalarInputWork>(
         &mut self,
         name: &ReferenceName,
         work: &mut W,
-    ) -> Result<ReferenceName, SQLError> {
+    ) -> Result<ReferenceName, W::Error> {
         Ok(ReferenceName::from(self.text_from(name, work).await?).with_position(name.position()))
     }
 
-    async fn scalar_slots<W: ScalarInputWork<Error = SQLError>>(
+    async fn scalar_slots<W: ScalarInputWork>(
         &mut self,
         count: usize,
         work: &mut W,
-    ) -> Result<Vec<ScalarExpr>, SQLError> {
+    ) -> Result<Vec<ScalarExpr>, W::Error> {
         Ok(map_from!(self, 0..count, work, |_| ScalarExpr::Star))
     }
 
-    async fn scalar_slot<W: ScalarInputWork<Error = SQLError>>(
+    async fn scalar_slot<W: ScalarInputWork>(
         &mut self,
         work: &mut W,
-    ) -> Result<Box<ScalarExpr>, SQLError> {
+    ) -> Result<Box<ScalarExpr>, W::Error> {
         Ok(boxed_from!(self, work, ScalarExpr, ScalarExpr::Star))
     }
 
-    async fn optional_slot<W: ScalarInputWork<Error = SQLError>>(
+    async fn optional_slot<W: ScalarInputWork>(
         &mut self,
         present: bool,
         work: &mut W,
-    ) -> Result<Option<Box<ScalarExpr>>, SQLError> {
+    ) -> Result<Option<Box<ScalarExpr>>, W::Error> {
         if present {
             Ok(Some(self.scalar_slot(work).await?))
         } else {
@@ -188,11 +188,11 @@ impl Lowering<'_> {
         }
     }
 
-    async fn order_slots<W: ScalarInputWork<Error = SQLError>>(
+    async fn order_slots<W: ScalarInputWork>(
         &mut self,
         orders: &[OrderBy],
         work: &mut W,
-    ) -> Result<Vec<ScalarOrder>, SQLError> {
+    ) -> Result<Vec<ScalarOrder>, W::Error> {
         Ok(map_from!(self, orders.iter(), work, |order| ScalarOrder {
             expr: ScalarExpr::Star,
             descending: order.descending,
@@ -200,11 +200,11 @@ impl Lowering<'_> {
         }))
     }
 
-    async fn window_slots<W: ScalarInputWork<Error = SQLError>>(
+    async fn window_slots<W: ScalarInputWork>(
         &mut self,
         spec: &WindowSpec,
         work: &mut W,
-    ) -> Result<ScalarWindowSpec, SQLError> {
+    ) -> Result<ScalarWindowSpec, W::Error> {
         assert!(
             spec.reference.is_none(),
             "named window reference must be resolved before unified-plan lowering"
@@ -226,11 +226,11 @@ impl Lowering<'_> {
         })
     }
 
-    async fn frame_slot<W: ScalarInputWork<Error = SQLError>>(
+    async fn frame_slot<W: ScalarInputWork>(
         &mut self,
         bound: &FrameBound,
         work: &mut W,
-    ) -> Result<ScalarFrameBound, SQLError> {
+    ) -> Result<ScalarFrameBound, W::Error> {
         self.checkpoint(work).await?;
         Ok(match bound {
             FrameBound::UnboundedPreceding => ScalarFrameBound::UnboundedPreceding,

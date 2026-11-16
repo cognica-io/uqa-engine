@@ -155,3 +155,55 @@ fn direct_lowering_rejects_query_children_without_publishing_partial_owners() {
     ));
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn controlled_scalar_construction_retires_deep_prefixes_and_preserves_typed_errors() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut deep = Expr::Literal(Value::Str("leaf".into()));
+            for _ in 0..8192 {
+                deep = Expr::Not(Box::new(deep));
+            }
+            let source = Expr::Row(vec![deep, expression("SELECT (SELECT 1)")]);
+            let budget = MemoryBudget::new(32 << 20);
+            let token = CancellationToken::new();
+            let sibling = budget.reserve(37).unwrap();
+            let control = ProductionControl::new(&budget, &token, &token);
+            assert!(matches!(
+                ExpressionPlan::lower_scalar_for_rewrite(&source, &control),
+                Err(CatalogRetentionError::UnexpectedSubquery)
+            ));
+            assert!(matches!(
+                ExpressionPlan::lower_scalar_with_control(&source, &control),
+                Err(CatalogRetentionError::UnexpectedSubquery)
+            ));
+            assert!(matches!(
+                ExpressionPlan::lower_column_budgeted(&source, &budget, &token, &token),
+                Err(CatalogRetentionError::UnexpectedSubquery)
+            ));
+            assert_eq!(budget.used(), 37);
+            for bytes in [0, 1, 128, 512, 1024] {
+                let denied = MemoryBudget::new(bytes);
+                let control = ProductionControl::new(&denied, &token, &token);
+                assert!(matches!(
+                    ExpressionPlan::lower_scalar_for_rewrite(&source, &control),
+                    Err(CatalogRetentionError::Memory(_))
+                ));
+                assert!(matches!(
+                    ExpressionPlan::lower_scalar_with_control(&source, &control),
+                    Err(CatalogRetentionError::Memory(_))
+                ));
+                assert!(matches!(
+                    ExpressionPlan::lower_column_budgeted(&source, &denied, &token, &token),
+                    Err(CatalogRetentionError::Memory(_))
+                ));
+                assert_eq!(denied.used(), 0);
+                assert!(denied.peak() <= bytes);
+            }
+            drop(sibling);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

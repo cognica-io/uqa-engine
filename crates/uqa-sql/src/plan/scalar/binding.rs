@@ -48,7 +48,7 @@ impl FunctionBinding {
             owned_children: None,
         };
         let binding = copying.binding(Source::Borrowed(self))?;
-        Ok(copying.finish(binding)?.into())
+        Ok(control.finish(binding, copying.control.map(|owner| owner.memory))?)
     }
     pub(crate) fn with_composite_projection_with_control(
         &self,

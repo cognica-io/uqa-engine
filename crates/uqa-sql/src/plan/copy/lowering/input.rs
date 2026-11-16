@@ -15,6 +15,7 @@ use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) mod scalars;
+pub(super) mod text;
 
 #[cfg(test)]
 mod tests;
