@@ -14,6 +14,9 @@ use crate::plan::{
     ComputePlan, CtePlan, NoRegisteredAggregates, QueryBlockPlan, QueryPlan, SourcePlan,
 };
 
+mod ctes;
+mod trees;
+
 struct Arena<'a> {
     value: QueryArena<'a>,
     work: Work<'a>,
@@ -112,10 +115,7 @@ impl<'s: 'a, 'c: 'a, 'a> construct::Input<'s, 'c> for Native<'a, Arena<'a>> {
         source: &'s [crate::ast::CTE],
         copying: &mut Copying<'c>,
     ) -> Result<Prefix<Vec<CtePlan>>> {
-        self.work.checkpoint().await;
-        // These arena fixtures exercise query and scalar descendants. CTE body callbacks retain their separate coverage.
-        assert!(source.is_empty());
-        Ok(copying.retain_plan(Vec::new()))
+        ctes::list_input(source, copying, self)?.await
     }
 
     async fn query(
@@ -133,7 +133,7 @@ impl<'s: 'a, 'c: 'a, 'a> block::Input<'s, 'c> for Native<'a, Arena<'a>> {
         source: &'s crate::ast::FromClause,
         copying: &mut Copying<'c>,
     ) -> Result<Prefix<SourcePlan>> {
-        blocks::source_input(source, copying, self)?.await
+        trees::source_child(source, copying, self).await
     }
 
     async fn finish_arena(&mut self, copying: &mut Copying<'c>) -> Result<Prefix<Vec<QueryPlan>>> {
@@ -223,9 +223,6 @@ fn statement(sql: &str) -> Statement {
 
 #[test]
 fn retained_enclosing_queries_construct_real_arenas_sets_values_and_parameter_scopes() {
-    let native = MemoryBudget::new(32 << 20);
-    let work = MemoryBudget::new(1 << 20);
-    let token = CancellationToken::new();
     let mut sources = [
         "SELECT 1",
         "SELECT (SELECT (SELECT 1)), (SELECT 2) IN (SELECT (SELECT 3)), EXISTS (SELECT 4)",
@@ -247,6 +244,13 @@ fn retained_enclosing_queries_construct_real_arenas_sets_values_and_parameter_sc
         blocks::query("SELECT 1 UNION ALL SELECT (SELECT 2) ORDER BY (SELECT 3)").set_op;
     implicit.set_op.as_mut().unwrap().left = None;
     sources.push(Statement::Select(Box::new(implicit)));
+    assert_equivalent(sources);
+}
+
+fn assert_equivalent(sources: impl IntoIterator<Item = Statement>) {
+    let native = MemoryBudget::new(32 << 20);
+    let work = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
     for source in sources {
         let source = Arc::new(source);
         for parameters in [false, true] {
@@ -294,7 +298,11 @@ fn retained_enclosing_queries_construct_real_arenas_sets_values_and_parameter_sc
 
 #[test]
 fn retained_enclosing_queries_release_each_pending_arena_and_set_prefix() {
-    let source = Arc::new(statement("SELECT (SELECT 1), (SELECT 2) IN (SELECT 3) UNION ALL SELECT (SELECT 4) ORDER BY (SELECT 5) LIMIT (SELECT 6)"));
+    assert_prefix_retirement(statement("SELECT (SELECT 1), (SELECT 2) IN (SELECT 3) UNION ALL SELECT (SELECT 4) ORDER BY (SELECT 5) LIMIT (SELECT 6)"));
+}
+
+fn assert_prefix_retirement(source: Statement) {
+    let source = Arc::new(source);
     let native = MemoryBudget::new(32 << 20);
     let work = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();

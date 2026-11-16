@@ -30,9 +30,7 @@ impl Copying<'_> {
         aggregates: &dyn AggregateClassifier,
     ) -> Result<InsertPlan> {
         let ctes = self.field("ctes", |copying| {
-            copying.map_plans(statement.with.iter(), |copying, cte| {
-                copying.lower_cte(cte, aggregates)
-            })
+            copying.lower_ctes(&statement.with, aggregates)
         })?;
         let ctes = self.retain_plan(ctes);
         let source = self.field("source", |copying| {
@@ -120,9 +118,7 @@ impl Copying<'_> {
         aggregates: &dyn AggregateClassifier,
     ) -> Result<UpdatePlan> {
         let ctes = self.field("ctes", |copying| {
-            copying.map_plans(statement.with.iter(), |copying, cte| {
-                copying.lower_cte(cte, aggregates)
-            })
+            copying.lower_ctes(&statement.with, aggregates)
         })?;
         let ctes = self.retain_plan(ctes);
         let mut arena = self.query_arena();
@@ -199,9 +195,7 @@ impl Copying<'_> {
         aggregates: &dyn AggregateClassifier,
     ) -> Result<DeletePlan> {
         let ctes = self.field("ctes", |copying| {
-            copying.map_plans(statement.with.iter(), |copying, cte| {
-                copying.lower_cte(cte, aggregates)
-            })
+            copying.lower_ctes(&statement.with, aggregates)
         })?;
         let ctes = self.retain_plan(ctes);
         let mut arena = self.query_arena();
@@ -287,9 +281,7 @@ impl Copying<'_> {
         })?;
         let returning = Pending::new(returning);
         let ctes = self.field("ctes", |copying| {
-            copying.map_plans(statement.with.iter(), |copying, cte| {
-                copying.lower_cte(cte, aggregates)
-            })
+            copying.lower_ctes(&statement.with, aggregates)
         })?;
         let ctes = self.retain_plan(ctes);
         let target = self.field("target", |copying| copying.text(&statement.target))?;

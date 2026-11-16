@@ -95,9 +95,7 @@ impl<'s, 'c> super::super::construct::Input<'s, 'c> for Inline<'_, '_> {
     ) -> impl Future<Output = Result<Prefix<Vec<crate::plan::CtePlan>>>> + Send {
         ready(
             copying
-                .map_plans(source.iter(), |copying, cte| {
-                    copying.lower_cte(cte, self.aggregates)
-                })
+                .lower_ctes(source, self.aggregates)
                 .map(|ctes| copying.retain_plan(ctes)),
         )
     }

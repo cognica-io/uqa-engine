@@ -29,7 +29,7 @@ pub(super) async fn construct_search<'s, I: ScalarInput<&'s Expr> + TextInput<&'
     })
 }
 
-pub(super) async fn construct_cycle<
+pub(in crate::plan::copy::lowering) async fn construct_cycle<
     's,
     M: ScalarInput<&'s Expr> + TextInput<&'s str>,
     D: ScalarInput<&'s Expr>,

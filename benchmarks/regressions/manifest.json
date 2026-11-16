@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -71018,6 +71018,71 @@
       "capability": "Retained enclosing query construction",
       "workload": "Construct 512 nested scalar queries on a 256 KiB thread stack and fail a later outer alias after completing the inner arena.",
       "invariant": "Use independent driver tasks and depth-admitted retirement, with constant polling stack, allocation-free cleanup and no retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_preserve_join_cte_and_arena_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct joins, lateral derived queries, recursive/materialized CTEs and SEARCH/CYCLE metadata through one-step work windows.",
+      "invariant": "Match consuming and controlled plans, preserving flags, names, query-local slots and parameter pruning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_retire_each_join_cte_and_derived_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Abandon or cancel either owner at every retained JOIN, CTE and derived-query prefix, then deny destination admission.",
+      "invariant": "Release every private plan and work owner while preserving the independent sibling allowance and original typed errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_bound_deep_children_and_late_metadata_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct 512 nested joins, derived queries and CTEs on a 256 KiB stack, then reject a later alias.",
+      "invariant": "Reuse independent child tasks and admitted plan retirement without recursive polling, cleanup allocations or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_ctes_preserve_cycle_scopes_and_each_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct independent CYCLE mark/default query scopes and cancel, abandon or deny each pending prefix.",
+      "invariant": "Preserve ordinary query-slot origins and parameter pruning; all private owners retire without releasing a sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_ctes_retire_deep_cycle_after_body_or_sibling_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Retain an 8,192-level CYCLE mark before a failed query body, rejected command callback or later CTE name on a 256 KiB stack.",
+      "invariant": "The existing scalar and plan-tree owners retain the completed mark through every later boundary and release its full allowance on failure.",
       "case_names": [
         ""
       ]

@@ -4,110 +4,174 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{input::InlineScalarInput, Copying, Result};
-use crate::{
-    ast::{CteBody, CTE},
-    plan::{retirement::Pending, AggregateClassifier, CommandPlan, CtePlan, CtePlanBody},
-};
+//! CTEs retain ordered metadata and independent body owners through every suspended child.
 
-mod metadata;
+use super::{
+    input::{text, InlineScalarInput, ScalarInput, TextInput},
+    Copying, Result,
+};
+use crate::{
+    ast::{CteBody, CteCycleClause, Expr, SelectStmt, CTE},
+    construction::Read,
+    plan::{
+        retirement::{construction::Prefix, Pending},
+        AggregateClassifier, CommandPlan, CteCyclePlan, CtePlan, CtePlanBody, QueryPlan,
+    },
+};
+use std::future::Future;
+use uqa_core::memory::BudgetedVec;
+
+mod inline;
+pub(super) mod metadata;
 
 #[cfg(test)]
 mod tests;
 
+pub(super) trait Input<'s, 'c>: ScalarInput<&'s Expr> + TextInput<&'s str> {
+    fn cte(
+        &mut self,
+        source: &'s CTE,
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Prefix<CtePlan>>> + Send;
+    fn cycle(
+        &mut self,
+        source: &'s CteCycleClause,
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Pending<CteCyclePlan>>> + Send;
+    fn query(
+        &mut self,
+        source: &'s SelectStmt,
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Prefix<QueryPlan>>> + Send;
+    fn command(
+        &mut self,
+        source: &'s CteBody,
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Prefix<CommandPlan>>> + Send;
+}
+
 impl Copying<'_> {
+    pub(super) fn lower_ctes(
+        &mut self,
+        source: &[CTE],
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<Vec<CtePlan>> {
+        let mut arena = self.query_arena();
+        crate::catalog::work::inline(construct_list(
+            source,
+            self,
+            &mut InlineScalarInput {
+                aggregates,
+                arena: &mut arena,
+            },
+        ))
+        .map(Prefix::take)
+    }
+
     pub(super) fn lower_cte(
         &mut self,
-        cte: &CTE,
+        source: &CTE,
         aggregates: &dyn AggregateClassifier,
     ) -> Result<CtePlan> {
         let mut scope = self.enter_plan_node()?;
-        scope.lower_cte_fields(cte, aggregates)
+        let mut arena = scope.query_arena();
+        crate::catalog::work::inline(construct(
+            source,
+            &mut scope,
+            &mut InlineScalarInput {
+                aggregates,
+                arena: &mut arena,
+            },
+        ))
+        .map(Prefix::take)
     }
+}
 
-    fn lower_cte_fields(
-        &mut self,
-        cte: &CTE,
-        aggregates: &dyn AggregateClassifier,
-    ) -> Result<CtePlan> {
-        let name = self.text(&cte.name)?;
-        let columns = self.texts(&cte.columns)?;
-        let mut search_arena = self.query_arena();
-        let search = match &cte.search {
-            Some(search) => Some(crate::catalog::work::inline(metadata::construct_search(
-                search,
-                self,
-                &mut InlineScalarInput {
-                    aggregates,
-                    arena: &mut search_arena,
-                },
-            ))?),
-            None => None,
-        };
-        let cycle = self.field("cycle", |copying| {
-            let Some(cycle) = &cte.cycle else {
-                return Ok(Pending::new(None));
-            };
-            let mut mark = copying.query_arena();
-            let mut default = copying.query_arena();
-            let cycle = crate::catalog::work::inline(metadata::construct_cycle(
-                cycle,
-                copying,
-                &mut InlineScalarInput {
-                    aggregates,
-                    arena: &mut mark,
-                },
-                &mut InlineScalarInput {
-                    aggregates,
-                    arena: &mut default,
-                },
-            ))?;
-            Ok(Pending::new(Some(cycle.take())))
-        })?;
-        let body = self.field("body", |copying| {
-            Ok(match &cte.body {
-                CteBody::Query(query) => CtePlanBody::Query(
-                    copying.lower_boxed(|copying| copying.lower_nested_query(query, aggregates))?,
-                ),
-                command => CtePlanBody::Command(copying.lower_boxed(|copying| {
-                    copying.field("command", |copying| {
-                        copying.field("value0", |copying| {
-                            Ok(match command {
-                                CteBody::Query(_) => unreachable!("query selected above"),
-                                CteBody::Insert(statement) => {
-                                    CommandPlan::Insert(copying.lower_boxed(|copying| {
-                                        copying.lower_insert(statement, aggregates)
-                                    })?)
-                                }
-                                CteBody::Update(statement) => {
-                                    CommandPlan::Update(copying.lower_boxed(|copying| {
-                                        copying.lower_update(statement, aggregates)
-                                    })?)
-                                }
-                                CteBody::Delete(statement) => {
-                                    CommandPlan::Delete(copying.lower_boxed(|copying| {
-                                        copying.lower_delete(statement, aggregates)
-                                    })?)
-                                }
-                                CteBody::Merge(statement) => {
-                                    CommandPlan::Merge(copying.lower_boxed(|copying| {
-                                        copying.lower_merge(statement, aggregates)
-                                    })?)
-                                }
-                            })
-                        })
-                    })
-                })?),
-            })
-        })?;
-        Ok(CtePlan {
-            name,
-            columns,
-            recursive: cte.recursive,
-            materialization: cte.materialization,
-            search,
-            cycle: cycle.take(),
-            body,
-        })
+pub(super) async fn construct_list<'s, 'c, I: Input<'s, 'c>>(
+    source: &'s [CTE],
+    copying: &mut Copying<'c>,
+    input: &mut I,
+) -> Result<Prefix<Vec<CtePlan>>> {
+    input.checkpoint().await?;
+    copying.check()?;
+    let mut output = copying.retain_plan(BudgetedVec::new(
+        copying.control.budget().expect("CTE allowance"),
+    ));
+    output.reserve(source.len())?;
+    copying
+        .fields
+        .as_mut()
+        .expect("CTE records")
+        .reserve(source.len())?;
+    for source in source {
+        input.checkpoint().await?;
+        let mut field = copying.begin_input_field()?;
+        let cte = Read::new(field.control, input.cte(source, &mut field))?.await?;
+        copying.finish_input_field("item", field);
+        output.push(cte.take()).expect("admitted CTE destination");
     }
+    let (output, memory) = output.take().into_parts();
+    copying.absorb(Some(memory));
+    Ok(copying.retain_plan(output))
+}
+
+pub(super) async fn construct<'s, 'c, I: Input<'s, 'c>>(
+    source: &'s CTE,
+    copying: &mut Copying<'c>,
+    input: &mut I,
+) -> Result<Prefix<CtePlan>> {
+    copying.check()?;
+    let name = copying.take(input.text(&source.name, copying.control).await?);
+    let columns = text::texts(&source.columns, copying, input).await?;
+    let search = match &source.search {
+        Some(search) => Some(metadata::construct_search(search, copying, input).await?),
+        None => None,
+    };
+    let cycle = field!(copying, "cycle", |field| match &source.cycle {
+        Some(cycle) => Pending::new(Some(
+            Read::new(field.control, input.cycle(cycle, &mut field))?
+                .await?
+                .take()
+        )),
+        None => Pending::new(None),
+    });
+    let body = field!(copying, "body", |field| construct_body(
+        &source.body,
+        &mut field,
+        input
+    )
+    .await?);
+    Ok(copying.retain_plan(CtePlan {
+        name,
+        columns,
+        recursive: source.recursive,
+        materialization: source.materialization,
+        search,
+        cycle: cycle.take(),
+        body: body.take(),
+    }))
+}
+
+async fn construct_body<'s, 'c, I: Input<'s, 'c>>(
+    source: &'s CteBody,
+    copying: &mut Copying<'c>,
+    input: &mut I,
+) -> Result<Prefix<CtePlanBody>> {
+    let body = match source {
+        CteBody::Query(query) => {
+            copying.admit_box::<QueryPlan>()?;
+            let query = Read::new(copying.control, input.query(query, copying))?.await?;
+            CtePlanBody::Query(copying.finish_box(query, Prefix::take)?)
+        }
+        command => {
+            copying.admit_box::<CommandPlan>()?;
+            let command = field!(copying, "command", |field| Read::new(
+                field.control,
+                input.command(command, &mut field)
+            )?
+            .await?);
+            CtePlanBody::Command(copying.finish_box(command, Prefix::take)?)
+        }
+    };
+    Ok(copying.retain_plan(body))
 }

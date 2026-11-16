@@ -8,8 +8,8 @@
 
 use super::{Node, RetainedTree, Retire, RetirementFrame};
 use crate::plan::{
-    CommandPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryBlockPlan,
-    QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
+    CommandPlan, CtePlan, CtePlanBody, DeletePlan, ExpressionPlan, InsertPlan, MergePlan,
+    QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
 };
 use std::{
     ops::{Deref, DerefMut},
@@ -168,6 +168,14 @@ root!(SourcePlan, Source);
 root!(CtePlan, Cte);
 root!(CommandPlan, Command);
 root!(ExpressionPlan, Expression);
+impl Root for CtePlanBody {
+    fn retire(self, workspace: &mut Workspace) {
+        match self {
+            Self::Query(query) => Root::retire(query, workspace),
+            Self::Command(command) => Root::retire(command, workspace),
+        }
+    }
+}
 impl Root for UnifiedPlan {
     fn retire(self, workspace: &mut Workspace) {
         match self {
