@@ -86,3 +86,36 @@ impl<'s, 'c> Input<'s, 'c> for Inline<'_, '_> {
         ready(block.compute_kind_with_control(self.aggregates, control))
     }
 }
+
+impl<'s, 'c> super::super::construct::Input<'s, 'c> for Inline<'_, '_> {
+    fn ctes(
+        &mut self,
+        source: &'s [crate::ast::CTE],
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Prefix<Vec<crate::plan::CtePlan>>>> + Send {
+        ready(
+            copying
+                .map_plans(source.iter(), |copying, cte| {
+                    copying.lower_cte(cte, self.aggregates)
+                })
+                .map(|ctes| copying.retain_plan(ctes)),
+        )
+    }
+
+    fn query(
+        &mut self,
+        source: super::super::construct::Source<'s>,
+        copying: &mut Copying<'c>,
+    ) -> impl Future<Output = Result<Prefix<QueryPlan>>> + Send {
+        use super::super::construct::Source;
+        ready(
+            match source {
+                Source::Select(statement) => copying.lower_nested_query(statement, self.aggregates),
+                Source::Values(_) | Source::Block(_) => copying.field("query", |copying| {
+                    copying.lower_query_source(source, self.aggregates)
+                }),
+            }
+            .map(|query| copying.retain_plan(query)),
+        )
+    }
+}

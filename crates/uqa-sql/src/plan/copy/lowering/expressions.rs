@@ -29,20 +29,6 @@ impl Copying<'_> {
         .map(Pending::take)
     }
 
-    pub(super) fn lower_optional_scalar_box(
-        &mut self,
-        expression: Option<&Expr>,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Option<Box<ScalarExpr>>> {
-        crate::catalog::work::inline(construct_optional_scalar_box(
-            expression,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-        ))
-        .map(Pending::take)
-    }
-
     pub(super) fn lower_expression(
         &mut self,
         expression: &Expr,

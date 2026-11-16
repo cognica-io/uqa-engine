@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod blocks;
+mod queries;
 mod sources;
 use std::sync::Arc;
 use uqa_core::{
@@ -38,7 +39,7 @@ enum Source {
 
 #[derive(Debug)]
 enum Field {
-    Block(Box<crate::plan::retirement::construction::Prefix<crate::plan::QueryBlockPlan>>),
+    Block(crate::plan::retirement::construction::Prefix<Box<crate::plan::QueryBlockPlan>>),
     From(crate::plan::SourcePlan),
     Values(Vec<ScalarExpr>),
     Orders(Vec<OrderPlan>),
@@ -120,12 +121,15 @@ impl<'s> crate::plan::scalar::ScalarQueryInput<&'s Expr, &'s crate::ast::SelectS
     }
 }
 
-struct Native<'a> {
+struct Native<'a, Q = Queries<'a>> {
     work: Work<'a>,
-    queries: Option<Queries<'a>>,
+    queries: Option<Q>,
 }
 
-impl<'s: 'a, 'a> ScalarInput<&'s Expr> for Native<'a> {
+impl<'s: 'a, 'a, Q> ScalarInput<&'s Expr> for Native<'a, Q>
+where
+    Q: crate::plan::scalar::ScalarQueryInput<&'s Expr, &'s SelectStmt> + Send + 'a,
+{
     async fn checkpoint(&mut self) -> Result<()> {
         self.work.checkpoint().await;
         Ok(())
@@ -155,7 +159,7 @@ impl<'s: 'a, 'a> ScalarInput<&'s Expr> for Native<'a> {
     }
 }
 
-impl<'s> TextInput<&'s str> for Native<'_> {
+impl<'s, Q: Send> TextInput<&'s str> for Native<'_, Q> {
     async fn text(
         &mut self,
         source: &'s str,
@@ -169,8 +173,9 @@ impl<'s> TextInput<&'s str> for Native<'_> {
     }
 }
 
-impl<'t, 'b> SourceMetadataInput<&'t crate::ast::ColumnType, &'b crate::ast::FunctionBinding>
-    for Native<'_>
+impl<'t, 'b, Q: Send>
+    SourceMetadataInput<&'t crate::ast::ColumnType, &'b crate::ast::FunctionBinding>
+    for Native<'_, Q>
 {
     async fn ty(
         &mut self,

@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -70979,6 +70979,45 @@
       "capability": "Retained query-block construction",
       "workload": "Reject a later scalar query or locking-name payload after retaining an 8,192-level projection on a 256 KiB stack.",
       "invariant": "The shared block owner preserves the original late error and retires the deep prefix without recursive cleanup or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_construct_real_arenas_sets_values_and_parameter_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct complete nested scalar-query arenas, explicit and implicit set operands, VALUES and parameter-pruned subtrees through one-step work windows.",
+      "invariant": "Match existing consuming and controlled lowering, preserving query-local slot order, field values and allocation-free retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_release_each_pending_arena_and_set_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Abandon or cancel either owner at every pending nested-arena and set-operation prefix, then deny destination admission with an independent sibling lease.",
+      "invariant": "Retire every partial query and constructor owner, preserve typed cancellation and admission errors, and retain only the sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_bound_nested_polling_and_retire_late_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct 512 nested scalar queries on a 256 KiB thread stack and fail a later outer alias after completing the inner arena.",
+      "invariant": "Use independent driver tasks and depth-admitted retirement, with constant polling stack, allocation-free cleanup and no retained memory.",
       "case_names": [
         ""
       ]

@@ -438,9 +438,17 @@ impl<'a> Copying<'a> {
         retain: impl FnOnce(T) -> O,
         take: impl FnOnce(O) -> T,
     ) -> Result<Box<T>> {
-        self.check()?;
-        self.reserve(size_of::<T>())?;
+        self.admit_box::<T>()?;
         let value = retain(copy(self)?);
+        self.finish_box(value, take)
+    }
+
+    fn admit_box<T>(&mut self) -> Result<()> {
+        self.check()?;
+        self.reserve(size_of::<T>())
+    }
+
+    fn finish_box<T, O>(&self, value: O, take: impl FnOnce(O) -> T) -> Result<Box<T>> {
         self.check()?;
         Ok(Box::new(take(value)))
     }

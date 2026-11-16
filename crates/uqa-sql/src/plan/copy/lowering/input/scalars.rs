@@ -6,39 +6,13 @@
 
 //! Ordered scalar vectors share suspended field admission with ordinary query construction.
 
-use super::super::{QueryArena, Result};
-use super::{Copying, InlineScalarInput, ScalarInput};
+use super::{Copying, Result, ScalarInput};
 use crate::{
-    ast::{Expr, OrderBy},
-    plan::{
-        retirement::{Pending, Retire},
-        AggregateClassifier, OrderPlan,
-    },
+    ast::Expr,
+    plan::retirement::{Pending, Retire},
     ScalarExpr,
 };
 use uqa_core::memory::BudgetedVec;
-
-impl Copying<'_> {
-    pub(in crate::plan::copy::lowering) fn lower_orders(
-        &mut self,
-        orders: &[OrderBy],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<OrderPlan>> {
-        crate::catalog::work::inline(construct_scalars(
-            orders,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-            |order| &order.expr,
-            |order, expr| OrderPlan {
-                expr,
-                descending: order.descending,
-                nulls: order.nulls,
-            },
-        ))
-        .map(Pending::take)
-    }
-}
 
 pub(in crate::plan::copy::lowering) async fn construct_scalars<
     's,

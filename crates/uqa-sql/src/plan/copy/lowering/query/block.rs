@@ -53,7 +53,7 @@ pub(in crate::plan::copy::lowering) async fn construct<'s, 'c, I: Input<'s, 'c>>
     statement: &'s SelectStmt,
     copying: &mut Copying<'c>,
     input: &mut I,
-    block: &mut Prefix<QueryBlockPlan>,
+    block: &mut Prefix<Box<QueryBlockPlan>>,
 ) -> Result<()> {
     copying.check()?;
     input.checkpoint().await?;

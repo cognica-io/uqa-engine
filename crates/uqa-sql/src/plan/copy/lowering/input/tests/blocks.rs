@@ -17,13 +17,14 @@ pub(super) fn block_input<'s: 'a, 'c: 'a, 'a, I: block::Input<'s, 'c> + Send + '
     source: &'s SelectStmt,
     copying: &'a mut Copying<'c>,
     input: &'a mut I,
-) -> Result<construction::Read<'a, Result<Box<Prefix<QueryBlockPlan>>>>> {
+) -> Result<construction::Read<'a, Result<Prefix<Box<QueryBlockPlan>>>>> {
     Ok(construction::Read::new(copying.control, async move {
         let mut scope = copying.enter_plan_node()?;
-        let mut block =
-            scope.retain_plan(crate::plan::mutable::construction::empty_projection_block());
+        let block =
+            scope.boxed(|_| Ok(crate::plan::mutable::construction::empty_projection_block()))?;
+        let mut block = scope.retain_plan(block);
         block::construct(source, &mut scope, input, &mut block).await?;
-        scope.boxed(|_| Ok(block))
+        Ok(block)
     })?)
 }
 
@@ -60,7 +61,12 @@ impl<'s: 'n, 'n, 'c> block::Input<'s, 'c> for Native<'n> {
     }
 }
 
-fn source_input<'s: 'a, 'c: 'a, 'a, I: super::super::super::source::leaf::Input<'s> + Send + 'a>(
+pub(super) fn source_input<
+    's: 'a,
+    'c: 'a,
+    'a,
+    I: super::super::super::source::leaf::Input<'s> + Send + 'a,
+>(
     source: &'s FromClause,
     copying: &'a mut Copying<'c>,
     input: &'a mut I,
@@ -75,7 +81,7 @@ fn source_input<'s: 'a, 'c: 'a, 'a, I: super::super::super::source::leaf::Input<
     })?)
 }
 
-fn query(sql: &str) -> SelectStmt {
+pub(super) fn query(sql: &str) -> SelectStmt {
     let Statement::Select(query) = crate::compile(sql).unwrap().remove(0) else {
         panic!("query fixture")
     };
