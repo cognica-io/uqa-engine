@@ -7,10 +7,10 @@
 //! Routine declaration checks preserve language-specific precedence across admitted type-name work.
 
 use super::{
-    routine_definition_error, CreateFunction, FunctionParamMode, FunctionReturns, SQLError,
-    POLYMORPHIC_PSEUDO_TYPES, ROUTINE_PARAMETER_PSEUDO_TYPES, ROUTINE_RESULT_PSEUDO_TYPES,
+    routine_definition_error, CreateFunction, FunctionReturns, SQLError, POLYMORPHIC_PSEUDO_TYPES,
+    ROUTINE_PARAMETER_PSEUDO_TYPES, ROUTINE_RESULT_PSEUDO_TYPES,
 };
-use crate::ast::FunctionBody;
+use crate::ast::{FunctionBody, FunctionParamMode};
 use std::future::Future;
 use uqa_core::{
     image_io::AsyncImageInput,
@@ -19,6 +19,13 @@ use uqa_core::{
 
 pub(super) fn validate_inline(def: &CreateFunction) -> Result<(), SQLError> {
     crate::catalog::work::inline(validate(def, &ProductionControl::uncontrolled(), &mut ()))
+}
+
+pub(super) fn validate_with_control(
+    def: &CreateFunction,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate(def, control, &mut ()))
 }
 
 /// Validate declared pseudo-types and polymorphic families without compiling a body or resolving catalog names. Type names and parameter traversal share the invoking continuation and native scratch allowance.

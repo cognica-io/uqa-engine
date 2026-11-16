@@ -10,6 +10,8 @@ use super::{CatalogDefinitionSnapshot, CatalogReadSnapshot};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{catalog::security::authority::AuthorityCatalog, SQLError};
 
+mod relationships;
+pub use relationships::validate as validate_relationships;
 mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;
@@ -21,6 +23,8 @@ mod routine_dependencies;
 pub use routine_dependencies::validate as validate_routines;
 mod routine_bindings;
 pub use routine_bindings::validate as validate_routine_bindings;
+mod routine_declarations;
+pub use routine_declarations::validate as validate_routine_declarations;
 mod sequence_functions;
 pub use sequence_functions::validate as validate_sequence_functions;
 mod namespaces;

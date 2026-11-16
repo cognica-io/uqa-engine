@@ -22,16 +22,21 @@ use crate::{
 pub trait RoutineSupportAuthority {
     fn current_user_is_superuser(&self) -> bool;
 }
-pub fn validate_routine_support(
-    authority: &dyn RoutineSupportAuthority,
-    support: &str,
-) -> Result<(), SQLError> {
+pub(super) fn validate_routine_support_identity(support: &str) -> Result<(), SQLError> {
     if builtin_routine_support_oid(support).is_none() {
         return Err(SQLError::Routine {
             sqlstate: "42883".into(),
             message: format!("function {support}(internal) does not exist"),
         });
     }
+    Ok(())
+}
+
+pub fn validate_routine_support(
+    authority: &dyn RoutineSupportAuthority,
+    support: &str,
+) -> Result<(), SQLError> {
+    validate_routine_support_identity(support)?;
     if !authority.current_user_is_superuser() {
         return Err(SQLError::Routine {
             sqlstate: "42501".into(),
