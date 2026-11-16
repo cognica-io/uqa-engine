@@ -8,6 +8,7 @@
 
 mod call_arguments;
 pub(crate) use call_arguments::scalar_call_argument_value_owned;
+pub(crate) mod children;
 mod collation;
 mod equality;
 pub(crate) mod observation;

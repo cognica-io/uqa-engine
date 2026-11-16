@@ -160,7 +160,7 @@ async fn query<I: Input>(
             .await
             .map_err(Into::into)?;
     }
-    query.prune_subqueries_in_place(control)
+    query.prune_subqueries_from(control, input.work()).await
 }
 
 async fn command<I: Input>(

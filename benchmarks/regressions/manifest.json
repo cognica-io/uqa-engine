@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -71525,6 +71525,97 @@
       "capability": "Retained canonical window resolution",
       "workload": "Retire three 8192-level canonical inputs on a 256 KiB stack, observing live leaves after 64 work windows before completion or cancellation.",
       "invariant": "Suspend productive release before reaching deep leaves, then retire every remaining input without recursive stack growth or cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_child_borrows_preserve_window_and_call_ownership_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/children/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Borrow complete, constructor and observation children from aggregate and window calls, including FILTER and both frame offsets.",
+      "invariant": "Preserve each existing child order and omission policy with shared and mutable borrows and no iterator allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_case_children_skip_pairs_without_losing_pending_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/children/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Select every CASE child by index and skip each suffix after every previously consumed prefix.",
+      "invariant": "Preserve base, condition/result and ELSE order, exact remaining lengths and mutable reference uniqueness without rescanning skipped slice elements.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_keeps_namespaces_and_paired_constructor_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Compact shifted arenas in query, canonical-window, derived-source, JOIN, VALUES and set-operation inputs through one-step windows.",
+      "invariant": "Keep original query targets and independent namespaces, pair every surviving payload with its constructor records and retain parent arena buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_retires_each_interruption_and_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel each pending compaction prefix through both owners and exhaust destination allowance before scratch admission.",
+      "invariant": "Leave the borrowed source unchanged, retire all private owners without cleanup allocation and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_preserves_invalid_ids_without_partial_rewriting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Collect valid and out-of-range scalar-query references with an unreferenced child.",
+      "invariant": "An invalid local reference preserves all original identities and children for their original diagnostic, without partial remapping.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_visits_empty_containers_through_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Collect and rewrite 4096 empty grouping sets, windows, FROM VALUES rows, function-group members and top-level VALUES rows.",
+      "invariant": "Every empty member reaches a work boundary in collection and rewriting; retained native owners release fully after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_bounds_deep_scalar_and_source_polling_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Remap an 8192-level scalar and 2048-level FROM tree on a 256 KiB stack through one-step windows.",
+      "invariant": "Borrowed collection and private rewriting use admitted iterative frames, preserve the surviving query identity and retire the original structural guard without cleanup allocation.",
       "case_names": [
         ""
       ]

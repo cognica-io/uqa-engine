@@ -16,6 +16,8 @@ use super::{
 };
 
 mod computation;
+mod expressions;
+pub(in crate::plan) use expressions::ExpressionOrder;
 
 impl QueryBlockPlan {
     /// One scalar SELECT with no relational clauses or subplans. The caller must also reject set-returning routines using its selected catalog.
@@ -397,30 +399,8 @@ impl QueryBlockPlan {
 
     /// Expressions at this query level, excluding FROM-item inputs and join conditions, which have their own namespaces.
     pub fn query_expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
-        // Scan projections precede scan qualifications; aggregate and window outputs follow their input scan.
-        let (before, after): (&[ProjectionPlan], &[ProjectionPlan]) =
-            if matches!(self.compute, ComputePlan::Project) {
-                (&self.projections, &[])
-            } else {
-                (&[], &self.projections)
-            };
-        before
-            .iter()
-            .map(|projection| &projection.expr)
-            .chain(self.r#where.as_ref())
-            .chain(after.iter().map(|projection| &projection.expr))
-            .chain(&self.group_by)
-            .chain(self.grouping_sets.iter().flatten())
-            .chain(self.having.as_ref())
-            .chain(self.order_by.iter().map(|order| &order.expr))
-            .chain(self.limit.as_ref())
-            .chain(self.offset.as_ref())
-            .chain(&self.distinct_on)
-            .chain(
-                self.windows
-                    .iter()
-                    .flat_map(|window| window.spec.expressions()),
-            )
+        self.expression_steps(ExpressionOrder::Initialization)
+            .flatten()
     }
 }
 
@@ -601,40 +581,15 @@ impl SourcePlan {
         &'a self,
         visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<bool, E>,
     ) -> Result<bool, E> {
-        match self {
-            Self::RetainedRows(_) | Self::Table { .. } | Self::Subquery { .. } => {}
-            Self::Join {
-                left, right, on, ..
-            } => {
-                if !left.try_visit_expressions(visit)? || !right.try_visit_expressions(visit)? {
-                    return Ok(false);
-                }
-                if let Some(on) = on {
-                    if !visit(on)? {
-                        return Ok(false);
-                    }
-                }
+        let (children, expressions) = self.expression_inputs();
+        for child in children.into_iter().flatten() {
+            if !child.try_visit_expressions(visit)? {
+                return Ok(false);
             }
-            Self::Values { rows, .. } => {
-                for expression in rows.iter().flatten() {
-                    if !visit(expression)? {
-                        return Ok(false);
-                    }
-                }
-            }
-            Self::Function { args, .. } => {
-                for expression in args {
-                    if !visit(expression)? {
-                        return Ok(false);
-                    }
-                }
-            }
-            Self::FunctionGroup { functions, .. } => {
-                for expression in functions.iter().flat_map(|function| &function.args) {
-                    if !visit(expression)? {
-                        return Ok(false);
-                    }
-                }
+        }
+        for expression in expressions.flatten() {
+            if !visit(expression)? {
+                return Ok(false);
             }
         }
         Ok(true)
