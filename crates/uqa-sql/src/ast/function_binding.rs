@@ -10,6 +10,7 @@ use super::{EnumFunctionOperation, RangeSubtype};
 
 mod input;
 mod legacy;
+mod ownership;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {

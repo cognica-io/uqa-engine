@@ -9,11 +9,12 @@
 use super::ScalarExpr;
 
 mod children;
+mod metadata;
 mod remaining;
 mod windows;
 
 pub(crate) fn retire(value: &mut ScalarExpr) {
-    if children::first(value).is_none() {
+    if matches!(value, ScalarExpr::Star) {
         return;
     }
     drop(Retirement::new(std::mem::replace(value, ScalarExpr::Star)));
@@ -46,18 +47,26 @@ impl Retirement {
                 std::mem::swap(first, &mut self.pending);
                 std::mem::swap(&mut self.current, &mut self.pending);
             } else {
+                if !metadata::advance(&mut self.current) {
+                    return false;
+                }
                 drop(std::mem::replace(&mut self.current, ScalarExpr::Star));
                 self.ascending = true;
             }
         } else if let Some(child) = remaining::take(&mut self.pending) {
             self.current = child;
             self.ascending = false;
-        } else if let Some(link) = children::first(&mut self.pending) {
-            let previous = std::mem::replace(link, ScalarExpr::Star);
-            // Only empty child slots remain in the retired parent; its ordinary field destruction cannot descend into another scalar tree.
-            self.pending = previous;
         } else {
-            self.complete = true;
+            if !metadata::advance(&mut self.pending) {
+                return false;
+            }
+            if let Some(link) = children::first(&mut self.pending) {
+                let previous = std::mem::replace(link, ScalarExpr::Star);
+                // Only empty child slots remain in the retired parent; its ordinary field destruction cannot descend into another scalar tree.
+                self.pending = previous;
+            } else {
+                self.complete = true;
+            }
         }
         self.complete
     }
@@ -68,3 +77,6 @@ impl Drop for Retirement {
         while !self.advance() {}
     }
 }
+
+#[cfg(test)]
+mod tests;

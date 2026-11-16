@@ -71775,6 +71775,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_retirement_bounds_private_type_and_signature_metadata_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Retire calls, composite rows, typed constants and collated expressions with 4,096-level types and 2,048 signature or descriptor elements.",
+      "invariant": "Every productive step allocates nothing and releases at most sixteen allocations; type depth and signature width require independent work steps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_metadata_retirement_and_ordinary_cleanup_share_small_stack_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Retire complete and suspended metadata containing 8,192-level array/domain types through ordinary scalar cleanup and the shared advancing owner on a 256 KiB stack.",
+      "invariant": "Both paths release the deep metadata without new allocations or recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_metadata_retirement_keeps_leases_through_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Complete, abandon and cancel either owner at every pending metadata prefix with exhausted native allowance and an independent sibling reservation.",
+      "invariant": "The original payload reservation survives every pending step; completion and interruption release all private storage without cleanup allocations or releasing the sibling lease.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -15,6 +15,16 @@ use uqa_core::{
 mod production;
 
 impl CompositeTypeDescriptor {
+    pub(crate) fn retire_step(&mut self) -> bool {
+        let Some(attribute) = self.attributes.last_mut() else {
+            return true;
+        };
+        if attribute.ty.retire_step() {
+            self.attributes.pop();
+        }
+        false
+    }
+
     /// Capture an expanded record's field binding without reading any tuple payload. Dropped physical positions retain their original width and alignment.
     pub fn expand_record_with_control(
         &self,

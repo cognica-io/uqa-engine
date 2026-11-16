@@ -18,6 +18,15 @@ impl Clone for ColumnType {
 }
 
 impl ColumnType {
+    /// Retire one unary wrapper while retaining its child for the next work window.
+    pub(crate) fn retire_step(&mut self) -> bool {
+        let Some(child) = self.take_owned_child() else {
+            return true;
+        };
+        *self = child;
+        false
+    }
+
     fn take_owned_child(&mut self) -> Option<Self> {
         match self {
             Self::Array(child) | Self::Domain { base: child, .. } => {
@@ -30,9 +39,8 @@ impl ColumnType {
 
 impl Drop for ColumnType {
     fn drop(&mut self) {
-        let mut next = self.take_owned_child();
-        while let Some(mut current) = next {
-            next = current.take_owned_child();
+        if let Some(mut child) = self.take_owned_child() {
+            while !child.retire_step() {}
         }
     }
 }
