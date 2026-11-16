@@ -8,13 +8,20 @@
 
 use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::{
-    plan::scalar::resources::{Control, Lowering},
+    plan::{
+        retirement::Pending,
+        scalar::resources::{input::Work, Control, Lowering},
+    },
+    schema::retention::CatalogRetentionError,
     ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
+#[cfg(test)]
+mod tests;
+
 pub(in crate::plan) struct OwnedWindowSpec {
-    value: ScalarWindowSpec,
+    value: Pending<ScalarWindowSpec>,
     memory: Option<ScalarMemory>,
 }
 impl OwnedWindowSpec {
@@ -25,38 +32,73 @@ impl OwnedWindowSpec {
         frame: Option<&ScalarWindowFrame>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        crate::catalog::work::inline(Self::copy_parts_from(
+            definition,
+            partition,
+            order,
+            frame,
+            control,
+            &mut (),
+        ))
+    }
+
+    pub(in crate::plan) async fn copy_parts_from<W: Work>(
+        definition: Option<usize>,
+        partition: &[ScalarExpr],
+        order: &[ScalarOrder],
+        frame: Option<&ScalarWindowFrame>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         control.check()?;
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(*control)),
             owned_children: control.budget().map(BudgetedVec::new),
         };
-        let value = ScalarWindowSpec {
+        let mut value = Pending::new(ScalarWindowSpec {
             definition,
-            partition_by: lowering.map(partition.iter(), |lowering, expression| {
-                OwnedScalarExpr::attach_child(lowering, expression.copy_for_rewrite(control)?)
-            })?,
-            order_by: lowering.map(order.iter(), |lowering, order| {
-                Ok(ScalarOrder {
-                    expr: OwnedScalarExpr::attach_child(
-                        lowering,
-                        order.expr.copy_for_rewrite(control)?,
-                    )?,
-                    descending: order.descending,
-                    nulls: order.nulls,
-                })
-            })?,
-            frame: frame
-                .map(|frame| {
-                    Ok::<_, crate::schema::retention::CatalogRetentionError>(ScalarWindowFrame {
-                        mode: frame.mode,
-                        start: bound(&mut lowering, &frame.start, control)?,
-                        end: bound(&mut lowering, &frame.end, control)?,
-                        between: frame.between,
-                        exclusion: frame.exclusion,
-                    })
-                })
-                .transpose()?,
-        };
+            partition_by: Vec::new(),
+            order_by: Vec::new(),
+            frame: None,
+        });
+        lowering.checkpoint(work).await?;
+        value.partition_by = lowering.vector(partition.len())?;
+        for expression in partition {
+            lowering.checkpoint(work).await?;
+            let child = expression.copy_for_rewrite_from(control, work).await?;
+            value
+                .partition_by
+                .push(OwnedScalarExpr::attach_child(&mut lowering, child)?);
+        }
+        lowering.checkpoint(work).await?;
+        value.order_by = lowering.vector(order.len())?;
+        for order in order {
+            lowering.checkpoint(work).await?;
+            let child = order.expr.copy_for_rewrite_from(control, work).await?;
+            value.order_by.push(ScalarOrder {
+                expr: OwnedScalarExpr::attach_child(&mut lowering, child)?,
+                descending: order.descending,
+                nulls: order.nulls,
+            });
+        }
+        if let Some(frame) = frame {
+            value.frame = Some(ScalarWindowFrame {
+                mode: frame.mode,
+                start: ScalarFrameBound::CurrentRow,
+                end: ScalarFrameBound::CurrentRow,
+                between: frame.between,
+                exclusion: frame.exclusion,
+            });
+            let target = value
+                .frame
+                .as_mut()
+                .expect("window frame under construction");
+            target.start = bound_from(&mut lowering, &frame.start, control, work).await?;
+            target.end = bound_from(&mut lowering, &frame.end, control, work).await?;
+        }
         let memory = lowering.control.map(|control| {
             ScalarMemory::from_parts(
                 control.memory,
@@ -71,27 +113,34 @@ impl OwnedWindowSpec {
         self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ScalarWindowSpec>> {
-        Ok(control.finish(self.value, self.memory.map(ScalarMemory::into_reservation))?)
+        Ok(self
+            .value
+            .finish(self.memory.map(ScalarMemory::into_reservation), control)?)
     }
 }
-fn bound(
+async fn bound_from<W: Work>(
     lowering: &mut Lowering<'_>,
     value: &ScalarFrameBound,
     control: &ProductionControl<'_>,
-) -> Result<ScalarFrameBound> {
+    work: &mut W,
+) -> std::result::Result<ScalarFrameBound, W::Error>
+where
+    W::Error: From<CatalogRetentionError>,
+{
+    lowering.checkpoint(work).await?;
     Ok(match value {
         ScalarFrameBound::UnboundedPreceding => ScalarFrameBound::UnboundedPreceding,
         ScalarFrameBound::UnboundedFollowing => ScalarFrameBound::UnboundedFollowing,
         ScalarFrameBound::CurrentRow => ScalarFrameBound::CurrentRow,
-        ScalarFrameBound::Preceding(expression) => {
-            ScalarFrameBound::Preceding(lowering.boxed(|lowering| {
-                OwnedScalarExpr::attach_child(lowering, expression.copy_for_rewrite(control)?)
-            })?)
-        }
-        ScalarFrameBound::Following(expression) => {
-            ScalarFrameBound::Following(lowering.boxed(|lowering| {
-                OwnedScalarExpr::attach_child(lowering, expression.copy_for_rewrite(control)?)
-            })?)
+        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
+            lowering.admit_box::<ScalarExpr>()?;
+            let child = expression.copy_for_rewrite_from(control, work).await?;
+            let child = Box::new(OwnedScalarExpr::attach_child(lowering, child)?);
+            if matches!(value, ScalarFrameBound::Preceding(_)) {
+                ScalarFrameBound::Preceding(child)
+            } else {
+                ScalarFrameBound::Following(child)
+            }
         }
     })
 }
@@ -140,8 +189,8 @@ impl OwnedScalarExpr {
         let ScalarExpr::WindowCall { spec, .. } = &mut self.expression else {
             unreachable!()
         };
-        let old = std::mem::replace(spec, replacement.value);
-        drop(old);
+        let old = std::mem::replace(spec, replacement.value.take());
+        drop(Pending::new(old));
         self.remove_child_owners(arguments..arguments + old_count);
         if let Some(parent) = &mut self.memory {
             drop(parent.direct.split(old_bytes));

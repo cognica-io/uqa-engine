@@ -4,12 +4,24 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{vector, Lowering, Result, ScalarExpr};
+use super::{Lowering, Result, ScalarExpr};
 use crate::{
-    ast::{ColumnType, FunctionBinding},
+    ast::{ColumnType, CompositeRowBinding, FunctionBinding},
     ir::{ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec},
-    plan::scalar::source::Source,
+    plan::{
+        retirement::{Pending, Retire},
+        scalar::resources::input::Work,
+    },
 };
+
+mod retirement;
+
+enum Metadata {
+    None,
+    Composite(CompositeRowBinding),
+    Cast(String),
+    Collated(ColumnType),
+}
 
 pub(super) enum Parts {
     Empty,
@@ -78,7 +90,11 @@ pub(super) enum Slot {
 }
 
 impl Parts {
-    pub(super) fn new(source: &ScalarExpr, lowering: &mut Lowering<'_>) -> Result<Self> {
+    pub(super) async fn new_from<W: Work>(
+        source: &ScalarExpr,
+        lowering: &mut Lowering<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error> {
         Ok(match source {
             ScalarExpr::Array(_) | ScalarExpr::Row(_) | ScalarExpr::And(_) | ScalarExpr::Or(_) => {
                 Self::List(Vec::new())
@@ -96,21 +112,21 @@ impl Parts {
                 list: Vec::new(),
             },
             ScalarExpr::CompositeRow { bound_type, .. } => Self::Composite {
-                bound_type: lowering.scalar_type_copy(bound_type.as_ref())?,
+                bound_type: lowering.type_from(bound_type.as_ref(), work).await?,
                 items: Vec::new(),
             },
             ScalarExpr::Func { name, binding, .. } => Self::Call {
-                name: lowering.copy_text(name)?,
-                binding: binding
-                    .as_ref()
-                    .map(|binding| lowering.binding(Source::Borrowed(binding)))
-                    .transpose()?,
+                name: lowering.text_from(name, work).await?,
+                binding: match binding {
+                    Some(binding) => Some(lowering.binding_from(binding, None, work).await?),
+                    None => None,
+                },
                 args: Vec::new(),
                 order_by: Vec::new(),
                 filter: None,
             },
             ScalarExpr::WindowCall { name, .. } => Self::Window {
-                name: lowering.copy_text(name)?,
+                name: lowering.text_from(name, work).await?,
                 args: Vec::new(),
                 partition: Vec::new(),
                 order_by: Vec::new(),
@@ -136,7 +152,9 @@ impl Parts {
             | ScalarExpr::RetainedLiteral(_)
             | ScalarExpr::Param(_)
             | ScalarExpr::ScalarSubquery(_)
-            | ScalarExpr::Exists { .. } => Self::Leaf(lowering.scalar_leaf_copy(source)?),
+            | ScalarExpr::Exists { .. } => {
+                Self::Leaf(lowering.scalar_leaf_from(source, work).await?)
+            }
         })
     }
 
@@ -152,17 +170,17 @@ impl Parts {
                 Self::List(items)
                 | Self::InList { list: items, .. }
                 | Self::Composite { items, .. },
-            ) => *items = vector(count, lowering)?,
+            ) => *items = lowering.vector(count)?,
             (Vector::Arguments, Self::Call { args, .. } | Self::Window { args, .. }) => {
-                *args = vector(count, lowering)?;
+                *args = lowering.vector(count)?;
             }
             (Vector::Partition, Self::Window { partition, .. }) => {
-                *partition = vector(count, lowering)?;
+                *partition = lowering.vector(count)?;
             }
             (Vector::Ordering, Self::Call { order_by, .. } | Self::Window { order_by, .. }) => {
-                *order_by = vector(count, lowering)?;
+                *order_by = lowering.vector(count)?;
             }
-            (Vector::When, Self::Case { when, .. }) => *when = vector(count, lowering)?,
+            (Vector::When, Self::Case { when, .. }) => *when = lowering.vector(count)?,
             _ => unreachable!("scalar destination container"),
         }
         Ok(())
@@ -224,22 +242,44 @@ impl Parts {
         }
     }
 
-    pub(super) fn finish(
-        self,
+    pub(super) async fn finish_from<W: Work>(
+        parts: Pending<Self>,
         source: &ScalarExpr,
         lowering: &mut Lowering<'_>,
-    ) -> Result<ScalarExpr> {
-        Ok(match (source, self) {
+        work: &mut W,
+    ) -> std::result::Result<Pending<ScalarExpr>, W::Error> {
+        // Keep completed children under their existing retirement owner until all trailing metadata succeeds.
+        let metadata = match source {
+            ScalarExpr::CompositeRow { binding, .. } => {
+                Metadata::Composite(lowering.composite_binding_from(binding, work).await?)
+            }
+            ScalarExpr::Cast { ty, .. } => Metadata::Cast(lowering.text_from(ty, work).await?),
+            ScalarExpr::Collated { ty, .. } => Metadata::Collated(
+                lowering
+                    .type_from(Some(ty), work)
+                    .await?
+                    .expect("retained result type"),
+            ),
+            _ => Metadata::None,
+        };
+        Ok(Pending::new(parts.take().finish(source, metadata)))
+    }
+
+    fn finish(self, source: &ScalarExpr, metadata: Metadata) -> ScalarExpr {
+        match (source, self) {
             (_, Self::Leaf(expression)) => expression,
             (ScalarExpr::Array(_), Self::List(items)) => ScalarExpr::Array(items),
             (ScalarExpr::Row(_), Self::List(items)) => ScalarExpr::Row(items),
             (ScalarExpr::And(_), Self::List(items)) => ScalarExpr::And(items),
             (ScalarExpr::Or(_), Self::List(items)) => ScalarExpr::Or(items),
-            (ScalarExpr::CompositeRow { binding, .. }, Self::Composite { items, bound_type }) => {
+            (ScalarExpr::CompositeRow { .. }, Self::Composite { items, bound_type }) => {
+                let Metadata::Composite(binding) = metadata else {
+                    unreachable!("composite metadata")
+                };
                 ScalarExpr::CompositeRow {
                     bound_type,
                     items,
-                    binding: lowering.composite_binding(Source::Borrowed(binding))?,
+                    binding,
                 }
             }
             (ScalarExpr::InList { negated, .. }, Self::InList { expr, list }) => {
@@ -315,19 +355,19 @@ impl Parts {
                 when,
                 else_branch: otherwise,
             },
-            (source, Self::Boxes(boxes)) => finish_boxes(source, boxes, lowering)?,
+            (source, Self::Boxes(boxes)) => finish_boxes(source, boxes, metadata),
             _ => unreachable!("completed scalar constructor"),
-        })
+        }
     }
 }
 
 fn finish_boxes(
     source: &ScalarExpr,
     [first, second, third]: [Option<Box<ScalarExpr>>; 3],
-    lowering: &mut Lowering<'_>,
-) -> Result<ScalarExpr> {
+    metadata: Metadata,
+) -> ScalarExpr {
     let expr = first.expect("first scalar child");
-    Ok(match source {
+    match source {
         ScalarExpr::Binary { op, .. } => ScalarExpr::Binary {
             op: *op,
             lhs: expr,
@@ -344,18 +384,26 @@ fn finish_boxes(
             expr,
             negated: *negated,
         },
-        ScalarExpr::Cast { implicit, ty, .. } => ScalarExpr::Cast {
-            expr,
-            ty: lowering.copy_text(ty)?,
-            implicit: *implicit,
-        },
-        ScalarExpr::Collated { ty, collation, .. } => ScalarExpr::Collated {
-            expr,
-            ty: lowering
-                .scalar_type_copy(Some(ty))?
-                .expect("retained result type"),
-            collation: *collation,
-        },
+        ScalarExpr::Cast { implicit, .. } => {
+            let Metadata::Cast(ty) = metadata else {
+                unreachable!("cast metadata")
+            };
+            ScalarExpr::Cast {
+                expr,
+                ty,
+                implicit: *implicit,
+            }
+        }
+        ScalarExpr::Collated { collation, .. } => {
+            let Metadata::Collated(ty) = metadata else {
+                unreachable!("collation metadata")
+            };
+            ScalarExpr::Collated {
+                expr,
+                ty,
+                collation: *collation,
+            }
+        }
         ScalarExpr::InSubquery {
             subquery, negated, ..
         } => ScalarExpr::InSubquery {
@@ -364,5 +412,5 @@ fn finish_boxes(
             negated: *negated,
         },
         _ => unreachable!("boxed scalar constructor"),
-    })
+    }
 }

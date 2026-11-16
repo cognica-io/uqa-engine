@@ -192,6 +192,28 @@ impl<T: Retire> Pending<T> {
     pub(crate) fn take(mut self) -> T {
         self.0.take().expect("pending native field")
     }
+
+    pub(crate) fn finish(
+        self,
+        memory: Option<uqa_core::memory::MemoryReservation>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<T>, uqa_core::ValueRetentionError> {
+        let value = control.finish(self, memory)?;
+        match value.into_budgeted() {
+            Ok(value) => {
+                // The final cancellation check ran while retirement ownership was live. Only an infallible move remains.
+                Ok(value
+                    .try_map(|value| Ok::<_, uqa_core::ValueRetentionError>(value.take()))?
+                    .into())
+            }
+            Err(value) => {
+                let value = value
+                    .into_uncontrolled()
+                    .unwrap_or_else(|_| unreachable!("ordinary scalar field publication"));
+                Ok(control.finish(value.take(), None)?)
+            }
+        }
+    }
 }
 impl<T: Retire> std::ops::Deref for Pending<T> {
     type Target = T;

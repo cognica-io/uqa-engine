@@ -7,6 +7,11 @@
 //! Suspended scalar constructors retain their exact allocation owners in admitted heap frames.
 
 use super::{Control, Lowering, OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
+use crate::{
+    catalog::work::inline,
+    plan::{retirement::Pending, scalar::resources::input::Work},
+    schema::retention::CatalogRetentionError,
+};
 use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
 
 mod parts;
@@ -41,7 +46,7 @@ enum Memory {
 
 struct Copied {
     // The copied tree is destroyed before any of its reservations.
-    expression: ScalarExpr,
+    expression: Pending<ScalarExpr>,
     memory: Memory,
     retained_children: usize,
 }
@@ -49,7 +54,7 @@ struct Copied {
 struct Frame<'s, 'c> {
     source: &'s ScalarExpr,
     // Partial fields, including completed children, precede their allocation owners.
-    parts: Parts,
+    parts: Pending<Parts>,
     lowering: Lowering<'c>,
     stage: usize,
     index: usize,
@@ -58,7 +63,20 @@ struct Frame<'s, 'c> {
 }
 
 impl<'s, 'c> Frame<'s, 'c> {
+    #[cfg(test)]
     fn new(source: &'s ScalarExpr, control: ProductionControl<'c>, mode: CopyMode) -> Result<Self> {
+        inline(Self::new_from(source, control, mode, &mut ()))
+    }
+
+    async fn new_from<W: Work>(
+        source: &'s ScalarExpr,
+        control: ProductionControl<'c>,
+        mode: CopyMode,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         control.check()?;
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(control)),
@@ -67,16 +85,19 @@ impl<'s, 'c> Frame<'s, 'c> {
                 .filter(|_| mode == CopyMode::Mutable)
                 .map(BudgetedVec::new),
         };
+        lowering.checkpoint(work).await?;
         let (parts, retained_children) = match (mode, source) {
             (CopyMode::Capture, ScalarExpr::RetainedLiteral(literal)) => {
-                let (literal, bytes) = literal.capture_with_footprint(&control)?;
+                let (literal, bytes) = literal
+                    .capture_with_footprint(&control)
+                    .map_err(CatalogRetentionError::from)?;
                 (Parts::Leaf(ScalarExpr::RetainedLiteral(literal)), bytes)
             }
-            _ => (Parts::new(source, &mut lowering)?, 0),
+            _ => (Parts::new_from(source, &mut lowering, work).await?, 0),
         };
         Ok(Self {
             source,
-            parts,
+            parts: Pending::new(parts),
             lowering,
             stage: 0,
             index: 0,
@@ -102,15 +123,13 @@ impl<'s, 'c> Frame<'s, 'c> {
     fn attach(&mut self, child: Copied) -> Result<()> {
         self.lowering.check()?;
         let slot = self.pending.take().expect("suspended scalar child");
-        let Copied {
-            expression,
-            memory,
-            retained_children,
-        } = child;
         self.retained_children = self
             .retained_children
-            .checked_add(retained_children)
+            .checked_add(child.retained_children)
             .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        let Copied {
+            expression, memory, ..
+        } = child;
         // The metadata slot was admitted before descending into this child. Installing its completed fields cannot allocate except for already-admitted parent boxes.
         match memory {
             Memory::Ordinary => assert!(self.lowering.control.is_none()),
@@ -129,15 +148,20 @@ impl<'s, 'c> Frame<'s, 'c> {
                 .push(Some(memory))
                 .expect("admitted child slot"),
         }
-        self.parts.attach(slot, expression);
+        self.parts.attach(slot, expression.take());
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Copied> {
-        self.lowering.check()?;
-        let parts = std::mem::replace(&mut self.parts, Parts::Empty);
-        let expression = parts.finish(self.source, &mut self.lowering)?;
-        self.lowering.check()?;
+    #[cfg(test)]
+    fn finish(self) -> Result<Copied> {
+        inline(self.finish_from(&mut ()))
+    }
+
+    async fn finish_from<W: Work>(mut self, work: &mut W) -> std::result::Result<Copied, W::Error> {
+        self.lowering.checkpoint(work).await?;
+        let parts = std::mem::replace(&mut self.parts, Pending::new(Parts::Empty));
+        let expression = Parts::finish_from(parts, self.source, &mut self.lowering, work).await?;
+        self.lowering.checkpoint(work).await?;
         let memory = match self.lowering.control.take() {
             None => Memory::Ordinary,
             Some(control) => match self.lowering.owned_children.take() {
@@ -155,10 +179,7 @@ impl<'s, 'c> Frame<'s, 'c> {
     }
 
     fn reserve_box(&mut self) -> Result<()> {
-        if let Some(control) = &mut self.lowering.control {
-            control.memory.grow(size_of::<ScalarExpr>())?;
-        }
-        Ok(())
+        self.lowering.admit_box::<ScalarExpr>()
     }
 
     fn advance(&mut self) {
@@ -217,15 +238,27 @@ impl<'s, 'c> Stack<'s, 'c> {
 }
 
 fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mode: CopyMode) -> Result<Copied> {
-    let mut current = Frame::new(source, control, mode)?;
+    inline(copy_from(source, control, mode, &mut ()))
+}
+
+async fn copy_from<W: Work>(
+    source: &ScalarExpr,
+    control: ProductionControl<'_>,
+    mode: CopyMode,
+    work: &mut W,
+) -> std::result::Result<Copied, W::Error>
+where
+    W::Error: From<CatalogRetentionError>,
+{
+    let mut current = Frame::new_from(source, control, mode, work).await?;
     let mut stack = Stack::new(control);
     loop {
-        control.check()?;
+        current.lowering.checkpoint(work).await?;
         if let Some(child) = current.next_child()? {
             stack.push(current)?;
-            current = Frame::new(child, control, mode)?;
+            current = Frame::new_from(child, control, mode, work).await?;
         } else {
-            let child = current.finish()?;
+            let child = current.finish_from(work).await?;
             let Some(mut parent) = stack.pop() else {
                 return Ok(child);
             };
@@ -235,15 +268,19 @@ fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mode: CopyMode) -> 
     }
 }
 
-pub(super) fn mutable(
+pub(super) async fn mutable_from<W: Work>(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
-) -> Result<OwnedScalarExpr> {
+    work: &mut W,
+) -> std::result::Result<OwnedScalarExpr, W::Error>
+where
+    W::Error: From<CatalogRetentionError>,
+{
     let Copied {
         expression, memory, ..
-    } = copy(source, control, CopyMode::Mutable)?;
+    } = copy_from(source, control, CopyMode::Mutable, work).await?;
     Ok(OwnedScalarExpr {
-        expression,
+        expression: expression.take(),
         memory: match memory {
             Memory::Ordinary => None,
             Memory::Mutable(memory) => Some(memory),
@@ -277,26 +314,14 @@ fn retained(
         retained_children,
     } = copy(source, control, mode)?;
     Ok((
-        control.finish(
-            expression,
+        expression.finish(
             match memory {
                 Memory::Ordinary => None,
                 Memory::Immutable(memory) => Some(memory),
                 Memory::Mutable(_) => unreachable!("immutable copy output"),
             },
+            &control,
         )?,
         retained_children,
     ))
-}
-
-fn vector<T>(count: usize, lowering: &mut Lowering<'_>) -> Result<Vec<T>> {
-    lowering.check()?;
-    let Some(control) = &mut lowering.control else {
-        return Ok(Vec::with_capacity(count));
-    };
-    let mut output = BudgetedVec::new(control.memory.budget());
-    output.reserve(count)?;
-    let (output, memory) = output.into_parts();
-    control.memory.absorb(memory);
-    Ok(output)
 }

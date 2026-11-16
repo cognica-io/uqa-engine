@@ -7,8 +7,8 @@
 //! Frozen scalars keep iterative retirement until their final fallible publication completes.
 
 use super::{
-    CatalogRetentionError, MemoryReservation, OwnedScalarExpr, Produced, ProductionControl, Result,
-    ScalarExpr, ScalarMemory,
+    MemoryReservation, OwnedScalarExpr, Produced, ProductionControl, Result, ScalarExpr,
+    ScalarMemory,
 };
 
 pub(super) struct Publication {
@@ -29,20 +29,8 @@ impl Publication {
     }
 
     pub(super) fn finish(self, control: &ProductionControl<'_>) -> Result<Produced<ScalarExpr>> {
-        let value = control.finish(self.expression, self.memory)?;
-        match value.into_budgeted() {
-            Ok(value) => {
-                // Publication already checked cancellation while the iterative owner was live. This unwrap moves the identical payload and lease without another fallible check or allocation.
-                Ok(value
-                    .try_map(|value| Ok::<_, CatalogRetentionError>(value.into_rewrite_parts().0))?
-                    .into())
-            }
-            Err(value) => {
-                let value = value
-                    .into_uncontrolled()
-                    .expect("ordinary scalar publication");
-                Ok(control.finish(value.into_rewrite_parts().0, None)?)
-            }
-        }
+        let (value, memory) = self.expression.into_rewrite_parts();
+        debug_assert!(memory.is_none());
+        Ok(crate::plan::retirement::Pending::new(value).finish(self.memory, control)?)
     }
 }

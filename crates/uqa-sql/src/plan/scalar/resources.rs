@@ -58,33 +58,39 @@ impl Lowering<'_> {
     where
         I: ExactSizeIterator,
     {
-        self.check()?;
-        let Some(control) = &self.control else {
-            return items.map(|item| convert(self, item)).collect();
-        };
-        let mut output = BudgetedVec::new(control.memory.budget());
-        output.reserve(items.len())?;
+        let mut output = self.vector(items.len())?;
         for item in items {
             self.check()?;
-            output.push(convert(self, item)?)?;
+            output.push(convert(self, item)?);
         }
-        let (output, memory) = output.into_parts();
-        self.control
-            .as_mut()
-            .expect("controlled lowering")
-            .memory
-            .absorb(memory);
         Ok(output)
+    }
+
+    pub(super) fn vector<T>(&mut self, count: usize) -> Result<Vec<T>> {
+        self.check()?;
+        let Some(control) = &mut self.control else {
+            return Ok(Vec::with_capacity(count));
+        };
+        let mut output = BudgetedVec::new(control.memory.budget());
+        output.reserve(count)?;
+        let (output, memory) = output.into_parts();
+        control.memory.absorb(memory);
+        Ok(output)
+    }
+
+    pub(super) fn admit_box<T>(&mut self) -> Result<()> {
+        self.check()?;
+        if let Some(control) = &mut self.control {
+            control.memory.grow(size_of::<T>())?;
+        }
+        Ok(())
     }
 
     pub(super) fn boxed<T>(
         &mut self,
         produce: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<Box<T>> {
-        self.check()?;
-        if let Some(control) = &mut self.control {
-            control.memory.grow(size_of::<T>())?;
-        }
+        self.admit_box::<T>()?;
         let value = produce(self)?;
         self.check()?;
         Ok(Box::new(value))
@@ -113,7 +119,7 @@ impl Lowering<'_> {
         &mut self,
         name: &crate::ast::ReferenceName,
     ) -> Result<crate::ast::ReferenceName> {
-        Ok(crate::ast::ReferenceName::from(self.copy_text(name)?).with_position(name.position()))
+        crate::catalog::work::inline(self.reference_from(name, &mut ()))
     }
 
     pub(super) fn copy_text(&mut self, text: &str) -> Result<String> {

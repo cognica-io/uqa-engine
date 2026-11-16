@@ -152,6 +152,17 @@ impl Lowering<'_> {
         }
     }
 
+    pub(in crate::plan::scalar) async fn reference_from<W: Work>(
+        &mut self,
+        name: &crate::ast::ReferenceName,
+        work: &mut W,
+    ) -> Result<crate::ast::ReferenceName, W::Error> {
+        Ok(
+            crate::ast::ReferenceName::from(self.text_from(name, work).await?)
+                .with_position(name.position()),
+        )
+    }
+
     pub(in crate::plan::scalar) async fn value_from<W: Work>(
         &mut self,
         value: &Value,

@@ -8,6 +8,8 @@ use super::*;
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+mod input;
+
 fn text(length: usize) -> ScalarExpr {
     ScalarExpr::Literal(Value::Str("x".repeat(length)))
 }

@@ -71138,6 +71138,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_preserves_analyzed_fields_and_movable_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy analyzed window, function, composite, typed, collation and subquery fields through one-step work windows.",
+      "invariant": "Preserve the original analyzed scalar, arena positions, bindings and independent child leases with the same retained bytes as ready construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_retires_every_interrupted_constructor_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Abandon or cancel either owner at every pending copy prefix, including trailing type metadata.",
+      "invariant": "Retire incomplete and completed scalar roots without cleanup allocations; preserve sibling reservations and typed terminal errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_bounds_wide_work_and_preserves_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy 2,048 payloads under one-step work windows and reject five insufficient destination allowances.",
+      "invariant": "Bound constructor work, reject before exceeding admission, and release all native and work storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_copy_retires_deep_children_on_late_metadata_failure_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy an 8,192-level child before a denied 32 MiB type name on a 256 KiB stack through mutable, immutable and retained inputs.",
+      "invariant": "Reject the trailing metadata after child completion and retire every deep prefix without stack overflow or lost sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_copy_preserves_fields_and_retires_each_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy partition, ordering and both frame bounds through one-step work windows, then interrupt every pending prefix.",
+      "invariant": "Preserve exact specifications and retained bytes; abandoned and cancelled fields retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_copy_and_replacement_retire_deep_specifications_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy an 8,192-level partition before a denied ordering payload, then replace a complete deep specification on a 256 KiB stack.",
+      "invariant": "Preserve ready and retained diagnostic order and retire superseded or partially copied specifications before releasing their leases.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -8,7 +8,7 @@ use super::{Expr, Lowering, ScalarExpr, ScalarQueryInput};
 use crate::plan::scalar::resources::input::{boxed_from, map_from};
 use crate::plan::scalar::ScalarInputWork;
 use crate::{
-    ast::{FrameBound, OrderBy, ReferenceName, WindowSpec},
+    ast::{FrameBound, OrderBy, WindowSpec},
     ir::{ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec},
 };
 
@@ -151,14 +151,6 @@ impl Lowering<'_> {
                 negated: *negated,
             },
         })
-    }
-
-    async fn reference_from<W: ScalarInputWork>(
-        &mut self,
-        name: &ReferenceName,
-        work: &mut W,
-    ) -> Result<ReferenceName, W::Error> {
-        Ok(ReferenceName::from(self.text_from(name, work).await?).with_position(name.position()))
     }
 
     async fn scalar_slots<W: ScalarInputWork>(
