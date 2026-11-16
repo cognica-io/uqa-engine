@@ -5,31 +5,11 @@
 //
 
 use super::*;
-use crate::ir::{ConstantValueSource, RetainedConstantValue, RetainedScalarLiteral};
+use crate::{
+    ir::{RetainedConstantValue, RetainedScalarLiteral},
+    plan::retirement::tests::ScalarSource as Source,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-#[derive(Debug)]
-struct Source {
-    native: MemoryBudget,
-    minimum: Arc<AtomicUsize>,
-    retired: Arc<AtomicUsize>,
-}
-
-impl ConstantValueSource for Source {
-    fn read(&self, _: u64) -> std::result::Result<Value, SQLError> {
-        panic!("window replacement must not read evaluated constants")
-    }
-}
-
-impl Drop for Source {
-    fn drop(&mut self) {
-        assert!(
-            self.native.used() >= self.minimum.load(Ordering::Relaxed),
-            "old payloads must retire before their constructor reservations"
-        );
-        self.retired.fetch_add(1, Ordering::Relaxed);
-    }
-}
 
 fn source(
     depth: usize,

@@ -8,11 +8,12 @@ use super::{invalid, QueryBlockPlan, SQLError, ScalarWindowSpec};
 use crate::{
     catalog::work::{self, Work as CatalogWork},
     plan::{
-        retirement::Pending,
+        retirement::{windows::checkpoint, Pending, WindowRetirement},
         scalar::{OwnedWindowSpec, ScalarInputWork as Work},
     },
     schema::retention::CatalogRetentionError,
 };
+use std::sync::Arc;
 use uqa_core::memory::{
     MapKeyInput, MemoryReservation, Produced, ProductionControl, ProductionMap, ProductionVec,
 };
@@ -47,6 +48,52 @@ impl std::ops::Deref for ResolvedWindows {
 }
 
 impl ResolvedWindows {
+    pub(in crate::plan) async fn retire_shared_from<W: Work>(
+        shared: Arc<Produced<Self>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error> {
+        // The query retains this final reference until every scalar/source consumer has returned.
+        let (mut resolved, memory) = Arc::try_unwrap(shared)
+            .unwrap_or_else(|_| unreachable!("completed window consumers released their inputs"))
+            .into_parts();
+        resolved.memory = control.combine(resolved.memory.take(), memory);
+        struct Retirement {
+            active: Option<WindowRetirement>,
+            resolved: ResolvedWindows,
+        }
+        let mut state = Retirement {
+            active: None,
+            resolved,
+        };
+        for index in 0..state.resolved.value.len() {
+            checkpoint(control, work).await?;
+            let specification = std::mem::replace(
+                &mut state.resolved.value[index],
+                ScalarWindowSpec {
+                    definition: None,
+                    partition_by: Vec::new(),
+                    order_by: Vec::new(),
+                    frame: None,
+                },
+            );
+            state.active = Some(WindowRetirement::new(specification));
+            state
+                .active
+                .as_mut()
+                .expect("retiring resolved window")
+                .retire_from(control, work)
+                .await?;
+            drop(state.active.take());
+        }
+        while !state.resolved.value.is_empty() {
+            checkpoint(control, work).await?;
+            state.resolved.value.pop();
+        }
+        control.check()?;
+        Ok(())
+    }
+
     fn finish(
         self,
         control: &ProductionControl<'_>,

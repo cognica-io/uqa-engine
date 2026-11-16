@@ -155,7 +155,10 @@ async fn query<I: Input>(
         let resolved = control
             .finish(resolved, control.empty_reservation())?
             .into_shared(control)?;
-        roots::normalize(query, resolved, control, input).await?;
+        roots::normalize(query, resolved.clone(), control, input).await?;
+        ResolvedWindows::retire_shared_from(resolved, control, input.work())
+            .await
+            .map_err(Into::into)?;
     }
     query.prune_subqueries_in_place(control)
 }

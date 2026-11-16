@@ -18,6 +18,8 @@ use uqa_core::{
 
 type Input = ImageDecoder<ResolvedWindows, SQLError>;
 
+mod retirement;
+
 fn fixture() -> Pending<QueryBlockPlan> {
     let crate::Statement::Select(statement) = crate::compile("SELECT row_number() OVER framed WINDOW base AS (PARTITION BY 1), ordered AS (base ORDER BY 2 DESC NULLS LAST), framed AS (ordered ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING)").unwrap().remove(0) else { panic!("SELECT") };
     let RelationalPlan::QueryBlock(block) = QueryPlan::lower(*statement).root else {

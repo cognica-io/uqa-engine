@@ -71489,6 +71489,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_bounds_final_shared_payload_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Retire three shared canonical specifications containing 128 independent retained inputs each through one-step windows with the destination allowance exhausted.",
+      "invariant": "Release at most one final scalar source per work window without evaluating constants or requiring additional destination memory; retain all original leases until payload retirement finishes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_keeps_all_leases_through_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every prefix of final shared-definition retirement for six 16-level inputs through both cancellation owners.",
+      "invariant": "Keep each payload ahead of the original vector, scalar and shared-header reservations; allocate nothing during terminal cleanup and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_suspends_deep_release_and_uses_bounded_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Retire three 8192-level canonical inputs on a 256 KiB stack, observing live leaves after 64 work windows before completion or cancellation.",
+      "invariant": "Suspend productive release before reaching deep leaves, then retire every remaining input without recursive stack growth or cleanup allocation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -14,8 +14,13 @@ mod commands;
 pub(in crate::plan) mod construction;
 mod scalars;
 mod tree;
+pub(in crate::plan) mod windows;
 pub(crate) use scalars::{Pending, Retire};
 pub(crate) use tree::{RetainedTree, RetirementFrame};
+pub(in crate::plan) use windows::WindowRetirement;
+
+#[cfg(test)]
+pub(in crate::plan) mod tests;
 
 #[derive(Debug)]
 pub(crate) enum Node {

@@ -7,15 +7,15 @@
 //! Specification edits retain their payload before every detached constructor owner.
 
 use super::{
-    frame_children, CatalogRetentionError, OwnedScalarExpr, OwnedWindowSpec, Pending,
-    ProductionControl, Result, ScalarExpr, ScalarMemory, ScalarOrder, ScalarWindowSpec, Work,
+    frame_children, CatalogRetentionError, OwnedScalarExpr, OwnedWindowSpec, ProductionControl,
+    Result, ScalarExpr, ScalarMemory, ScalarOrder, ScalarWindowSpec, Work,
 };
-use crate::{ir::ownership::Retirement, plan::scalar::owned::folding::Folding};
+pub(super) use crate::plan::retirement::windows::checkpoint;
+use crate::plan::{retirement::WindowRetirement, scalar::owned::folding::Folding};
 
 struct Replacement {
-    // Both old payload owners precede the parent that still retains their constructor leases.
-    old: Option<Pending<ScalarWindowSpec>>,
-    payload: Option<Retirement>,
+    // The old payload precedes the parent that still retains its constructor leases.
+    old: Option<WindowRetirement>,
     expression: OwnedScalarExpr,
     specification: OwnedWindowSpec,
     filter: Option<ScalarMemory>,
@@ -23,34 +23,16 @@ struct Replacement {
 }
 
 async fn retire_old<W: Work>(
-    old: &mut Option<Pending<ScalarWindowSpec>>,
-    payload: &mut Option<Retirement>,
+    old: &mut Option<WindowRetirement>,
+    value: ScalarWindowSpec,
     control: &ProductionControl<'_>,
     work: &mut W,
 ) -> std::result::Result<(), W::Error> {
-    let specification = old.as_mut().expect("replaced window");
-    for expression in specification.expressions_mut() {
-        checkpoint(control, work).await?;
-        *payload = Some(Retirement::new(std::mem::replace(
-            expression,
-            ScalarExpr::Star,
-        )));
-        loop {
-            checkpoint(control, work).await?;
-            if payload.as_mut().expect("retiring scalar").advance() {
-                break;
-            }
-        }
-        *payload = None;
-    }
-    while !specification.partition_by.is_empty() {
-        checkpoint(control, work).await?;
-        specification.partition_by.pop();
-    }
-    while !specification.order_by.is_empty() {
-        checkpoint(control, work).await?;
-        specification.order_by.pop();
-    }
+    *old = Some(WindowRetirement::new(value));
+    old.as_mut()
+        .expect("replaced window")
+        .retire_from(control, work)
+        .await?;
     drop(old.take());
     Ok(())
 }
@@ -86,7 +68,6 @@ impl OwnedScalarExpr {
         .await?;
         let mut state = Replacement {
             old: None,
-            payload: None,
             expression: self,
             specification,
             filter: None,
@@ -114,8 +95,7 @@ impl OwnedScalarExpr {
             unreachable!()
         };
         let old = std::mem::replace(spec, state.specification.value.take());
-        state.old = Some(Pending::new(old));
-        retire_old(&mut state.old, &mut state.payload, control, work).await?;
+        retire_old(&mut state.old, old, control, work).await?;
         if let Some(parent) = &mut state.expression.memory {
             if filter {
                 state.filter = parent.children.pop().expect("window filter owner");
@@ -169,14 +149,4 @@ impl OwnedScalarExpr {
         control.check()?;
         Ok(state.expression)
     }
-}
-
-pub(super) async fn checkpoint<W: Work>(
-    control: &ProductionControl<'_>,
-    work: &mut W,
-) -> std::result::Result<(), W::Error> {
-    control.check()?;
-    work.checkpoint().await?;
-    control.check()?;
-    Ok(())
 }
