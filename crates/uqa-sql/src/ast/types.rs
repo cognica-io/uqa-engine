@@ -17,6 +17,7 @@ mod names;
 mod ownership;
 mod parsing;
 mod production;
+pub(crate) use production::ColumnTypeInputWork;
 mod references;
 
 pub use display::TypeDisplayScope;

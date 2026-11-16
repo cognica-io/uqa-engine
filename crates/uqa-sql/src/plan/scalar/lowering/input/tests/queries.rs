@@ -7,19 +7,19 @@
 use super::*;
 use crate::ast::SelectStmt;
 
-struct Queries {
+struct Queries<'a> {
+    work: crate::construction::Work<'a>,
     literals: BudgetedVec<i64>,
     replace_query: bool,
 }
 
-impl ScalarQueryInput for Queries {
+impl<'s> ScalarQueryInput<'s> for Queries<'s> {
     async fn parameter(
         &mut self,
-        expression: &Expr,
+        expression: &'s Expr,
         control: &ProductionControl<'_>,
-        input: &mut AsyncImageInput<'_>,
     ) -> Result<Option<usize>, SQLError> {
-        input.checkpoint().await?;
+        self.work.checkpoint().await;
         control.check()?;
         Ok(match expression {
             Expr::Column(name) if name.as_str() == "replacement" => Some(7),
@@ -30,11 +30,10 @@ impl ScalarQueryInput for Queries {
 
     async fn append(
         &mut self,
-        query: &SelectStmt,
+        query: &'s SelectStmt,
         control: &ProductionControl<'_>,
-        input: &mut AsyncImageInput<'_>,
     ) -> Result<usize, SQLError> {
-        input.checkpoint().await?;
+        self.work.checkpoint().await;
         control.check()?;
         let Expr::Literal(Value::Int(value)) = query.projections[0].expr else {
             panic!("fixture query contains one integer literal");
@@ -64,18 +63,28 @@ fn query_input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut input = reader.input();
         let control = ProductionControl::new(&native, &original, input.cancellation);
-        let mut queries = Queries {
-            literals: BudgetedVec::new(&native),
-            replace_query,
-        };
-        let scalar = ExpressionPlan::lower_scalar_with_query_input(
-            &source,
-            &mut queries,
-            &control,
-            &mut input,
-        )
-        .await?;
-        Ok((scalar, queries.literals))
+        let mut driver = crate::construction::Driver::new(control)?;
+        let source = source.as_ref();
+        let native = &native;
+        let output = driver.work().submit(move |mut work| async move {
+            let mut queries = Queries {
+                work: work.clone(),
+                literals: BudgetedVec::new(native),
+                replace_query,
+            };
+            let scalar = ExpressionPlan::lower_scalar_with_query_input(
+                source,
+                &mut queries,
+                &control,
+                &mut work,
+            )?
+            .await?;
+            Ok::<_, SQLError>((scalar, queries.literals))
+        })?;
+        while driver.advance().await? {
+            input.checkpoint().await?;
+        }
+        crate::construction::receive(output).await
     })
     .unwrap()
 }

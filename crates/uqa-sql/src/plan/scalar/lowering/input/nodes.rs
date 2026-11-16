@@ -6,22 +6,26 @@
 
 use super::{Expr, Lowering, SQLError, ScalarExpr, ScalarQueryInput};
 use crate::plan::scalar::resources::input::{boxed_from, map_from};
+use crate::plan::scalar::ScalarInputWork;
 use crate::{
     ast::{FrameBound, OrderBy, ReferenceName, WindowSpec},
     ir::{ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec},
 };
-use uqa_core::image_io::AsyncImageInput;
 
 impl Lowering<'_> {
     #[expect(
         clippy::too_many_lines,
         reason = "the exhaustive AST constructor retains every scalar field"
     )]
-    pub(super) async fn scalar_node_from<Q: ScalarQueryInput>(
+    pub(super) async fn scalar_node_from<
+        's,
+        W: ScalarInputWork<Error = SQLError>,
+        Q: ScalarQueryInput<'s>,
+    >(
         &mut self,
-        source: &Expr,
+        source: &'s Expr,
         queries: &mut Q,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<ScalarExpr, SQLError> {
         self.checkpoint(work).await?;
         Ok(match source {
@@ -135,10 +139,10 @@ impl Lowering<'_> {
                 ty: self.text_from(ty, work).await?,
             },
             Expr::ScalarSubquery(query) => {
-                ScalarExpr::ScalarSubquery(queries.append(query, &self.production(), work).await?)
+                ScalarExpr::ScalarSubquery(queries.append(query, &self.production()).await?)
             }
             Expr::Exists { body, negated } => ScalarExpr::Exists {
-                subquery: queries.append(body, &self.production(), work).await?,
+                subquery: queries.append(body, &self.production()).await?,
                 negated: *negated,
             },
             Expr::InSubquery { negated, .. } => ScalarExpr::InSubquery {
@@ -149,33 +153,33 @@ impl Lowering<'_> {
         })
     }
 
-    async fn reference_from(
+    async fn reference_from<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         name: &ReferenceName,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<ReferenceName, SQLError> {
         Ok(ReferenceName::from(self.text_from(name, work).await?).with_position(name.position()))
     }
 
-    async fn scalar_slots(
+    async fn scalar_slots<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         count: usize,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<Vec<ScalarExpr>, SQLError> {
         Ok(map_from!(self, 0..count, work, |_| ScalarExpr::Star))
     }
 
-    async fn scalar_slot(
+    async fn scalar_slot<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<Box<ScalarExpr>, SQLError> {
         Ok(boxed_from!(self, work, ScalarExpr, ScalarExpr::Star))
     }
 
-    async fn optional_slot(
+    async fn optional_slot<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         present: bool,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<Option<Box<ScalarExpr>>, SQLError> {
         if present {
             Ok(Some(self.scalar_slot(work).await?))
@@ -184,10 +188,10 @@ impl Lowering<'_> {
         }
     }
 
-    async fn order_slots(
+    async fn order_slots<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         orders: &[OrderBy],
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<Vec<ScalarOrder>, SQLError> {
         Ok(map_from!(self, orders.iter(), work, |order| ScalarOrder {
             expr: ScalarExpr::Star,
@@ -196,10 +200,10 @@ impl Lowering<'_> {
         }))
     }
 
-    async fn window_slots(
+    async fn window_slots<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         spec: &WindowSpec,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<ScalarWindowSpec, SQLError> {
         assert!(
             spec.reference.is_none(),
@@ -222,10 +226,10 @@ impl Lowering<'_> {
         })
     }
 
-    async fn frame_slot(
+    async fn frame_slot<W: ScalarInputWork<Error = SQLError>>(
         &mut self,
         bound: &FrameBound,
-        work: &mut AsyncImageInput<'_>,
+        work: &mut W,
     ) -> Result<ScalarFrameBound, SQLError> {
         self.checkpoint(work).await?;
         Ok(match bound {

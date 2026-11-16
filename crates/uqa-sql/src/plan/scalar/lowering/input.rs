@@ -7,6 +7,7 @@
 //! Native scalar construction suspends inside payloads and between children without recursive polling.
 
 use super::{Control, Expr, Lowering, OwnedScalarExpr, ScalarExpr, ScalarMemory};
+use crate::plan::scalar::ScalarInputWork;
 use crate::{plan::scalar::owned::child_slot_mut, SQLError};
 use std::future::Future;
 use uqa_core::{
@@ -16,14 +17,14 @@ use uqa_core::{
 
 mod children;
 mod nodes;
+mod work;
 
 /// Query slots and parameter substitutions belong to the enclosing private plan constructor. Native implementations retain their own query construction state through the supplied work channel and selected production control; a failed enclosing construction retires its private arena.
-pub trait ScalarQueryInput: Send {
+pub(in crate::plan) trait ScalarQueryInput<'s>: Send {
     fn parameter(
         &mut self,
-        _expression: &Expr,
+        _expression: &'s Expr,
         control: &ProductionControl<'_>,
-        _input: &mut AsyncImageInput<'_>,
     ) -> impl Future<Output = Result<Option<usize>, SQLError>> + Send {
         async {
             control.check()?;
@@ -33,20 +34,18 @@ pub trait ScalarQueryInput: Send {
 
     fn append(
         &mut self,
-        query: &crate::ast::SelectStmt,
+        query: &'s crate::ast::SelectStmt,
         control: &ProductionControl<'_>,
-        input: &mut AsyncImageInput<'_>,
     ) -> impl Future<Output = Result<usize, SQLError>> + Send;
 }
 
 struct NoQueries;
 
-impl ScalarQueryInput for NoQueries {
+impl<'s> ScalarQueryInput<'s> for NoQueries {
     async fn append(
         &mut self,
-        _: &crate::ast::SelectStmt,
+        _: &'s crate::ast::SelectStmt,
         control: &ProductionControl<'_>,
-        _: &mut AsyncImageInput<'_>,
     ) -> Result<usize, SQLError> {
         control.check()?;
         Err(crate::schema::retention::CatalogRetentionError::UnexpectedSubquery.into())
@@ -68,11 +67,11 @@ impl Drop for Frame<'_, '_> {
 }
 
 impl<'s, 'c> Frame<'s, 'c> {
-    async fn new<Q: ScalarQueryInput>(
+    async fn new<W: ScalarInputWork<Error = SQLError>, Q: ScalarQueryInput<'s>>(
         source: &'s Expr,
         control: ProductionControl<'c>,
         queries: &mut Q,
-        input: &mut AsyncImageInput<'_>,
+        input: &mut W,
     ) -> Result<Self, SQLError> {
         control.check()?;
         let mut lowering = Lowering {
@@ -81,7 +80,7 @@ impl<'s, 'c> Frame<'s, 'c> {
                 control.budget().expect("native scalar allowance"),
             )),
         };
-        let (source, output) = match queries.parameter(source, &control, input).await? {
+        let (source, output) = match queries.parameter(source, &control).await? {
             Some(number) => (None, ScalarExpr::Param(number)),
             None => (
                 Some(source),
@@ -96,16 +95,13 @@ impl<'s, 'c> Frame<'s, 'c> {
         })
     }
 
-    async fn finish<Q: ScalarQueryInput>(
+    async fn finish<Q: ScalarQueryInput<'s>>(
         mut self,
         queries: &mut Q,
-        input: &mut AsyncImageInput<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {
         // IN lowers its left operand, including that operand's queries, before appending the right query. Its slot becomes valid only at this constructor boundary.
         if let Some(Expr::InSubquery { body, .. }) = self.source {
-            let slot = queries
-                .append(body, &self.lowering.production(), input)
-                .await?;
+            let slot = queries.append(body, &self.lowering.production()).await?;
             let ScalarExpr::InSubquery { subquery, .. } = &mut self.output else {
                 unreachable!("pending IN query");
             };
@@ -142,52 +138,59 @@ impl crate::plan::ExpressionPlan {
         control: &ProductionControl<'_>,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        Self::lower_scalar_with_query_input(expression, &mut NoQueries, control, input).await
+        Self::lower_scalar_with_query_input(expression, &mut NoQueries, control, input)?.await
     }
 
     /// Lower a retained scalar into an enclosing private query arena. Query callbacks run in ordinary lowering order, and a parameter replacement suppresses traversal of its replaced syntax. The arena keeps every completed query owner until its enclosing constructor publishes or retires it.
-    pub async fn lower_scalar_with_query_input<Q: ScalarQueryInput>(
-        expression: &Expr,
-        queries: &mut Q,
-        control: &ProductionControl<'_>,
-        input: &mut AsyncImageInput<'_>,
-    ) -> Result<OwnedScalarExpr, SQLError> {
+    pub(in crate::plan) fn lower_scalar_with_query_input<
+        's: 'a,
+        'a,
+        W: ScalarInputWork<Error = SQLError> + 'a,
+        Q: ScalarQueryInput<'s> + 'a,
+    >(
+        expression: &'s Expr,
+        queries: &'a mut Q,
+        control: &'a ProductionControl<'a>,
+        input: &'a mut W,
+    ) -> Result<crate::construction::Read<'a, Result<OwnedScalarExpr, SQLError>>, SQLError> {
         let memory = control.budget().ok_or_else(|| {
             SQLError::Internal("native scalar construction requires a destination allowance".into())
         })?;
-        let mut frames = BudgetedVec::new(memory);
-        frames.reserve(1)?;
-        frames.push(Frame::new(expression, *control, queries, input).await?)?;
-        loop {
-            control.check()?;
-            input.checkpoint().await?;
-            control.check()?;
-            let parent = frames.last_mut().expect("active scalar constructor");
-            if let Some(child) = parent
-                .source
-                .and_then(|source| children::get(source, parent.next))
-            {
-                parent.next += 1;
-                parent
-                    .lowering
-                    .owned_children
-                    .as_mut()
-                    .expect("native scalar children")
-                    .reserve(1)?;
-                frames.reserve(1)?;
-                frames.push(Frame::new(child, *control, queries, input).await?)?;
-            } else {
-                let value = frames
-                    .pop()
-                    .expect("completed scalar constructor")
-                    .finish(queries, input)
-                    .await?;
-                match frames.last_mut() {
-                    Some(parent) => parent.attach(value)?,
-                    None => return Ok(value),
+        Ok(crate::construction::Read::new(*control, async move {
+            let mut frames = BudgetedVec::new(memory);
+            frames.reserve(1)?;
+            frames.push(Frame::new(expression, *control, queries, input).await?)?;
+            loop {
+                control.check()?;
+                input.checkpoint().await?;
+                control.check()?;
+                let parent = frames.last_mut().expect("active scalar constructor");
+                if let Some(child) = parent
+                    .source
+                    .and_then(|source| children::get(source, parent.next))
+                {
+                    parent.next += 1;
+                    parent
+                        .lowering
+                        .owned_children
+                        .as_mut()
+                        .expect("native scalar children")
+                        .reserve(1)?;
+                    frames.reserve(1)?;
+                    frames.push(Frame::new(child, *control, queries, input).await?)?;
+                } else {
+                    let value = frames
+                        .pop()
+                        .expect("completed scalar constructor")
+                        .finish(queries)
+                        .await?;
+                    match frames.last_mut() {
+                        Some(parent) => parent.attach(value)?,
+                        None => return Ok(value),
+                    }
                 }
             }
-        }
+        })?)
     }
 }
 

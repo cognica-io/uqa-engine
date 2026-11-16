@@ -4,6 +4,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_construction_driver_keeps_deep_polling_and_retirement_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Drive 8,192 nested owners on a 256 KiB stack; count completed owners per one-step poll and inspect every cancelled or denied prefix.",
+      "invariant": "A poll completes at most one owner, native frames remain admitted, and retirement requires no allocation or recursive poll chain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_construction_driver_retires_each_prefix_both_cancellations_and_denied_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Drive 8,192 nested owners on a 256 KiB stack; count completed owners per one-step poll and inspect every cancelled or denied prefix.",
+      "invariant": "A poll completes at most one owner, native frames remain admitted, and retirement requires no allocation or recursive poll chain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "retained_scalar_query_input_preserves_ordinary_query_slot_order",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",

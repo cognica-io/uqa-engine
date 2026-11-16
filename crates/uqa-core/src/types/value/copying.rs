@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 mod work;
+pub use work::Work as ValueCopyWork;
 use work::{inline, Work};
 
 use crate::{
@@ -66,7 +67,7 @@ impl Value {
     pub async fn clone_from_input(
         &self,
         control: &ProductionControl<'_>,
-        input: &mut crate::image_io::AsyncImageInput<'_>,
+        input: &mut impl ValueCopyWork,
     ) -> Result<Produced<Self>, ValueRetentionError> {
         copy_with_work(
             self,

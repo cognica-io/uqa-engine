@@ -18,6 +18,7 @@ pub use comparison_control::{
 };
 mod cloning;
 mod copying;
+pub use copying::ValueCopyWork;
 mod decoding;
 mod identity;
 pub mod image;

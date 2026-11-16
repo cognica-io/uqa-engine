@@ -50,21 +50,29 @@ impl Work for AsyncImageInput<'_> {
         source: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, SQLError> {
-        let mut value = ProductionString::new(*control);
-        value.reserve(source.len())?;
-        let mut begin = 0;
-        while begin < source.len() {
-            self.checkpoint().await?;
-            control.check()?;
-            let mut end = begin.saturating_add(4096).min(source.len());
-            while !source.is_char_boundary(end) {
-                end -= 1;
-            }
-            value.push_str(&source[begin..end])?;
-            begin = end;
-        }
-        Ok(value.finish()?)
+        copy_text(self, source, control).await
     }
+}
+
+pub(crate) async fn copy_text<W: Work + Send>(
+    work: &mut W,
+    source: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
+    let mut value = ProductionString::new(*control);
+    value.reserve(source.len())?;
+    let mut begin = 0;
+    while begin < source.len() {
+        work.checkpoint().await?;
+        control.check()?;
+        let mut end = begin.saturating_add(4096).min(source.len());
+        while !source.is_char_boundary(end) {
+            end -= 1;
+        }
+        value.push_str(&source[begin..end])?;
+        begin = end;
+    }
+    Ok(value.finish()?)
 }
 
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {

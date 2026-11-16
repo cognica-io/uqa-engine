@@ -7,7 +7,7 @@
 //! Typed declarations consume already projected values through their original work owner.
 
 use super::{InputError, Native, Parts};
-use std::{future::Future, pin::Pin};
+use std::future::Future;
 use uqa_core::{
     json::{
         JsonDiagnostic, JsonDocument, JsonInputError, JsonPosition, JsonReadError, JsonReadWork,
@@ -36,21 +36,7 @@ pub(super) mod special;
 mod types;
 
 pub(super) type Result<T> = std::result::Result<T, JsonInputError>;
-pub(super) struct Read<'a, T> {
-    future: Pin<Box<dyn Future<Output = Result<Native<T>>> + Send + 'a>>,
-    // The future's owned allocation retires before its admission.
-    _memory: Option<MemoryReservation>,
-}
-
-impl<T> Future for Read<'_, T> {
-    type Output = Result<Native<T>>;
-    fn poll(
-        self: Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.get_mut().future.as_mut().poll(context)
-    }
-}
+pub(super) type Read<'a, T> = crate::construction::Read<'a, Result<Native<T>>>;
 
 pub(super) trait Projected: Sized + Send + 'static {
     const BUFFERED: bool = false;
@@ -247,13 +233,7 @@ where
     F: Future<Output = Result<Native<T>>> + Send + 'a,
     T: 'a,
 {
-    let memory = control
-        .reserve(size_of_val(&future))
-        .map_err(JsonReadError::from)?;
-    Ok(Read {
-        future: Box::pin(future),
-        _memory: memory,
-    })
+    Ok(Read::new(control, future).map_err(JsonReadError::from)?)
 }
 
 pub(super) struct Cursor<'a, T> {
