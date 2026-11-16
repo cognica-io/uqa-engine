@@ -70,6 +70,7 @@ impl Write for Message {
 enum Width {
     Byte,
     Word,
+    Float64,
 }
 
 impl Width {
@@ -77,6 +78,7 @@ impl Width {
         match self {
             Self::Byte => "u8",
             Self::Word => "u32",
+            Self::Float64 => "f64",
         }
     }
 
@@ -84,6 +86,7 @@ impl Width {
         match self {
             Self::Byte => u8::MAX.into(),
             Self::Word => u32::MAX.into(),
+            Self::Float64 => unreachable!("floating-point conversion has no integer bound"),
         }
     }
 }
@@ -94,6 +97,7 @@ fn observe(input: &[u8], width: Width) -> Result<(Result<Number, Syntax>, usize)
     let number = match width {
         Width::Byte => parser.deserialize_u8(visitor),
         Width::Word => parser.deserialize_u32(visitor),
+        Width::Float64 => parser.deserialize_f64(visitor),
     };
     let consumed = parser.into_iter::<de::IgnoredAny>().byte_offset();
     let number = match number {
@@ -126,6 +130,37 @@ fn observe(input: &[u8], width: Width) -> Result<(Result<Number, Syntax>, usize)
 }
 
 impl JsonReader<'_, '_> {
+    /// Read a direct f64 scalar through the public text parser. Its integer-to-float and decimal conversion remain distinct from generic-value number projection.
+    pub async fn read_f64_from(
+        &mut self,
+        work: &mut AsyncImageInput<'_>,
+    ) -> Result<f64, JsonInputError> {
+        let control = ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+        self.read_f64_with_work(&control, &mut super::super::work::InputWork(work))
+            .await
+            .map_err(|error| error.retain_syntax(self))
+    }
+
+    pub async fn read_f64_with_work<W: JsonReadWork>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<f64, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
+        Ok(
+            match self
+                .read_number_with_work(Width::Float64, control, work)
+                .await?
+            {
+                Number::Unsigned(value) => value as f64,
+                Number::Signed(value) => value as f64,
+                Number::Float(value) => value,
+            },
+        )
+    }
+
     /// Read an unsigned 32-bit scalar at its original typed boundary. Numeric conversion uses the public scalar parser under a fixed scratch allowance; cursor advancement retains the enclosing scheduler and original source positions.
     pub async fn read_u32_from(
         &mut self,
@@ -176,6 +211,31 @@ impl JsonReader<'_, '_> {
     where
         W::Error: From<JsonDiagnostic>,
     {
+        let number = self.read_number_with_work(width, control, work).await?;
+        let expected = width.expected();
+        match number {
+            Number::Unsigned(value) if value <= width.maximum() => Ok(value),
+            Number::Unsigned(value) => {
+                Err(JsonDiagnostic::invalid_unsigned(value, expected, self.position()).into())
+            }
+            Number::Signed(value) => {
+                Err(JsonDiagnostic::invalid_signed(value, expected, self.position()).into())
+            }
+            Number::Float(value) => {
+                Err(JsonDiagnostic::invalid_float(value, expected, self.position()).into())
+            }
+        }
+    }
+
+    async fn read_number_with_work<W: JsonReadWork>(
+        &mut self,
+        width: Width,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Number, W::Error>
+    where
+        W::Error: From<JsonDiagnostic>,
+    {
         if !matches!(self.next_step(work, false).await?, ReadStep::Value) {
             return Err(JsonReadError::InvalidJson.into());
         }
@@ -197,16 +257,7 @@ impl JsonReader<'_, '_> {
         }
         self.check()?;
         match number {
-            Ok(Number::Unsigned(value)) if value <= width.maximum() => Ok(value),
-            Ok(Number::Unsigned(value)) => {
-                Err(JsonDiagnostic::invalid_unsigned(value, expected, self.position()).into())
-            }
-            Ok(Number::Signed(value)) => {
-                Err(JsonDiagnostic::invalid_signed(value, expected, self.position()).into())
-            }
-            Ok(Number::Float(value)) => {
-                Err(JsonDiagnostic::invalid_float(value, expected, self.position()).into())
-            }
+            Ok(number) => Ok(number),
             Err(error) => {
                 let line = start.line + error.line - 1;
                 let column = if error.line == 1 {

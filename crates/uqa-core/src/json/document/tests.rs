@@ -12,6 +12,7 @@ mod native;
 mod output;
 mod projection;
 mod resources;
+mod typed_map;
 
 fn protocol() -> JsonScalarProtocol {
     JsonScalarProtocol::from_values(

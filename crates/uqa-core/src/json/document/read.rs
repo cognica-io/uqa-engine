@@ -17,6 +17,61 @@ use std::{cmp::Ordering, future::Future, pin::Pin};
 type Result<T> = std::result::Result<T, JsonInputError>;
 type Token<'a> = JsonToken<'a, &'a [u8]>;
 
+pub(super) async fn map<W: JsonReadWork<Error = JsonReadError>>(
+    document: &mut JsonDocument,
+    reader: &mut JsonReader<'_, '_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    protocol: JsonScalarProtocol,
+) -> Result<usize> {
+    if !matches!(
+        reader
+            .next_step(work, false)
+            .await
+            .map_err(|error| JsonInputError::from_reader(reader, error))?,
+        crate::json::ReadStep::Value
+    ) {
+        return Err(JsonInputError::Invalid);
+    }
+    if reader.peek() != Some(b'{') {
+        return Err(reader
+            .type_error_with_work("a map", control, work)
+            .await
+            .map_err(|error| JsonInputError::from_reader(reader, error))?
+            .into());
+    }
+    let token = reader
+        .value(work, false)
+        .await
+        .map_err(|error| JsonInputError::from_reader(reader, error))?
+        .token;
+    if !matches!(token, JsonToken::StartObject) {
+        return Err(JsonInputError::Invalid);
+    }
+    let mut fields = OwnedMap::new();
+    loop {
+        let token = next(reader, work).await?;
+        let JsonToken::Key(encoded) = token else {
+            return if matches!(token, JsonToken::EndObject) {
+                document.insert(Value::Object(fields))
+            } else {
+                Err(JsonInputError::Invalid)
+            };
+        };
+        let name = decode_json_string_with_work(encoded, control, work)
+            .await?
+            .into_budgeted()
+            .unwrap_or_else(|_| unreachable!("admitted map key"));
+        let child = value(document, reader, control, work, protocol).await?;
+        let previous = fields
+            .insert_admitted_key_from(name, child, &mut Comparison { control, work })
+            .await?;
+        if let Some(previous) = previous {
+            document.retire(previous, control, work).await?;
+        }
+    }
+}
+
 enum Frame {
     Array(BudgetedVec<usize>),
     Object {

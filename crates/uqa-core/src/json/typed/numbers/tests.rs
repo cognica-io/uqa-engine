@@ -11,6 +11,69 @@ use crate::{
     CancellationToken,
 };
 
+#[test]
+fn typed_json_f64_keeps_text_parser_bits_errors_and_cancellation() {
+    let texts = [
+        "null",
+        "true",
+        "[",
+        "{",
+        "\"secret\"",
+        "-0",
+        "-0.0",
+        "0.1",
+        "1.2345678901234567",
+        "18446744073709551616",
+        "1e-400",
+        "1e400",
+        "-",
+        "01",
+        "1.",
+        "1e+",
+    ];
+    for text in texts {
+        let expected = serde_json::from_str::<f64>(text);
+        let memory = MemoryBudget::new(65536);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &token);
+        let mut reader = JsonReader::from_slice_with_control(text.as_bytes(), &control);
+        let actual = crate::json::work::inline(async {
+            let value = reader
+                .read_f64_with_work(&control, &mut crate::json::work::InputWork(&mut ()))
+                .await
+                .map_err(|error| error.retain_syntax(&reader))?;
+            assert!(reader
+                .next_event_with_work(&mut ())
+                .await
+                .map_err(|error| JsonInputError::from_reader(&reader, error))?
+                .is_none());
+            Ok::<_, JsonInputError>(value)
+        });
+        match (expected, actual) {
+            (Ok(expected), Ok(actual)) => {
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}");
+            }
+            (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
+                assert_eq!(actual.to_string(), expected.to_string(), "{text}");
+                assert_eq!(actual.is_eof(), expected.is_eof());
+                assert_eq!(actual.is_syntax(), expected.is_syntax());
+                assert_eq!(actual.is_data(), expected.is_data());
+            }
+            other => panic!("float result differs: {other:?}"),
+        }
+        drop(reader);
+        assert_eq!(memory.used(), 0);
+        token.cancel();
+        let mut reader = JsonReader::from_slice_with_control(text.as_bytes(), &control);
+        assert!(matches!(
+            crate::json::work::inline(
+                reader.read_f64_with_work(&control, &mut crate::json::work::InputWork(&mut ()),)
+            ),
+            Err(JsonInputError::Cancelled(_))
+        ));
+    }
+}
+
 struct NoRead;
 impl std::io::Read for NoRead {
     fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {

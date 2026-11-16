@@ -96,30 +96,39 @@ impl ModelCatalog {
         payload_bytes: usize,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        if model.reserved_bytes() < payload_bytes {
-            return Err(StorageBackendError::Other(
-                "incomplete model image admission".into(),
-            ));
-        }
-        let model = ModelHandle::from_image(model)?;
-        let payload_bytes = payload_bytes
-            .checked_add(model.admitted_wrapper_bytes())
-            .ok_or(MemoryError::SizeOverflow)?;
-        let total = name
-            .capacity()
-            .checked_add(payload_bytes)
-            .ok_or(MemoryError::SizeOverflow)?;
-        let (name, memory) = name.into_parts();
-        self.values.insert(
-            name,
-            ModelSource {
-                model,
-                payload_bytes,
-                _name_memory: Some(memory),
-            },
-            total,
-        )?;
+        let (name, source, total) = source(name, model, payload_bytes)?;
+        self.values.insert(name, source, total)?;
         control.check()?;
         Ok(self)
     }
+}
+
+pub(super) fn source(
+    name: Budgeted<String>,
+    model: Budgeted<DeepModel>,
+    payload_bytes: usize,
+) -> StorageBackendResult<(String, ModelSource, usize)> {
+    if model.reserved_bytes() < payload_bytes {
+        return Err(StorageBackendError::Other(
+            "incomplete model image admission".into(),
+        ));
+    }
+    let model = ModelHandle::from_image(model)?;
+    let payload_bytes = payload_bytes
+        .checked_add(model.admitted_wrapper_bytes())
+        .ok_or(MemoryError::SizeOverflow)?;
+    let total = name
+        .capacity()
+        .checked_add(payload_bytes)
+        .ok_or(MemoryError::SizeOverflow)?;
+    let (name, memory) = name.into_parts();
+    Ok((
+        name,
+        ModelSource {
+            model,
+            payload_bytes,
+            _name_memory: Some(memory),
+        },
+        total,
+    ))
 }

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Restore persistent model catalogs through retained ML-owned input. Preserve original JSON declarations, numeric conversions, selected snapshots and last-definition replacement while model construction, name comparison and publication resume under the restore allowance. Completed model handles keep their original weights after input retirement and later edits. Complete public backup restoration remains in progress.
+
 - Share intrinsic routine cost/row estimates, support identities, language, parameter-order, default and pseudo-type checks between ordinary declarations and private backup validation. Reject invalid captured source declarations before activation while preserving deferred bodies and input/output names. Reject domains over arrays as VARIADIC parameter types, while preserving arrays of domains, matching PostgreSQL 18. Complete public backup restoration remains in progress.
 - Restore persistent scoring parameters through bounded native catalog input. Preserve opaque names and values, selected snapshots and original allocation ownership; native image publication also resumes long-name comparisons. Failed or abandoned private input releases its read transaction without publishing a partial catalog. Complete public backup restoration remains in progress.
 
