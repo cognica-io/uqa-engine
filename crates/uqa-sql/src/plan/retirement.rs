@@ -15,7 +15,8 @@ pub(in crate::plan) mod construction;
 mod scalars;
 mod tree;
 pub(in crate::plan) mod windows;
-pub(crate) use scalars::{Pending, Retire};
+pub(crate) use scalars::fields as scalar_fields;
+pub(crate) use scalars::{Pending, Retire, ScalarRetirement};
 pub(crate) use tree::{RetainedTree, RetirementFrame};
 pub(in crate::plan) use windows::WindowRetirement;
 
@@ -32,29 +33,35 @@ pub(crate) enum Node {
     Expression(ExpressionPlan),
 }
 
-impl Node {
-    pub(crate) fn retire_scalars(&mut self) {
+impl Retire for Node {
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
         match self {
-            Node::Empty => {}
+            Node::Empty => true,
             Node::Query(query) => match &mut query.root {
-                RelationalPlan::QueryBlock(block) => block.retire(),
+                RelationalPlan::QueryBlock(block) => block.retire_step(positions, scalar),
                 RelationalPlan::SetOp {
                     order_by,
                     limit,
                     offset,
                     ..
-                } => {
-                    order_by.retire();
-                    limit.retire();
-                    offset.retire();
-                }
-                RelationalPlan::Values { rows, .. } => rows.retire(),
+                } => scalars::fields!(positions, scalar; order_by, limit, offset),
+                RelationalPlan::Values { rows, .. } => rows.retire_step(positions, scalar),
             },
-            Node::Source(source) => source.retire(),
-            Node::Cte(cte) => cte.cycle.retire(),
-            Node::Command(command) => commands::retire_scalars(command),
-            Node::Expression(expression) => expression.scalar.retire(),
+            Node::Source(source) => source.retire_step(positions, scalar),
+            Node::Cte(cte) => cte.cycle.retire_step(positions, scalar),
+            Node::Command(command) => commands::retire_scalars(command, positions, scalar),
+            Node::Expression(expression) => expression.scalar.retire_step(positions, scalar),
         }
+    }
+}
+
+impl Node {
+    pub(crate) fn retire_scalars(&mut self) {
+        self.retire();
     }
 
     pub(crate) fn retire_child(&mut self, position: &mut usize) -> Option<Node> {

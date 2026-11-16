@@ -6,7 +6,7 @@
 
 //! Partial constructors share the existing plan-tree retirement workspace. Structural descent admits its depth before a child can exist; sibling prefixes reuse that workspace when they retire.
 
-use super::{Node, RetainedTree, Retire, RetirementFrame};
+use super::{Node, RetainedTree, Retire, RetirementFrame, ScalarRetirement};
 use crate::plan::{
     CommandPlan, CtePlan, CtePlanBody, DeletePlan, ExpressionPlan, InsertPlan, MergePlan,
     QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
@@ -16,6 +16,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use uqa_core::memory::{BudgetedVec, MemoryError, Produced, ProductionControl};
+
+mod retirement;
+pub(in crate::plan) use retirement::Retirement;
 
 #[cfg(test)]
 mod tests;
@@ -29,6 +32,7 @@ struct Frame {
 
 impl RetirementFrame for Frame {
     type Node = Node;
+    type Local = ScalarRetirement;
     fn empty() -> Node {
         Node::Empty
     }
@@ -42,11 +46,14 @@ impl RetirementFrame for Frame {
             retiring: false,
         }
     }
-    fn begin_retirement(&mut self) {
-        if !self.retiring {
-            self.retiring = true;
-            self.node.retire_scalars();
+    fn advance_retirement(&mut self, local: &mut ScalarRetirement) -> bool {
+        if self.retiring {
+            return true;
         }
+        if local.advance(&mut self.node) {
+            self.retiring = true;
+        }
+        self.retiring
     }
     fn retire_child(&mut self) -> Option<Node> {
         self.node.retire_child(&mut self.position)
@@ -106,6 +113,21 @@ impl Context {
             value: Some(value),
             context: self.clone(),
         }
+    }
+
+    pub(in crate::plan) fn prepare_retirement(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Retirement, crate::SQLError> {
+        control.check()?;
+        let capacity = self
+            .workspace
+            .lock()
+            .expect("plan retirement workspace")
+            .0
+            .frames
+            .capacity();
+        Retirement::new(capacity, control)
     }
 }
 

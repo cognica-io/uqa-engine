@@ -45,12 +45,16 @@ enum Field {
     Merge(Vec<MergeWhenPlan>),
 }
 impl Retire for Field {
-    fn retire(&mut self) {
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
         match self {
-            Self::Targets(values) => values.retire(),
-            Self::Assignments(values) => values.retire(),
-            Self::Conflict(value) => value.retire(),
-            Self::Merge(values) => values.retire(),
+            Self::Targets(values) => values.retire_step(positions, scalar),
+            Self::Assignments(values) => values.retire_step(positions, scalar),
+            Self::Conflict(value) => value.retire_step(positions, scalar),
+            Self::Merge(values) => values.retire_step(positions, scalar),
         }
     }
 }

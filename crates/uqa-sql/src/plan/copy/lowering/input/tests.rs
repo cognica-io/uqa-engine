@@ -80,16 +80,20 @@ impl PartialEq for Field {
 }
 
 impl Retire for Field {
-    fn retire(&mut self) {
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
         match self {
-            Self::Block(_) => {}
-            Self::From(source) => source.retire(),
-            Self::Values(values) => values.retire(),
-            Self::Orders(values) => values.retire(),
-            Self::Optional(value) => value.retire(),
-            Self::Boxed(value) => value.retire(),
-            Self::Projections(values) => values.retire(),
-            Self::Windows(values) => values.retire(),
+            Self::Block(_) => true,
+            Self::From(source) => source.retire_step(positions, scalar),
+            Self::Values(values) => values.retire_step(positions, scalar),
+            Self::Orders(values) => values.retire_step(positions, scalar),
+            Self::Optional(value) => value.retire_step(positions, scalar),
+            Self::Boxed(value) => value.retire_step(positions, scalar),
+            Self::Projections(values) => values.retire_step(positions, scalar),
+            Self::Windows(values) => values.retire_step(positions, scalar),
         }
     }
 }

@@ -4,13 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Flat plan metadata retires its native scalar roots before ordinary field destruction.
+//! Native scalar fields retain their declared order across immediate and stepped retirement.
 
 use crate::{
     ast::{
         AssignmentStep, AssignmentTarget, AssignmentTargets, MultipleAssignmentTargets,
         WindowDefinition,
     },
+    ir::ownership::Retirement,
     plan::{
         AssignmentPlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, MergeWhenPlan, OrderPlan,
         ProjectionPlan, QueryBlockPlan, SourcePlan, TableFunctionPlan, ViewCheckPlan,
@@ -18,61 +19,109 @@ use crate::{
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 
-pub(crate) trait Retire {
-    fn retire(&mut self);
+mod steps;
+pub(crate) use steps::ScalarRetirement;
+
+pub(crate) trait Retire: Sized {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool;
+    fn retire(&mut self) {
+        let mut retirement = ScalarRetirement::default();
+        while !retirement.advance(self) {}
+    }
 }
 
-// Structural source children belong to the enclosing retained plan tree; this operation retires only the source's local scalar roots.
+macro_rules! fields {
+    ($positions:expr, $scalar:expr; $($field:expr),* $(,)?) => {
+        true $(&& $field.retire_step($positions, $scalar))*
+    };
+}
+pub(crate) use fields;
+
 impl Retire for SourcePlan {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Table { .. } | Self::Subquery { .. } | Self::RetainedRows(_) => {}
-            Self::Join { on, .. } => on.retire(),
-            Self::Values { rows, .. } => rows.retire(),
-            Self::Function { args, .. } => args.retire(),
-            Self::FunctionGroup { functions, .. } => functions.retire(),
+            Self::Table { .. } | Self::Subquery { .. } | Self::RetainedRows(_) => true,
+            Self::Join { on, .. } => on.retire_step(positions, scalar),
+            Self::Values { rows, .. } => rows.retire_step(positions, scalar),
+            Self::Function { args, .. } => args.retire_step(positions, scalar),
+            Self::FunctionGroup { functions, .. } => functions.retire_step(positions, scalar),
         }
     }
 }
 
 impl Retire for ScalarExpr {
-    fn retire(&mut self) {
-        crate::ir::ownership::retire(self);
-    }
-}
-impl<T: Retire> Retire for Vec<T> {
-    fn retire(&mut self) {
-        for value in self {
-            value.retire();
+    fn retire_step(&mut self, _: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        if matches!(self, Self::Star) {
+            return true;
         }
+        *scalar = Some(Retirement::new(std::mem::replace(self, Self::Star)));
+        false
     }
 }
-impl<T: Retire> Retire for uqa_core::memory::BudgetedVec<T> {
-    fn retire(&mut self) {
-        for value in self.iter_mut() {
-            value.retire();
+
+macro_rules! vector {
+    ($ty:ty) => {
+        impl<T: Retire> Retire for $ty {
+            fn retire_step(
+                &mut self,
+                positions: &mut [usize],
+                scalar: &mut Option<Retirement>,
+            ) -> bool {
+                if self.is_empty() {
+                    return true;
+                }
+                let (position, children) = positions
+                    .split_first_mut()
+                    .expect("native scalar container depth");
+                if let Some(value) = self.get_mut(*position) {
+                    if value.retire_step(children, scalar) {
+                        *position += 1;
+                    }
+                    return false;
+                }
+                if self.pop().is_some() {
+                    if self.is_empty() {
+                        *position = 0;
+                    }
+                    return false;
+                }
+                unreachable!("nonempty scalar container")
+            }
         }
-    }
+    };
 }
+vector!(Vec<T>);
+vector!(uqa_core::memory::BudgetedVec<T>);
+
 impl<T: Retire> Retire for Option<T> {
-    fn retire(&mut self) {
-        if let Some(value) = self {
-            value.retire();
-        }
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        self.as_mut()
+            .is_none_or(|value| value.retire_step(positions, scalar))
     }
 }
 impl<T: Retire> Retire for Box<T> {
-    fn retire(&mut self) {
-        self.as_mut().retire();
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        self.as_mut().retire_step(positions, scalar)
+    }
+}
+impl<T: Retire, const N: usize> Retire for [T; N] {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        self.iter_mut()
+            .all(|value| value.retire_step(positions, scalar))
+    }
+}
+impl<A: Retire, B: Retire> Retire for (A, B) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        fields!(positions, scalar; self.0, self.1)
     }
 }
 
 macro_rules! scalar_fields {
     ($ty:ty { $($field:ident),* $(,)? } $(skip { $($skip:ident),* $(,)? })?) => {
         impl Retire for $ty {
-            fn retire(&mut self) {
+            fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
                 let Self { $($field,)* $($($skip: _,)*)? } = self;
-                $($field.retire();)*
+                fields!(positions, scalar; $($field),*)
             }
         }
     };
@@ -93,64 +142,49 @@ scalar_fields!(ViewCheckPlan { predicate } skip { view });
 scalar_fields!(CteCyclePlan { mark_value, mark_default } skip { columns, mark_column, path_column });
 
 impl Retire for QueryBlockPlan {
-    fn retire(&mut self) {
-        self.windows.retire();
-        self.projections.retire();
-        self.r#where.retire();
-        self.group_by.retire();
-        self.grouping_sets.retire();
-        self.having.retire();
-        self.order_by.retire();
-        self.limit.retire();
-        self.offset.retire();
-        self.distinct_on.retire();
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        fields!(positions, scalar; self.windows, self.projections, self.r#where, self.group_by,
+            self.grouping_sets, self.having, self.order_by, self.limit, self.offset, self.distinct_on)
     }
 }
-
 impl Retire for ScalarFrameBound {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Preceding(value) | Self::Following(value) => value.retire(),
-            Self::UnboundedPreceding | Self::UnboundedFollowing | Self::CurrentRow => {}
+            Self::Preceding(value) | Self::Following(value) => value.retire_step(positions, scalar),
+            Self::UnboundedPreceding | Self::UnboundedFollowing | Self::CurrentRow => true,
         }
     }
 }
 impl Retire for AssignmentTargets<ScalarExpr> {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Single(value) => value.retire(),
-            Self::Multiple(value) => value.retire(),
+            Self::Single(value) => value.retire_step(positions, scalar),
+            Self::Multiple(value) => value.retire_step(positions, scalar),
         }
     }
 }
 impl Retire for AssignmentStep<ScalarExpr> {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Field(_) => {}
-            Self::Index(value) => value.retire(),
-            Self::Slice { lower, upper } => {
-                lower.retire();
-                upper.retire();
-            }
+            Self::Field(_) => true,
+            Self::Index(value) => value.retire_step(positions, scalar),
+            Self::Slice { lower, upper } => fields!(positions, scalar; lower, upper),
         }
     }
 }
 impl Retire for ConflictActionPlan {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Nothing => {}
+            Self::Nothing => true,
             Self::Update {
                 assignments,
                 predicate,
-            } => {
-                assignments.retire();
-                predicate.retire();
-            }
+            } => fields!(positions, scalar; assignments, predicate),
         }
     }
 }
 impl Retire for MergeWhenPlan {
-    fn retire(&mut self) {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
             Self::UpdateMatched {
                 condition,
@@ -159,25 +193,20 @@ impl Retire for MergeWhenPlan {
             | Self::UpdateNotMatchedBySource {
                 condition,
                 assignments,
-            } => {
-                condition.retire();
-                assignments.retire();
-            }
+            } => fields!(positions, scalar; condition, assignments),
             Self::DeleteMatched { condition }
             | Self::DeleteNotMatchedBySource { condition }
             | Self::NothingMatched { condition }
             | Self::NothingNotMatched { condition }
-            | Self::NothingNotMatchedBySource { condition } => condition.retire(),
+            | Self::NothingNotMatchedBySource { condition } => {
+                condition.retire_step(positions, scalar)
+            }
             Self::InsertNotMatched {
                 condition,
                 columns,
                 overriding: _,
                 values,
-            } => {
-                condition.retire();
-                columns.retire();
-                values.retire();
-            }
+            } => fields!(positions, scalar; condition, columns, values),
         }
     }
 }

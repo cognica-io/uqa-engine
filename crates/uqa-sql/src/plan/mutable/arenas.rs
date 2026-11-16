@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{
     catalog::work::{self, Work},
-    plan::{subqueries, QueryPlan},
+    plan::{
+        retirement::construction::{Context, Retirement},
+        subqueries, QueryPlan,
+    },
     SQLError,
 };
 use uqa_core::memory::{BudgetedVec, ProductionControl};
@@ -27,6 +30,7 @@ impl MutableQueryPlan {
     pub(super) async fn prune_subqueries_from<W: Work + Send>(
         &mut self,
         control: &ProductionControl<'_>,
+        retirement: Option<&Context>,
         work: &mut W,
     ) -> Result<(), SQLError> {
         self.assert_owner(control);
@@ -40,11 +44,15 @@ impl MutableQueryPlan {
             else {
                 return Ok(());
             };
+            let mut retirement = retirement
+                .map(|context| context.prepare_retirement(control))
+                .transpose()?;
             subqueries::rewrite_query_from(&mut self.query, &remap, control, work).await?;
             compact(
                 subqueries::query_arena(&mut self.query.root),
                 self.memory.as_mut().map(query_fields),
                 &|index| remap.keep(index),
+                retirement.as_mut(),
                 Some(control),
                 work,
             )
@@ -71,7 +79,7 @@ impl MutableQueryPlan {
             &mut self.query,
             *control,
             |arena, keep| {
-                work::inline(compact(arena, fields, keep, None, &mut ()))
+                work::inline(compact(arena, fields, keep, None, None, &mut ()))
                     .expect("immediate compaction has no fallible commit operation");
             },
         )?;
@@ -83,6 +91,7 @@ async fn compact<W: Work, K: Fn(usize) -> bool + ?Sized>(
     arena: &mut Vec<QueryPlan>,
     mut fields: Option<&mut BudgetedVec<RewriteField>>,
     keep: &K,
+    retirement: Option<&mut Retirement>,
     control: Option<&ProductionControl<'_>>,
     work: &mut W,
 ) -> Result<(), SQLError> {
@@ -103,7 +112,15 @@ async fn compact<W: Work, K: Fn(usize) -> bool + ?Sized>(
             retained += 1;
         }
     }
-    arena.truncate(retained);
+    if let Some(retirement) = retirement {
+        let control = control.expect("admitted private query retirement");
+        while arena.len() > retained {
+            retirement.query(arena.pop().expect("discarded query"));
+            retirement.retire_from(control, work).await?;
+        }
+    } else {
+        arena.truncate(retained);
+    }
     if let Some(fields) = fields {
         while fields.len() > retained {
             if let Some(control) = control {
@@ -148,7 +165,7 @@ impl MutableCommandPlan {
             &mut self.command,
             *control,
             |arena, keep| {
-                work::inline(compact(arena, fields, keep, None, &mut ()))
+                work::inline(compact(arena, fields, keep, None, None, &mut ()))
                     .expect("immediate compaction has no fallible commit operation");
             },
         )?;

@@ -10,6 +10,7 @@ use super::{Frame, NativeNode, Node};
 
 impl<N: NativeNode> crate::plan::retirement::RetirementFrame for Frame<N> {
     type Node = N;
+    type Local = ();
 
     fn empty() -> N {
         N::empty()
@@ -20,13 +21,14 @@ impl<N: NativeNode> crate::plan::retirement::RetirementFrame for Frame<N> {
     fn new(node: N) -> Self {
         Self::new(node)
     }
-    fn begin_retirement(&mut self) {
+    fn advance_retirement(&mut self, (): &mut ()) -> bool {
         if !self.retiring {
             self.retiring = true;
             self.position = 0;
             self.count = None;
             N::retire_scalars(self);
         }
+        true
     }
     fn retire_child(&mut self) -> Option<N> {
         N::retire_child(self)

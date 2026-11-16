@@ -5,32 +5,28 @@
 //
 
 use super::{Parts, Retire};
+use crate::plan::retirement::scalar_fields;
 
 impl Retire for Parts {
-    fn retire(&mut self) {
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
         match self {
-            Self::Empty => {}
-            Self::Leaf(value) => value.retire(),
-            Self::List(items) | Self::Composite { items, .. } => items.retire(),
-            Self::Boxes(boxes) => {
-                for value in boxes {
-                    value.retire();
-                }
+            Self::Empty => true,
+            Self::Leaf(value) => value.retire_step(positions, scalar),
+            Self::List(items) | Self::Composite { items, .. } => {
+                items.retire_step(positions, scalar)
             }
-            Self::InList { expr, list } => {
-                expr.retire();
-                list.retire();
-            }
+            Self::Boxes(boxes) => boxes.retire_step(positions, scalar),
+            Self::InList { expr, list } => scalar_fields!(positions, scalar; expr, list),
             Self::Call {
                 args,
                 order_by,
                 filter,
                 ..
-            } => {
-                args.retire();
-                order_by.retire();
-                filter.retire();
-            }
+            } => scalar_fields!(positions, scalar; args, order_by, filter),
             Self::Window {
                 args,
                 partition,
@@ -39,28 +35,13 @@ impl Retire for Parts {
                 end,
                 filter,
                 ..
-            } => {
-                args.retire();
-                partition.retire();
-                order_by.retire();
-                start.retire();
-                end.retire();
-                filter.retire();
-            }
+            } => scalar_fields!(positions, scalar; args, partition, order_by, start, end, filter),
             Self::Case {
                 base,
                 when,
                 condition,
                 otherwise,
-            } => {
-                base.retire();
-                for (condition, result) in when {
-                    condition.retire();
-                    result.retire();
-                }
-                condition.retire();
-                otherwise.retire();
-            }
+            } => scalar_fields!(positions, scalar; base, when, condition, otherwise),
         }
     }
 }

@@ -24,6 +24,8 @@ use uqa_core::{
 type Output = Prefix<MutableQueryPlan>;
 type Input = ImageDecoder<Output, SQLError>;
 
+mod retirement;
+
 fn query(sql: &str) -> QueryPlan {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
     else {
@@ -44,7 +46,10 @@ fn input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut work = reader.input();
         let control = ProductionControl::new(&native, &original, work.cancellation);
-        query.prune_subqueries_from(&control, &mut work).await?;
+        let retirement = query.context().clone();
+        query
+            .prune_subqueries_from(&control, Some(&retirement), &mut work)
+            .await?;
         Ok(query)
     })
     .unwrap()
@@ -314,11 +319,13 @@ fn native_query_compaction_bounds_deep_scalar_and_source_polling_stack() {
                 let remap = subqueries::prepare_query_from(&pending, control, &mut work)
                     .await?
                     .expect("one unreachable query");
+                let mut retirement = pending.context().prepare_retirement(&control)?;
                 subqueries::rewrite_query_from(&mut pending, &remap, &control, &mut work).await?;
                 compact(
                     subqueries::query_arena(&mut pending.root),
                     None,
                     &|index| remap.keep(index),
+                    Some(&mut retirement),
                     Some(&control),
                     &mut work,
                 )

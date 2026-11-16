@@ -160,7 +160,10 @@ async fn query<I: Input>(
             .await
             .map_err(Into::into)?;
     }
-    query.prune_subqueries_from(control, input.work()).await
+    let retirement = input.retirement().cloned();
+    query
+        .prune_subqueries_from(control, retirement.as_ref(), input.work())
+        .await
 }
 
 async fn command<I: Input>(

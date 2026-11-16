@@ -71684,6 +71684,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "suspended_query_tree_retirement_keeps_original_parent_cleanup_available",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 65 retained query roots while another 17-root parent uses the original cleanup context and the destination allowance is exhausted.",
+      "invariant": "Keep parent and discarded-child retirement independent, release at most one observed root per work window and allocate nothing after admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_tree_retirement_releases_every_interrupted_prefix_without_new_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel either owner at every pending prefix of a seven-query retirement.",
+      "invariant": "Release every native payload exactly once without cleanup allocation and preserve unrelated reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_query_tree_retirement_reuses_admitted_frames_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 8193 nested queries on a 256 KiB stack after exhausting the native allowance.",
+      "invariant": "Use the existing plan-tree algorithm and pre-admitted capacity through productive work and final cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_retirement_admission_failure_preserves_the_original_tree",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Deny detached-tree workspace admission while its original seven-query owner remains live.",
+      "invariant": "Reject before transferring payloads or rewriting references; preserve the complete original cleanup context.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_retires_deep_discarded_payloads_before_constructor_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Complete, abandon or cancel either owner while compacting an unreachable 512-level controlled query child on a 256 KiB stack; independently observe its final payload release.",
+      "invariant": "Retire through the existing structural owner before releasing any matching constructor reservation; leave the selected query and arena capacity valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_tree_retirement_suspends_deep_scalar_roots_and_empty_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 4096 empty row containers followed by an 8192-level scalar in a discarded query under one-step work windows.",
+      "invariant": "Bound scalar-root and container progress, preserve source ownership until productive descent reaches it and allocate nothing after admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_field_retirement_preserves_order_at_the_deepest_native_container_layout",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/scalars/steps/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire MERGE clauses with assignments, multiple targets and subscript indirection through all four native container levels.",
+      "invariant": "Preserve all 22 independently observed scalar releases in declared order, retire at most one per step and reuse the existing allocation-free scalar state.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

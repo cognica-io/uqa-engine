@@ -71,6 +71,9 @@ impl<'a> Input for Native<'a> {
     fn work(&mut self) -> &mut Self::Work {
         &mut self.work
     }
+    fn retirement(&self) -> Option<&Context> {
+        Some(&self.retirement)
+    }
     fn scalar(
         &mut self,
         value: OwnedScalarExpr,

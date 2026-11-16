@@ -27,6 +27,7 @@ type Result<T> = std::result::Result<T, SQLError>;
 pub(super) trait Input: Send {
     type Work: ScalarInputWork<Error: From<CatalogRetentionError> + Into<SQLError>> + CatalogWork;
     fn work(&mut self) -> &mut Self::Work;
+    fn retirement(&self) -> Option<&Context>;
     fn scalar(
         &mut self,
         value: OwnedScalarExpr,
@@ -87,6 +88,9 @@ impl Input for Immediate {
     type Work = ();
     fn work(&mut self) -> &mut Self::Work {
         &mut self.work
+    }
+    fn retirement(&self) -> Option<&Context> {
+        self.retirement.as_ref()
     }
     fn scalar(
         &mut self,

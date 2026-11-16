@@ -9,14 +9,17 @@ use crate::plan::{
     CommandPlan, DeletePlan, InsertPlan, MergePlan, UnifiedPlan, UpdatePlan, ViewRuleReturningPlan,
 };
 
-pub(super) fn retire_scalars(command: &mut CommandPlan) {
+pub(super) fn retire_scalars(
+    command: &mut CommandPlan,
+    positions: &mut [usize],
+    scalar: &mut Option<crate::ir::ownership::Retirement>,
+) -> bool {
     match command {
-        CommandPlan::Empty => {}
-        CommandPlan::Insert(value) => value.retire(),
-        CommandPlan::Update(value) => value.retire(),
-        CommandPlan::Delete(value) => value.retire(),
-        CommandPlan::Merge(value) => value.retire(),
-        _ => {}
+        CommandPlan::Insert(value) => value.retire_step(positions, scalar),
+        CommandPlan::Update(value) => value.retire_step(positions, scalar),
+        CommandPlan::Delete(value) => value.retire_step(positions, scalar),
+        CommandPlan::Merge(value) => value.retire_step(positions, scalar),
+        _ => true,
     }
 }
 
@@ -62,47 +65,51 @@ pub(super) fn child(command: &mut CommandPlan, position: &mut usize) -> Option<N
 }
 
 impl Retire for InsertPlan {
-    fn retire(&mut self) {
-        self.columns.retire();
-        self.rows.retire();
-        self.on_conflict.retire();
-        self.returning.retire();
-        self.view_checks.retire();
-        if let Some(rule) = &mut self.view_rule_returning {
-            rule.returning.retire();
-        }
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
+        super::scalars::fields!(positions, scalar; self.columns, self.rows, self.on_conflict, self.returning, self.view_checks)
+            && self
+                .view_rule_returning
+                .as_mut()
+                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
     }
 }
-
 impl Retire for UpdatePlan {
-    fn retire(&mut self) {
-        self.assignments.retire();
-        self.predicate.retire();
-        self.returning.retire();
-        self.view_checks.retire();
-        if let Some(rule) = &mut self.view_rule_returning {
-            rule.returning.retire();
-        }
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
+        super::scalars::fields!(positions, scalar; self.assignments, self.predicate, self.returning, self.view_checks)
+            && self
+                .view_rule_returning
+                .as_mut()
+                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
     }
 }
-
 impl Retire for DeletePlan {
-    fn retire(&mut self) {
-        self.predicate.retire();
-        self.returning.retire();
-        if let Some(rule) = &mut self.view_rule_returning {
-            rule.returning.retire();
-        }
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
+        super::scalars::fields!(positions, scalar; self.predicate, self.returning)
+            && self
+                .view_rule_returning
+                .as_mut()
+                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
     }
 }
-
 impl Retire for MergePlan {
-    fn retire(&mut self) {
-        self.target_predicate.retire();
-        self.join_condition.retire();
-        self.when_clauses.retire();
-        self.returning.retire();
-        self.view_checks.retire();
+    fn retire_step(
+        &mut self,
+        positions: &mut [usize],
+        scalar: &mut Option<crate::ir::ownership::Retirement>,
+    ) -> bool {
+        super::scalars::fields!(positions, scalar; self.target_predicate, self.join_condition, self.when_clauses, self.returning, self.view_checks)
     }
 }
 
