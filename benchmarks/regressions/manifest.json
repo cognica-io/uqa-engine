@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -71317,6 +71317,71 @@
       "capability": "Retained canonical window resolution",
       "workload": "Interrupt freezing at seven positions of an 8192-level specification on a 256 KiB stack, with either cancellation owner or abandonment.",
       "invariant": "Keep the deep payload alive before partial folding leases and retire every detached metadata tree without allocation or recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_rewrites_preserve_arguments_filters_and_constructor_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace and normalize a window with zero, two and seven canonical partition expressions.",
+      "invariant": "Preserve original argument and filter values and addresses, exact retained fields and constructor reservations in inline and suspended execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_rewrites_retire_every_interrupted_edit_and_traversal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every one-step prefix of specification replacement and scalar normalization through both cancellation scopes.",
+      "invariant": "Keep payloads before detached owners, allocate nothing during retirement and return every native and input reservation without disturbing a sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_preserves_argument_filter_and_specification_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Combine an invalid filter window slot with a canonical partition that exceeds the destination allowance, with and without an earlier argument failure.",
+      "invariant": "Visit arguments, then FILTER, then specification children and report the same first failure in ordinary and retained work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_retires_deep_pending_parents_without_recursion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Normalize an 8192-level scalar on a 256 KiB stack and interrupt descent and ascent through either cancellation owner or abandonment.",
+      "invariant": "Reuse the admitted constructor stack, preserve the normalized leaf and retire all suspended parents without recursion or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_admits_ancestor_storage_before_detached_children_escape",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Exhaust the remaining native allowance after constructing a 32-level scalar, then normalize through ordinary and retained entry points.",
+      "invariant": "Reject heap-frame admission before exceeding the allowance, return no partial result and release the complete input while preserving independent reservations.",
       "case_names": [
         ""
       ]

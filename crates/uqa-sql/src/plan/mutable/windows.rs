@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     plan::{CommandPlan, RelationalPlan, SourcePlan},
-    SQLError, ScalarExpr, ScalarWindowSpec,
+    SQLError, ScalarWindowSpec,
 };
 use uqa_core::memory::ProductionControl;
 
@@ -168,38 +168,9 @@ fn normalize_source(
     }
 }
 fn scalar(
-    mut expression: OwnedScalarExpr,
+    expression: OwnedScalarExpr,
     resolved: &[ScalarWindowSpec],
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    control.check()?;
-    if let ScalarExpr::WindowCall { spec, .. } = &*expression {
-        if let Some(slot) = spec.definition {
-            let canonical = resolved.get(slot).ok_or_else(|| {
-                super::super::windows::invalid("a call refers to a missing window definition")
-            })?;
-            expression = expression.replace_window_spec(canonical, control)?;
-        }
-    }
-    if let ScalarExpr::WindowCall { args, filter, .. } = &*expression {
-        let arguments = args.len();
-        let filter = filter.is_some();
-        let children = expression.child_count();
-        for index in 0..arguments {
-            expression =
-                expression.map_child(index, control, |child| scalar(child, resolved, control))?;
-        }
-        if filter {
-            expression = expression.map_child(children - 1, control, |child| {
-                scalar(child, resolved, control)
-            })?;
-        }
-        for index in arguments..children - usize::from(filter) {
-            expression =
-                expression.map_child(index, control, |child| scalar(child, resolved, control))?;
-        }
-        Ok(expression)
-    } else {
-        expression.map_children(control, |_, child| scalar(child, resolved, control))
-    }
+    expression.normalize_window_definitions(resolved, control)
 }

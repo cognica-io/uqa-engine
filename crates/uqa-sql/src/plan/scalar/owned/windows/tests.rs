@@ -13,6 +13,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod normalization;
+
 type Input = ImageDecoder<Produced<ScalarWindowSpec>, SQLError>;
 
 fn specification(source: &OwnedScalarExpr) -> &ScalarWindowSpec {

@@ -9,6 +9,7 @@
 use super::{Control, Lowering, OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::{
     catalog::work::inline,
+    construction::Stack,
     plan::{retirement::Pending, scalar::resources::input::Work},
     schema::retention::CatalogRetentionError,
 };
@@ -188,55 +189,6 @@ impl<'s, 'c> Frame<'s, 'c> {
     }
 }
 
-enum Frames<'s, 'c> {
-    Ordinary(Vec<Frame<'s, 'c>>),
-    Controlled(BudgetedVec<Frame<'s, 'c>>),
-}
-
-struct Stack<'s, 'c> {
-    // Shallow constructors use a fixed inline buffer; additional ancestors retain admitted heap storage.
-    inline: [Option<Frame<'s, 'c>>; 4],
-    len: usize,
-    frames: Frames<'s, 'c>,
-}
-
-impl<'s, 'c> Stack<'s, 'c> {
-    fn new(control: ProductionControl<'c>) -> Self {
-        Self {
-            inline: std::array::from_fn(|_| None),
-            len: 0,
-            frames: control.budget().map_or_else(
-                || Frames::Ordinary(Vec::new()),
-                |budget| Frames::Controlled(BudgetedVec::new(budget)),
-            ),
-        }
-    }
-
-    fn push(&mut self, frame: Frame<'s, 'c>) -> Result<()> {
-        if self.len < self.inline.len() {
-            self.inline[self.len] = Some(frame);
-            self.len += 1;
-            return Ok(());
-        }
-        match &mut self.frames {
-            Frames::Ordinary(frames) => frames.push(frame),
-            Frames::Controlled(frames) => frames.push(frame)?,
-        }
-        Ok(())
-    }
-
-    fn pop(&mut self) -> Option<Frame<'s, 'c>> {
-        let frame = match &mut self.frames {
-            Frames::Ordinary(frames) => frames.pop(),
-            Frames::Controlled(frames) => frames.pop(),
-        };
-        frame.or_else(|| {
-            self.len = self.len.checked_sub(1)?;
-            self.inline[self.len].take()
-        })
-    }
-}
-
 fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mode: CopyMode) -> Result<Copied> {
     inline(copy_from(source, control, mode, &mut ()))
 }
@@ -251,7 +203,7 @@ where
     W::Error: From<CatalogRetentionError>,
 {
     let mut current = Frame::new_from(source, control, mode, work).await?;
-    let mut stack = Stack::new(control);
+    let mut stack = Stack::<_, 4>::new(control);
     loop {
         current.lowering.checkpoint(work).await?;
         if let Some(child) = current.next_child()? {

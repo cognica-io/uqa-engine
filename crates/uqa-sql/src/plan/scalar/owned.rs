@@ -240,6 +240,15 @@ impl OwnedScalarExpr {
         }
     }
 
+    // Reattach a detached child without reallocating its parent's payload or metadata slots.
+    fn restore_child(&mut self, index: usize, child: Self) {
+        let (expression, memory) = child.into_rewrite_parts();
+        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
+        if let Some(parent) = &mut self.memory {
+            parent.children[index] = memory;
+        }
+    }
+
     /// Rewrite immediate children without reallocating the parent's boxes or vectors. Each callback consumes one complete owner and must return an owner from the same production scope. Error or unwind destroys the private rewrite, including unvisited children; no partly rewritten tree escapes.
     pub fn map_children<E>(
         mut self,
@@ -257,12 +266,7 @@ impl OwnedScalarExpr {
             let replacement = map(ordinal, child)?;
             replacement.assert_owner(control);
             control.check().map_err(CatalogRetentionError::from)?;
-            let (expression, memory) = replacement.into_rewrite_parts();
-            *children::get_mut(&mut self.expression, ordinal).expect("scalar child index") =
-                expression;
-            if let Some(parent) = &mut self.memory {
-                parent.children[ordinal] = memory;
-            }
+            self.restore_child(ordinal, replacement);
         }
         control.check().map_err(CatalogRetentionError::from)?;
         Ok(self)
@@ -283,11 +287,7 @@ impl OwnedScalarExpr {
         let replacement = map(self.take_child(index))?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let (expression, memory) = replacement.into_rewrite_parts();
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         Ok(self)
     }
 

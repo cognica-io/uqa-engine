@@ -134,7 +134,7 @@ impl OwnedScalarExpr {
     }
 }
 
-fn visit_index(expression: &ScalarExpr, ordinal: usize, count: usize) -> usize {
+pub(super) fn visit_index(expression: &ScalarExpr, ordinal: usize, count: usize) -> usize {
     // Read-only/mutable syntax visitation places the window FILTER before its specification; constructor ownership stores it last.
     if let ScalarExpr::WindowCall {
         args,

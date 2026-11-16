@@ -17,6 +17,9 @@ use crate::{
 };
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
+mod normalization;
+mod replacement;
+
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +28,7 @@ pub(in crate::plan) struct OwnedWindowSpec {
     memory: Option<ScalarMemory>,
 }
 impl OwnedWindowSpec {
+    #[cfg(test)]
     pub(in crate::plan) fn copy_parts(
         definition: Option<usize>,
         partition: &[ScalarExpr],
@@ -164,60 +168,4 @@ fn frame_children(spec: &ScalarWindowSpec) -> usize {
             )
         })
         .count()
-}
-
-impl OwnedScalarExpr {
-    pub fn replace_window_spec(
-        mut self,
-        specification: &ScalarWindowSpec,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self> {
-        self.assert_owner(control);
-        control.check()?;
-        let replacement = OwnedWindowSpec::copy_parts(
-            specification.definition,
-            &specification.partition_by,
-            &specification.order_by,
-            specification.frame.as_ref(),
-            control,
-        )?;
-        let ScalarExpr::WindowCall { args, spec, .. } = &self.expression else {
-            panic!("window specification replacement requires a window call")
-        };
-        let arguments = args.len();
-        let old_count = spec.partition_by.len() + spec.order_by.len() + frame_children(spec);
-        let old_bytes = spec.partition_by.capacity() * size_of::<ScalarExpr>()
-            + spec.order_by.capacity() * size_of::<ScalarOrder>()
-            + frame_children(spec) * size_of::<ScalarExpr>();
-        let new_count = replacement.value.partition_by.len()
-            + replacement.value.order_by.len()
-            + frame_children(&replacement.value);
-        if let Some(memory) = &mut self.memory {
-            memory.reserve_children(new_count.saturating_sub(old_count))?;
-        }
-        let ScalarExpr::WindowCall { spec, .. } = &mut self.expression else {
-            unreachable!()
-        };
-        let old = std::mem::replace(spec, replacement.value.take());
-        drop(Pending::new(old));
-        self.remove_child_owners(arguments..arguments + old_count);
-        if let Some(parent) = &mut self.memory {
-            drop(parent.direct.split(old_bytes));
-            let (direct, children) = replacement
-                .memory
-                .expect("controlled specification")
-                .into_parts();
-            let (children, children_memory) = children.into_parts();
-            for child in children {
-                parent
-                    .push_child(child)
-                    .expect("window child slots admitted before replacement");
-            }
-            drop(children_memory);
-            parent.children[arguments..].rotate_right(new_count);
-            parent.direct.absorb(direct);
-        }
-        control.check()?;
-        Ok(self)
-    }
 }

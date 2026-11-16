@@ -6,7 +6,7 @@
 
 //! Selected child rewrites retain parent metadata and transfer only constructor-owned buffers.
 
-use super::{children, OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
+use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::memory::ProductionControl;
 
@@ -50,11 +50,7 @@ impl OwnedScalarExpr {
         let replacement = map(&self.expression, child)?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let (expression, memory) = replacement.into_rewrite_parts();
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         Ok(self)
     }
 

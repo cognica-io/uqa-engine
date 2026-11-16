@@ -21,11 +21,7 @@ impl OwnedScalarExpr {
         replacement.assert_owner(control);
         control.check()?;
         let previous = self.take_child(index);
-        let (expression, memory) = replacement.into_rewrite_parts();
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         control.check()?;
         Ok((self, previous))
     }

@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Resolve canonical window inheritance through one shared ordinary and resumable implementation. Reuse ordered-map admission and bounded name comparison, and keep completed specifications under iterative retirement through later failures and cancellation. Scalar publication and retirement share allocation-free metadata folding. Complete mutable normalization and public backup restoration remain in progress.
+- Resolve canonical window inheritance through one shared ordinary and resumable implementation. Reuse ordered-map admission and bounded name comparison, and keep completed specifications under iterative retirement through later failures and cancellation. Scalar publication and retirement share allocation-free metadata folding. Window-call replacement and normalization share admitted traversal with ordinary execution, preserving argument/FILTER ownership and iterative cancellation cleanup. Complete mutable normalization and public backup restoration remain in progress.
 
 - Share analyzed scalar and window-specification copying between ready and suspended work, retaining original bindings, query positions and child allocation owners. Reuse payload producers, container admission and final publication; retire completed deep children through later metadata failures and window replacement without recursive destruction. Complete mutable normalization and public backup restoration remain in progress.
 

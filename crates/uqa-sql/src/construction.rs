@@ -13,9 +13,12 @@ use std::{
     task::Poll,
 };
 use uqa_core::{
-    memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl},
+    memory::{MemoryReservation, Produced, ProductionControl},
     ValueRetentionError,
 };
+
+pub(crate) use stack::Stack;
+mod stack;
 
 type Result<T> = std::result::Result<T, ValueRetentionError>;
 type Shared<T> = Arc<Produced<Mutex<T>>>;
@@ -135,48 +138,6 @@ impl<'a> Work<'a> {
     }
 }
 
-enum Tasks<'a> {
-    Ordinary(Vec<Task<'a>>),
-    Admitted(BudgetedVec<Task<'a>>),
-}
-
-impl<'a> Tasks<'a> {
-    fn new(control: ProductionControl<'_>) -> Self {
-        control.budget().map_or_else(
-            || Self::Ordinary(Vec::new()),
-            |budget| Self::Admitted(BudgetedVec::new(budget)),
-        )
-    }
-    fn push(&mut self, task: Task<'a>) -> Result<()> {
-        match self {
-            Self::Ordinary(tasks) => {
-                tasks
-                    .try_reserve(1)
-                    .map_err(uqa_core::memory::MemoryError::from)?;
-                tasks.push(task);
-            }
-            Self::Admitted(tasks) => tasks.push(task)?,
-        }
-        Ok(())
-    }
-    fn last_mut(&mut self) -> Option<&mut Task<'a>> {
-        match self {
-            Self::Ordinary(tasks) => tasks.last_mut(),
-            Self::Admitted(tasks) => tasks.last_mut(),
-        }
-    }
-    fn pop(&mut self) {
-        match self {
-            Self::Ordinary(tasks) => {
-                tasks.pop();
-            }
-            Self::Admitted(tasks) => {
-                tasks.pop();
-            }
-        }
-    }
-}
-
 enum Step<'a> {
     Child(Task<'a>),
     Checkpoint,
@@ -185,7 +146,7 @@ enum Step<'a> {
 }
 
 pub(crate) struct Driver<'a> {
-    tasks: Tasks<'a>,
+    tasks: Stack<Task<'a>>,
     queue: Shared<Queue<'a>>,
     control: ProductionControl<'a>,
 }
@@ -193,7 +154,7 @@ pub(crate) struct Driver<'a> {
 impl<'a> Driver<'a> {
     pub(crate) fn new(control: ProductionControl<'a>) -> Result<Self> {
         Ok(Self {
-            tasks: Tasks::new(control),
+            tasks: Stack::new(control),
             queue: shared(
                 Queue {
                     child: None,
