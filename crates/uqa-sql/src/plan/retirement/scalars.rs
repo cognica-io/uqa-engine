@@ -13,13 +13,26 @@ use crate::{
     },
     plan::{
         AssignmentPlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, MergeWhenPlan, OrderPlan,
-        ProjectionPlan, TableFunctionPlan, ViewCheckPlan,
+        ProjectionPlan, SourcePlan, TableFunctionPlan, ViewCheckPlan,
     },
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 
 pub(crate) trait Retire {
     fn retire(&mut self);
+}
+
+// Structural source children belong to the enclosing retained plan tree; this operation retires only the source's local scalar roots.
+impl Retire for SourcePlan {
+    fn retire(&mut self) {
+        match self {
+            Self::Table { .. } | Self::Subquery { .. } | Self::RetainedRows(_) => {}
+            Self::Join { on, .. } => on.retire(),
+            Self::Values { rows, .. } => rows.retire(),
+            Self::Function { args, .. } => args.retire(),
+            Self::FunctionGroup { functions, .. } => functions.retire(),
+        }
+    }
 }
 
 impl Retire for ScalarExpr {

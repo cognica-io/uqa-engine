@@ -37,9 +37,43 @@ pub(super) trait TextInput<Text> {
     ) -> impl Future<Output = Result<Produced<String>>> + Send;
 }
 
+pub(super) trait SourceMetadataInput<Type, Binding> {
+    fn ty(
+        &mut self,
+        source: Type,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<crate::ast::ColumnType>>> + Send;
+
+    fn binding(
+        &mut self,
+        source: Binding,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<crate::ast::FunctionBinding>>> + Send;
+}
+
 pub(super) struct InlineScalarInput<'a, 'c> {
     pub(super) aggregates: &'a dyn AggregateClassifier,
     pub(super) arena: &'a mut QueryArena<'c>,
+}
+
+impl<'s> SourceMetadataInput<&'s crate::ast::ColumnType, &'s crate::ast::FunctionBinding>
+    for InlineScalarInput<'_, '_>
+{
+    fn ty(
+        &mut self,
+        source: &'s crate::ast::ColumnType,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<crate::ast::ColumnType>>> + Send {
+        ready(source.clone_with_control(&control).map_err(Into::into))
+    }
+
+    fn binding(
+        &mut self,
+        source: &'s crate::ast::FunctionBinding,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<crate::ast::FunctionBinding>>> + Send {
+        ready(source.clone_with_control(&control).map_err(Into::into))
+    }
 }
 
 impl<'s> TextInput<&'s str> for InlineScalarInput<'_, '_> {

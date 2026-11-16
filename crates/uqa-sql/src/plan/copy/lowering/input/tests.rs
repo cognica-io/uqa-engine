@@ -16,6 +16,8 @@ use crate::{
     },
     SQLError, ScalarExpr, ScalarWindowSpec,
 };
+
+mod sources;
 use std::sync::Arc;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
@@ -24,6 +26,7 @@ use uqa_core::{
 };
 
 enum Source {
+    From(crate::ast::FromClause),
     Values(Vec<Expr>),
     Orders(Vec<OrderBy>),
     Optional(Option<Expr>, bool),
@@ -33,6 +36,7 @@ enum Source {
 
 #[derive(Debug)]
 enum Field {
+    From(crate::plan::SourcePlan),
     Values(Vec<ScalarExpr>),
     Orders(Vec<OrderPlan>),
     Optional(Option<ScalarExpr>),
@@ -44,6 +48,9 @@ enum Field {
 impl PartialEq for Field {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::From(left), Self::From(right)) => {
+                serde_json::to_value(left).unwrap() == serde_json::to_value(right).unwrap()
+            }
             (Self::Values(left), Self::Values(right)) => left == right,
             (Self::Optional(left), Self::Optional(right)) => left == right,
             (Self::Boxed(left), Self::Boxed(right)) => left == right,
@@ -68,6 +75,7 @@ impl PartialEq for Field {
 impl Retire for Field {
     fn retire(&mut self) {
         match self {
+            Self::From(source) => source.retire(),
             Self::Values(values) => values.retire(),
             Self::Orders(values) => values.retire(),
             Self::Optional(value) => value.retire(),
@@ -137,17 +145,45 @@ impl<'s> TextInput<&'s str> for Native<'_> {
         source: &'s str,
         control: ProductionControl<'_>,
     ) -> Result<Produced<String>> {
-        crate::catalog::work::copy_text(&mut self.work, source, &control).await
+        let copied = crate::catalog::work::copy_text(&mut self.work, source, &control).await?;
+        if source == "reject_source_alias" {
+            return Err(SQLError::Internal("rejected source alias".into()));
+        }
+        Ok(copied)
     }
 }
 
-fn retained_field<'s: 'a, 'c: 'a, 'a, I: ScalarInput<&'s Expr> + TextInput<&'s str> + Send + 'a>(
+impl<'s> SourceMetadataInput<&'s crate::ast::ColumnType, &'s crate::ast::FunctionBinding>
+    for Native<'_>
+{
+    async fn ty(
+        &mut self,
+        source: &'s crate::ast::ColumnType,
+        control: ProductionControl<'_>,
+    ) -> Result<Produced<crate::ast::ColumnType>> {
+        source.clone_with_input_work(&control, &mut self.work).await
+    }
+    async fn binding(
+        &mut self,
+        source: &'s crate::ast::FunctionBinding,
+        control: ProductionControl<'_>,
+    ) -> Result<Produced<crate::ast::FunctionBinding>> {
+        source.clone_with_input_work(&control, &mut self.work).await
+    }
+}
+
+fn retained_field<'s: 'a, 'c: 'a, 'a, I: super::super::source::leaf::Input<'s> + Send + 'a>(
     source: &'s Source,
     copying: &'a mut Copying<'c>,
     input: &'a mut I,
 ) -> Result<construction::Read<'a, Result<Pending<Field>>>> {
     Ok(construction::Read::new(copying.control, async move {
         Ok(Pending::new(match source {
+            Source::From(source) => Field::From(
+                super::super::source::leaf::construct(source, copying, input)
+                    .await?
+                    .take(),
+            ),
             Source::Values(values) => Field::Values(
                 scalars::construct_scalars(values, copying, input, |value| value, |_, value| value)
                     .await?

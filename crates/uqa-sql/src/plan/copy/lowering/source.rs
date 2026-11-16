@@ -4,11 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Copying, QueryArena, Result, SyntaxCopy};
+use super::{input::InlineScalarInput, Copying, QueryArena, Result};
 use crate::{
-    ast::{FromClause, TableFunction},
-    plan::{AggregateClassifier, JoinExecutionStrategy, SourcePlan, TableFunctionPlan},
+    ast::FromClause,
+    plan::{AggregateClassifier, JoinExecutionStrategy, SourcePlan},
 };
+
+pub(super) mod leaf;
 
 impl Copying<'_> {
     pub(super) fn lower_source(
@@ -21,10 +23,6 @@ impl Copying<'_> {
             copying.lower_source_fields(source, aggregates, arena)
         })
     }
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive source copying admits every destination field"
-    )]
     fn lower_source_fields(
         &mut self,
         source: &FromClause,
@@ -33,26 +31,6 @@ impl Copying<'_> {
     ) -> Result<SourcePlan> {
         self.check()?;
         Ok(match source {
-            FromClause::RetainedRows(rows) => SourcePlan::RetainedRows(rows.clone()),
-            FromClause::Table {
-                name,
-                qualifier,
-                alias,
-                column_aliases,
-                bound_columns,
-                include_descendants,
-            } => SourcePlan::Table {
-                name: self.field("name", |copying| copying.text(name))?,
-                executable_query: self.field("executable_query", |_| Ok(None))?,
-                qualifier: self.field("qualifier", |copying| copying.text(qualifier))?,
-                alias: self.optional_text(alias.as_deref())?,
-                column_aliases: self.texts(column_aliases)?,
-                bound_columns: bound_columns
-                    .as_ref()
-                    .map(|columns| self.texts(columns))
-                    .transpose()?,
-                include_descendants: *include_descendants,
-            },
             FromClause::Join {
                 comma,
                 left,
@@ -91,68 +69,6 @@ impl Copying<'_> {
                 lateral: *lateral,
                 strategy: JoinExecutionStrategy::Auto,
             },
-            FromClause::Values {
-                lateral,
-                rows,
-                alias,
-                column_aliases,
-                internal_relation,
-                internal_column_types,
-                internal_column_collations,
-            } => SourcePlan::Values {
-                lateral: *lateral,
-                rows: self.field("rows", |copying| {
-                    copying.lower_rows(rows, aggregates, arena)
-                })?,
-                alias: self.optional_text(alias.as_deref())?,
-                column_aliases: self.texts(column_aliases)?,
-                internal_relation: *internal_relation,
-                internal_column_types: self.map(internal_column_types.iter(), |copying, ty| {
-                    ty.as_ref().map(|ty| copying.ty(ty)).transpose()
-                })?,
-                internal_column_collations: self
-                    .map(internal_column_collations.iter(), |_, collation| {
-                        Ok(*collation)
-                    })?,
-            },
-            FromClause::Function {
-                name,
-                binding,
-                output_name,
-                relations,
-                args,
-                alias,
-                column_aliases,
-                ordinality,
-                column_types,
-            } => SourcePlan::Function {
-                name: self.text(name)?,
-                binding: self.field("binding", |copying| binding.copy_syntax(copying))?,
-                output_name: self.field("output_name", |copying| copying.text(output_name))?,
-                relations: self.field("relations", |copying| relations.copy_syntax(copying))?,
-                args: self.field("args", |copying| {
-                    copying.lower_scalars(args, aggregates, arena)
-                })?,
-                alias: self.optional_text(alias.as_deref())?,
-                column_aliases: self.texts(column_aliases)?,
-                ordinality: *ordinality,
-                column_types: self.texts(column_types)?,
-            },
-            FromClause::FunctionGroup {
-                functions,
-                alias,
-                column_aliases,
-                ordinality,
-            } => SourcePlan::FunctionGroup {
-                functions: self.field("functions", |copying| {
-                    copying.map(functions.iter(), |copying, function| {
-                        copying.lower_table_function(function, aggregates, arena)
-                    })
-                })?,
-                alias: self.optional_text(alias.as_deref())?,
-                column_aliases: self.texts(column_aliases)?,
-                ordinality: *ordinality,
-            },
             FromClause::Subquery {
                 lateral,
                 body,
@@ -167,28 +83,18 @@ impl Copying<'_> {
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
             },
-        })
-    }
-
-    fn lower_table_function(
-        &mut self,
-        function: &TableFunction,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<TableFunctionPlan> {
-        Ok(TableFunctionPlan {
-            name: self.text(&function.name)?,
-            binding: self.field("binding", |copying| function.binding.copy_syntax(copying))?,
-            output_name: self
-                .field("output_name", |copying| copying.text(&function.output_name))?,
-            relations: self.field("relations", |copying| {
-                function.relations.copy_syntax(copying)
-            })?,
-            args: self.field("args", |copying| {
-                copying.lower_scalars(&function.args, aggregates, arena)
-            })?,
-            column_aliases: self.texts(&function.column_aliases)?,
-            column_types: self.texts(&function.column_types)?,
+            FromClause::RetainedRows(_)
+            | FromClause::Table { .. }
+            | FromClause::Values { .. }
+            | FromClause::Function { .. }
+            | FromClause::FunctionGroup { .. } => {
+                return crate::catalog::work::inline(leaf::construct(
+                    source,
+                    self,
+                    &mut InlineScalarInput { aggregates, arena },
+                ))
+                .map(crate::plan::retirement::Pending::take);
+            }
         })
     }
 }

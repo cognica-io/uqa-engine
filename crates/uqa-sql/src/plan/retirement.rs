@@ -55,19 +55,7 @@ impl Node {
                 }
                 RelationalPlan::Values { rows, .. } => rows.retire(),
             },
-            Node::Source(source) => match source {
-                SourcePlan::Table { .. }
-                | SourcePlan::Subquery { .. }
-                | SourcePlan::RetainedRows(_) => {}
-                SourcePlan::Join { on, .. } => on.retire(),
-                SourcePlan::Values { rows, .. } => rows.retire(),
-                SourcePlan::Function { args, .. } => args.retire(),
-                SourcePlan::FunctionGroup { functions, .. } => {
-                    for function in functions {
-                        function.args.retire();
-                    }
-                }
-            },
+            Node::Source(source) => source.retire(),
             Node::Cte(cte) => cte.cycle.retire(),
             Node::Command(command) => commands::retire_scalars(command),
             Node::Expression(expression) => expression.scalar.retire(),

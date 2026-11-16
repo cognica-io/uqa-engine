@@ -23,6 +23,16 @@ impl FunctionBinding {
         control: &uqa_core::memory::ProductionControl<'_>,
         work: &mut uqa_core::image_io::AsyncImageInput<'_>,
     ) -> std::result::Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
+        self.clone_with_input_work(control, work).await
+    }
+
+    pub(in crate::plan) async fn clone_with_input_work<
+        W: super::ScalarInputWork<Error = crate::SQLError>,
+    >(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
         control.check()?;
         let mut copying = Lowering {
             control: control

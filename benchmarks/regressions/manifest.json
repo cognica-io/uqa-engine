@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -70810,6 +70810,84 @@
       "capability": "Controlled scalar construction",
       "workload": "Lower an 8,192-level scalar prefix before a rejected query on a 256 KiB stack and deny small construction allowances.",
       "invariant": "Use the shared iterative constructor while retaining typed subquery and memory errors and independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_preserve_ordinary_fields_and_query_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct table, VALUES, table-function and function-group sources with ordered scalar subqueries.",
+      "invariant": "Match ordinary, controlled and retained fields, preserve query slots and retire private reservations without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_metadata_owns_bound_names_types_and_call_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct long Unicode table and bound-column names, nested types, collations and selected function identities.",
+      "invariant": "Preserve every metadata payload after source retirement using the existing owning producers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_share_execution_row_identity_without_copying_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Retain empty, single-row and million-row execution sources through bounded source construction.",
+      "invariant": "Share the original internal relation and schema descriptor without traversing row contents or allocating during retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_bound_empty_and_wide_metadata_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct empty and 2,048-element bound-column, type, collation and table-function vectors.",
+      "invariant": "Yield for each metadata element, preserve output and release private reservations without allocating during retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_retire_each_suspended_prefix_and_denied_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Abandon or cancel every function-group input prefix through both cancellation owners and deny small destination allowances.",
+      "invariant": "Preserve cancellation and admission SQLSTATEs, terminal input state and independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_retire_deep_prefixes_after_metadata_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Reject a later source alias after constructing an 8,192-level row or argument prefix on a 256 KiB stack.",
+      "invariant": "Preserve the original callback error and retire every deep prefix iteratively before releasing its allowance.",
       "case_names": [
         ""
       ]
