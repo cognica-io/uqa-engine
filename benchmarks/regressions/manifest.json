@@ -71385,6 +71385,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_limits_each_work_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace 128 independently retained old window inputs through one-step image windows while observing each final source release.",
+      "invariant": "Retire at most one scalar root per work window without evaluating constants, and keep every old payload ahead of its constructor leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_preserves_owners_at_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every prefix of replacing two 32-level retained window inputs, through both cancellation owners.",
+      "invariant": "Release old payloads before their original reservations, allocate nothing during cleanup and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_suspends_before_releasing_deep_leaves",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace an 8192-level retained window input on a 256 KiB stack; observe the live leaf after 64 work windows, then finish or cancel through either token.",
+      "invariant": "The productive retirement itself suspends before reaching the deep leaf, and every completion/cancellation releases the full ownership tree without recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_specification_copy_admits_its_suspended_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Exhaust the remaining native allowance after constructing a window, then attempt empty-specification replacement through ordinary and retained entry points.",
+      "invariant": "Admit the suspended specification-copy workspace before allocating or polling it, reject immediately with the original input still safely owned and return all input reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

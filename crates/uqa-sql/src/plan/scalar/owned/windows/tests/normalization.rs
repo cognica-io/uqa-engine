@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod retirement;
+
 type Rewrite = ImageDecoder<OwnedScalarExpr, SQLError>;
 type Definitions = Arc<Pending<Vec<ScalarWindowSpec>>>;
 
@@ -236,35 +238,51 @@ fn window_normalization_preserves_argument_filter_and_specification_failure_orde
         *filter = Some(Box::new(call(Some(99))));
         spec.partition_by.push(call(Some(0)));
         let source = OwnedScalarExpr::uncontrolled(source);
-        let native = MemoryBudget::new(64 << 10);
-        let work = MemoryBudget::new(1 << 20);
-        let token = CancellationToken::new();
-        let control = ProductionControl::new(&native, &token, &token);
-        let ready = source
-            .copy_for_rewrite(&control)
-            .unwrap()
-            .normalize_window_definitions(&definitions, &control)
-            .unwrap_err();
-        let resumed = rewrite(
-            source.copy_for_rewrite(&control).unwrap(),
-            definitions.clone(),
-            &native,
-            &work,
-            &token,
-            &token,
-            true,
-        )
-        .read(&mut std::io::empty())
-        .unwrap_err();
-        assert_eq!(ready.to_string(), resumed.to_string());
+        let [(ready, ready_peak), (resumed, resumed_peak)] = [false, true].map(|retained| {
+            let native = MemoryBudget::new(64 << 10);
+            let work = MemoryBudget::new(1 << 20);
+            let token = CancellationToken::new();
+            let control = ProductionControl::new(&native, &token, &token);
+            let owned = source.copy_for_rewrite(&control).unwrap();
+            let error = if retained {
+                rewrite(
+                    owned,
+                    definitions.clone(),
+                    &native,
+                    &work,
+                    &token,
+                    &token,
+                    true,
+                )
+                .read(&mut std::io::empty())
+                .unwrap_err()
+            } else {
+                owned
+                    .normalize_window_definitions(&definitions, &control)
+                    .unwrap_err()
+            };
+            assert_eq!((native.used(), work.used()), (0, 0));
+            (error, native.peak())
+        });
         if arguments_first {
-            assert_eq!(ready.sqlstate(), Some("53200"));
+            // Each work type has its own admitted future layout; both diagnostics must identify the same denied payload above that actual workspace.
+            for (error, peak) in [(&ready, ready_peak), (&resumed, resumed_peak)] {
+                assert_eq!(error.sqlstate(), Some("53200"));
+                assert_eq!(
+                    error.to_string(),
+                    uqa_core::memory::MemoryError::Limit {
+                        required: peak + (1 << 20),
+                        limit: 64 << 10,
+                    }
+                    .to_string()
+                );
+            }
         } else {
+            assert_eq!(ready.to_string(), resumed.to_string());
             assert!(ready
                 .to_string()
                 .contains("a call refers to a missing window definition"));
         }
-        assert_eq!((native.used(), work.used()), (0, 0));
     }
 }
 
