@@ -29,6 +29,31 @@ macro_rules! integer {
 }
 
 impl JsonValue<'_> {
+    /// Read the arbitrary-precision generic number's direct f64 visitor. This is distinct from text parsing and content buffering: the public number visitor uses Rust's scalar conversion, including signed zero and infinity on overflow.
+    pub async fn read_f64_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<f64, JsonInputError> {
+        control.check().map_err(JsonReadError::from)?;
+        work.checkpoint().await?;
+        control.check().map_err(JsonReadError::from)?;
+        if let Some(text) = self.number_text() {
+            return text.parse().map_err(|_| {
+                JsonDiagnostic::from(JsonSyntaxError {
+                    kind: JsonSyntaxKind::InvalidNumber,
+                    position: JsonPosition::unlocated(),
+                })
+                .into()
+            });
+        }
+        Err(
+            JsonDiagnostic::projected_type_with_work(self, "f64", control, work)
+                .await?
+                .into(),
+        )
+    }
+
     integer!(read_u8_with_work, u8, 3);
     integer!(read_u32_with_work, u32, 10);
     integer!(read_u64_with_work, u64, 20);

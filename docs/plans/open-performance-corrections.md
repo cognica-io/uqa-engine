@@ -1,6 +1,10 @@
 # Open performance corrections
 
-## Current controlled qualification (2026-11-01)
+## Current controlled cursor regression (2026-11-15 UTC)
+
+Automatic [run 43754562077](https://github.com/cognica-io/uqa-engine/actions/runs/43754562077) fails on main `6d0a1ed49690e8c5c353fcc7916557470f221675`: cursor scan has paired ratio 1.1753800455067358 and independently calibrated interval [1.1670944402157417, 1.1837244731626326], above the unchanged 1.15 limit. Q1, Q6, materialized scan and all sixteen claim comparisons are accepted. Seven signatures, the analytical control/calibration bindings and all twenty paired medians and ratio decisions verify. The [performance record](../design/performance.md#controlled-cursor-regression-2026-11-15-utc) retains measured times and compact artifact provenance. [#653](https://github.com/cognica-io/uqa-engine/issues/653) keeps cause attribution, correction and corrected-source qualification open; the earlier accepted source below does not qualify this later source.
+
+## Historical controlled qualification (2026-11-01)
 
 [PR #1315](https://github.com/cognica-io/uqa-engine/pull/1315) is merged as `e8abe2c88cc2ea442e7e886e5c917a2ea14cb186`. Automatic [controlled run 41282309353](https://github.com/cognica-io/uqa-engine/actions/runs/41282309353) accepts all twenty comparisons under the existing references, inputs and limits. Q1 is 1.030736 with calibrated interval [1.018662, 1.042952] below 1.10; Q6 is 0.711769 [0.705651, 0.717941], materialized output 0.884942 [0.866155, 0.904135] and cursor output 1.068569 [1.053854, 1.083489]. All seven signatures, 160 resource hashes, independent calibration and comparison observations, bounds and decisions verify. The [performance record](../design/performance.md#controlled-analytical-and-claim-qualification-2026-11-01) retains measured times, complete comparison intervals and artifact provenance. Current Q1 qualification is complete; original historical instruction-throughput attribution under #653 remains open.
 

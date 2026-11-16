@@ -6,13 +6,78 @@
 
 use super::JsonValue;
 use crate::{
-    json::{JsonDiagnostic, JsonInputError, JsonReadError, JsonReadWork},
+    json::{
+        JsonDiagnostic, JsonInputError, JsonPosition, JsonReadError, JsonReadWork, JsonValueKind,
+    },
     memory::{Produced, ProductionControl, ProductionString},
 };
 
 mod numbers;
+#[cfg(test)]
+mod tests;
 
 impl JsonValue<'_> {
+    /// Decode a unit enum after generic-value construction. Object cardinality precedes variant selection, and a known object variant requires a unit payload.
+    pub async fn read_unit_variant_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        self,
+        variants: &'static [&'static str],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<usize, JsonInputError> {
+        work.checkpoint().await?;
+        control.check().map_err(JsonReadError::from)?;
+        let (name, payload) = if let Some(name) = self.as_str() {
+            (name, None)
+        } else if let Some(mut fields) = self.fields() {
+            let first = fields.next();
+            let Some((name, payload)) = first.filter(|_| fields.next().is_none()) else {
+                return Err(JsonDiagnostic::message(
+                    "invalid value: map, expected map with a single key",
+                    JsonPosition::unlocated(),
+                )
+                .into());
+            };
+            (name, Some(payload))
+        } else {
+            return Err(JsonDiagnostic::projected_type_with_work(
+                self,
+                "string or map",
+                control,
+                work,
+            )
+            .await?
+            .into());
+        };
+        let Some(index) = variants.iter().position(|variant| *variant == name) else {
+            let mut text = ProductionString::new(*control);
+            let mut begin = 0;
+            while begin < name.len() {
+                work.checkpoint().await?;
+                let mut end = (begin + 4096).min(name.len());
+                while !name.is_char_boundary(end) {
+                    end -= 1;
+                }
+                text.push_str(&name[begin..end])
+                    .map_err(JsonReadError::from)?;
+                begin = end;
+            }
+            return Err(JsonDiagnostic::unknown_variant(
+                text.finish().map_err(JsonReadError::from)?,
+                variants,
+                JsonPosition::unlocated(),
+            )
+            .into());
+        };
+        if let Some(payload) = payload.filter(|value| value.kind() != JsonValueKind::Null) {
+            return Err(
+                JsonDiagnostic::projected_type_with_work(payload, "unit", control, work)
+                    .await?
+                    .into(),
+            );
+        }
+        Ok(index)
+    }
+
     /// Adopt an independently admitted string from a complete generic value; a type failure retains its original unlocated diagnostic.
     pub async fn read_string_with_work<W: JsonReadWork<Error = JsonReadError>>(
         self,

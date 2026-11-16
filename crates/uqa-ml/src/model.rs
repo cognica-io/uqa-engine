@@ -8,6 +8,8 @@
 
 use std::collections::BTreeMap;
 
+pub(crate) mod fields;
+
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use uqa_core::{DocId, Value};
 use uqa_operators::{base::Direction, ExecutionContext, Operator};
@@ -120,94 +122,15 @@ impl<'de> Deserialize<'de> for DeepLayerSpec {
         let mut fields = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
         let kind = take_layer_field::<String, D::Error>(&mut fields, "layer", "kind")?;
         macro_rules! field {
-            ($name:literal) => {
-                take_layer_field::<_, D::Error>(&mut fields, &kind, $name)
+            ($kind:literal, $name:literal, $method:ident) => {
+                take_layer_field::<_, D::Error>(&mut fields, $kind, $name)
             };
         }
-        Ok(match kind.as_str() {
-            "input" => Self::Input {
-                dimensions: field!("dimensions")?,
-            },
-            "embed" => Self::Embed {
-                embedding: field!("embedding")?,
-            },
-            "dense" => Self::Dense {
-                weights: field!("weights")?,
-                bias: field!("bias")?,
-                output_channels: field!("output_channels")?,
-                input_channels: field!("input_channels")?,
-            },
-            "flatten" => Self::Flatten,
-            "global_pool" => Self::GlobalPool {
-                method: field!("method")?,
-            },
-            "softmax" => Self::Softmax,
-            "batch_norm" => Self::BatchNorm {
-                epsilon: field!("epsilon")?,
-            },
-            "dropout" => Self::Dropout { p: field!("p")? },
-            "cnn_1d" => Self::CNN1D {
-                weights: field!("weights")?,
-                bias: field!("bias")?,
-                output_channels: field!("output_channels")?,
-                input_channels: field!("input_channels")?,
-                kernel_size: field!("kernel_size")?,
-                stride: field!("stride")?,
-                padding: field!("padding")?,
-            },
-            "cnn_2d" => Self::CNN2D {
-                weights: field!("weights")?,
-                bias: field!("bias")?,
-                output_channels: field!("output_channels")?,
-                input_channels: field!("input_channels")?,
-                input_height: field!("input_height")?,
-                input_width: field!("input_width")?,
-                kernel_height: field!("kernel_height")?,
-                kernel_width: field!("kernel_width")?,
-                stride_height: field!("stride_height")?,
-                stride_width: field!("stride_width")?,
-                padding_height: field!("padding_height")?,
-                padding_width: field!("padding_width")?,
-            },
-            "propagate" => Self::Propagate {
-                edge_label: field!("edge_label")?,
-                aggregation: field!("aggregation")?,
-                direction: field!("direction")?,
-            },
-            "conv" => Self::Conv {
-                edge_label: field!("edge_label")?,
-                hop_weights: field!("hop_weights")?,
-                direction: field!("direction")?,
-            },
-            "pool" => Self::Pool {
-                edge_label: field!("edge_label")?,
-                pool_size: field!("pool_size")?,
-                method: field!("method")?,
-                direction: field!("direction")?,
-            },
-            "attention" => Self::Attention,
-            "rnn" => Self::RNN {
-                weights_input: field!("weights_input")?,
-                weights_hidden: field!("weights_hidden")?,
-                bias: field!("bias")?,
-                hidden_channels: field!("hidden_channels")?,
-                input_channels: field!("input_channels")?,
-                return_sequences: field!("return_sequences")?,
-            },
-            "lstm" => Self::LSTM {
-                weights_input: field!("weights_input")?,
-                weights_hidden: field!("weights_hidden")?,
-                bias: field!("bias")?,
-                hidden_channels: field!("hidden_channels")?,
-                input_channels: field!("input_channels")?,
-                return_sequences: field!("return_sequences")?,
-            },
-            other => {
-                return Err(serde::de::Error::custom(format!(
-                    "unknown deep layer kind `{other}`"
-                )))
-            }
-        })
+        Ok(fields::layer_fields!(kind.as_str(), field, {
+            return Err(serde::de::Error::custom(format!(
+                "unknown deep layer kind `{kind}`"
+            )));
+        }))
     }
 }
 

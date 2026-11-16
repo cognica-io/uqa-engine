@@ -172,3 +172,42 @@ fn generic_document_typed_integer_adopts_no_source_or_scalar_allocation() {
     assert_eq!(source_memory.used(), 0);
     assert_eq!(result, Some(u64::MAX));
 }
+
+#[test]
+fn generic_document_f64_matches_direct_number_visitation_and_exact_bits() {
+    for text in [
+        "null",
+        "true",
+        "[]",
+        "{}",
+        "\"secret\"",
+        "-0",
+        "-0.0",
+        "0.1",
+        "1.2345678901234567",
+        "18446744073709551616",
+        "1e-400",
+        "1e400",
+    ] {
+        let expected = serde_json::from_value::<f64>(serde_json::from_str(text).unwrap());
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &token);
+        let source =
+            JsonDocument::read_with_control(text.as_bytes(), &control, protocol()).unwrap();
+        let actual = crate::json::work::inline(source.root().read_f64_with_work(&control, &mut ()));
+        match (expected, actual) {
+            (Ok(expected), Ok(actual)) => {
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{text}");
+            }
+            (Err(expected), Err(JsonInputError::Diagnostic(actual))) => {
+                assert_eq!(actual.to_string(), expected.to_string());
+                assert_eq!(actual.is_syntax(), expected.is_syntax());
+                assert_eq!(actual.is_data(), expected.is_data());
+            }
+            other => panic!("float result differs: {other:?}"),
+        }
+        drop(source);
+        assert_eq!(memory.used(), 0);
+    }
+}
