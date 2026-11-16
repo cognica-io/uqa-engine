@@ -9,6 +9,8 @@
 use super::super::scalar::ScalarMemory;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 
+mod retirement;
+
 #[derive(Debug)]
 pub(crate) enum RewriteMemory {
     Fields {
@@ -54,34 +56,7 @@ impl RewriteMemory {
     }
 
     pub(crate) fn into_reservation(self) -> Option<MemoryReservation> {
-        match self {
-            Self::Scalar(memory) => memory.map(ScalarMemory::into_reservation),
-            Self::Scalars {
-                mut direct,
-                mut items,
-            } => {
-                while let Some(memory) = items.pop() {
-                    if let Some(memory) = memory {
-                        direct.absorb(memory.into_reservation());
-                    }
-                }
-                drop(items);
-                Some(direct)
-            }
-            Self::Fields {
-                mut direct,
-                mut fields,
-            } => {
-                while let Some(field) = fields.pop() {
-                    if let Some(memory) = field.memory.and_then(Self::into_reservation) {
-                        direct.absorb(memory);
-                    }
-                }
-                // Constructor records are temporary; their capacity is not executable storage.
-                drop(fields);
-                Some(direct)
-            }
-        }
+        retirement::fold(self)
     }
 
     pub(super) fn field_mut(&mut self, name: &str) -> &mut Option<Self> {

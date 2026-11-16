@@ -4,6 +4,45 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "deep_query_constructor_records_fold_and_drop_without_recursive_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Fold and drop 8,192 nested query constructor records on a 256 KiB thread stack.",
+      "invariant": "Payload leases survive freezing while temporary metadata is released; both paths allocate nothing during cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_query_constructor_records_retire_deep_partial_owners_and_keep_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Deny five allowances while constructing deep mixed field/scalar metadata.",
+      "invariant": "Failed admission releases all partial records and preserves a separate 47-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "moving_query_constructor_fields_preserves_exact_surviving_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Detach a nested constructor field, retire its original parent and freeze the child.",
+      "invariant": "The detached field retains exactly its original lease; parent and scratch metadata disappear independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_computation_preserves_aggregate_precedence_and_query_window_boundaries",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",

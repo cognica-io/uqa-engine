@@ -312,6 +312,7 @@ impl<'a> Copying<'a> {
                 .pop()
                 .expect("single scalar field")
                 .memory
+                .take()
                 .expect("scalar owner");
         }
         RewriteMemory::Fields { direct, fields }
