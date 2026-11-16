@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -70680,6 +70680,71 @@
       "capability": "Retained query field construction",
       "workload": "Construct empty and 2,048-element projection and window-definition vectors through one-step work windows.",
       "invariant": "Preserve exact projection values and window fields; empty and wide vectors consume bounded work and release every destination and work reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_preserve_ordinary_paths_positions_and_query_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct assignment paths, grouped targets, conflict actions and all MERGE clause kinds through one-step work windows.",
+      "invariant": "Match independently lowered native fields, original query-arena slots, overriding flags and first-use order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_keep_owned_names_and_nonconsecutive_source_positions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct grouped assignment targets with long Unicode column/field names and sparse positional mappings, then retire the source.",
+      "invariant": "Keep exact names, source width and positions independently owned after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_vectors_bound_empty_and_wide_clause_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct empty and 2,048-element target, assignment and MERGE vectors.",
+      "invariant": "Every vector consumes bounded work, preserves its complete shape and retires without cleanup allocations or remaining reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_retire_every_suspended_prefix_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/retirement.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Abandon or cancel every retained target, assignment, conflict and MERGE prefix under both cancellation owners; deny output allowances.",
+      "invariant": "Keep completed prefixes private and admitted; release work and destination owners without allocation while preserving an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_retire_deep_prefixes_after_late_callback_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/retirement.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Reject a later query after producing an 8,192-level target, action or value prefix on a 256 KiB stack.",
+      "invariant": "Preserve the original callback failure and retire every deep prefix iteratively without consuming an independent sibling lease.",
       "case_names": [
         ""
       ]

@@ -56,9 +56,7 @@ impl Copying<'_> {
             target_alias: self.optional_text(statement.target_alias.as_deref())?,
             include_descendants: statement.include_descendants,
             columns: self.field("columns", |copying| {
-                copying.map(statement.columns.iter(), |copying, target| {
-                    copying.lower_assignment_target(target, aggregates, &mut arena)
-                })
+                copying.lower_assignment_targets(&statement.columns, aggregates, &mut arena)
             })?,
             overriding: statement.overriding,
             ctes,
@@ -97,9 +95,7 @@ impl Copying<'_> {
                 .transpose()
         })?;
         let assignments = self.field("assignments", |copying| {
-            copying.map(statement.assignments.iter(), |copying, assignment| {
-                copying.lower_assignment(assignment, aggregates, &mut arena)
-            })
+            copying.lower_assignments(&statement.assignments, aggregates, &mut arena)
         })?;
         let predicate = self.field("predicate", |copying| {
             copying.lower_optional_scalar(statement.r#where.as_ref(), aggregates, &mut arena)
@@ -193,9 +189,7 @@ impl Copying<'_> {
             copying.lower_scalar(&statement.join_condition, aggregates, &mut arena)
         })?;
         let when_clauses = self.field("when_clauses", |copying| {
-            copying.map(statement.when_clauses.iter(), |copying, clause| {
-                copying.lower_merge_when(clause, aggregates, &mut arena)
-            })
+            copying.lower_merge_whens(&statement.when_clauses, aggregates, &mut arena)
         })?;
         let returning = self.field("returning", |copying| {
             copying.map(statement.returning.iter(), |copying, projection| {

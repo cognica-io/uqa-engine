@@ -15,16 +15,6 @@ use crate::{
 };
 
 impl Copying<'_> {
-    pub(super) fn lower_scalar_box(
-        &mut self,
-        expression: &Expr,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Box<ScalarExpr>> {
-        self.lower_optional_scalar_box(Some(expression), aggregates, arena)
-            .map(|value| value.expect("supplied scalar expression"))
-    }
-
     pub(super) fn lower_optional_scalar(
         &mut self,
         expression: Option<&Expr>,
