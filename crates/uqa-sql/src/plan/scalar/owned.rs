@@ -25,6 +25,7 @@ mod generated;
 mod iteration;
 mod literals;
 mod metadata;
+mod publication;
 mod query_ids;
 mod references;
 mod replacement;
@@ -311,11 +312,7 @@ impl OwnedScalarExpr {
 
     /// Freeze a completed rewrite. Surviving IR reservations become one immutable lease, while the temporary ownership metadata is destroyed and its capacity released.
     pub fn finish(self, control: &ProductionControl<'_>) -> Result<Produced<ScalarExpr>> {
-        self.assert_owner(control);
-        control.check()?;
-        let (expression, memory) = self.into_rewrite_parts();
-        let memory = memory.map(ScalarMemory::into_reservation);
-        Ok(control.finish(expression, memory)?)
+        publication::Publication::new(self, control)?.finish(control)
     }
 
     fn assert_owner(&self, control: &ProductionControl<'_>) {

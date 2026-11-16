@@ -162,9 +162,9 @@ The bounded catalog-continuation candidate integrates native metadata, authority
 
 | Scope | Complete | Remaining |
 | --- | --- | --- |
-| All live checkboxes, including parent and child items | 87 of 100 | 13 unchecked: five original requirements and eight child items |
+| Original delivery checklist, including parent and child items | 91 of 100 | Nine unchecked: five original requirements and four child items |
 | Original requirements, delivered | 13 of 18 | Five delivery requirements below |
-| Implementation and integration child items | 74 of 82 | Eight child items below |
+| Implementation and integration child items in that checklist | 78 of 82 | Four child items below |
 | Native catalog input components | 24 of 24 delivered | Complete bounded Engine catalog composition remains open |
 | Table metadata input slots | 10 of 10 delivered | Complete bounded Engine catalog composition remains open |
 | Native dictionary frame input | Delivered through #1404 | Complete Engine restoration remains in the parent requirement |

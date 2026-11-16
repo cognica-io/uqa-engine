@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -70589,6 +70589,19 @@
       "capability": "Retained window definition construction",
       "workload": "Construct an 8,192-level partition expression on a 256 KiB stack before an ordering query rejects the definition.",
       "invariant": "Retire the completed partition and all partial field owners without recursive cleanup or leaked destination/work memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "late_scalar_publication_cancellation_retires_deep_roots_before_their_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Retained scalar publication",
+      "workload": "Cancel each owner after freezing an 8,192-level scalar and abandon the same prepared publication on a 256 KiB stack.",
+      "invariant": "The final fallible handoff retains iterative destruction; every scalar allocation retires before its folded lease without allocating cleanup memory or consuming a sibling lease.",
       "case_names": [
         ""
       ]

@@ -88,3 +88,52 @@ fn deep_scalar_rewrite_failure_retires_detached_child_and_remaining_siblings() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn late_scalar_publication_cancellation_retires_deep_roots_before_their_leases() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            for cancellation in 0..3 {
+                let memory = MemoryBudget::new(16 << 20);
+                let sibling = memory.reserve(37).unwrap();
+                let original = CancellationToken::new();
+                let invoking = CancellationToken::new();
+                let control = ProductionControl::new(&memory, &original, &invoking);
+                let value = deep(&control);
+                let before = memory.used();
+                let publication =
+                    super::super::publication::Publication::new(value, &control).unwrap();
+                assert!(memory.used() < before);
+                let retained = memory.used() - 37;
+                if cancellation == 1 {
+                    original.cancel();
+                } else if cancellation == 2 {
+                    invoking.cancel();
+                }
+                let mut error = None;
+                let measured = allocation_counter::measure(|| {
+                    if cancellation == 0 {
+                        drop(publication);
+                    } else {
+                        error = Some(
+                            publication
+                                .finish(&control)
+                                .expect_err("cancelled publication"),
+                        );
+                    }
+                });
+                assert_eq!(measured.count_total, 0);
+                assert_eq!(measured.bytes_current, -i64::try_from(retained).unwrap());
+                if let Some(error) = error {
+                    assert_eq!(crate::SQLError::from(error).sqlstate(), Some("57014"));
+                }
+                assert_eq!(memory.used(), 37);
+                drop(sibling);
+                assert_eq!(memory.used(), 0);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
