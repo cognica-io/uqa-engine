@@ -17,15 +17,15 @@ use crate::{
 use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
-trait ProjectionInput<'s>: ScalarInput<'s> {
+trait ProjectionInput<Expression, Text>: ScalarInput<Expression> {
     fn text(
         &mut self,
-        source: &'s str,
+        source: Text,
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<String>>> + Send;
 }
 
-impl<'s> ProjectionInput<'s> for InlineScalarInput<'_, '_> {
+impl<'s> ProjectionInput<&'s crate::ast::Expr, &'s str> for InlineScalarInput<'_, '_> {
     fn text(
         &mut self,
         source: &'s str,
@@ -51,7 +51,7 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_projection<'s, I: ProjectionInput<'s>>(
+async fn construct_projection<'s, I: ProjectionInput<&'s crate::ast::Expr, &'s str>>(
     projection: &'s Projection,
     control: ProductionControl<'_>,
     input: &mut I,

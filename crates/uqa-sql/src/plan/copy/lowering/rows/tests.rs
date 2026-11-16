@@ -20,7 +20,7 @@ use uqa_core::{
 struct NativeRows<'a>(Work<'a>);
 
 impl Copying<'_> {
-    fn lower_rows_with<'s: 'a, 'a, I: ScalarInput<'s> + Send + 'a>(
+    fn lower_rows_with<'s: 'a, 'a, I: ScalarInput<&'s crate::ast::Expr> + Send + 'a>(
         &'a mut self,
         rows: &'s [Vec<Expr>],
         input: &'a mut I,
@@ -38,7 +38,7 @@ impl Copying<'_> {
     }
 }
 
-impl<'s> ScalarInput<'s> for NativeRows<'_> {
+impl<'s> ScalarInput<&'s crate::ast::Expr> for NativeRows<'_> {
     async fn checkpoint(&mut self) -> Result<()> {
         self.0.checkpoint().await;
         Ok(())
@@ -50,7 +50,10 @@ impl<'s> ScalarInput<'s> for NativeRows<'_> {
         control: ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
         struct Queries;
-        impl<'s> crate::plan::scalar::ScalarQueryInput<'s> for Queries {
+        impl<'s>
+            crate::plan::scalar::ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>
+            for Queries
+        {
             async fn append(
                 &mut self,
                 _: &'s crate::ast::SelectStmt,

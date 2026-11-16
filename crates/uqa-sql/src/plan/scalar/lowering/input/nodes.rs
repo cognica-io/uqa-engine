@@ -20,7 +20,7 @@ impl Lowering<'_> {
     pub(super) async fn scalar_node_from<
         's,
         W: ScalarInputWork<Error = SQLError>,
-        Q: ScalarQueryInput<'s>,
+        Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>,
     >(
         &mut self,
         source: &'s Expr,

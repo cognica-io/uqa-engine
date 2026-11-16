@@ -36,7 +36,7 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_window<'s, I: ScalarInput<'s>>(
+async fn construct_window<'s, I: ScalarInput<&'s crate::ast::Expr>>(
     window: &'s WindowSpec,
     copying: &mut Copying<'_>,
     input: &mut I,
@@ -100,7 +100,7 @@ async fn construct_window<'s, I: ScalarInput<'s>>(
     }))
 }
 
-async fn construct_scalars<'s, T: Sync, U: Retire + Send, I: ScalarInput<'s>>(
+async fn construct_scalars<'s, T: Sync, U: Retire + Send, I: ScalarInput<&'s crate::ast::Expr>>(
     source: &'s [T],
     copying: &mut Copying<'_>,
     input: &mut I,
@@ -131,7 +131,7 @@ async fn construct_scalars<'s, T: Sync, U: Retire + Send, I: ScalarInput<'s>>(
     Ok(Pending::new(values))
 }
 
-async fn construct_bound<'s, I: ScalarInput<'s>>(
+async fn construct_bound<'s, I: ScalarInput<&'s crate::ast::Expr>>(
     source: &'s FrameBound,
     copying: &mut Copying<'_>,
     input: &mut I,

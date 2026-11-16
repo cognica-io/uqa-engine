@@ -20,7 +20,7 @@ use uqa_core::{
 
 struct NativeProjection<'a>(Work<'a>);
 
-impl<'s> ScalarInput<'s> for NativeProjection<'_> {
+impl<'s> ScalarInput<&'s crate::ast::Expr> for NativeProjection<'_> {
     async fn checkpoint(&mut self) -> Result<()> {
         self.0.checkpoint().await;
         Ok(())
@@ -32,7 +32,10 @@ impl<'s> ScalarInput<'s> for NativeProjection<'_> {
         control: ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
         struct Queries;
-        impl<'s> crate::plan::scalar::ScalarQueryInput<'s> for Queries {
+        impl<'s>
+            crate::plan::scalar::ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>
+            for Queries
+        {
             async fn append(
                 &mut self,
                 _: &'s crate::ast::SelectStmt,
@@ -51,7 +54,7 @@ impl<'s> ScalarInput<'s> for NativeProjection<'_> {
     }
 }
 
-impl<'s> ProjectionInput<'s> for NativeProjection<'_> {
+impl<'s> ProjectionInput<&'s crate::ast::Expr, &'s str> for NativeProjection<'_> {
     async fn text(
         &mut self,
         source: &'s str,
@@ -61,7 +64,11 @@ impl<'s> ProjectionInput<'s> for NativeProjection<'_> {
     }
 }
 
-fn retained_projection<'s: 'a, 'a, I: ProjectionInput<'s> + Send + 'a>(
+fn retained_projection<
+    's: 'a,
+    'a,
+    I: ProjectionInput<&'s crate::ast::Expr, &'s str> + Send + 'a,
+>(
     source: &'s Projection,
     control: ProductionControl<'a>,
     input: &'a mut I,

@@ -38,7 +38,7 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_rows<'s, I: ScalarInput<'s>>(
+async fn construct_rows<'s, I: ScalarInput<&'s crate::ast::Expr>>(
     rows: &'s [Vec<Expr>],
     input: &mut I,
     control: ProductionControl<'_>,

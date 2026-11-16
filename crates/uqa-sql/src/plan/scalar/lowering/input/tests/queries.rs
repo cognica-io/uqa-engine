@@ -13,7 +13,7 @@ struct Queries<'a> {
     replace_query: bool,
 }
 
-impl<'s> ScalarQueryInput<'s> for Queries<'s> {
+impl<'s> ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt> for Queries<'s> {
     async fn parameter(
         &mut self,
         expression: &'s Expr,

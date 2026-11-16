@@ -20,10 +20,10 @@ mod nodes;
 mod work;
 
 /// Query slots and parameter substitutions belong to the enclosing private plan constructor. Native implementations retain their own query construction state through the supplied work channel and selected production control; a failed enclosing construction retires its private arena.
-pub(in crate::plan) trait ScalarQueryInput<'s>: Send {
+pub(in crate::plan) trait ScalarQueryInput<Expression, Query>: Send {
     fn parameter(
         &mut self,
-        _expression: &'s Expr,
+        _expression: Expression,
         control: &ProductionControl<'_>,
     ) -> impl Future<Output = Result<Option<usize>, SQLError>> + Send {
         async {
@@ -34,14 +34,14 @@ pub(in crate::plan) trait ScalarQueryInput<'s>: Send {
 
     fn append(
         &mut self,
-        query: &'s crate::ast::SelectStmt,
+        query: Query,
         control: &ProductionControl<'_>,
     ) -> impl Future<Output = Result<usize, SQLError>> + Send;
 }
 
 struct NoQueries;
 
-impl<'s> ScalarQueryInput<'s> for NoQueries {
+impl<'s> ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt> for NoQueries {
     async fn append(
         &mut self,
         _: &'s crate::ast::SelectStmt,
@@ -67,7 +67,10 @@ impl Drop for Frame<'_, '_> {
 }
 
 impl<'s, 'c> Frame<'s, 'c> {
-    async fn new<W: ScalarInputWork<Error = SQLError>, Q: ScalarQueryInput<'s>>(
+    async fn new<
+        W: ScalarInputWork<Error = SQLError>,
+        Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>,
+    >(
         source: &'s Expr,
         control: ProductionControl<'c>,
         queries: &mut Q,
@@ -95,7 +98,7 @@ impl<'s, 'c> Frame<'s, 'c> {
         })
     }
 
-    async fn finish<Q: ScalarQueryInput<'s>>(
+    async fn finish<Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>>(
         mut self,
         queries: &mut Q,
     ) -> Result<OwnedScalarExpr, SQLError> {
@@ -146,7 +149,7 @@ impl crate::plan::ExpressionPlan {
         's: 'a,
         'a,
         W: ScalarInputWork<Error = SQLError> + 'a,
-        Q: ScalarQueryInput<'s> + 'a,
+        Q: ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt> + 'a,
     >(
         expression: &'s Expr,
         queries: &'a mut Q,

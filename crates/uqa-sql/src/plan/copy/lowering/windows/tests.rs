@@ -26,7 +26,9 @@ struct Queries<'a> {
     values: BudgetedVec<i64>,
 }
 
-impl<'s> crate::plan::scalar::ScalarQueryInput<'s> for Queries<'_> {
+impl<'s> crate::plan::scalar::ScalarQueryInput<&'s crate::ast::Expr, &'s crate::ast::SelectStmt>
+    for Queries<'_>
+{
     async fn append(
         &mut self,
         query: &'s SelectStmt,
@@ -51,7 +53,7 @@ struct Native<'a> {
     queries: Queries<'a>,
 }
 
-impl<'s> ScalarInput<'s> for Native<'_> {
+impl<'s> ScalarInput<&'s crate::ast::Expr> for Native<'_> {
     async fn checkpoint(&mut self) -> Result<()> {
         self.work.checkpoint().await;
         Ok(())
@@ -75,7 +77,7 @@ impl<'s> ScalarInput<'s> for Native<'_> {
 type Output = (Pending<ScalarWindowSpec>, RewriteMemory, BudgetedVec<i64>);
 type Input = ImageDecoder<Output, SQLError>;
 
-fn retained_window<'s: 'a, 'c: 'a, 'a, I: ScalarInput<'s> + Send + 'a>(
+fn retained_window<'s: 'a, 'c: 'a, 'a, I: ScalarInput<&'s crate::ast::Expr> + Send + 'a>(
     source: &'s WindowSpec,
     copying: &'a mut Copying<'c>,
     input: &'a mut I,

@@ -14,11 +14,11 @@ use crate::{
 use std::future::{ready, Future};
 use uqa_core::memory::ProductionControl;
 
-pub(super) trait ScalarInput<'s> {
+pub(super) trait ScalarInput<Expression> {
     fn checkpoint(&mut self) -> impl Future<Output = Result<()>> + Send;
     fn scalar(
         &mut self,
-        expression: &'s Expr,
+        expression: Expression,
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<OwnedScalarExpr>> + Send;
 }
@@ -28,7 +28,7 @@ pub(super) struct InlineScalarInput<'a, 'c> {
     pub(super) arena: &'a mut QueryArena<'c>,
 }
 
-impl<'s> ScalarInput<'s> for InlineScalarInput<'_, '_> {
+impl<'s> ScalarInput<&'s crate::ast::Expr> for InlineScalarInput<'_, '_> {
     fn checkpoint(&mut self) -> impl Future<Output = Result<()>> + Send {
         ready(Ok(()))
     }
