@@ -70925,7 +70925,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/retirement/construction/tests.rs",
       "capability": "Executable construction prefix ownership",
-      "workload": "Retire an 8192-level source tree and 2048 sibling prefixes using one depth-admitted workspace on a 256 KiB thread stack.",
+      "workload": "Retire an 8192-level source tree and 2048 sibling prefixes using one depth-admitted workspace on a 256 KiB thread stack, with controlled and ordinary ownership.",
       "invariant": "Reuse the existing plan-tree retirement algorithm with zero cleanup allocations and depth-bounded shared capacity, preserving sibling reservations.",
       "case_names": [
         ""
@@ -71434,6 +71434,58 @@
       "capability": "Retained canonical window resolution",
       "workload": "Exhaust the remaining native allowance after constructing a window, then attempt empty-specification replacement through ordinary and retained entry points.",
       "invariant": "Admit the suspended specification-copy workspace before allocating or polling it, reject immediately with the original input still safely owned and return all input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_parent_observation_preserves_absence_until_child_returns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/traversal.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Rewrite present and absent FROM inputs while inspecting the original parent and exact live allocation accounting.",
+      "invariant": "A detached optional source remains absent during the callback and returns to the same field with its original ownership; an absent source does not invoke the callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_preserves_canonical_scopes_and_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Normalize native query roots, inherited windows, nested arenas, CTEs, mutation CTEs, derived joins and set operations through one-step work windows.",
+      "invariant": "Preserve complete ordinary plan fields and canonical query namespaces; completed native payloads retire before their constructor reservations without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_releases_every_interrupted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon or cancel both ownership scopes at every pending native construction and normalization prefix, and deny six destination allowances.",
+      "invariant": "Retire the complete private parent, detached children and untouched siblings while preserving independent reservations; denied admission publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_bounds_structural_polling_and_cleanup_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Construct and normalize 512 nested scalar-query arenas with a canonical window at the leaf on a 256 KiB stack.",
+      "invariant": "Schedule structural children independently, admit specification-copy workspace in its owning constructor and retire the complete plan without recursive polling or cleanup allocation.",
       "case_names": [
         ""
       ]

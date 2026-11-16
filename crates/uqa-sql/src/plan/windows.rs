@@ -12,8 +12,10 @@ use super::{
 };
 use crate::{SQLError, ScalarExpr, ScalarWindowSpec};
 mod production;
-pub(in crate::plan) use production::resolved_window_definitions_owned;
 pub use production::resolved_window_definitions_with_control;
+pub(in crate::plan) use production::{
+    resolved_window_definitions_from, resolved_window_definitions_owned, ResolvedWindows,
+};
 
 /// Resolve the canonical own clauses without evaluating any expression.
 pub fn resolved_window_definitions(

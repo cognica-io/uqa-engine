@@ -170,7 +170,19 @@ fn window_copy_and_replacement_retire_deep_specifications_with_small_stack() {
             let resumed = input(source.clone(), &native, &work, &token, &token)
                 .read(&mut std::io::empty())
                 .unwrap_err();
-            assert_eq!(resumed.to_string(), SQLError::from(ordinary).to_string());
+            assert_eq!(resumed.sqlstate(), SQLError::from(ordinary).sqlstate());
+            let message = resumed.to_string();
+            let (required, limit) = message
+                .strip_prefix("memory requires ")
+                .unwrap()
+                .split_once(" bytes, exceeding limit ")
+                .unwrap();
+            let required = required.parse::<usize>().unwrap();
+            let limit = limit.parse::<usize>().unwrap();
+            // Work adapters retain different future layouts; both must reach the same oversized ordering payload after completing the deep partition.
+            assert!(required >= 32 << 20);
+            assert_eq!(limit, 16 << 20);
+            assert!(native.peak() <= limit);
             assert_eq!((native.used(), work.used()), (0, 0));
             // A complete old specification also retires iteratively when replaced.
             let ScalarExpr::WindowCall { spec, .. } =

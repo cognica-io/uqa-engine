@@ -75,16 +75,14 @@ impl OwnedScalarExpr {
     {
         self.assert_owner(control);
         control.check()?;
-        let specification = crate::construction::retain_with(*control, || {
-            OwnedWindowSpec::copy_parts_from(
-                specification.definition,
-                &specification.partition_by,
-                &specification.order_by,
-                specification.frame.as_ref(),
-                control,
-                work,
-            )
-        })?
+        let specification = OwnedWindowSpec::copy_parts_from(
+            specification.definition,
+            &specification.partition_by,
+            &specification.order_by,
+            specification.frame.as_ref(),
+            control,
+            work,
+        )
         .await?;
         let mut state = Replacement {
             old: None,

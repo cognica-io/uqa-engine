@@ -19,6 +19,14 @@ pub use owner::ScalarQueryArena;
 impl MutableQueryPlan {
     /// Compact the local scalar-query arena through SQL's existing namespace-aware remapping. Unreachable child payloads release before their constructor records, while the original arena capacity remains owned by the parent.
     pub fn prune_subqueries(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        self.prune_subqueries_in_place(control)?;
+        Ok(self)
+    }
+
+    pub(super) fn prune_subqueries_in_place(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         self.assert_owner(control);
         control.check()?;
         let mut fields = self.memory.as_mut().map(|memory| {
@@ -67,7 +75,7 @@ impl MutableQueryPlan {
                 }
             },
         )?;
-        Ok(self)
+        Ok(())
     }
 }
 

@@ -5,16 +5,23 @@
 //
 
 use super::{
-    scalar, MutableQueryPlan, MutableSourcePlan, ProductionControl, QueryScalarSlot,
-    RelationalPlan, SQLError, ScalarWindowSpec, SourceChildSlot, SourcePlan, SourceScalarSlot,
+    checkpoint, Input, MutableQueryPlan, MutableSourcePlan, ProductionControl, QueryScalarSlot,
+    RelationalPlan, SQLError, SourceChildSlot, SourcePlan, SourceScalarSlot, SourceScope, Windows,
 };
+use crate::plan::scalar::OwnedScalarExpr;
 
-pub(super) fn normalize(
-    mut query: MutableQueryPlan,
-    resolved: &[ScalarWindowSpec],
+pub(super) async fn normalize<I: Input>(
+    query: &mut MutableQueryPlan,
+    resolved: Windows,
     control: &ProductionControl<'_>,
-) -> Result<MutableQueryPlan, SQLError> {
-    query = query.map_source(control, |source| source_roots(source, resolved, control))?;
+    input: &mut I,
+) -> Result<(), SQLError> {
+    if let Some(mut slot) = query.source_slot()? {
+        let value = input
+            .source(slot.take(), SourceScope::Roots(resolved.clone()), control)?
+            .await?;
+        slot.restore(value);
+    }
     let RelationalPlan::QueryBlock(block) = &query.root else {
         unreachable!("local window roots belong to a query block")
     };
@@ -26,105 +33,173 @@ pub(super) fn normalize(
         block.distinct_on.len(),
     );
     for index in 0..counts.0 {
-        query = slot(query, QueryScalarSlot::Projection(index), resolved, control)?;
+        slot(
+            query,
+            QueryScalarSlot::Projection(index),
+            &resolved,
+            control,
+            input,
+        )
+        .await?;
     }
-    query = slot(query, QueryScalarSlot::Where, resolved, control)?;
+    slot(query, QueryScalarSlot::Where, &resolved, control, input).await?;
     for index in 0..counts.1 {
-        query = slot(query, QueryScalarSlot::GroupBy(index), resolved, control)?;
+        slot(
+            query,
+            QueryScalarSlot::GroupBy(index),
+            &resolved,
+            control,
+            input,
+        )
+        .await?;
     }
     for set in 0..counts.2 {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
         for expression in 0..block.grouping_sets[set].len() {
-            query = slot(
+            slot(
                 query,
                 QueryScalarSlot::GroupingSet { set, expression },
-                resolved,
+                &resolved,
                 control,
-            )?;
+                input,
+            )
+            .await?;
         }
     }
-    query = slot(query, QueryScalarSlot::Having, resolved, control)?;
+    slot(query, QueryScalarSlot::Having, &resolved, control, input).await?;
     for index in 0..counts.3 {
-        query = slot(query, QueryScalarSlot::OrderBy(index), resolved, control)?;
+        slot(
+            query,
+            QueryScalarSlot::OrderBy(index),
+            &resolved,
+            control,
+            input,
+        )
+        .await?;
     }
-    query = slot(query, QueryScalarSlot::Limit, resolved, control)?;
-    query = slot(query, QueryScalarSlot::Offset, resolved, control)?;
+    slot(query, QueryScalarSlot::Limit, &resolved, control, input).await?;
+    slot(query, QueryScalarSlot::Offset, &resolved, control, input).await?;
     for index in 0..counts.4 {
-        query = slot(query, QueryScalarSlot::DistinctOn(index), resolved, control)?;
+        slot(
+            query,
+            QueryScalarSlot::DistinctOn(index),
+            &resolved,
+            control,
+            input,
+        )
+        .await?;
     }
-    Ok(query)
+    Ok(())
 }
-fn slot(
-    query: MutableQueryPlan,
-    slot: QueryScalarSlot,
-    resolved: &[ScalarWindowSpec],
+async fn slot<I: Input>(
+    query: &mut MutableQueryPlan,
+    selected: QueryScalarSlot,
+    resolved: &Windows,
     control: &ProductionControl<'_>,
-) -> Result<MutableQueryPlan, SQLError> {
-    query.map_scalar(slot, control, |expression| {
-        scalar(expression, resolved, control)
-    })
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    if let Some(mut slot) = query.scalar_slot(selected) {
+        let value = scalar(slot.take(), resolved, control, input).await?;
+        slot.restore(value);
+    }
+    Ok(())
 }
-fn source_roots(
-    mut source: MutableSourcePlan,
-    resolved: &[ScalarWindowSpec],
+
+async fn scalar<I: Input>(
+    expression: OwnedScalarExpr,
+    resolved: &Windows,
     control: &ProductionControl<'_>,
-) -> Result<MutableSourcePlan, SQLError> {
-    control.check()?;
-    match &*source {
+    input: &mut I,
+) -> Result<OwnedScalarExpr, SQLError> {
+    input.scalar(expression, resolved.clone(), control)?.await
+}
+
+async fn source_slot<I: Input>(
+    source: &mut MutableSourcePlan,
+    selected: SourceScalarSlot,
+    resolved: &Windows,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    if let Some(mut slot) = source.scalar_slot(selected) {
+        let value = scalar(slot.take(), resolved, control, input).await?;
+        slot.restore(value);
+    }
+    Ok(())
+}
+
+pub(super) async fn source<I: Input>(
+    source: &mut MutableSourcePlan,
+    resolved: Windows,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    match &**source {
         SourcePlan::Join { .. } => {
-            source = source.map_child(SourceChildSlot::Left, control, |source| {
-                source_roots(source, resolved, control)
-            })?;
-            source = source.map_child(SourceChildSlot::Right, control, |source| {
-                source_roots(source, resolved, control)
-            })?;
-            source = source.map_scalar(SourceScalarSlot::JoinOn, control, |expression| {
-                scalar(expression, resolved, control)
-            })?;
+            for child in [SourceChildSlot::Left, SourceChildSlot::Right] {
+                let mut slot = source.child_slot(child);
+                let value = input
+                    .source(slot.take(), SourceScope::Roots(resolved.clone()), control)?
+                    .await?;
+                slot.restore(value);
+            }
+            source_slot(source, SourceScalarSlot::JoinOn, &resolved, control, input).await?;
         }
         SourcePlan::Values { rows, .. } => {
             let count = rows.len();
             for row in 0..count {
-                let SourcePlan::Values { rows, .. } = &*source else {
+                let SourcePlan::Values { rows, .. } = &**source else {
                     unreachable!()
                 };
                 for column in 0..rows[row].len() {
-                    source = source.map_scalar(
+                    source_slot(
+                        source,
                         SourceScalarSlot::Value { row, column },
+                        &resolved,
                         control,
-                        |expression| scalar(expression, resolved, control),
-                    )?;
+                        input,
+                    )
+                    .await?;
                 }
             }
         }
         SourcePlan::Function { args, .. } => {
             let count = args.len();
             for index in 0..count {
-                source = source.map_scalar(
+                source_slot(
+                    source,
                     SourceScalarSlot::Argument(index),
+                    &resolved,
                     control,
-                    |expression| scalar(expression, resolved, control),
-                )?;
+                    input,
+                )
+                .await?;
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             let count = functions.len();
             for function in 0..count {
-                let SourcePlan::FunctionGroup { functions, .. } = &*source else {
+                let SourcePlan::FunctionGroup { functions, .. } = &**source else {
                     unreachable!()
                 };
                 for argument in 0..functions[function].args.len() {
-                    source = source.map_scalar(
+                    source_slot(
+                        source,
                         SourceScalarSlot::GroupArgument { function, argument },
+                        &resolved,
                         control,
-                        |expression| scalar(expression, resolved, control),
-                    )?;
+                        input,
+                    )
+                    .await?;
                 }
             }
         }
         SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } | SourcePlan::Subquery { .. } => {}
     }
-    Ok(source)
+    Ok(())
 }

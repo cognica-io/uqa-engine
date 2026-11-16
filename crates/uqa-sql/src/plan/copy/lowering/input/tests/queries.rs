@@ -16,6 +16,7 @@ use crate::plan::{
 
 mod ctes;
 mod mutations;
+mod normalization;
 mod trees;
 
 struct Arena<'a> {

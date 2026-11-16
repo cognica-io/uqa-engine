@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::plan::UnifiedPlan;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 mod children;
 mod command_inputs;

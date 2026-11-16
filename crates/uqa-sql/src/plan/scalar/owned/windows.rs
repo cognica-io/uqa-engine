@@ -58,6 +58,23 @@ impl OwnedWindowSpec {
         W::Error: From<CatalogRetentionError>,
     {
         control.check()?;
+        crate::construction::retain_with(*control, || {
+            Self::construct_from(definition, partition, order, frame, control, work)
+        })?
+        .await
+    }
+
+    async fn construct_from<W: Work>(
+        definition: Option<usize>,
+        partition: &[ScalarExpr],
+        order: &[ScalarOrder],
+        frame: Option<&ScalarWindowFrame>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(*control)),
             owned_children: control.budget().map(BudgetedVec::new),

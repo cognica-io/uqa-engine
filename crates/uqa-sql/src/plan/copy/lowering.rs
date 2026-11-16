@@ -147,8 +147,12 @@ fn lower_query(
         None => Context::new(control)?,
     });
     let query = copying.lower_query_fields(statement, aggregates)?;
-    MutableQueryPlan::from_rewrite_parts(query, Some(copying.into_rewrite_memory()))
+    let query = copying.retain_plan(query);
+    let memory = copying.into_rewrite_memory();
+    query
+        .map(|query| MutableQueryPlan::from_rewrite_parts(query, Some(memory)))
         .normalize_window_definitions(control)
+        .map(Prefix::take)
 }
 
 struct QueryArena<'a> {

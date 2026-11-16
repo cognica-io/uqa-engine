@@ -7,13 +7,15 @@
 //! Pending work retains its admitted stack capacity and owns every suspended frame.
 
 use super::Result;
-use uqa_core::memory::{BudgetedVec, ProductionControl};
+use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryError, ProductionControl};
 
+#[derive(Debug)]
 enum Storage<T> {
     Ordinary(Vec<T>),
     Admitted(BudgetedVec<T>),
 }
 
+#[derive(Debug)]
 pub(crate) struct Stack<T, const N: usize = 0> {
     inline: [Option<T>; N],
     len: usize,
@@ -22,14 +24,49 @@ pub(crate) struct Stack<T, const N: usize = 0> {
 
 impl<T, const N: usize> Stack<T, N> {
     pub(crate) fn new(control: ProductionControl<'_>) -> Self {
+        Self::with_budget(control.budget())
+    }
+    pub(crate) fn with_budget(budget: Option<&MemoryBudget>) -> Self {
         Self {
             inline: std::array::from_fn(|_| None),
             len: 0,
-            storage: control.budget().map_or_else(
+            storage: budget.map_or_else(
                 || Storage::Ordinary(Vec::new()),
                 |budget| Storage::Admitted(BudgetedVec::new(budget)),
             ),
         }
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.len
+            + match &self.storage {
+                Storage::Ordinary(values) => values.len(),
+                Storage::Admitted(values) => values.len(),
+            }
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    pub(crate) fn capacity(&self) -> usize {
+        N + match &self.storage {
+            Storage::Ordinary(values) => values.capacity(),
+            Storage::Admitted(values) => values.capacity(),
+        }
+    }
+    pub(crate) fn reserve(&mut self, additional: usize) -> Result<()> {
+        let required = self
+            .len()
+            .checked_add(additional)
+            .ok_or(MemoryError::SizeOverflow)?
+            .saturating_sub(N);
+        match &mut self.storage {
+            Storage::Ordinary(values) => values
+                .try_reserve(required.saturating_sub(values.len()))
+                .map_err(MemoryError::from)?,
+            Storage::Admitted(values) => {
+                values.reserve(required.saturating_sub(values.len()))?;
+            }
+        }
+        Ok(())
     }
     pub(crate) fn push(&mut self, task: T) -> Result<()> {
         if self.len < N {

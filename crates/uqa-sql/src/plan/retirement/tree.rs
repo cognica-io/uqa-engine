@@ -6,7 +6,8 @@
 
 //! A native tree retains its admitted traversal capacity through complete and partial retirement.
 
-use uqa_core::memory::{BudgetedVec, MemoryBudget};
+use crate::construction::Stack;
+use uqa_core::memory::MemoryBudget;
 
 pub(crate) trait RetirementFrame: Sized {
     type Node;
@@ -20,14 +21,18 @@ pub(crate) trait RetirementFrame: Sized {
 #[derive(Debug)]
 pub(crate) struct RetainedTree<F: RetirementFrame> {
     pub(crate) root: F::Node,
-    pub(crate) frames: BudgetedVec<F>,
+    pub(crate) frames: Stack<F>,
 }
 
 impl<F: RetirementFrame> RetainedTree<F> {
     pub(crate) fn new(memory: &MemoryBudget) -> Self {
+        Self::with_budget(Some(memory))
+    }
+
+    pub(crate) fn with_budget(memory: Option<&MemoryBudget>) -> Self {
         Self {
             root: F::empty(),
-            frames: BudgetedVec::new(memory),
+            frames: Stack::with_budget(memory),
         }
     }
 }

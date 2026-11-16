@@ -18,18 +18,6 @@ struct Parent {
 }
 
 impl OwnedScalarExpr {
-    pub(in crate::plan) fn normalize_window_definitions(
-        self,
-        resolved: &[ScalarWindowSpec],
-        control: &ProductionControl<'_>,
-    ) -> std::result::Result<Self, SQLError> {
-        crate::catalog::work::inline(self.normalize_window_definitions_from(
-            resolved,
-            control,
-            &mut (),
-        ))
-    }
-
     pub(in crate::plan) async fn normalize_window_definitions_from<W: Work>(
         mut self,
         resolved: &[ScalarWindowSpec],

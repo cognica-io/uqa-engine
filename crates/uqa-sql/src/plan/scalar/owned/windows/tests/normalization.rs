@@ -78,9 +78,12 @@ fn retained_window_rewrites_preserve_arguments_filters_and_constructor_owners() 
         for normalize in [false, true] {
             let ready = source.copy_for_rewrite(&control).unwrap();
             let ready = if normalize {
-                ready
-                    .normalize_window_definitions(&definitions, &control)
-                    .unwrap()
+                crate::catalog::work::inline(ready.normalize_window_definitions_from(
+                    &definitions,
+                    &control,
+                    &mut (),
+                ))
+                .unwrap()
             } else {
                 ready
                     .replace_window_spec(&definitions[0], &control)
@@ -257,9 +260,12 @@ fn window_normalization_preserves_argument_filter_and_specification_failure_orde
                 .read(&mut std::io::empty())
                 .unwrap_err()
             } else {
-                owned
-                    .normalize_window_definitions(&definitions, &control)
-                    .unwrap_err()
+                crate::catalog::work::inline(owned.normalize_window_definitions_from(
+                    &definitions,
+                    &control,
+                    &mut (),
+                ))
+                .unwrap_err()
             };
             assert_eq!((native.used(), work.used()), (0, 0));
             (error, native.peak())
@@ -301,11 +307,13 @@ fn window_normalization_retires_deep_pending_parents_without_recursion() {
             let work = MemoryBudget::new(1 << 20);
             let token = CancellationToken::new();
             let control = ProductionControl::new(&native, &token, &token);
-            let ready = source
-                .copy_for_rewrite(&control)
-                .unwrap()
-                .normalize_window_definitions(&definitions, &control)
-                .unwrap();
+            let ready = crate::catalog::work::inline(
+                source
+                    .copy_for_rewrite(&control)
+                    .unwrap()
+                    .normalize_window_definitions_from(&definitions, &control, &mut ()),
+            )
+            .unwrap();
             let mut leaf = &*ready;
             for _ in 0..8192 {
                 let ScalarExpr::Not(child) = leaf else {
@@ -382,9 +390,12 @@ fn window_normalization_admits_ancestor_storage_before_detached_children_escape(
             .read(&mut std::io::empty())
             .unwrap_err()
         } else {
-            owned
-                .normalize_window_definitions(&definitions, &control)
-                .unwrap_err()
+            crate::catalog::work::inline(owned.normalize_window_definitions_from(
+                &definitions,
+                &control,
+                &mut (),
+            ))
+            .unwrap_err()
         };
         assert_eq!(error.sqlstate(), Some("53200"));
         assert_eq!((native.used(), work.used()), (blocker.bytes(), 0));

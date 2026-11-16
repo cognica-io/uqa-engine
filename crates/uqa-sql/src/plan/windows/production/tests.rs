@@ -207,23 +207,39 @@ fn canonical_window_names_use_bounded_borrowed_comparisons() {
         native.peak() < prefix.len(),
         "name payloads remain borrowed"
     );
-    let required = native.peak();
-    assert!(required > 4);
+    let resumed_required = native.peak();
+    assert!(resumed_required > 4);
     drop(value);
-    for bytes in [0, 1, required / 4, required / 2, required - 1] {
-        let native = MemoryBudget::new(bytes);
-        let control = ProductionControl::new(&native, &token, &token);
-        let ordinary = resolved_window_definitions_owned(&source, &control)
-            .err()
-            .expect("denied canonical allocation");
-        let resumed = input(source.clone(), &native, &work, &token, &token)
-            .read(&mut std::io::empty())
-            .err()
-            .expect("denied retained allocation");
-        assert_eq!(ordinary.to_string(), resumed.to_string());
-        assert_eq!(resumed.sqlstate(), Some("53200"));
-        assert_eq!((native.used(), work.used()), (0, 0));
-        assert!(native.peak() <= bytes);
+    let ordinary = MemoryBudget::new(1 << 20);
+    drop(
+        resolved_window_definitions_owned(
+            &source,
+            &ProductionControl::new(&ordinary, &token, &token),
+        )
+        .unwrap(),
+    );
+    assert_eq!(ordinary.used(), 0);
+    assert!(
+        ordinary.peak() < prefix.len(),
+        "ordinary names remain borrowed"
+    );
+    // Each adapter must reject below its own actual peak, including its retained future workspace.
+    for (resumed, required) in [(false, ordinary.peak()), (true, resumed_required)] {
+        for bytes in [0, 1, required / 4, required / 2, required - 1] {
+            let native = MemoryBudget::new(bytes);
+            let result = if resumed {
+                input(source.clone(), &native, &work, &token, &token).read(&mut std::io::empty())
+            } else {
+                resolved_window_definitions_owned(
+                    &source,
+                    &ProductionControl::new(&native, &token, &token),
+                )
+            };
+            let error = result.err().expect("denied canonical allocation");
+            assert_eq!(error.sqlstate(), Some("53200"));
+            assert_eq!((native.used(), work.used()), (0, 0));
+            assert!(native.peak() <= bytes);
+        }
     }
 }
 

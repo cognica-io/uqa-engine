@@ -72,7 +72,7 @@ pub(in crate::plan) struct Context {
 impl Context {
     pub(in crate::plan) fn new(control: &ProductionControl<'_>) -> Result<Self, crate::SQLError> {
         control.check()?;
-        let tree = RetainedTree::new(control.budget().expect("controlled plan construction"));
+        let tree = RetainedTree::with_budget(control.budget());
         Ok(Self {
             workspace: control
                 .finish(Mutex::new(Workspace(tree)), control.empty_reservation())?
@@ -125,6 +125,16 @@ impl<T: Root + std::fmt::Debug> std::fmt::Debug for Prefix<T> {
 }
 
 impl<T: Root> Prefix<T> {
+    pub(in crate::plan) fn context(&self) -> &Context {
+        &self.context
+    }
+
+    /// Transfer a completed root into another native owner without an intervening fallible operation.
+    pub(in crate::plan) fn map<U: Root>(mut self, map: impl FnOnce(T) -> U) -> Prefix<U> {
+        let value = self.value.take().expect("pending plan root");
+        self.context.retain(map(value))
+    }
+
     pub(in crate::plan) fn take(mut self) -> T {
         self.value.take().expect("pending plan root")
     }
