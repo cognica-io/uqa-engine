@@ -4,6 +4,58 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_computation_preserves_aggregate_precedence_and_query_window_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Select nine computation shapes with grouped roots, registered aggregates, window ordering and nested query scopes.",
+      "invariant": "Native and ordinary selection agree; a one-step poll performs at most one controlled aggregate lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_computation_counts_empty_window_definitions_against_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Visit 2,048 empty window definitions with a one-step input window.",
+      "invariant": "Empty definitions consume work instead of disappearing inside a flattening iterator.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_aggregate_observation_keeps_pruning_order_and_late_lookup_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Observe ordered CASE and row expressions with a selected aggregate subtree and a later failing callback.",
+      "invariant": "Selected aggregate descendants stay pruned, later siblings remain observable and the original late error is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_observation_bounds_deep_work_and_retires_every_interrupted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Traverse an 8,192-level scalar on a 256 KiB stack; interrupt selected prefixes, cancel either owner and deny spill admission.",
+      "invariant": "Work windows bound visits, scratch is admitted and released, source ownership survives interruption and retirement allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_construction_driver_keeps_deep_polling_and_retirement_on_a_small_stack",
       "cases": 1,
       "source": "crates/uqa-sql/src/construction/tests.rs",

@@ -358,61 +358,27 @@ impl ScalarExpr {
 
     #[must_use]
     pub fn contains_window(&self) -> bool {
-        match self {
-            Self::WindowCall { .. } => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_window)
-                    || order_by.iter().any(|order| order.expr.contains_window())
-                    || filter.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => items.iter().any(Self::contains_window),
-            Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_window(),
-            Self::Between { expr, low, high } => {
-                expr.contains_window() || low.contains_window() || high.contains_window()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_window() || list.iter().any(Self::contains_window)
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_window)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_window() || result.contains_window()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => false,
-        }
+        crate::catalog::work::inline(self.contains_window_with_work(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("ordinary window observation")
+    }
+
+    pub(crate) async fn contains_window_with_work<W: crate::catalog::work::Work>(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, crate::SQLError> {
+        use super::observation::Decision;
+        super::observation::visit(self, control, work, true, &mut |expression| {
+            Ok(if matches!(expression, Self::WindowCall { .. }) {
+                Decision::Stop
+            } else {
+                Decision::Descend
+            })
+        })
+        .await
     }
 
     #[must_use]
