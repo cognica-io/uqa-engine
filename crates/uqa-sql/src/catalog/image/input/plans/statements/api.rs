@@ -18,7 +18,7 @@ pub struct CapturedStatement {
 impl Deref for CapturedStatement {
     type Target = Statement;
     fn deref(&self) -> &Self::Target {
-        match &self.owner.root {
+        match &self.owner.tree.root {
             Node::Statement(value) => value,
             _ => unreachable!("immutable original statement owner"),
         }

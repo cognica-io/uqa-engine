@@ -58,12 +58,12 @@ struct RuleImage {
 
 impl Drop for RuleImage {
     fn drop(&mut self) {
-        let Node::Rule(definition) = &mut self.definition.root else {
+        let Node::Rule(definition) = &mut self.definition.tree.root else {
             unreachable!("native rule definition owner")
         };
         std::mem::swap(definition, &mut self.value.definition);
         if let Some(owner) = &mut self.condition {
-            let PlanNode::Expression(condition) = &mut owner.root else {
+            let PlanNode::Expression(condition) = &mut owner.tree.root else {
                 unreachable!("native rule condition owner")
             };
             std::mem::swap(
@@ -107,7 +107,7 @@ macro_rules! rule_input {
                 identities: &mut Identities,
             ) -> Result<RuleImage, SQLError> {
                 let mut definition = $read!(self.native_tree::<Node>(Kind::Rule))?;
-                let Node::Rule(value) = &mut definition.root else {
+                let Node::Rule(value) = &mut definition.tree.root else {
                     unreachable!("native rule declaration")
                 };
                 let value = std::mem::replace(value, <CreateRule as Empty>::empty());
@@ -147,7 +147,7 @@ macro_rules! rule_input {
                 };
                 if $read!(self.flag())? {
                     let mut owner = $read!(self.native_plan(PlanKind::Expression))?;
-                    let PlanNode::Expression(condition) = &mut owner.root else {
+                    let PlanNode::Expression(condition) = &mut owner.tree.root else {
                         unreachable!("native rule condition")
                     };
                     let value = std::mem::replace(

@@ -49,7 +49,8 @@ impl DerefMut for PlanMemory {
 
 impl<N: NativeNode> Owner<N> {
     pub(in super::super) fn retained_bytes(&self) -> Result<usize, MemoryError> {
-        self.frames
+        self.tree
+            .frames
             .capacity()
             .checked_mul(size_of::<Frame<N>>())
             .and_then(|bytes| bytes.checked_add(self.memory.bytes()))
@@ -61,7 +62,7 @@ impl<N: NativeNode> Owner<N> {
 impl Owner {
     /// Transfer only between an immutable catalog definition and its retained native retirement owner.
     pub(in super::super) fn exchange_query(&mut self, query: &mut QueryPlan) {
-        match &mut self.root {
+        match &mut self.tree.root {
             Node::Query(value) => std::mem::swap(value, query),
             _ => unreachable!("query retirement owner"),
         }

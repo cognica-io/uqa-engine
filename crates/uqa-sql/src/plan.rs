@@ -47,6 +47,7 @@ pub use owned::{ExecutableMemory, OwnedExecutablePlan, OwnedQueryPlan, SharedExe
 mod query;
 mod query_visit;
 mod retained;
+pub(crate) mod retirement;
 pub use retained::RetainedCtePlan;
 mod retained_arena;
 pub use retained_arena::RetainedQueryArena;

@@ -27,7 +27,7 @@ impl Input<'_> {
         owner.begin(kind)?;
         loop {
             self.binary.cancellation.check()?;
-            let frame = owner.frames.last_mut().expect("active native plan");
+            let frame = owner.tree.frames.last_mut().expect("active native plan");
             let step = N::read(frame, self, &mut owner.memory)?;
             if matches!(step, Step::Done) {
                 N::validate(frame, self)?;
@@ -119,14 +119,20 @@ child_fields!(Fields, await_field, async);
 impl<N: NativeNode> Owner<N> {
     fn apply(&mut self, step: Step<N::Kind>) -> Result<bool, SQLError> {
         match step {
-            Step::Advance => self.frames.last_mut().expect("active native plan").position += 1,
+            Step::Advance => {
+                self.tree
+                    .frames
+                    .last_mut()
+                    .expect("active native plan")
+                    .position += 1;
+            }
             Step::Child(kind) => self.begin(kind)?,
             Step::Done => {
-                let frame = self.frames.pop().expect("completed native plan");
-                if let Some(parent) = self.frames.last_mut() {
+                let frame = self.tree.frames.pop().expect("completed native plan");
+                if let Some(parent) = self.tree.frames.last_mut() {
                     N::attach(parent, frame);
                 } else {
-                    self.root = frame.node;
+                    self.tree.root = frame.node;
                     return Ok(true);
                 }
             }
@@ -149,7 +155,7 @@ impl Fields<'_> {
         owner.begin(kind)?;
         loop {
             self.binary.checkpoint().await?;
-            let frame = owner.frames.last_mut().expect("active native plan");
+            let frame = owner.tree.frames.last_mut().expect("active native plan");
             let step = await_field!(N::read_fields(frame, self, &mut owner.memory))?;
             if matches!(step, Step::Done) {
                 let mut position = 0;

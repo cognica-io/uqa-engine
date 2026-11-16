@@ -35,7 +35,7 @@ struct RoutineImage {
 }
 impl Drop for RoutineImage {
     fn drop(&mut self) {
-        let Node::Routine(definition) = &mut self.definition.root else {
+        let Node::Routine(definition) = &mut self.definition.tree.root else {
             unreachable!("native routine definition owner")
         };
         std::mem::swap(definition, &mut self.value.def);
@@ -128,7 +128,7 @@ macro_rules! routine_input {
                 identities: &mut Identities,
             ) -> Result<SQLRoutine, SQLError> {
                 let mut owner = $read!(self.native_tree::<Node>(Kind::Routine))?;
-                let Node::Routine(definition) = &mut owner.root else {
+                let Node::Routine(definition) = &mut owner.tree.root else {
                     unreachable!("native routine definition")
                 };
                 let definition = std::mem::replace(definition, <CreateFunction as Empty>::empty());
