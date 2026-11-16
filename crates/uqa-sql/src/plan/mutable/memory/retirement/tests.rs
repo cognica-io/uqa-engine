@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryError};
 
+mod resources;
+
 fn chain(depth: usize, memory: &MemoryBudget) -> Result<RewriteMemory, MemoryError> {
     let mut owner = RewriteMemory::Scalar(None);
     for level in 0..depth {

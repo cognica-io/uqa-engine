@@ -10,6 +10,7 @@ use super::super::scalar::ScalarMemory;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 
 mod retirement;
+pub(super) use retirement::Folding;
 
 #[derive(Debug)]
 pub(crate) enum RewriteMemory {

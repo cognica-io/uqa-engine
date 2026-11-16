@@ -7,7 +7,7 @@
 //! Scalar-query compaction keeps the existing remapping algorithm and retires child owners with their inputs.
 
 use super::{
-    memory::{RewriteField, RewriteMemory},
+    memory::{Folding, RewriteField, RewriteMemory},
     MutableCommandPlan, MutableQueryPlan,
 };
 use crate::{
@@ -35,7 +35,8 @@ impl MutableQueryPlan {
             return Ok(());
         }
         crate::construction::retain_with(*control, || async {
-            let Some(remap) = subqueries::prepare_query_from(&self.query, *control, work).await?
+            let Some(mut remap) =
+                subqueries::prepare_query_from(&self.query, *control, work).await?
             else {
                 return Ok(());
             };
@@ -47,7 +48,8 @@ impl MutableQueryPlan {
                 Some(control),
                 work,
             )
-            .await
+            .await?;
+            remap.retire_from(work).await
         })?
         .await
     }
@@ -103,7 +105,18 @@ async fn compact<W: Work, K: Fn(usize) -> bool + ?Sized>(
     }
     arena.truncate(retained);
     if let Some(fields) = fields {
-        fields.truncate(retained);
+        while fields.len() > retained {
+            if let Some(control) = control {
+                control.check()?;
+            }
+            work.checkpoint().await?;
+            if let Some(control) = control {
+                control.check()?;
+            }
+            if let Some(memory) = fields.pop().expect("discarded constructor").memory.take() {
+                Folding::new(memory).retire_from(control, work).await?;
+            }
+        }
     }
     Ok(())
 }

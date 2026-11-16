@@ -71619,6 +71619,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_folding_preserves_exact_payload_leases_between_steps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Fold 64 nested constructor records, a 128-level scalar owner and 256 absent scalar slots one transition at a time.",
+      "invariant": "Release temporary metadata without allocating, retain the independently calculated payload reservation until completion and preserve a sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_retirement_releases_every_suspended_and_cancelled_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel both ownership scopes at every pending prefix of mixed constructor/scalar metadata retirement.",
+      "invariant": "Keep all original payload leases through each pending boundary, retire every remaining record without cleanup allocation and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_retirement_bounds_deep_work_without_new_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 8192 constructor levels, 8192 scalar levels and 4096 absent scalar slots on a 256 KiB stack with the native allowance exhausted.",
+      "invariant": "Suspend productive metadata work, reuse original field slots and the existing scalar fold, acquire no new native allowance and return every original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_compaction_scratch_retires_one_node_per_window_without_mutation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Prepare 256 retained query indices with complete reachability or an additional invalid reference through one-step windows.",
+      "invariant": "Release exactly one admitted map node per productive retirement window, leave the input unchanged and release all temporary ownership after the no-op result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_compaction_scratch_retirement_observes_each_cancellation_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel both ownership scopes before work and after each pending map-node release for complete and invalid local references.",
+      "invariant": "Retire remaining ordered scratch without allocation, preserve the original query and keep an independent reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

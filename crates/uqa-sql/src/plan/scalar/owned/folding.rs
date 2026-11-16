@@ -8,7 +8,7 @@
 
 use super::{absorb_leaf, MemoryReservation, ScalarMemory};
 
-pub(super) struct Folding {
+pub(in crate::plan) struct Folding {
     current: Option<ScalarMemory>,
     pending: Option<ScalarMemory>,
     retained: MemoryReservation,
@@ -16,7 +16,7 @@ pub(super) struct Folding {
 }
 
 impl Folding {
-    pub(super) fn new(memory: ScalarMemory) -> Self {
+    pub(in crate::plan) fn new(memory: ScalarMemory) -> Self {
         let retained = memory.direct.budget().empty_reservation();
         Self {
             current: Some(memory),
@@ -27,7 +27,7 @@ impl Folding {
     }
 
     /// Detach at most one descendant or retire at most one completed metadata node.
-    pub(super) fn advance(&mut self) -> bool {
+    pub(in crate::plan) fn advance(&mut self) -> bool {
         if !self.ascending {
             if let Some(first) = self
                 .current
@@ -55,11 +55,11 @@ impl Folding {
         self.is_complete()
     }
 
-    pub(super) fn is_complete(&self) -> bool {
+    pub(in crate::plan) fn is_complete(&self) -> bool {
         self.current.is_none() && self.pending.is_none()
     }
 
-    pub(super) fn finish(self) -> MemoryReservation {
+    pub(in crate::plan) fn finish(self) -> MemoryReservation {
         assert!(self.is_complete());
         self.retained
     }

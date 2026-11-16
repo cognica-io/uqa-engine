@@ -28,6 +28,7 @@ pub(in crate::plan) use resources::input::Work as ScalarInputWork;
 mod owned;
 pub(in crate::plan) use owned::windows::OwnedWindowSpec;
 pub(crate) use owned::ScalarMemory;
+pub(in crate::plan) use owned::ScalarMemoryFolding;
 pub use owned::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
 mod resources;
 mod source;

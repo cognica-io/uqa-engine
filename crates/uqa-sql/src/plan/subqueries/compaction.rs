@@ -118,6 +118,7 @@ pub(in crate::plan) async fn prepare_query_from<'a, W: Work + Send>(
     if remap.prepare_from(work).await? {
         Ok(Some(remap))
     } else {
+        remap.retire_from(work).await?;
         Ok(None)
     }
 }
@@ -165,6 +166,22 @@ pub(in crate::plan) struct Remapping<'a> {
 }
 
 impl<'a> Remapping<'a> {
+    pub(in crate::plan) async fn retire_from<W: Work>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        for index in 0..self.arena_len {
+            if self.slots.is_empty() {
+                break;
+            }
+            self.control.check()?;
+            work.checkpoint().await?;
+            self.control.check()?;
+            self.slots.remove(&index);
+        }
+        Ok(())
+    }
+
     pub(in crate::plan) fn keep(&self, index: usize) -> bool {
         self.slots.get(&index).is_some()
     }

@@ -4,9 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Existing field slots retain ancestor links while constructor records retire. No cleanup allocation or recursive field drop is required.
+//! Existing field slots retain ancestor links while constructor records retire. Immediate and suspended folds share each transition without allocation or recursive cleanup.
 
-use super::{MemoryReservation, RewriteField, RewriteMemory, ScalarMemory};
+use super::{MemoryReservation, RewriteField, RewriteMemory};
+use crate::{catalog::work::Work, plan::scalar::ScalarMemoryFolding, SQLError};
+use uqa_core::memory::ProductionControl;
 
 impl Drop for RewriteField {
     fn drop(&mut self) {
@@ -17,69 +19,149 @@ impl Drop for RewriteField {
 }
 
 pub(super) fn fold(memory: RewriteMemory) -> Option<MemoryReservation> {
-    let mut retained = None;
-    let mut current = Some(memory);
-    let mut pending = None;
-    loop {
-        if let Some(first) = current.as_mut().and_then(|memory| match memory {
-            RewriteMemory::Fields { fields, .. } => fields.first_mut(),
-            RewriteMemory::Scalars { .. } | RewriteMemory::Scalar(_) => None,
-        }) {
-            std::mem::swap(&mut first.memory, &mut pending);
-            std::mem::swap(&mut current, &mut pending);
-            continue;
+    let mut folding = Folding::new(memory);
+    while !folding.advance() {}
+    folding.finish()
+}
+
+enum Step {
+    Descend,
+    Release,
+    Ascend,
+}
+
+pub(in crate::plan::mutable) struct Folding {
+    current: Option<RewriteMemory>,
+    pending: Option<RewriteMemory>,
+    scalar: Option<ScalarMemoryFolding>,
+    retained: Option<MemoryReservation>,
+    step: Step,
+}
+
+impl Folding {
+    pub(in crate::plan::mutable) fn new(memory: RewriteMemory) -> Self {
+        Self {
+            current: Some(memory),
+            pending: None,
+            scalar: None,
+            retained: None,
+            step: Step::Descend,
         }
-        absorb(current.take(), &mut retained);
-        loop {
-            let Some(RewriteMemory::Fields { fields, .. }) = pending.as_mut() else {
-                debug_assert!(pending.is_none());
-                return retained;
-            };
-            if fields.len() > 1 {
-                current = fields
-                    .pop()
-                    .expect("remaining constructor field")
-                    .memory
-                    .take();
-                break;
+    }
+
+    pub(in crate::plan::mutable) async fn retire_from<W: Work>(
+        mut self,
+        control: Option<&ProductionControl<'_>>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        while !self.is_complete() {
+            if let Some(control) = control {
+                control.check()?;
             }
-            let previous = fields.first_mut().and_then(|field| field.memory.take());
-            absorb(std::mem::replace(&mut pending, previous), &mut retained);
+            work.checkpoint().await?;
+            if let Some(control) = control {
+                control.check()?;
+            }
+            self.advance();
         }
+        drop(self.finish());
+        Ok(())
+    }
+
+    /// Detach one constructor field or scalar owner, advance one scalar-fold edge, or release one completed record.
+    fn advance(&mut self) -> bool {
+        if let Some(scalar) = &mut self.scalar {
+            if scalar.advance() {
+                let memory = self.scalar.take().expect("complete scalar fold").finish();
+                self.absorb(Some(memory));
+            }
+            return self.is_complete();
+        }
+        match self.step {
+            Step::Descend => {
+                if let Some(RewriteMemory::Fields { fields, .. }) = &mut self.current {
+                    if let Some(first) = fields.first_mut() {
+                        std::mem::swap(&mut first.memory, &mut self.pending);
+                        std::mem::swap(&mut self.current, &mut self.pending);
+                        return false;
+                    }
+                }
+                self.step = Step::Release;
+            }
+            Step::Release => {
+                let scalar = match &mut self.current {
+                    Some(RewriteMemory::Scalar(memory)) if memory.is_some() => Some(memory.take()),
+                    Some(RewriteMemory::Scalars { items, .. }) => items.pop(),
+                    _ => None,
+                };
+                if let Some(scalar) = scalar {
+                    self.scalar = scalar.map(ScalarMemoryFolding::new);
+                    return false;
+                }
+                let memory = self.current.take();
+                self.absorb(memory.and_then(|memory| match memory {
+                    RewriteMemory::Scalar(None) => None,
+                    RewriteMemory::Scalar(Some(_)) => unreachable!("scalar fold still pending"),
+                    RewriteMemory::Scalars { direct, items } => {
+                        debug_assert!(items.is_empty());
+                        drop(items);
+                        Some(direct)
+                    }
+                    RewriteMemory::Fields { direct, fields } => {
+                        debug_assert!(
+                            fields.len() <= 1 && fields.iter().all(|field| field.memory.is_none())
+                        );
+                        drop(fields);
+                        Some(direct)
+                    }
+                }));
+                self.step = Step::Ascend;
+            }
+            Step::Ascend => {
+                if let Some(RewriteMemory::Fields { fields, .. }) = &mut self.pending {
+                    if fields.len() > 1 {
+                        self.current = fields
+                            .pop()
+                            .expect("remaining constructor field")
+                            .memory
+                            .take();
+                        self.step = Step::Descend;
+                    } else {
+                        let previous = fields.first_mut().and_then(|field| field.memory.take());
+                        self.current = std::mem::replace(&mut self.pending, previous);
+                        self.step = Step::Release;
+                    }
+                } else {
+                    debug_assert!(self.pending.is_none());
+                }
+            }
+        }
+        self.is_complete()
+    }
+
+    fn absorb(&mut self, memory: Option<MemoryReservation>) {
+        if let Some(memory) = memory {
+            if let Some(retained) = &mut self.retained {
+                retained.absorb(memory);
+            } else {
+                self.retained = Some(memory);
+            }
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.current.is_none() && self.pending.is_none() && self.scalar.is_none()
+    }
+
+    fn finish(mut self) -> Option<MemoryReservation> {
+        assert!(self.is_complete());
+        self.retained.take()
     }
 }
 
-fn absorb(memory: Option<RewriteMemory>, retained: &mut Option<MemoryReservation>) {
-    let Some(memory) = memory else {
-        return;
-    };
-    let reservation = match memory {
-        RewriteMemory::Scalar(memory) => memory.map(ScalarMemory::into_reservation),
-        RewriteMemory::Scalars {
-            mut direct,
-            mut items,
-        } => {
-            while let Some(memory) = items.pop() {
-                if let Some(memory) = memory {
-                    direct.absorb(memory.into_reservation());
-                }
-            }
-            drop(items);
-            Some(direct)
-        }
-        RewriteMemory::Fields { direct, fields } => {
-            debug_assert!(fields.iter().all(|field| field.memory.is_none()));
-            // Constructor buffers disappear before their payload reservation is returned.
-            drop(fields);
-            Some(direct)
-        }
-    };
-    if let Some(reservation) = reservation {
-        if let Some(retained) = retained {
-            retained.absorb(reservation);
-        } else {
-            *retained = Some(reservation);
-        }
+impl Drop for Folding {
+    fn drop(&mut self) {
+        while !self.advance() {}
     }
 }
 

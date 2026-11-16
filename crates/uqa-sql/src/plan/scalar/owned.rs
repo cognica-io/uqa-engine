@@ -22,6 +22,7 @@ mod construction;
 mod constructors;
 mod edit;
 mod folding;
+pub(in crate::plan) use folding::Folding as ScalarMemoryFolding;
 mod generated;
 mod iteration;
 mod literals;
