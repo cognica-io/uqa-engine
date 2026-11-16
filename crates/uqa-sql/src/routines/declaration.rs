@@ -8,8 +8,8 @@
 
 use crate::{
     ast::{
-        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionParamMode,
-        FunctionReturns, RoutineColumnTypeReference,
+        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionReturns,
+        RoutineColumnTypeReference,
     },
     type_resolution::canonical_routine_type_name,
     SQLError,
@@ -17,6 +17,10 @@ use crate::{
 
 mod validation;
 pub use validation::validate_routine_declaration_from_input;
+mod captured;
+mod parameters;
+pub use captured::validate_captured_declaration;
+pub(super) use captured::validate_language as validate_routine_language;
 
 mod shells;
 pub use shells::RoutineShellTypes;
@@ -164,8 +168,7 @@ fn resolve_parameter_type_references(
     shells: &mut RoutineShellTypes,
 ) -> Result<(), SQLError> {
     let catalog = context.types;
-    let mut have_defaults = false;
-    let mut after_variadic = false;
+    let mut layout = parameters::ParameterLayout::default();
     for index in 0..def.params.len() {
         let (previous, rest) = def.params.split_at_mut(index);
         let parameter = &mut rest[0];
@@ -187,80 +190,29 @@ fn resolve_parameter_type_references(
             )?;
         }
         parameter.type_reference = None;
-        let input = !matches!(
-            parameter.mode,
-            FunctionParamMode::Out | FunctionParamMode::Table
-        );
-        let output = !matches!(
-            parameter.mode,
-            FunctionParamMode::In | FunctionParamMode::Variadic
-        );
-        if input && after_variadic {
-            return Err(routine_definition_error(
-                "VARIADIC parameter must be the last input parameter",
-            ));
-        }
-        if output && def.is_procedure && after_variadic {
-            return Err(routine_definition_error(
-                "VARIADIC parameter must be the last parameter",
-            ));
-        }
-        if parameter.mode == FunctionParamMode::Variadic {
-            after_variadic = true;
-            if !variadic_type_is_array(catalog, &parameter.type_name) {
-                return Err(routine_definition_error(
-                    "VARIADIC parameter must be an array",
-                ));
-            }
-        }
-        if !parameter.name.is_empty()
-            && previous.iter().any(|earlier| {
-                earlier.name == parameter.name
-                    && parameter_names_conflict(parameter.mode, earlier.mode)
-            })
-        {
-            return Err(routine_definition_error(format!(
-                "parameter name \"{}\" used more than once",
-                parameter.name
-            )));
-        }
+        layout.visit(
+            previous,
+            parameter,
+            def.is_procedure,
+            || {
+                captured::variadic_array(
+                    catalog,
+                    &parameter.type_name,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )
+            },
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
         if let Some(default) = &mut parameter.default {
-            if !input {
-                return Err(routine_definition_error(
-                    "only input parameters can have default values",
-                ));
-            }
             parameter.default_type = super::defaults::analyze_parameter_default(
                 context,
                 default,
                 &parameter.type_name,
                 shell_oid,
             )?;
-            have_defaults = true;
-        } else if input && have_defaults {
-            return Err(routine_definition_error(
-                "input parameters after one with a default value must also have defaults",
-            ));
-        } else if def.is_procedure && have_defaults {
-            return Err(routine_definition_error(
-                "procedure OUT parameters cannot appear after one with a default value",
-            ));
         }
     }
     Ok(())
-}
-
-/// Whether two parameters of these modes may not share a name: a pure input never conflicts with a pure output.
-fn parameter_names_conflict(current: FunctionParamMode, earlier: FunctionParamMode) -> bool {
-    let pure_input = |mode| matches!(mode, FunctionParamMode::In | FunctionParamMode::Variadic);
-    let pure_output = |mode| matches!(mode, FunctionParamMode::Out | FunctionParamMode::Table);
-    !(pure_input(current) && pure_output(earlier) || pure_input(earlier) && pure_output(current))
-}
-
-/// Whether a VARIADIC argument's type is one `interpret_function_parameter_list` accepts: an array, `anyarray`, `anycompatiblearray` or `"any"`.
-fn variadic_type_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {
-    canonical_routine_type_name(type_name) == "any"
-        || routine_declaration_is_array(catalog, type_name)
 }
 
 /// How a missing declared type is reported: `interpret_function_parameter_list` names an argument's type unquoted, `compute_return_type` quotes the result type, each as the statement wrote it.
@@ -572,26 +524,6 @@ pub(super) fn routine_parameter_regrole_constants(
         constants.collect_expression(default, target.as_ref());
     }
     constants
-}
-
-fn routine_declaration_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {
-    let canonical = canonical_routine_type_name(type_name);
-    canonical.ends_with("[]")
-        || matches!(
-            canonical.as_str(),
-            "anyarray" | "anycompatiblearray" | "int2vector" | "oidvector"
-        )
-        || catalog
-            .resolve_catalog_column_type(&canonical)
-            .is_some_and(|ty| routine_column_type_is_array(&ty))
-}
-
-fn routine_column_type_is_array(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Array(_) | ColumnType::AnyArray => true,
-        ColumnType::Domain { base, .. } => routine_column_type_is_array(base),
-        _ => false,
-    }
 }
 
 pub(super) fn routine_definition_error(message: impl Into<String>) -> SQLError {

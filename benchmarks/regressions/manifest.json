@@ -69781,6 +69781,93 @@
         "case_2_sqlite_kv",
         "case_3_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_declarations_preserve_postgresql_language_modes_defaults_and_polymorphism",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Compare 33 captured declarations with independent PostgreSQL 18.4 results, preserving exact errors, original syntax and released scratch.",
+      "invariant": "Intrinsic COST/ROWS and support identity, language, parameter layout, array-domain eligibility and pseudo-types match creation rules without compiling deferred bodies or repeating privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_declarations_resolve_variadic_array_aliases_without_compiling_bodies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Resolve a selected array alias while retaining deliberately uncompiled source.",
+      "invariant": "Array identity validation does not execute source or creation callbacks and releases admitted scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_declarations_release_denied_and_cancelled_type_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Deny canonical type scratch and cancel each original/invoking control independently.",
+      "invariant": "Native failures leave no retained scratch and do not mutate the captured declaration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "routine_declaration_diagnostics_match_postgresql_with_eager_and_lazy_bodies",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Run 66 PostgreSQL 18.4 declaration outcomes on all four providers with both body-validation settings.",
+      "invariant": "Exact diagnostics, failed transaction state, rollback and absence of rejected or rolled-back routines match PostgreSQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_declarations_reject_invalid_original_signatures",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Damage eleven declaration fields in actual memory, native SQLite, SQLite Key/Value and redb archives.",
+      "invariant": "Invalid intrinsic attributes, support identity, language, names, modes, defaults and polymorphic results fail before publication and retire candidate/archive ownership.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_declarations_preserve_modes_domain_arrays_and_lazy_bodies",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/preserved.rs",
+      "capability": "Captured routine declarations",
+      "workload": "Restore nine routines after retiring the source, remove the archive, compare seven PostgreSQL outputs, roll back later DDL and reopen persistent destinations.",
+      "invariant": "Original definitions, infinite planner estimates, support identity owned by a non-superuser, input/output modes, arrays of domains and deferred source bodies survive restoration and later observations; all restore reservations retire.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }
