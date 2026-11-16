@@ -7,30 +7,14 @@
 //! Projection expressions keep their scalar owner until alias production and destination admission complete.
 
 use super::{
-    input::{InlineScalarInput, ScalarInput, TextInput},
-    Copying, QueryArena, Result,
+    input::{ScalarInput, TextInput},
+    Copying, Result,
 };
 use crate::{
     ast::Projection,
-    plan::{retirement::Pending, AggregateClassifier, OwnedProjection, ProjectionPlan},
+    plan::{retirement::Pending, OwnedProjection, ProjectionPlan},
 };
 use uqa_core::memory::{BudgetedVec, ProductionControl};
-
-impl Copying<'_> {
-    pub(super) fn lower_projections(
-        &mut self,
-        projections: &[Projection],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<ProjectionPlan>> {
-        crate::catalog::work::inline(construct_projections(
-            projections,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-        ))
-        .map(Pending::take)
-    }
-}
 
 async fn construct_projection<'s, I: ScalarInput<&'s crate::ast::Expr> + TextInput<&'s str>>(
     projection: &'s Projection,

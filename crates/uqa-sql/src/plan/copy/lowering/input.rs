@@ -15,7 +15,7 @@ use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) mod scalars;
-pub(super) mod text;
+pub(in crate::plan::copy) mod text;
 
 #[cfg(test)]
 mod tests;
@@ -29,12 +29,22 @@ pub(super) trait ScalarInput<Expression> {
     ) -> impl Future<Output = Result<OwnedScalarExpr>> + Send;
 }
 
-pub(super) trait TextInput<Text> {
+pub(in crate::plan::copy) trait TextInput<Text> {
     fn text(
         &mut self,
         source: Text,
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<String>>> + Send;
+}
+
+impl<'s> TextInput<&'s str> for () {
+    fn text(
+        &mut self,
+        source: &'s str,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<String>>> + Send {
+        ready(control.copy_text(source).map_err(Into::into))
+    }
 }
 
 pub(super) trait SourceMetadataInput<Type, Binding> {

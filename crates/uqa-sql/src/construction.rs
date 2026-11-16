@@ -32,9 +32,17 @@ pub(crate) fn retain<F: Future>(
     control: ProductionControl<'_>,
     future: F,
 ) -> Result<RetainedFuture<F>> {
-    let memory = control.reserve(size_of_val(&future))?;
+    retain_with(control, || future)
+}
+
+/// Admit and construct the future inside its owner, keeping its temporary workspace out of the caller's poll frame.
+pub(crate) fn retain_with<F: Future>(
+    control: ProductionControl<'_>,
+    construct: impl FnOnce() -> F,
+) -> Result<RetainedFuture<F>> {
+    let memory = control.reserve(size_of::<F>())?;
     Ok(RetainedFuture {
-        future: Box::pin(future),
+        future: Box::pin(construct()),
         memory,
     })
 }

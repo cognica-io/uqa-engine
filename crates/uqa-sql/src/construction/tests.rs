@@ -169,3 +169,34 @@ fn native_construction_driver_retires_each_prefix_both_cancellations_and_denied_
     }
     drop(sibling);
 }
+
+#[test]
+fn retained_future_admission_precedes_construction() {
+    for (capacity, cancellation) in [(37, 0), (512, 1), (512, 2), (512, 0)] {
+        let memory = MemoryBudget::new(capacity);
+        let sibling = memory.reserve(37).unwrap();
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        if cancellation == 1 {
+            original.cancel();
+        } else if cancellation == 2 {
+            invoking.cancel();
+        }
+        let constructed = AtomicUsize::new(0);
+        let control = ProductionControl::new(&memory, &original, &invoking);
+        let result = retain_with(control, || {
+            constructed.fetch_add(1, Ordering::Relaxed);
+            std::future::ready([0_u8; 128])
+        });
+        if capacity == 512 && cancellation == 0 {
+            assert_eq!(constructed.load(Ordering::Relaxed), 1);
+            assert!(memory.used() >= 37 + 128);
+            assert_eq!(crate::catalog::work::inline(result.unwrap()), [0; 128]);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(constructed.load(Ordering::Relaxed), 0);
+        }
+        assert_eq!(memory.used(), 37);
+        drop(sibling);
+    }
+}

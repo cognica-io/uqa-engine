@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::copy::lowering::{input::InlineScalarInput, Copying, QueryArena};
 use crate::{
     construction::{self, Work},
     plan::{mutable::values::OwnedRows, ExpressionPlan, NoRegisteredAggregates, OwnedScalarExpr},
@@ -137,11 +138,11 @@ fn retained_value_rows_share_ordinary_shape_and_independently_movable_cells() {
     let token = CancellationToken::new();
     let control = ProductionControl::new(&native, &token, &token);
     let mut copying = Copying::for_rewrite(control).unwrap();
-    let expected = copying
-        .lower_rows(
-            &source,
-            &NoRegisteredAggregates,
-            &mut QueryArena::new(
+    let expected = crate::catalog::work::inline(construct_rows(
+        &source,
+        &mut InlineScalarInput {
+            aggregates: &NoRegisteredAggregates,
+            arena: &mut QueryArena::new(
                 control,
                 None,
                 crate::plan::retirement::construction::Context::new(&control)
@@ -149,8 +150,12 @@ fn retained_value_rows_share_ordinary_shape_and_independently_movable_cells() {
                     .child(&control)
                     .unwrap(),
             ),
-        )
-        .unwrap();
+        },
+        control,
+        copying.fields.as_mut().unwrap(),
+        copying.memory.as_mut().unwrap(),
+    ))
+    .unwrap();
     let expected = OwnedRows {
         rows: expected,
         memory: Some(copying.into_rewrite_memory()),

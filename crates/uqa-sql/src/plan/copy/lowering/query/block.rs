@@ -26,7 +26,7 @@ use std::future::Future;
 use uqa_core::memory::{BudgetedVec, OwnedSet, ProductionControl};
 
 mod inline;
-pub(super) use inline::Inline;
+pub(in crate::plan::copy::lowering) use inline::Inline;
 
 pub(in crate::plan::copy::lowering) trait Input<'s, 'c>:
     ScalarInput<&'s Expr> + TextInput<&'s str>

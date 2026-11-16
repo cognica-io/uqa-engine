@@ -31,7 +31,7 @@ macro_rules! field {
 mod commands;
 mod ctes;
 mod expressions;
-mod input;
+pub(super) mod input;
 mod mutations;
 mod ownership;
 mod projections;

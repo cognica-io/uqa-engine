@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -71081,8 +71081,60 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
       "capability": "Retained structural query construction",
-      "workload": "Retain an 8,192-level CYCLE mark before a failed query body, rejected command callback or later CTE name on a 256 KiB stack.",
+      "workload": "Retain an 8,192-level CYCLE mark before a failed query body, failed mutation body or later CTE name on a 256 KiB stack.",
       "invariant": "The existing scalar and plan-tree owners retain the completed mark through every later boundary and release its full allowance on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_future_admission_precedes_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Deny future admission or cancel either owner before invoking the constructor, then complete an admitted future with an independent sibling lease.",
+      "invariant": "Rejected construction performs no constructor work; admitted future storage retains its allowance through completion and preserves sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_preserve_complete_fields_and_query_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Construct complete INSERT, UPDATE, DELETE and MERGE roots, including data-modifying CTEs, conflict actions, grouped and indirect targets, RETURNING aliases and nested query arenas.",
+      "invariant": "Match consuming and controlled lowering with identical fields, flags, query-slot order and parameter pruning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_release_each_pending_body_and_field_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Abandon or cancel either owner at every pending body and field prefix of all four mutations, then deny destination admission.",
+      "invariant": "Retire all partial mutation, query and constructor owners while preserving typed errors and the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_bound_nested_cte_bodies_and_late_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Construct 512 nested data-modifying CTE bodies on a 256 KiB stack and reject a later outer target qualifier.",
+      "invariant": "Independent child tasks preserve bounded polling stack; complete and failed prefixes retire without cleanup allocations or retained allowances.",
       "case_names": [
         ""
       ]

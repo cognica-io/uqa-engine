@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Share enclosing query, VALUES, set-operation, query-block, JOIN/derived-source and CTE assembly between ordinary controlled lowering and retained construction. Reuse existing field, query-arena, box and retirement owners; preserve field order, nested query slots, flags, locking metadata and parameter pruning. Admit structural depth before creating a query-local arena and keep completed prefixes owned through suspended or failed later fields. Complete native statement entry points, mutation bodies, window normalization, stored binding and public backup restoration remain in progress.
+- Share enclosing query, VALUES, set-operation, query-block, JOIN/derived-source, CTE and complete INSERT/UPDATE/DELETE/MERGE assembly between ordinary controlled lowering and retained construction. Reuse existing field, query-arena, box and retirement owners; preserve field order, nested query slots, flags, RETURNING aliases, locking metadata and parameter pruning. Admit structural depth before creating a query-local arena and keep completed prefixes owned through suspended or failed later fields. Construct admitted mutation futures inside their storage owner to preserve small-stack execution. Complete native statement entry points, window normalization, stored binding and public backup restoration remain in progress.
 
 - Keep completed query, CTE, FROM and mutation prefixes in the existing plan-tree retirement owner while later fields are constructed. Reuse the vector and box constructors, preserve field and scalar-query order, and release failed or cancelled prefixes without recursive scalar destruction or cleanup allocations.
 

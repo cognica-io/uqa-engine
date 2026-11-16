@@ -80,11 +80,15 @@ impl<'s: 'a, 'c: 'a, 'a> constructor::Input<'s, 'c> for Native<'a, Arena<'a>> {
 
     async fn command(
         &mut self,
-        _: &'s CteBody,
-        _: &mut Copying<'c>,
+        source: &'s CteBody,
+        copying: &mut Copying<'c>,
     ) -> Result<Prefix<CommandPlan>> {
-        self.work.checkpoint().await;
-        Err(SQLError::Internal("rejected mutation body callback".into()))
+        mutations::child(
+            crate::plan::copy::lowering::mutations::Source::cte(source),
+            copying,
+            &mut self.work,
+        )
+        .await
     }
 }
 
@@ -130,7 +134,11 @@ fn retained_query_ctes_retire_deep_cycle_after_body_or_sibling_failure() {
                         .with
                         .remove(0)
                         .body;
-                        "internal error: rejected mutation body callback"
+                        let CteBody::Delete(body) = &mut source.with[0].body else {
+                            unreachable!()
+                        };
+                        body.target_qualifier = "reject_source_alias".into();
+                        "internal error: rejected source alias"
                     }
                     _ => {
                         let mut sibling = blocks::query("WITH t AS (SELECT 1) SELECT * FROM t")

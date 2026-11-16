@@ -15,6 +15,7 @@ use crate::plan::{
 };
 
 mod ctes;
+mod mutations;
 mod trees;
 
 struct Arena<'a> {
@@ -160,8 +161,8 @@ impl<'s: 'a, 'c: 'a, 'a> block::Input<'s, 'c> for Native<'a, Arena<'a>> {
     }
 }
 
-type QueryOutput = (Prefix<QueryPlan>, RewriteMemory);
-type QueryInput = ImageDecoder<QueryOutput, SQLError>;
+type PlanOutput = (Prefix<UnifiedPlan>, RewriteMemory);
+type PlanInput = ImageDecoder<PlanOutput, SQLError>;
 
 fn replace(expression: &Expr) -> Option<usize> {
     matches!(expression, Expr::Not(_)).then_some(7)
@@ -174,24 +175,46 @@ fn input(
     original: &CancellationToken,
     invoking: &CancellationToken,
     parameters: bool,
-) -> QueryInput {
+) -> PlanInput {
     let native = native.clone();
     let original = original.clone();
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut channel = reader.input();
         let control = ProductionControl::new(&native, &original, channel.cancellation);
         let mut driver = construction::Driver::new(control)?;
-        let source = match source.as_ref() {
-            Statement::Select(query) => construct::Source::Select(query),
-            Statement::Values { rows } => construct::Source::Values(rows),
-            _ => unreachable!("query fixture"),
-        };
-        let output = driver.work().submit(move |work| async move {
+        let source = source.as_ref();
+        let output = driver.work().submit(move |mut work| async move {
             let mut copying = Copying::for_rewrite(control).unwrap();
             copying.plan_retirement = Some(Context::new(&control)?);
             copying.parameters = parameters.then_some(&replace);
-            let query = build(source, &mut copying, work)?.await?;
-            Ok::<_, SQLError>((query, copying.into_rewrite_memory()))
+            let plan = match source {
+                Statement::Select(query) => {
+                    copying.admit_box::<QueryPlan>()?;
+                    let query =
+                        build(construct::Source::Select(query), &mut copying, work)?.await?;
+                    UnifiedPlan::Query(copying.finish_box(query, Prefix::take)?)
+                }
+                Statement::Values { rows } => {
+                    copying.admit_box::<QueryPlan>()?;
+                    let query = build(construct::Source::Values(rows), &mut copying, work)?.await?;
+                    UnifiedPlan::Query(copying.finish_box(query, Prefix::take)?)
+                }
+                source => {
+                    copying.admit_box::<crate::plan::CommandPlan>()?;
+                    let mut scope = copying.enter_plan_node()?;
+                    let command = mutations::child(
+                        crate::plan::copy::lowering::mutations::Source::statement(source)
+                            .expect("query or mutation fixture"),
+                        &mut scope,
+                        &mut work,
+                    )
+                    .await?;
+                    UnifiedPlan::Command(scope.finish_box(command, Prefix::take)?)
+                }
+            };
+            let plan = copying.retain_plan(plan);
+            control.check()?;
+            Ok::<_, SQLError>((plan, copying.into_rewrite_memory()))
         })?;
         while driver.advance().await? {
             channel.checkpoint().await?;
@@ -201,14 +224,14 @@ fn input(
     .unwrap()
 }
 
-fn advance(reader: &mut QueryInput) -> Result<Option<QueryOutput>> {
+fn advance(reader: &mut PlanInput) -> Result<Option<PlanOutput>> {
     reader.advance(
         &mut std::io::empty(),
         ImageDecodeWindow { bytes: 1, steps: 1 },
     )
 }
 
-fn complete(reader: &mut QueryInput) -> (QueryOutput, usize) {
+fn complete(reader: &mut PlanInput) -> (PlanOutput, usize) {
     for polls in 1..1_000_000 {
         if let Some(output) = advance(reader).unwrap() {
             return (output, polls);
@@ -262,9 +285,6 @@ fn assert_equivalent(sources: impl IntoIterator<Item = Statement>) {
                 parameters.then_some(&replace),
             )
             .unwrap();
-            let crate::plan::MutableExecutablePlan::Query(expected) = expected else {
-                unreachable!()
-            };
             let ((query, memory), polls) = complete(&mut input(
                 source.clone(),
                 &native,
@@ -273,19 +293,29 @@ fn assert_equivalent(sources: impl IntoIterator<Item = Statement>) {
                 &token,
                 parameters,
             ));
-            assert_eq!(
-                serde_json::to_value(&*query).unwrap(),
-                serde_json::to_value(&*expected).unwrap(),
-                "parameters={parameters}"
-            );
+            let (actual_json, expected_json) = match (&*query, &expected) {
+                (
+                    UnifiedPlan::Query(actual),
+                    crate::plan::MutableExecutablePlan::Query(expected),
+                ) => (
+                    serde_json::to_value(&**actual).unwrap(),
+                    serde_json::to_value(&**expected).unwrap(),
+                ),
+                (
+                    UnifiedPlan::Command(actual),
+                    crate::plan::MutableExecutablePlan::Command(expected),
+                ) => (
+                    serde_json::to_value(&**actual).unwrap(),
+                    serde_json::to_value(&**expected).unwrap(),
+                ),
+                _ => panic!("statement kind changed"),
+            };
+            assert_eq!(actual_json, expected_json, "parameters={parameters}");
             if !parameters {
-                let UnifiedPlan::Query(ordinary) = UnifiedPlan::lower(source.as_ref().clone())
-                else {
-                    unreachable!()
-                };
+                let ordinary = UnifiedPlan::lower(source.as_ref().clone());
                 assert_eq!(
                     serde_json::to_value(&*query).unwrap(),
-                    serde_json::to_value(&*ordinary).unwrap()
+                    serde_json::to_value(&ordinary).unwrap()
                 );
             }
             assert!(polls > 1);

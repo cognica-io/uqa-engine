@@ -6,37 +6,16 @@
 
 //! Ordinary and retained row lowering share destination admission and scalar ownership transfer.
 
-use super::{
-    input::{InlineScalarInput, ScalarInput},
-    Copying, QueryArena, Result,
-};
+use super::{input::ScalarInput, Result};
 use crate::{
     ast::Expr,
     plan::{
         mutable::memory::{RewriteField, RewriteMemory},
         retirement::Pending,
-        AggregateClassifier,
     },
     ScalarExpr,
 };
 use uqa_core::memory::{BudgetedVec, ProductionControl};
-
-impl Copying<'_> {
-    pub(super) fn lower_rows(
-        &mut self,
-        rows: &[Vec<Expr>],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<Vec<ScalarExpr>>> {
-        crate::catalog::work::inline(construct_rows(
-            rows,
-            &mut InlineScalarInput { aggregates, arena },
-            self.control,
-            self.fields.as_mut().expect("row records"),
-            self.memory.as_mut().expect("row allowance"),
-        ))
-    }
-}
 
 pub(super) async fn construct_rows<'s, I: ScalarInput<&'s crate::ast::Expr>>(
     rows: &'s [Vec<Expr>],

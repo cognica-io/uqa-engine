@@ -277,24 +277,15 @@ impl Copying<'_> {
                     copying.boxed(|copying| value.copy_syntax(copying))
                 })?)
             }
-            Statement::Insert(statement) => {
-                CommandPlan::Insert(self.field("value0", |copying| {
-                    copying.lower_boxed(|copying| copying.lower_insert(statement, aggregates))
-                })?)
-            }
-            Statement::Update(statement) => {
-                CommandPlan::Update(self.field("value0", |copying| {
-                    copying.lower_boxed(|copying| copying.lower_update(statement, aggregates))
-                })?)
-            }
-            Statement::Delete(statement) => {
-                CommandPlan::Delete(self.field("value0", |copying| {
-                    copying.lower_boxed(|copying| copying.lower_delete(statement, aggregates))
-                })?)
-            }
-            Statement::Merge(statement) => CommandPlan::Merge(self.field("value0", |copying| {
-                copying.lower_boxed(|copying| copying.lower_merge(statement, aggregates))
-            })?),
+            Statement::Insert(_)
+            | Statement::Update(_)
+            | Statement::Delete(_)
+            | Statement::Merge(_) => self.field("value0", |copying| {
+                copying.lower_mutation(
+                    super::mutations::Source::statement(statement).expect("selected mutation"),
+                    aggregates,
+                )
+            })?,
             Statement::CreateView {
                 name,
                 column_names,

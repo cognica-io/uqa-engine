@@ -16,7 +16,10 @@ use crate::{
 };
 use uqa_core::memory::BudgetedVec;
 
-pub(super) async fn construct_assignments<'s, I: ScalarInput<&'s Expr> + TextInput<&'s str>>(
+pub(in crate::plan::copy::lowering::mutations) async fn construct_assignments<
+    's,
+    I: ScalarInput<&'s Expr> + TextInput<&'s str>,
+>(
     source: &'s [(AssignmentTargets, Expr)],
     copying: &mut Copying<'_>,
     input: &mut I,

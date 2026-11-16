@@ -13,9 +13,9 @@ use crate::plan::{
 use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
-pub(in crate::plan::copy::lowering::query) struct Inline<'a, 'c> {
-    pub(in crate::plan::copy::lowering::query) aggregates: &'a dyn AggregateClassifier,
-    pub(in crate::plan::copy::lowering::query) arena: Option<QueryArena<'c>>,
+pub(in crate::plan::copy::lowering) struct Inline<'a, 'c> {
+    pub(in crate::plan::copy::lowering) aggregates: &'a dyn AggregateClassifier,
+    pub(in crate::plan::copy::lowering) arena: Option<QueryArena<'c>>,
 }
 
 impl<'s> ScalarInput<&'s Expr> for Inline<'_, '_> {

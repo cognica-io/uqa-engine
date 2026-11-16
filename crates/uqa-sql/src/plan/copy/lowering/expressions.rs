@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    input::{InlineScalarInput, ScalarInput},
-    Copying, QueryArena, Result,
-};
+use super::{input::ScalarInput, Copying, Result};
 use crate::{
     ast::Expr,
     plan::{retirement::Pending, AggregateClassifier, ExpressionPlan},
@@ -15,20 +12,6 @@ use crate::{
 };
 
 impl Copying<'_> {
-    pub(super) fn lower_optional_scalar(
-        &mut self,
-        expression: Option<&Expr>,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Option<ScalarExpr>> {
-        crate::catalog::work::inline(construct_optional_scalar(
-            expression,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-        ))
-        .map(Pending::take)
-    }
-
     pub(super) fn lower_expression(
         &mut self,
         expression: &Expr,

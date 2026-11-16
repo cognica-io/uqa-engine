@@ -11,7 +11,10 @@ use crate::{
     plan::{retirement::Pending, ConflictActionPlan, ConflictPlan},
 };
 
-pub(super) async fn construct_conflict<'s, I: ScalarInput<&'s Expr> + TextInput<&'s str>>(
+pub(in crate::plan::copy::lowering::mutations) async fn construct_conflict<
+    's,
+    I: ScalarInput<&'s Expr> + TextInput<&'s str>,
+>(
     source: &'s OnConflict,
     copying: &mut Copying<'_>,
     input: &mut I,

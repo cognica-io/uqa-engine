@@ -12,7 +12,10 @@ use crate::{
 };
 use uqa_core::memory::BudgetedVec;
 
-pub(super) async fn construct_merge_whens<'s, I: ScalarInput<&'s Expr> + TextInput<&'s str>>(
+pub(in crate::plan::copy::lowering::mutations) async fn construct_merge_whens<
+    's,
+    I: ScalarInput<&'s Expr> + TextInput<&'s str>,
+>(
     source: &'s [MergeWhen],
     copying: &mut Copying<'_>,
     input: &mut I,

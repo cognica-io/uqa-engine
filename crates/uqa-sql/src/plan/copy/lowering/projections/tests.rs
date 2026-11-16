@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::copy::lowering::{input::InlineScalarInput, Copying, QueryArena};
 use crate::{
     ast::Expr,
     construction::{self, Work},
@@ -133,22 +134,22 @@ fn retained_projection_preserves_alias_bytes_order_and_independent_scalar_owners
     let token = CancellationToken::new();
     let control = ProductionControl::new(&native, &token, &token);
     let mut copying = Copying::for_rewrite(control).unwrap();
-    let ordinary = Pending::new(
-        copying
-            .lower_projections(
-                std::slice::from_ref(source.as_ref()),
-                &NoRegisteredAggregates,
-                &mut QueryArena::new(
-                    control,
-                    None,
-                    crate::plan::retirement::construction::Context::new(&control)
-                        .unwrap()
-                        .child(&control)
-                        .unwrap(),
-                ),
-            )
-            .unwrap(),
-    );
+    let ordinary = crate::catalog::work::inline(construct_projections(
+        std::slice::from_ref(source.as_ref()),
+        &mut copying,
+        &mut InlineScalarInput {
+            aggregates: &NoRegisteredAggregates,
+            arena: &mut QueryArena::new(
+                control,
+                None,
+                crate::plan::retirement::construction::Context::new(&control)
+                    .unwrap()
+                    .child(&control)
+                    .unwrap(),
+            ),
+        },
+    ))
+    .unwrap();
     let ordinary_memory = copying.into_rewrite_memory();
     let (actual, polls) = complete(&mut input(source.clone(), &native, &work, &token, &token));
     assert!(polls > source.alias.as_ref().unwrap().len() / 4096);

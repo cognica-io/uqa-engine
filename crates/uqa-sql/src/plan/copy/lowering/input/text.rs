@@ -10,6 +10,19 @@ use super::{Copying, Result, ScalarInput, TextInput};
 use crate::ast::Expr;
 use uqa_core::memory::BudgetedVec;
 
+pub(in crate::plan::copy) async fn returning_aliases<'s, I: TextInput<&'s str>>(
+    source: &'s crate::ast::ReturningAliases,
+    copying: &mut Copying<'_>,
+    input: &mut I,
+) -> Result<crate::ast::ReturningAliases> {
+    Ok(crate::ast::ReturningAliases {
+        old: copying.take(input.text(&source.old, copying.control).await?),
+        new: copying.take(input.text(&source.new, copying.control).await?),
+        old_explicit: source.old_explicit,
+        new_explicit: source.new_explicit,
+    })
+}
+
 pub(in crate::plan::copy::lowering) async fn optional_text<'s, I: TextInput<&'s str>>(
     source: Option<&'s str>,
     copying: &mut Copying<'_>,
