@@ -70258,6 +70258,45 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_preserves_alias_bytes_order_and_independent_scalar_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Lower a scalar and long Unicode alias through ordinary and one-step retained construction, then release the alias.",
+      "invariant": "The exact alias and scalar values survive source retirement; the independently retained scalar keeps only its own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_retires_each_suspended_prefix_and_denied_alias",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Abandon or cancel every projection construction prefix and deny scalar or alias admission under finite allowances.",
+      "invariant": "No partial projection is published and every partial payload retires without releasing an unrelated sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_destination_admission_keeps_deep_scalars_owned_until_alias_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Transfer an 8192-level scalar and alias on a 256 KiB stack with destination allowance for only one field record.",
+      "invariant": "Failed destination admission keeps the scalar owned until allocation-free retirement; successful publication preserves both field records.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

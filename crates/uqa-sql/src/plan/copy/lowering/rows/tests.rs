@@ -7,7 +7,7 @@
 use super::*;
 use crate::{
     construction::{self, Work},
-    plan::{mutable::values::OwnedRows, ExpressionPlan, NoRegisteredAggregates},
+    plan::{mutable::values::OwnedRows, ExpressionPlan, NoRegisteredAggregates, OwnedScalarExpr},
     SQLError,
 };
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use uqa_core::{
 struct NativeRows<'a>(Work<'a>);
 
 impl Copying<'_> {
-    fn lower_rows_with<'s: 'a, 'a, I: RowInput<'s> + Send + 'a>(
+    fn lower_rows_with<'s: 'a, 'a, I: ScalarInput<'s> + Send + 'a>(
         &'a mut self,
         rows: &'s [Vec<Expr>],
         input: &'a mut I,
@@ -38,7 +38,7 @@ impl Copying<'_> {
     }
 }
 
-impl<'s> RowInput<'s> for NativeRows<'_> {
+impl<'s> ScalarInput<'s> for NativeRows<'_> {
     async fn checkpoint(&mut self) -> Result<()> {
         self.0.checkpoint().await;
         Ok(())

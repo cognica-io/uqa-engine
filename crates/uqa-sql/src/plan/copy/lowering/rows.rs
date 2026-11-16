@@ -6,54 +6,20 @@
 
 //! Ordinary and retained row lowering share destination admission and scalar ownership transfer.
 
-use super::{Copying, QueryArena, Result};
+use super::{
+    input::{InlineScalarInput, ScalarInput},
+    Copying, QueryArena, Result,
+};
 use crate::{
     ast::Expr,
     plan::{
         mutable::memory::{RewriteField, RewriteMemory},
         retirement::Pending,
-        AggregateClassifier, OwnedScalarExpr,
+        AggregateClassifier,
     },
     ScalarExpr,
 };
-use std::future::{ready, Future};
 use uqa_core::memory::{BudgetedVec, ProductionControl};
-
-pub(in crate::plan) trait RowInput<'s> {
-    fn checkpoint(&mut self) -> impl Future<Output = Result<()>> + Send;
-    fn scalar(
-        &mut self,
-        expression: &'s Expr,
-        control: ProductionControl<'_>,
-    ) -> impl Future<Output = Result<OwnedScalarExpr>> + Send;
-}
-
-struct InlineRows<'a, 'c> {
-    aggregates: &'a dyn AggregateClassifier,
-    arena: &'a mut QueryArena<'c>,
-}
-
-impl<'s> RowInput<'s> for InlineRows<'_, '_> {
-    fn checkpoint(&mut self) -> impl Future<Output = Result<()>> + Send {
-        ready(Ok(()))
-    }
-
-    fn scalar(
-        &mut self,
-        expression: &'s Expr,
-        control: ProductionControl<'_>,
-    ) -> impl Future<Output = Result<OwnedScalarExpr>> + Send {
-        ready(
-            crate::plan::scalar::lower_scalar_with_arena(
-                expression,
-                self.aggregates,
-                self.arena,
-                control,
-            )
-            .map_err(Into::into),
-        )
-    }
-}
 
 impl Copying<'_> {
     pub(super) fn lower_rows(
@@ -64,7 +30,7 @@ impl Copying<'_> {
     ) -> Result<Vec<Vec<ScalarExpr>>> {
         crate::catalog::work::inline(construct_rows(
             rows,
-            &mut InlineRows { aggregates, arena },
+            &mut InlineScalarInput { aggregates, arena },
             self.control,
             self.fields.as_mut().expect("row records"),
             self.memory.as_mut().expect("row allowance"),
@@ -72,7 +38,7 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_rows<'s, I: RowInput<'s>>(
+async fn construct_rows<'s, I: ScalarInput<'s>>(
     rows: &'s [Vec<Expr>],
     input: &mut I,
     control: ProductionControl<'_>,

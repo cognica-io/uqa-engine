@@ -6,8 +6,8 @@
 
 use super::{Copying, QueryArena, Result};
 use crate::{
-    ast::{Expr, FrameBound, OrderBy, Projection, WindowSpec},
-    plan::{AggregateClassifier, ExpressionPlan, OrderPlan, ProjectionPlan},
+    ast::{Expr, FrameBound, OrderBy, WindowSpec},
+    plan::{AggregateClassifier, ExpressionPlan, OrderPlan},
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 
@@ -41,20 +41,6 @@ impl Copying<'_> {
         expression
             .map(|expression| self.lower_scalar_box(expression, aggregates, arena))
             .transpose()
-    }
-
-    pub(super) fn lower_projection(
-        &mut self,
-        projection: &Projection,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<ProjectionPlan> {
-        Ok(ProjectionPlan {
-            expr: self.lower_scalar(&projection.expr, aggregates, arena)?,
-            alias: self.field("alias", |copying| {
-                copying.optional_text(projection.alias.as_deref())
-            })?,
-        })
     }
 
     pub(super) fn lower_order(
