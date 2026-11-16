@@ -118,6 +118,12 @@ pub(in crate::plan) struct Prefix<T: Root> {
     context: Context,
 }
 
+impl<T: Root + std::fmt::Debug> std::fmt::Debug for Prefix<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(formatter)
+    }
+}
+
 impl<T: Root> Prefix<T> {
     pub(in crate::plan) fn take(mut self) -> T {
         self.value.take().expect("pending plan root")

@@ -21,9 +21,22 @@ type Result<T> = std::result::Result<T, ValueRetentionError>;
 type Shared<T> = Arc<Produced<Mutex<T>>>;
 pub(crate) type Output<T> = Shared<Option<T>>;
 
-pub(crate) struct Read<'a, T> {
-    future: Pin<Box<dyn Future<Output = T> + Send + 'a>>,
-    _memory: Option<MemoryReservation>,
+pub(crate) struct RetainedFuture<F: Future + ?Sized> {
+    future: Pin<Box<F>>,
+    memory: Option<MemoryReservation>,
+}
+
+pub(crate) type Read<'a, T> = RetainedFuture<dyn Future<Output = T> + Send + 'a>;
+
+pub(crate) fn retain<F: Future>(
+    control: ProductionControl<'_>,
+    future: F,
+) -> Result<RetainedFuture<F>> {
+    let memory = control.reserve(size_of_val(&future))?;
+    Ok(RetainedFuture {
+        future: Box::pin(future),
+        memory,
+    })
 }
 
 impl<'a, T> Read<'a, T> {
@@ -31,25 +44,22 @@ impl<'a, T> Read<'a, T> {
         control: ProductionControl<'_>,
         future: F,
     ) -> Result<Self> {
-        let memory = control.reserve(size_of_val(&future))?;
+        let future = retain(control, future)?;
         Ok(Self {
-            future: Box::pin(future),
-            _memory: memory,
+            future: future.future,
+            memory: future.memory,
         })
     }
 }
 
-impl<T> Future for Read<'_, T> {
-    type Output = T;
-    fn poll(self: Pin<&mut Self>, context: &mut std::task::Context<'_>) -> Poll<T> {
+impl<F: Future + ?Sized> Future for RetainedFuture<F> {
+    type Output = F::Output;
+    fn poll(self: Pin<&mut Self>, context: &mut std::task::Context<'_>) -> Poll<F::Output> {
         self.get_mut().future.as_mut().poll(context)
     }
 }
 
-struct Task<'a> {
-    future: Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
-    _memory: Option<MemoryReservation>,
-}
+type Task<'a> = Read<'a, ()>;
 
 struct Queue<'a> {
     child: Option<Task<'a>>,
@@ -83,11 +93,7 @@ impl<'a> Work<'a> {
             let value = constructor.await;
             *output.lock().expect("private constructor output") = Some(value);
         };
-        let memory = self.control.reserve(size_of_val(&future))?;
-        let task = Task {
-            future: Box::pin(future),
-            _memory: memory,
-        };
+        let task = Read::new(self.control, future)?;
         let queue = self.queue.upgrade().expect("active constructor driver");
         let mut queue = queue.lock().expect("private constructor queue");
         assert!(

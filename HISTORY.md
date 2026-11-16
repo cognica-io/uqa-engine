@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share query-block assembly between ordinary controlled lowering and retained construction. Reuse existing projection, window, scalar, source and compute constructors; preserve field order, query slots, flags and locking metadata. Keep completed fields in the existing retirement owner while admitted constructor futures suspend or fail. Complete nested query construction, stored binding and public backup restoration remain in progress.
+
 - Keep completed query, CTE, FROM and mutation prefixes in the existing plan-tree retirement owner while later fields are constructed. Reuse the vector and box constructors, preserve field and scalar-query order, and release failed or cancelled prefixes without recursive scalar destruction or cleanup allocations.
 
 - Share retained FROM construction for tables, VALUES, table functions and function groups with ordinary controlled lowering. Reuse existing name, type and function-binding producers; preserve query order and retained row identity, and retire scalar prefixes through later metadata failures. Structural query construction and public backup restoration remain in progress.

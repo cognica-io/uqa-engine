@@ -17,15 +17,6 @@ use crate::{
 };
 use uqa_core::memory::BudgetedVec;
 
-macro_rules! field {
-    ($copying:ident, $name:literal, |$field:ident| $body:expr) => {{
-        let mut $field = $copying.begin_input_field()?;
-        let value = $body;
-        $copying.finish_input_field($name, $field);
-        value
-    }};
-}
-
 pub(in crate::plan::copy::lowering) trait Input<'s>:
     ScalarInput<&'s Expr>
     + TextInput<&'s str>

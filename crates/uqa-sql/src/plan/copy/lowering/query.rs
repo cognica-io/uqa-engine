@@ -4,12 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Copying, Result, SyntaxCopy};
+use super::{Copying, Result};
 use crate::{
     ast::{Expr, SelectStmt},
     plan::{retirement::Pending, AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan},
 };
-use uqa_core::memory::OwnedSet;
+
+pub(super) mod block;
 
 impl Copying<'_> {
     pub(super) fn lower_query_fields(
@@ -151,57 +152,13 @@ impl Copying<'_> {
         statement: &SelectStmt,
         aggregates: &dyn AggregateClassifier,
     ) -> Result<QueryBlockPlan> {
-        let mut arena = self.query_arena();
-        // Scalar-subquery indices follow the established lowering order, including windows after projection roots.
+        let mut input = block::Inline {
+            aggregates,
+            arena: Some(self.query_arena()),
+        };
         let mut block =
             self.retain_plan(crate::plan::mutable::construction::empty_projection_block());
-        block.projections = self.field("projections", |copying| {
-            copying.lower_projections(&statement.projections, aggregates, &mut arena)
-        })?;
-        block.windows = self.field("windows", |copying| {
-            copying.lower_windows(&statement.windows, aggregates, &mut arena)
-        })?;
-        block.deferred_outer_rewrites = self.field("deferred_outer_rewrites", |copying| {
-            copying.map(std::iter::empty(), |_, rewrite| Ok(rewrite))
-        })?;
-        block.privilege_columns = self.field("privilege_columns", |_| Ok(OwnedSet::new()))?;
-        block.from = self.field("from", |copying| {
-            statement
-                .from
-                .as_ref()
-                .map(|source| copying.lower_source(source, aggregates, &mut arena))
-                .transpose()
-        })?;
-        block.r#where = self.field("where", |copying| {
-            copying.lower_optional_scalar(statement.r#where.as_ref(), aggregates, &mut arena)
-        })?;
-        block.group_by = self.field("group_by", |copying| {
-            copying.lower_scalars(&statement.group_by, aggregates, &mut arena)
-        })?;
-        block.grouping_sets = self.field("grouping_sets", |copying| {
-            copying.lower_rows(&statement.grouping_sets, aggregates, &mut arena)
-        })?;
-        block.group_distinct = statement.group_distinct;
-        block.having = self.field("having", |copying| {
-            copying.lower_optional_scalar(statement.having.as_ref(), aggregates, &mut arena)
-        })?;
-        block.order_by = self.field("order_by", |copying| {
-            copying.lower_orders(&statement.order_by, aggregates, &mut arena)
-        })?;
-        block.limit = self.field("limit", |copying| {
-            copying.lower_optional_scalar(statement.limit.as_ref(), aggregates, &mut arena)
-        })?;
-        block.with_ties = statement.with_ties;
-        block.offset = self.field("offset", |copying| {
-            copying.lower_optional_scalar(statement.offset.as_ref(), aggregates, &mut arena)
-        })?;
-        block.distinct = statement.distinct;
-        block.distinct_on = self.field("distinct_on", |copying| {
-            copying.lower_scalars(&statement.distinct_on, aggregates, &mut arena)
-        })?;
-        block.subqueries = self.take_arena(arena)?;
-        block.locking = self.field("locking", |copying| statement.locking.copy_syntax(copying))?;
-        block.compute = block.compute_kind_with_control(aggregates, &self.control)?;
+        crate::catalog::work::inline(block::construct(statement, self, &mut input, &mut block))?;
         Ok(block.take())
     }
 }

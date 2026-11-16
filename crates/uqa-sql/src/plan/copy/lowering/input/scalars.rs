@@ -19,22 +19,6 @@ use crate::{
 use uqa_core::memory::BudgetedVec;
 
 impl Copying<'_> {
-    pub(in crate::plan::copy::lowering) fn lower_scalars(
-        &mut self,
-        expressions: &[Expr],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<ScalarExpr>> {
-        crate::catalog::work::inline(construct_scalars(
-            expressions,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-            |expression| expression,
-            |_, expression| expression,
-        ))
-        .map(Pending::take)
-    }
-
     pub(in crate::plan::copy::lowering) fn lower_orders(
         &mut self,
         orders: &[OrderBy],

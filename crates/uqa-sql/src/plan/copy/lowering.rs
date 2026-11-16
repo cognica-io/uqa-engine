@@ -19,6 +19,15 @@ use crate::{
 };
 use uqa_core::memory::{BudgetedVec, ProductionControl};
 
+macro_rules! field {
+    ($copying:ident, $name:literal, |$field:ident| $body:expr) => {{
+        let mut $field = $copying.begin_input_field()?;
+        let value = $body;
+        $copying.finish_input_field($name, $field);
+        value
+    }};
+}
+
 mod commands;
 mod ctes;
 mod expressions;

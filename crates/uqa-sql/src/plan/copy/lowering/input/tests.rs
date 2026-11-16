@@ -17,6 +17,7 @@ use crate::{
     SQLError, ScalarExpr, ScalarWindowSpec,
 };
 
+mod blocks;
 mod sources;
 use std::sync::Arc;
 use uqa_core::{
@@ -26,6 +27,7 @@ use uqa_core::{
 };
 
 enum Source {
+    Block(Box<SelectStmt>),
     From(crate::ast::FromClause),
     Values(Vec<Expr>),
     Orders(Vec<OrderBy>),
@@ -36,6 +38,7 @@ enum Source {
 
 #[derive(Debug)]
 enum Field {
+    Block(Box<crate::plan::retirement::construction::Prefix<crate::plan::QueryBlockPlan>>),
     From(crate::plan::SourcePlan),
     Values(Vec<ScalarExpr>),
     Orders(Vec<OrderPlan>),
@@ -48,6 +51,9 @@ enum Field {
 impl PartialEq for Field {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Block(left), Self::Block(right)) => {
+                serde_json::to_value(&***left).unwrap() == serde_json::to_value(&***right).unwrap()
+            }
             (Self::From(left), Self::From(right)) => {
                 serde_json::to_value(left).unwrap() == serde_json::to_value(right).unwrap()
             }
@@ -75,6 +81,7 @@ impl PartialEq for Field {
 impl Retire for Field {
     fn retire(&mut self) {
         match self {
+            Self::Block(_) => {}
             Self::From(source) => source.retire(),
             Self::Values(values) => values.retire(),
             Self::Orders(values) => values.retire(),
@@ -115,10 +122,10 @@ impl<'s> crate::plan::scalar::ScalarQueryInput<&'s Expr, &'s crate::ast::SelectS
 
 struct Native<'a> {
     work: Work<'a>,
-    queries: Queries<'a>,
+    queries: Option<Queries<'a>>,
 }
 
-impl<'s> ScalarInput<&'s Expr> for Native<'_> {
+impl<'s: 'a, 'a> ScalarInput<&'s Expr> for Native<'a> {
     async fn checkpoint(&mut self) -> Result<()> {
         self.work.checkpoint().await;
         Ok(())
@@ -129,13 +136,22 @@ impl<'s> ScalarInput<&'s Expr> for Native<'_> {
         expression: &'s Expr,
         control: ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
-        ExpressionPlan::lower_scalar_with_query_input(
-            expression,
-            &mut self.queries,
-            &control,
-            &mut self.work,
-        )?
-        .await
+        let mut queries = self.queries.take().expect("active scalar query owner");
+        let control = control.capture();
+        let output = self.work.submit(move |mut work| async move {
+            let control = control.control();
+            let value = ExpressionPlan::lower_scalar_with_query_input(
+                expression,
+                &mut queries,
+                &control,
+                &mut work,
+            )?
+            .await?;
+            Ok::<_, SQLError>((value, queries))
+        })?;
+        let (value, queries) = construction::receive(output).await?;
+        self.queries = Some(queries);
+        Ok(value)
     }
 }
 
@@ -153,32 +169,40 @@ impl<'s> TextInput<&'s str> for Native<'_> {
     }
 }
 
-impl<'s> SourceMetadataInput<&'s crate::ast::ColumnType, &'s crate::ast::FunctionBinding>
+impl<'t, 'b> SourceMetadataInput<&'t crate::ast::ColumnType, &'b crate::ast::FunctionBinding>
     for Native<'_>
 {
     async fn ty(
         &mut self,
-        source: &'s crate::ast::ColumnType,
+        source: &'t crate::ast::ColumnType,
         control: ProductionControl<'_>,
     ) -> Result<Produced<crate::ast::ColumnType>> {
         source.clone_with_input_work(&control, &mut self.work).await
     }
     async fn binding(
         &mut self,
-        source: &'s crate::ast::FunctionBinding,
+        source: &'b crate::ast::FunctionBinding,
         control: ProductionControl<'_>,
     ) -> Result<Produced<crate::ast::FunctionBinding>> {
         source.clone_with_input_work(&control, &mut self.work).await
     }
 }
 
-fn retained_field<'s: 'a, 'c: 'a, 'a, I: super::super::source::leaf::Input<'s> + Send + 'a>(
+fn retained_field<
+    's: 'a,
+    'c: 'a,
+    'a,
+    I: super::super::source::leaf::Input<'s> + super::super::query::block::Input<'s, 'c> + Send + 'a,
+>(
     source: &'s Source,
     copying: &'a mut Copying<'c>,
     input: &'a mut I,
 ) -> Result<construction::Read<'a, Result<Pending<Field>>>> {
     Ok(construction::Read::new(copying.control, async move {
         Ok(Pending::new(match source {
+            Source::Block(source) => {
+                Field::Block(blocks::block_input(source, copying, input)?.await?)
+            }
             Source::From(source) => Field::From(
                 super::super::source::leaf::construct(source, copying, input)
                     .await?
@@ -248,15 +272,19 @@ fn input(
         let native = &native;
         let output = driver.work().submit(move |work| async move {
             let mut input = Native {
-                queries: Queries {
+                queries: Some(Queries {
                     work: work.clone(),
                     values: BudgetedVec::new(native),
-                },
+                }),
                 work,
             };
             let mut copying = Copying::for_rewrite(control).unwrap();
             let field = retained_field(source, &mut copying, &mut input)?.await?;
-            Ok::<_, SQLError>((field, copying.into_rewrite_memory(), input.queries.values))
+            Ok::<_, SQLError>((
+                field,
+                copying.into_rewrite_memory(),
+                input.queries.expect("completed query callbacks").values,
+            ))
         })?;
         while driver.advance().await? {
             channel.checkpoint().await?;

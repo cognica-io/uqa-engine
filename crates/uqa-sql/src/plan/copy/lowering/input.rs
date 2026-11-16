@@ -56,12 +56,12 @@ pub(super) struct InlineScalarInput<'a, 'c> {
     pub(super) arena: &'a mut QueryArena<'c>,
 }
 
-impl<'s> SourceMetadataInput<&'s crate::ast::ColumnType, &'s crate::ast::FunctionBinding>
+impl<'t, 'b> SourceMetadataInput<&'t crate::ast::ColumnType, &'b crate::ast::FunctionBinding>
     for InlineScalarInput<'_, '_>
 {
     fn ty(
         &mut self,
-        source: &'s crate::ast::ColumnType,
+        source: &'t crate::ast::ColumnType,
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<crate::ast::ColumnType>>> + Send {
         ready(source.clone_with_control(&control).map_err(Into::into))
@@ -69,7 +69,7 @@ impl<'s> SourceMetadataInput<&'s crate::ast::ColumnType, &'s crate::ast::Functio
 
     fn binding(
         &mut self,
-        source: &'s crate::ast::FunctionBinding,
+        source: &'b crate::ast::FunctionBinding,
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<crate::ast::FunctionBinding>>> + Send {
         ready(source.clone_with_control(&control).map_err(Into::into))

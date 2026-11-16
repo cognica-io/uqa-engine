@@ -7,32 +7,16 @@
 //! Window definitions share ordered scalar construction and retain partial fields across input suspension.
 
 use super::{
-    input::{scalars::construct_scalars, InlineScalarInput, ScalarInput, TextInput},
-    Copying, QueryArena, Result,
+    input::{scalars::construct_scalars, ScalarInput, TextInput},
+    Copying, Result,
 };
 use crate::{
     ast::{Expr, FrameBound, WindowDefinition, WindowSpec},
-    plan::{retirement::Pending, AggregateClassifier},
+    plan::retirement::Pending,
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 
 use uqa_core::memory::BudgetedVec;
-
-impl Copying<'_> {
-    pub(super) fn lower_windows(
-        &mut self,
-        windows: &[WindowDefinition],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<WindowDefinition<ScalarWindowSpec>>> {
-        crate::catalog::work::inline(construct_windows(
-            windows,
-            self,
-            &mut InlineScalarInput { aggregates, arena },
-        ))
-        .map(Pending::take)
-    }
-}
 
 pub(super) async fn construct_windows<'s, I: ScalarInput<&'s Expr> + TextInput<&'s str>>(
     source: &'s [WindowDefinition],
