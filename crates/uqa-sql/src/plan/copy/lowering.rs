@@ -27,6 +27,7 @@ mod projections;
 mod query;
 mod rows;
 mod source;
+mod windows;
 
 impl crate::plan::ExpressionPlan {
     /// Lower a borrowed expression and every nested query directly into independently movable owners.

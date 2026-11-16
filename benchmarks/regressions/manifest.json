@@ -70540,6 +70540,58 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_preserve_query_order_frame_flags_and_owned_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Compare retained window definitions with independent ordinary lowering across query children, UTF-8 literals, null ordering and all frame bounds/exclusions.",
+      "invariant": "Preserve exact scalars, query slot order and frame flags; completed payloads outlive the source and retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_retire_every_prefix_and_denied_field_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Abandon and cancel both owners at every suspended prefix of a window with a long Unicode partition payload and two frame endpoints; deny destination allowances.",
+      "invariant": "No partial definition is published; all destination and work memory retires without consuming a sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_bound_wide_partition_and_order_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Construct a definition with 2,048 partition roots and 2,048 ordering roots through one-step work windows.",
+      "invariant": "Every root consumes work, preserves order and retains its admitted payload until output retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_retire_deep_partial_fields_after_late_query_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Construct an 8,192-level partition expression on a 256 KiB stack before an ordering query rejects the definition.",
+      "invariant": "Retire the completed partition and all partial field owners without recursive cleanup or leaked destination/work memory.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
