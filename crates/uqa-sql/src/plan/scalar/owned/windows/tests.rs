@@ -35,7 +35,7 @@ fn input(
         let mut input = reader.input();
         let control = ProductionControl::new(&native, &original, input.cancellation);
         let spec = specification(&source);
-        Ok(OwnedWindowSpec::copy_parts_from(
+        OwnedWindowSpec::copy_parts_from(
             spec.definition,
             &spec.partition_by,
             &spec.order_by,
@@ -44,7 +44,8 @@ fn input(
             &mut input,
         )
         .await?
-        .finish(&control)?)
+        .finish_from(&control, &mut input)
+        .await
     })
     .unwrap()
 }
@@ -184,6 +185,92 @@ fn window_copy_and_replacement_retire_deep_specifications_with_small_stack() {
             assert_eq!(specification(&owned), specification(&replacement));
             drop(owned);
             assert_eq!((native.used(), work.used()), (0, 0));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn retained_window_publication_retires_interrupted_deep_metadata_folds() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut source = fixture();
+            let ScalarExpr::WindowCall { spec, .. } =
+                &mut Arc::get_mut(&mut source).unwrap().expression
+            else {
+                unreachable!()
+            };
+            let mut deep = ScalarExpr::Literal(Value::Str("leaf".into()));
+            for _ in 0..8192 {
+                deep = ScalarExpr::Not(Box::new(deep));
+            }
+            spec.partition_by = vec![deep];
+            let native = MemoryBudget::new(16 << 20);
+            let work = MemoryBudget::new(1 << 20);
+            let sibling = native.reserve(29).unwrap();
+            for prefix in [0, 1, 2, 8, 1024, 8192, 16_384] {
+                for cancellation in 0..3 {
+                    let original = CancellationToken::new();
+                    let invoking = CancellationToken::new();
+                    let control = ProductionControl::new(&native, &original, &invoking);
+                    let spec = specification(&source);
+                    let spec = OwnedWindowSpec::copy_parts(
+                        spec.definition,
+                        &spec.partition_by,
+                        &spec.order_by,
+                        spec.frame.as_ref(),
+                        &control,
+                    )
+                    .unwrap();
+                    let budget = native.clone();
+                    let retained = original.clone();
+                    let mut reader: ImageDecoder<(), SQLError> =
+                        ImageDecoder::new(&work, &invoking, |mut reader| async move {
+                            let mut input = reader.input();
+                            let control =
+                                ProductionControl::new(&budget, &retained, input.cancellation);
+                            let (value, memory) =
+                                spec.finish_from(&control, &mut input).await?.into_parts();
+                            drop(Pending::new(value));
+                            drop(memory);
+                            Ok(())
+                        })
+                        .unwrap();
+                    for _ in 0..prefix {
+                        assert!(reader
+                            .advance(
+                                &mut std::io::empty(),
+                                ImageDecodeWindow { bytes: 1, steps: 1 }
+                            )
+                            .unwrap()
+                            .is_none());
+                    }
+                    if cancellation != 0 {
+                        if cancellation == 1 {
+                            original.cancel();
+                        } else {
+                            invoking.cancel();
+                        }
+                        assert_eq!(
+                            reader
+                                .advance(
+                                    &mut std::io::empty(),
+                                    ImageDecodeWindow { bytes: 1, steps: 1 }
+                                )
+                                .unwrap_err()
+                                .sqlstate(),
+                            Some("57014")
+                        );
+                    }
+                    let allocation = allocation_counter::measure(|| drop(reader));
+                    assert_eq!(allocation.count_total, 0);
+                    assert_eq!((native.used(), work.used()), (29, 0));
+                }
+            }
+            drop(sibling);
+            assert_eq!(native.used(), 0);
         })
         .unwrap()
         .join()

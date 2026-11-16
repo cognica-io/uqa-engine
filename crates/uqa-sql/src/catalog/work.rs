@@ -75,6 +75,28 @@ pub(crate) async fn copy_text<W: Work + Send>(
     Ok(value.finish()?)
 }
 
+pub(crate) async fn compare_text<W: Work + Send>(
+    work: &mut W,
+    left: &str,
+    right: &str,
+    control: &ProductionControl<'_>,
+) -> Result<std::cmp::Ordering, SQLError> {
+    for (left, right) in left
+        .as_bytes()
+        .chunks(4096)
+        .zip(right.as_bytes().chunks(4096))
+    {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        let order = left.cmp(right);
+        if order.is_ne() {
+            return Ok(order);
+        }
+    }
+    Ok(left.len().cmp(&right.len()))
+}
+
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     match future

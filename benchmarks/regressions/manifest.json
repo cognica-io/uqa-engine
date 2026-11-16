@@ -71216,6 +71216,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_production_map_shares_nodes_with_inline_insertion_and_lookup",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests/input.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Mix ordinary and suspended operations across 257 ordered keys with controlled and uncontrolled construction.",
+      "invariant": "Preserve reference-map contents, exact live node charges and replacement addresses without a separate map algorithm.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "interrupted_production_map_admission_preserves_entries_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests/input.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon, fail or cancel each insertion prefix and deny the first node before allocation.",
+      "invariant": "Preserve all existing entries and leases until publication; retirement and rejected admission allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_canonical_windows_preserve_inherited_clauses_and_exact_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Resolve ordered partition, ordering and frame inheritance through one-step work windows.",
+      "invariant": "Preserve canonical slot identities, inherited clauses and the same final reservations as ordinary resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_validation_keeps_first_failure_order_across_work_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Combine malformed slots, empty or duplicate names, invalid parents and conflicting clauses.",
+      "invariant": "Preserve original ordered validation and exact diagnostics in ready and suspended resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_canonical_windows_retire_every_interrupted_resolution_and_freeze_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Drop or cancel either owner at every pending canonical resolution and metadata-freezing boundary.",
+      "invariant": "Retire completed specifications and partial memory trees before releasing their leases without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_names_use_bounded_borrowed_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Compare long shared-prefix Unicode names and reject five insufficient destination allowances.",
+      "invariant": "Borrow name payloads, bound comparisons to 4096-byte chunks, preserve admission errors and release all work and payload leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_failure_retires_completed_deep_definitions_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Resolve an 8192-level specification before a later duplicate definition on a 256 KiB stack.",
+      "invariant": "Keep the completed specification under iterative retirement through late validation failure and release its complete reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_publication_retires_interrupted_deep_metadata_folds",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Interrupt freezing at seven positions of an 8192-level specification on a 256 KiB stack, with either cancellation owner or abandonment.",
+      "invariant": "Keep the deep payload alive before partial folding leases and retire every detached metadata tree without allocation or recursion.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

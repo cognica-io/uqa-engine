@@ -21,11 +21,12 @@ mod composites;
 mod construction;
 mod constructors;
 mod edit;
+mod folding;
 mod generated;
 mod iteration;
 mod literals;
 mod metadata;
-mod publication;
+pub(in crate::plan::scalar) mod publication;
 mod query_ids;
 mod references;
 mod replacement;
@@ -128,29 +129,9 @@ impl ScalarMemory {
     }
 
     pub(crate) fn into_reservation(self) -> MemoryReservation {
-        let mut retained = self.direct.budget().empty_reservation();
-        let mut current = Some(self);
-        let mut pending = None;
-        // Existing child slots retain ancestor links; freezing and retirement need no temporary allocation or recursive calls.
-        loop {
-            if let Some(first) = current.as_mut().and_then(|node| node.children.first_mut()) {
-                std::mem::swap(first, &mut pending);
-                std::mem::swap(&mut current, &mut pending);
-                continue;
-            }
-            absorb_leaf(current.take(), &mut retained);
-            loop {
-                let Some(parent) = pending.as_mut() else {
-                    return retained;
-                };
-                if parent.children.len() > 1 {
-                    current = parent.children.pop().expect("remaining scalar owner");
-                    break;
-                }
-                let previous = parent.children.first_mut().and_then(Option::take);
-                absorb_leaf(std::mem::replace(&mut pending, previous), &mut retained);
-            }
-        }
+        let mut folding = folding::Folding::new(self);
+        while !folding.advance() {}
+        folding.finish()
     }
 }
 

@@ -109,13 +109,22 @@ impl OwnedWindowSpec {
         control.check()?;
         Ok(output)
     }
+    #[cfg(test)]
     pub(in crate::plan) fn finish(
         self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ScalarWindowSpec>> {
-        Ok(self
-            .value
-            .finish(self.memory.map(ScalarMemory::into_reservation), control)?)
+        crate::catalog::work::inline(self.finish_from(control, &mut ()))
+    }
+
+    pub(in crate::plan) async fn finish_from<W: Work>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Produced<ScalarWindowSpec>, W::Error> {
+        super::publication::Publication::from_parts(self.value, self.memory)
+            .finish_from(control, work)
+            .await
     }
 }
 async fn bound_from<W: Work>(

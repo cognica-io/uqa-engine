@@ -12,6 +12,7 @@ use super::{
 };
 use crate::{SQLError, ScalarExpr, ScalarWindowSpec};
 mod production;
+pub(in crate::plan) use production::resolved_window_definitions_owned;
 pub use production::resolved_window_definitions_with_control;
 
 /// Resolve the canonical own clauses without evaluating any expression.
@@ -48,7 +49,10 @@ impl QueryPlan {
                 for query in &mut block.subqueries {
                     query.normalize_window_definitions()?;
                 }
-                let resolved = resolved_window_definitions(block)?;
+                let resolved = resolved_window_definitions_owned(
+                    block,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )?;
                 let mut result = Ok(());
                 let mut update = |node: &mut ScalarExpr| {
                     if result.is_ok() {

@@ -5,27 +5,105 @@
 //
 
 use super::{invalid, QueryBlockPlan, SQLError, ScalarWindowSpec};
-use crate::plan::scalar::OwnedWindowSpec;
-use uqa_core::memory::{Produced, ProductionControl, ProductionMap, ProductionVec};
+use crate::{
+    catalog::work::{self, Work as CatalogWork},
+    plan::{
+        retirement::Pending,
+        scalar::{OwnedWindowSpec, ScalarInputWork as Work},
+    },
+    schema::retention::CatalogRetentionError,
+};
+use uqa_core::memory::{
+    MapKeyInput, MemoryReservation, Produced, ProductionControl, ProductionMap, ProductionVec,
+};
+
+#[cfg(test)]
+mod tests;
 
 pub fn resolved_window_definitions_with_control(
     block: &QueryBlockPlan,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<ScalarWindowSpec>>, SQLError> {
+    resolved_window_definitions_owned(block, control)?.finish(control)
+}
+
+pub(in crate::plan) fn resolved_window_definitions_owned(
+    block: &QueryBlockPlan,
+    control: &ProductionControl<'_>,
+) -> Result<ResolvedWindows, SQLError> {
+    work::inline(resolved_window_definitions_from(block, control, &mut ()))
+}
+
+pub(in crate::plan) struct ResolvedWindows {
+    value: Pending<Vec<ScalarWindowSpec>>,
+    memory: Option<MemoryReservation>,
+}
+
+impl std::ops::Deref for ResolvedWindows {
+    type Target = [ScalarWindowSpec];
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl ResolvedWindows {
+    fn finish(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Vec<ScalarWindowSpec>>, SQLError> {
+        Ok(self.value.finish(self.memory, control)?)
+    }
+}
+
+pub(in crate::plan) async fn resolved_window_definitions_from<W: Work + CatalogWork>(
+    block: &QueryBlockPlan,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<ResolvedWindows, SQLError>
+where
+    W::Error: From<CatalogRetentionError> + Into<SQLError>,
+{
     control.check()?;
-    let mut resolved: ProductionVec<'_, ScalarWindowSpec> = ProductionVec::new(*control);
-    resolved.reserve(block.windows.len())?;
+    let mut buffer: ProductionVec<'_, ScalarWindowSpec> = ProductionVec::new(*control);
+    buffer.reserve(block.windows.len())?;
+    let (value, memory) = buffer.finish()?.into_parts();
+    let mut resolved = ResolvedWindows {
+        value: Pending::new(value),
+        memory,
+    };
     let mut names = ProductionMap::new(*control);
     for (slot, window) in block.windows.iter().enumerate() {
+        control.check()?;
+        CatalogWork::checkpoint(work).await?;
         control.check()?;
         if window.spec.definition.is_some() {
             return Err(invalid("a canonical specification refers to a call slot"));
         }
         if let Some(name) = &window.name {
-            if name.is_empty() || names.get(&name.as_str()).is_some() {
+            if name.is_empty()
+                || names
+                    .get_from(
+                        &name.as_str(),
+                        &mut Comparison {
+                            work,
+                            control: *control,
+                        },
+                    )
+                    .await?
+                    .is_some()
+            {
                 return Err(invalid("a canonical window name is empty or repeated"));
             }
-            names.insert_copy(name.as_str(), ())?;
+            names
+                .insert_copy_from(
+                    name.as_str(),
+                    (),
+                    &mut Comparison {
+                        work,
+                        control: *control,
+                    },
+                )
+                .await?;
         }
         let base = window
             .inherited
@@ -58,15 +136,42 @@ pub fn resolved_window_definitions_with_control(
         } else {
             window.spec.order_by.as_slice()
         };
-        let spec = OwnedWindowSpec::copy_parts(
+        let spec = OwnedWindowSpec::copy_parts_from(
             Some(slot),
             partition,
             order,
             window.spec.frame.as_ref(),
             control,
-        )?
-        .finish(control)?;
-        resolved.push_produced(spec)?;
+            work,
+        )
+        .await
+        .map_err(Into::into)?
+        .finish_from(control, work)
+        .await
+        .map_err(Into::into)?;
+        let (spec, memory) = spec.into_parts();
+        // All slots were admitted before resolving the first definition; attaching a completed specification cannot allocate or suspend.
+        resolved.value.push(spec);
+        resolved.memory = control.combine(resolved.memory.take(), memory);
     }
-    Ok(resolved.finish()?)
+    control.check()?;
+    Ok(resolved)
+}
+
+struct Comparison<'a, 'b, W> {
+    work: &'a mut W,
+    control: ProductionControl<'b>,
+}
+impl<'q, 's, W: CatalogWork + Send> MapKeyInput<&'q str, &'s str> for Comparison<'_, '_, W> {
+    type Error = SQLError;
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        Ok(CatalogWork::checkpoint(self.work).await?)
+    }
+    async fn compare(
+        &mut self,
+        left: &&'q str,
+        right: &&'s str,
+    ) -> Result<std::cmp::Ordering, Self::Error> {
+        work::compare_text(self.work, left, right, &self.control).await
+    }
 }

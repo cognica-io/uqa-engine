@@ -67,8 +67,7 @@ impl MutableQueryPlan {
             })?;
         }
         if let RelationalPlan::QueryBlock(block) = &self.root {
-            let resolved =
-                crate::plan::windows::resolved_window_definitions_with_control(block, control)?;
+            let resolved = crate::plan::windows::resolved_window_definitions_owned(block, control)?;
             self = roots::normalize(self, &resolved, control)?;
         }
         self.prune_subqueries(control)
