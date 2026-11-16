@@ -11,6 +11,7 @@ use super::{
 };
 
 mod commands;
+pub(in crate::plan) mod construction;
 mod scalars;
 mod tree;
 pub(crate) use scalars::{Pending, Retire};
@@ -31,18 +32,7 @@ impl Node {
         match self {
             Node::Empty => {}
             Node::Query(query) => match &mut query.root {
-                RelationalPlan::QueryBlock(block) => {
-                    block.windows.retire();
-                    block.projections.retire();
-                    block.r#where.retire();
-                    block.group_by.retire();
-                    block.grouping_sets.retire();
-                    block.having.retire();
-                    block.order_by.retire();
-                    block.limit.retire();
-                    block.offset.retire();
-                    block.distinct_on.retire();
-                }
+                RelationalPlan::QueryBlock(block) => block.retire(),
                 RelationalPlan::SetOp {
                     order_by,
                     limit,
@@ -92,12 +82,7 @@ fn query_child(query: &mut QueryPlan, position: &mut usize) -> Option<Node> {
         return Some(Node::Cte(cte));
     }
     match &mut query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = block.from.take() {
-                return Some(Node::Source(source));
-            }
-            block.subqueries.pop().map(Node::Query)
-        }
+        RelationalPlan::QueryBlock(block) => block_child(block),
         RelationalPlan::Values { subqueries, .. } => subqueries.pop().map(Node::Query),
         RelationalPlan::SetOp {
             left,
@@ -117,6 +102,13 @@ fn query_child(query: &mut QueryPlan, position: &mut usize) -> Option<Node> {
             child
         }
     }
+}
+
+fn block_child(block: &mut super::QueryBlockPlan) -> Option<Node> {
+    if let Some(source) = block.from.take() {
+        return Some(Node::Source(source));
+    }
+    block.subqueries.pop().map(Node::Query)
 }
 
 fn source_child(source: &mut SourcePlan, position: &mut usize) -> Option<Node> {

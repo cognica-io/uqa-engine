@@ -7,7 +7,7 @@
 //! Mutation fields share retained construction and keep completed scalar prefixes owned through later callbacks.
 
 use super::super::input::InlineScalarInput;
-use super::{Copying, QueryArena, Result};
+use super::{super::QueryArena, Copying, Result};
 use crate::{
     ast::{AssignmentTarget, AssignmentTargets, Expr, MergeWhen, OnConflict},
     plan::retirement::Pending,

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Keep completed query, CTE, FROM and mutation prefixes in the existing plan-tree retirement owner while later fields are constructed. Reuse the vector and box constructors, preserve field and scalar-query order, and release failed or cancelled prefixes without recursive scalar destruction or cleanup allocations.
+
 - Share retained FROM construction for tables, VALUES, table functions and function groups with ordinary controlled lowering. Reuse existing name, type and function-binding producers; preserve query order and retained row identity, and retire scalar prefixes through later metadata failures. Structural query construction and public backup restoration remain in progress.
 - Use the shared iterative scalar constructor for ordinary controlled SQL lowering, preventing stack overflow while constructing deeply nested expressions. Preserve original parameter pruning, query-arena order and typed cancellation, memory and subquery errors.
 - Retain CTE SEARCH and CYCLE metadata through suspended text/scalar construction and later body failures. Preserve independent mark/default query scopes, field order and original diagnostics while retiring completed deep marks iteratively.

@@ -70891,6 +70891,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_query_and_mutation_failures_retire_completed_deep_scalar_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ownership/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Reject a later field after completing an 8192-level scalar in SELECT, a joined source, INSERT, UPDATE, DELETE and MERGE on a 256 KiB thread stack.",
+      "invariant": "Release every private constructor and completed scalar through the owning retirement paths, retain the sibling reservation and preserve allocation failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_constructors_retire_each_cancelled_prefix_and_preserve_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ownership/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Cancel original and invoking tokens at every observed scalar prefix of CTE, set-operation, joined-source, mutation, prepared, explained and call constructors.",
+      "invariant": "Preserve cancellation identity and scalar-query order while releasing complete and partial fields without leaking or releasing sibling allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "partial_plan_retirement_reuses_depth_capacity_and_drops_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Retire an 8192-level source tree and 2048 sibling prefixes using one depth-admitted workspace on a 256 KiB thread stack.",
+      "invariant": "Reuse the existing plan-tree retirement algorithm with zero cleanup allocations and depth-bounded shared capacity, preserving sibling reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

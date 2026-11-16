@@ -141,7 +141,14 @@ fn retained_value_rows_share_ordinary_shape_and_independently_movable_cells() {
         .lower_rows(
             &source,
             &NoRegisteredAggregates,
-            &mut QueryArena::new(control, None),
+            &mut QueryArena::new(
+                control,
+                None,
+                crate::plan::retirement::construction::Context::new(&control)
+                    .unwrap()
+                    .child(&control)
+                    .unwrap(),
+            ),
         )
         .unwrap();
     let expected = OwnedRows {

@@ -13,7 +13,7 @@ use crate::{
     },
     plan::{
         AssignmentPlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, MergeWhenPlan, OrderPlan,
-        ProjectionPlan, SourcePlan, TableFunctionPlan, ViewCheckPlan,
+        ProjectionPlan, QueryBlockPlan, SourcePlan, TableFunctionPlan, ViewCheckPlan,
     },
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
@@ -91,6 +91,21 @@ scalar_fields!(AssignmentPlan { target, value });
 scalar_fields!(ConflictPlan { predicate, expressions, action } skip { constraint, conflict_columns });
 scalar_fields!(ViewCheckPlan { predicate } skip { view });
 scalar_fields!(CteCyclePlan { mark_value, mark_default } skip { columns, mark_column, path_column });
+
+impl Retire for QueryBlockPlan {
+    fn retire(&mut self) {
+        self.windows.retire();
+        self.projections.retire();
+        self.r#where.retire();
+        self.group_by.retire();
+        self.grouping_sets.retire();
+        self.having.retire();
+        self.order_by.retire();
+        self.limit.retire();
+        self.offset.retire();
+        self.distinct_on.retire();
+    }
+}
 
 impl Retire for ScalarFrameBound {
     fn retire(&mut self) {

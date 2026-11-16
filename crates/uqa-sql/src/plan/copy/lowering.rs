@@ -10,6 +10,7 @@ use super::{syntax::SyntaxCopy, Copying, ParameterLookup, Result, RewriteField};
 use crate::{
     ast::{Expr, SelectStmt, Statement},
     plan::{
+        retirement::construction::{Context, Prefix},
         scalar::{lower_scalar_with_arena, QueryLowering},
         AggregateClassifier, MutableCommandPlan, MutableExecutablePlan, MutableQueryPlan,
         QueryPlan, UnifiedPlan,
@@ -23,6 +24,7 @@ mod ctes;
 mod expressions;
 mod input;
 mod mutations;
+mod ownership;
 mod projections;
 mod query;
 mod rows;
@@ -47,9 +49,9 @@ impl crate::plan::ExpressionPlan {
         if control.budget().is_none() {
             return Self::lower_with(expression.clone(), aggregates).copy_for_rewrite(control);
         }
-        let mut arena = QueryArena::new(*control, None);
+        let mut arena = QueryArena::new(*control, None, Context::new(control)?.child(control)?);
         let scalar = lower_scalar_with_arena(expression, aggregates, &mut arena, *control)?;
-        let (queries, memory) = arena.queries.into_parts();
+        let (queries, memory) = arena.queries.take().into_parts();
         arena.copying.absorb(Some(memory));
         let arena = crate::plan::ScalarQueryArena::from_rewrite_parts(
             queries,
@@ -94,9 +96,10 @@ impl UnifiedPlan {
         copying.parameters = parameters;
         match statement {
             Statement::Select(query) => Ok(MutableExecutablePlan::Query(lower_query(
-                query, aggregates, control, parameters,
+                query, aggregates, control, parameters, None,
             )?)),
             Statement::Values { rows } => {
+                copying.plan_retirement = Some(Context::new(control)?);
                 let query = copying.lower_values_query(rows, aggregates)?;
                 Ok(MutableExecutablePlan::Query(
                     MutableQueryPlan::from_rewrite_parts(
@@ -106,11 +109,13 @@ impl UnifiedPlan {
                 ))
             }
             statement => {
+                copying.plan_retirement = Some(Context::new(control)?);
                 let command = copying.lower_command(statement, aggregates)?;
+                let command = copying.retain_plan(command);
                 control.check()?;
                 Ok(MutableExecutablePlan::Command(
                     MutableCommandPlan::from_rewrite_parts(
-                        command,
+                        command.take(),
                         Some(copying.into_rewrite_memory()),
                     ),
                 ))
@@ -124,26 +129,38 @@ fn lower_query(
     aggregates: &dyn AggregateClassifier,
     control: &ProductionControl<'_>,
     parameters: Option<&ParameterLookup<'_>>,
+    retirement: Option<Context>,
 ) -> Result<MutableQueryPlan> {
     let mut copying = Copying::for_rewrite(*control).expect("admitted syntax lowering");
     copying.parameters = parameters;
+    copying.plan_retirement = Some(match retirement {
+        Some(retirement) => retirement,
+        None => Context::new(control)?,
+    });
     let query = copying.lower_query_fields(statement, aggregates)?;
     MutableQueryPlan::from_rewrite_parts(query, Some(copying.into_rewrite_memory()))
         .normalize_window_definitions(control)
 }
 
 struct QueryArena<'a> {
+    queries: Prefix<BudgetedVec<QueryPlan>>,
     copying: Copying<'a>,
-    queries: BudgetedVec<QueryPlan>,
 }
 
 impl<'a> QueryArena<'a> {
-    fn new(control: ProductionControl<'a>, parameters: Option<&'a ParameterLookup<'a>>) -> Self {
+    fn new(
+        control: ProductionControl<'a>,
+        parameters: Option<&'a ParameterLookup<'a>>,
+        retirement: Context,
+    ) -> Self {
         let mut copying = Copying::for_rewrite(control).expect("admitted query arena");
         copying.parameters = parameters;
+        copying.plan_retirement = Some(retirement.clone());
         Self {
             copying,
-            queries: BudgetedVec::new(control.budget().expect("admitted query arena")),
+            queries: retirement.retain(BudgetedVec::new(
+                control.budget().expect("admitted query arena"),
+            )),
         }
     }
 }
@@ -171,7 +188,13 @@ impl QueryLowering for QueryArena<'_> {
         self.queries.reserve(1)?;
         let index = self.queries.len();
         let query = self.copying.field("item", |copying| {
-            let query = lower_query(statement, aggregates, &copying.control, copying.parameters)?;
+            let query = lower_query(
+                statement,
+                aggregates,
+                &copying.control,
+                copying.parameters,
+                copying.plan_retirement.clone(),
+            )?;
             copying.take_query(query)
         })?;
         self.queries.push(query)?;
@@ -179,11 +202,22 @@ impl QueryLowering for QueryArena<'_> {
     }
 }
 
-impl Copying<'_> {
+impl<'c> Copying<'c> {
+    fn query_arena(&self) -> QueryArena<'c> {
+        QueryArena::new(
+            self.control,
+            self.parameters,
+            self.plan_retirement
+                .as_ref()
+                .expect("active query constructor")
+                .clone(),
+        )
+    }
+
     fn take_arena(&mut self, mut arena: QueryArena<'_>) -> Result<Vec<QueryPlan>> {
         self.check()?;
         self.fields.as_mut().expect("query fields").reserve(1)?;
-        let (queries, memory) = arena.queries.into_parts();
+        let (queries, memory) = arena.queries.take().into_parts();
         arena.copying.absorb(Some(memory));
         self.fields
             .as_mut()
@@ -191,7 +225,8 @@ impl Copying<'_> {
             .push(RewriteField {
                 name: "subqueries",
                 memory: Some(arena.copying.into_rewrite_memory()),
-            })?;
+            })
+            .expect("query arena field was admitted");
         Ok(queries)
     }
 
@@ -215,6 +250,7 @@ impl Copying<'_> {
             aggregates,
             &self.control,
             self.parameters,
+            self.plan_retirement.clone(),
         )?)
     }
 
@@ -225,14 +261,14 @@ impl Copying<'_> {
     ) -> Result<UnifiedPlan> {
         Ok(match statement {
             Statement::Select(query) => UnifiedPlan::Query(
-                self.boxed(|copying| copying.lower_nested_query(query, aggregates))?,
+                self.lower_boxed(|copying| copying.lower_nested_query(query, aggregates))?,
             ),
-            Statement::Values { rows } => UnifiedPlan::Query(self.boxed(|copying| {
+            Statement::Values { rows } => UnifiedPlan::Query(self.lower_boxed(|copying| {
                 copying.field("query", |copying| {
                     copying.lower_values_query(rows, aggregates)
                 })
             })?),
-            statement => UnifiedPlan::Command(self.boxed(|copying| {
+            statement => UnifiedPlan::Command(self.lower_boxed(|copying| {
                 copying.field("command", |copying| {
                     copying.lower_command(statement, aggregates)
                 })

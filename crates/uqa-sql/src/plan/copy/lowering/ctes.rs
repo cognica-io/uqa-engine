@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{input::InlineScalarInput, Copying, QueryArena, Result};
+use super::{input::InlineScalarInput, Copying, Result};
 use crate::{
     ast::{CteBody, CTE},
     plan::{retirement::Pending, AggregateClassifier, CommandPlan, CtePlan, CtePlanBody},
@@ -21,9 +21,18 @@ impl Copying<'_> {
         cte: &CTE,
         aggregates: &dyn AggregateClassifier,
     ) -> Result<CtePlan> {
+        let mut scope = self.enter_plan_node()?;
+        scope.lower_cte_fields(cte, aggregates)
+    }
+
+    fn lower_cte_fields(
+        &mut self,
+        cte: &CTE,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<CtePlan> {
         let name = self.text(&cte.name)?;
         let columns = self.texts(&cte.columns)?;
-        let mut search_arena = QueryArena::new(self.control, self.parameters);
+        let mut search_arena = self.query_arena();
         let search = match &cte.search {
             Some(search) => Some(crate::catalog::work::inline(metadata::construct_search(
                 search,
@@ -39,8 +48,8 @@ impl Copying<'_> {
             let Some(cycle) = &cte.cycle else {
                 return Ok(Pending::new(None));
             };
-            let mut mark = QueryArena::new(copying.control, copying.parameters);
-            let mut default = QueryArena::new(copying.control, copying.parameters);
+            let mut mark = copying.query_arena();
+            let mut default = copying.query_arena();
             let cycle = crate::catalog::work::inline(metadata::construct_cycle(
                 cycle,
                 copying,
@@ -58,30 +67,30 @@ impl Copying<'_> {
         let body = self.field("body", |copying| {
             Ok(match &cte.body {
                 CteBody::Query(query) => CtePlanBody::Query(
-                    copying.boxed(|copying| copying.lower_nested_query(query, aggregates))?,
+                    copying.lower_boxed(|copying| copying.lower_nested_query(query, aggregates))?,
                 ),
-                command => CtePlanBody::Command(copying.boxed(|copying| {
+                command => CtePlanBody::Command(copying.lower_boxed(|copying| {
                     copying.field("command", |copying| {
                         copying.field("value0", |copying| {
                             Ok(match command {
                                 CteBody::Query(_) => unreachable!("query selected above"),
                                 CteBody::Insert(statement) => {
-                                    CommandPlan::Insert(copying.boxed(|copying| {
+                                    CommandPlan::Insert(copying.lower_boxed(|copying| {
                                         copying.lower_insert(statement, aggregates)
                                     })?)
                                 }
                                 CteBody::Update(statement) => {
-                                    CommandPlan::Update(copying.boxed(|copying| {
+                                    CommandPlan::Update(copying.lower_boxed(|copying| {
                                         copying.lower_update(statement, aggregates)
                                     })?)
                                 }
                                 CteBody::Delete(statement) => {
-                                    CommandPlan::Delete(copying.boxed(|copying| {
+                                    CommandPlan::Delete(copying.lower_boxed(|copying| {
                                         copying.lower_delete(statement, aggregates)
                                     })?)
                                 }
                                 CteBody::Merge(statement) => {
-                                    CommandPlan::Merge(copying.boxed(|copying| {
+                                    CommandPlan::Merge(copying.lower_boxed(|copying| {
                                         copying.lower_merge(statement, aggregates)
                                     })?)
                                 }

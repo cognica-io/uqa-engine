@@ -135,10 +135,17 @@ fn retained_projection_preserves_alias_bytes_order_and_independent_scalar_owners
     let mut copying = Copying::for_rewrite(control).unwrap();
     let ordinary = Pending::new(
         copying
-            .lower_projection(
-                &source,
+            .lower_projections(
+                std::slice::from_ref(source.as_ref()),
                 &NoRegisteredAggregates,
-                &mut QueryArena::new(control, None),
+                &mut QueryArena::new(
+                    control,
+                    None,
+                    crate::plan::retirement::construction::Context::new(&control)
+                        .unwrap()
+                        .child(&control)
+                        .unwrap(),
+                ),
             )
             .unwrap(),
     );
@@ -146,10 +153,10 @@ fn retained_projection_preserves_alias_bytes_order_and_independent_scalar_owners
     let (actual, polls) = complete(&mut input(source.clone(), &native, &work, &token, &token));
     assert!(polls > source.alias.as_ref().unwrap().len() / 4096);
     drop(source);
-    assert_eq!(*actual.expression, ordinary.expr);
+    assert_eq!(*actual.expression, ordinary[0].expr);
     assert_eq!(
         actual.alias.as_deref().map(String::as_str),
-        ordinary.alias.as_deref()
+        ordinary[0].alias.as_deref()
     );
     assert_eq!(work.used(), 0);
     drop(ordinary);

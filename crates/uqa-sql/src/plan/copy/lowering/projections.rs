@@ -30,20 +30,6 @@ impl Copying<'_> {
         ))
         .map(Pending::take)
     }
-
-    pub(super) fn lower_projection(
-        &mut self,
-        projection: &Projection,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<ProjectionPlan> {
-        let projection = crate::catalog::work::inline(construct_projection(
-            projection,
-            self.control,
-            &mut InlineScalarInput { aggregates, arena },
-        ))?;
-        self.take_projection(projection)
-    }
 }
 
 async fn construct_projection<'s, I: ScalarInput<&'s crate::ast::Expr> + TextInput<&'s str>>(

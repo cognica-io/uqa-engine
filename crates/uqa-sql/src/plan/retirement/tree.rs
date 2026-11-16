@@ -34,6 +34,12 @@ impl<F: RetirementFrame> RetainedTree<F> {
 
 impl<F: RetirementFrame> Drop for RetainedTree<F> {
     fn drop(&mut self) {
+        self.retire();
+    }
+}
+
+impl<F: RetirementFrame> RetainedTree<F> {
+    pub(crate) fn retire(&mut self) {
         if !F::is_empty(&self.root) {
             debug_assert!(self.frames.is_empty());
             let root = std::mem::replace(&mut self.root, F::empty());

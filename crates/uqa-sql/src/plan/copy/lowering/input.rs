@@ -115,6 +115,7 @@ impl Copying<'_> {
         self.fields.as_mut().expect("retained fields").reserve(1)?;
         let mut child = Self::for_rewrite(self.control).expect("retained field allowance");
         child.parameters = self.parameters;
+        child.plan_retirement.clone_from(&self.plan_retirement);
         Ok(child)
     }
 

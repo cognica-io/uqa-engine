@@ -11,11 +11,20 @@ use crate::{
 };
 
 impl Copying<'_> {
+    pub(super) fn lower_command(
+        &mut self,
+        statement: &Statement,
+        aggregates: &dyn AggregateClassifier,
+    ) -> Result<CommandPlan> {
+        let mut scope = self.enter_plan_node()?;
+        scope.lower_command_fields(statement, aggregates)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "exhaustive lowering preserves command payloads and their constructor fields"
     )]
-    pub(super) fn lower_command(
+    fn lower_command_fields(
         &mut self,
         statement: &Statement,
         aggregates: &dyn AggregateClassifier,
@@ -270,21 +279,21 @@ impl Copying<'_> {
             }
             Statement::Insert(statement) => {
                 CommandPlan::Insert(self.field("value0", |copying| {
-                    copying.boxed(|copying| copying.lower_insert(statement, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_insert(statement, aggregates))
                 })?)
             }
             Statement::Update(statement) => {
                 CommandPlan::Update(self.field("value0", |copying| {
-                    copying.boxed(|copying| copying.lower_update(statement, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_update(statement, aggregates))
                 })?)
             }
             Statement::Delete(statement) => {
                 CommandPlan::Delete(self.field("value0", |copying| {
-                    copying.boxed(|copying| copying.lower_delete(statement, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_delete(statement, aggregates))
                 })?)
             }
             Statement::Merge(statement) => CommandPlan::Merge(self.field("value0", |copying| {
-                copying.boxed(|copying| copying.lower_merge(statement, aggregates))
+                copying.lower_boxed(|copying| copying.lower_merge(statement, aggregates))
             })?),
             Statement::CreateView {
                 name,
@@ -295,16 +304,20 @@ impl Copying<'_> {
                 options,
             } => {
                 let query = self.field("query", |copying| {
-                    copying.boxed(|copying| copying.lower_nested_query(body, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_nested_query(body, aggregates))
                 })?;
+                let query = self.retain_plan(query);
+                let name = self.field("name", |copying| name.copy_syntax(copying))?;
+                let column_names =
+                    self.field("column_names", |copying| column_names.copy_syntax(copying))?;
+                let options = self.field("options", |copying| options.copy_syntax(copying))?;
                 CommandPlan::CreateView {
-                    name: self.field("name", |copying| name.copy_syntax(copying))?,
-                    column_names: self
-                        .field("column_names", |copying| column_names.copy_syntax(copying))?,
-                    query,
+                    name,
+                    column_names,
+                    query: query.take(),
                     or_replace: *or_replace,
                     persistence: *persistence,
-                    options: self.field("options", |copying| options.copy_syntax(copying))?,
+                    options,
                 }
             }
             Statement::CreateMaterializedView {
@@ -322,23 +335,31 @@ impl Copying<'_> {
                 with_no_data: *with_no_data,
                 options: self.field("options", |copying| options.copy_syntax(copying))?,
                 query: self.field("query", |copying| {
-                    copying.boxed(|copying| copying.lower_nested_query(body, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_nested_query(body, aggregates))
                 })?,
             },
-            Statement::Explain { options, body } => CommandPlan::Explain {
-                options: self.field("options", |copying| options.copy_syntax(copying))?,
-                body: self.field("body", |copying| {
-                    copying.boxed(|copying| copying.lower_statement(body, aggregates))
-                })?,
-                unbound_parameters: self.field("unbound_parameters", |_| Ok(None))?,
-            },
+            Statement::Explain { options, body } => {
+                let options = self.field("options", |copying| options.copy_syntax(copying))?;
+                let body = self.field("body", |copying| {
+                    copying.lower_boxed(|copying| copying.lower_statement(body, aggregates))
+                })?;
+                let body = self.retain_plan(body);
+                let unbound_parameters = self.field("unbound_parameters", |_| Ok(None))?;
+                CommandPlan::Explain {
+                    options,
+                    body: body.take(),
+                    unbound_parameters,
+                }
+            }
             Statement::DeclareCursor(cursor) => CommandPlan::DeclareCursor {
                 name: self.field("name", |copying| cursor.name.copy_syntax(copying))?,
                 binary: cursor.binary,
                 scroll: cursor.scroll,
                 hold: cursor.hold,
                 query: self.field("query", |copying| {
-                    copying.boxed(|copying| copying.lower_nested_query(&cursor.query, aggregates))
+                    copying.lower_boxed(|copying| {
+                        copying.lower_nested_query(&cursor.query, aggregates)
+                    })
                 })?,
             },
             Statement::CreateTableAs {
@@ -360,7 +381,7 @@ impl Copying<'_> {
                 persistence: *persistence,
                 on_commit: *on_commit,
                 query: self.field("query", |copying| {
-                    copying.boxed(|copying| copying.lower_nested_query(body, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_nested_query(body, aggregates))
                 })?,
             },
             Statement::Prepare {
@@ -369,20 +390,23 @@ impl Copying<'_> {
                 body,
             } => {
                 let body = self.field("body", |copying| {
-                    copying.boxed(|copying| copying.lower_statement(body, aggregates))
+                    copying.lower_boxed(|copying| copying.lower_statement(body, aggregates))
+                })?;
+                let body = self.retain_plan(body);
+                let name = self.field("name", |copying| name.copy_syntax(copying))?;
+                let parameter_types = self.field("parameter_types", |copying| {
+                    parameter_types.copy_syntax(copying)
                 })?;
                 CommandPlan::Prepare {
-                    name: self.field("name", |copying| name.copy_syntax(copying))?,
-                    parameter_types: self.field("parameter_types", |copying| {
-                        parameter_types.copy_syntax(copying)
-                    })?,
-                    body,
+                    name,
+                    parameter_types,
+                    body: body.take(),
                 }
             }
             Statement::Execute { name, params } => CommandPlan::Execute {
                 name: self.field("name", |copying| name.copy_syntax(copying))?,
                 params: self.field("params", |copying| {
-                    copying.map(params.iter(), |copying, expression| {
+                    copying.map_plans(params.iter(), |copying, expression| {
                         copying.lower_expression(expression, aggregates)
                     })
                 })?,
@@ -390,7 +414,7 @@ impl Copying<'_> {
             Statement::Call { name, args } => CommandPlan::Call {
                 name: self.field("name", |copying| name.copy_syntax(copying))?,
                 args: self.field("args", |copying| {
-                    copying.map(args.iter(), |copying, expression| {
+                    copying.map_plans(args.iter(), |copying, expression| {
                         copying.lower_expression(expression, aggregates)
                     })
                 })?,

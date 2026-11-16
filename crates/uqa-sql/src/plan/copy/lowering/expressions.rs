@@ -48,11 +48,14 @@ impl Copying<'_> {
         expression: &Expr,
         aggregates: &dyn AggregateClassifier,
     ) -> Result<ExpressionPlan> {
-        let mut arena = QueryArena::new(self.control, self.parameters);
-        let scalar = self.lower_scalar(expression, aggregates, &mut arena)?;
+        let mut scope = self.enter_plan_node()?;
+        let copying = &mut *scope;
+        let mut arena = copying.query_arena();
+        let scalar = Pending::new(copying.lower_scalar(expression, aggregates, &mut arena)?);
+        let subqueries = copying.take_arena(arena)?;
         Ok(ExpressionPlan {
-            scalar,
-            subqueries: self.take_arena(arena)?,
+            scalar: scalar.take(),
+            subqueries,
         })
     }
 }
