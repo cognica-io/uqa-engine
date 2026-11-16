@@ -94,7 +94,7 @@ impl OwnedScalarExpr {
             owner.reserve_children(1)?;
         }
         let boxed = control.reserve(size_of::<ScalarExpr>())?;
-        let Self { expression, memory } = child;
+        let (expression, memory) = child.into_rewrite_parts();
         let (ty, declaration_memory) = declaration.into_parts();
         output.expression = ScalarExpr::Cast {
             expr: Box::new(expression),

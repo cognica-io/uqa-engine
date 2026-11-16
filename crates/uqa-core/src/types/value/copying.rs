@@ -62,6 +62,22 @@ impl Value {
         .map(|value| value.into_budgeted().expect("controlled value copy"))
     }
 
+    /// Copy through a retained work channel while preserving the destination allowance and both cancellation owners selected by the enclosing native producer. The channel supplies suspension only; it does not replace the value's allocation owner.
+    pub async fn clone_from_input(
+        &self,
+        control: &ProductionControl<'_>,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        copy_with_work(
+            self,
+            *control,
+            &mut || control.check(),
+            &mut |_| Ok::<_, ValueRetentionError>(None),
+            input,
+        )
+        .await
+    }
+
     /// Copy native containers with an iterative, admitted traversal. A replacement owns its admitted payload under the same control and stops traversal at that node; all other nodes preserve their shape, bounds and descriptors. Replacements are never interpreted by Core. A failed transform releases every partial copy.
     pub fn transform_with_control<E: From<ValueRetentionError>>(
         &self,

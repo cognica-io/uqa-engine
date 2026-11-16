@@ -63,7 +63,10 @@ pub(super) fn count(expression: &ScalarExpr) -> usize {
     }
 }
 
-pub(super) fn get_mut(expression: &mut ScalarExpr, index: usize) -> Option<&mut ScalarExpr> {
+pub(in crate::plan::scalar) fn get_mut(
+    expression: &mut ScalarExpr,
+    index: usize,
+) -> Option<&mut ScalarExpr> {
     match expression {
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)

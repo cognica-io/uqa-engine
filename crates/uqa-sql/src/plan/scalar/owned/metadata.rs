@@ -32,10 +32,7 @@ impl OwnedScalarExpr {
         }
         let boxed = control.reserve(size_of::<ScalarExpr>())?;
         let (ty, type_memory) = ty.into_parts();
-        let Self {
-            expression,
-            memory: child_memory,
-        } = child;
+        let (expression, child_memory) = child.into_rewrite_parts();
         let mut output = Self {
             expression: ScalarExpr::Literal(Value::Null),
             memory,

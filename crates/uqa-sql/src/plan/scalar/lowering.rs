@@ -6,6 +6,8 @@
 
 //! AST lowering can publish independently movable scalar children directly.
 
+mod input;
+
 use super::{
     resources::{Control, Lowering, Result},
     source::Source,

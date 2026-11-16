@@ -6,6 +6,8 @@
 
 //! Destination admission for the shared AST-to-scalar lowerer.
 
+pub(super) mod input;
+
 use super::source::Source;
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::{
@@ -143,22 +145,9 @@ impl Lowering<'_> {
     ) -> Result<crate::ast::CompositeRowBinding> {
         match binding {
             Source::Owned(binding) => Ok(binding),
-            Source::Borrowed(binding) => Ok(crate::ast::CompositeRowBinding {
-                layout: binding.layout,
-                ty: self.copy_text(&binding.ty)?,
-                attributes: self.map(binding.attributes.iter(), |_, number| Ok(*number))?,
-                argument_types: binding
-                    .argument_types
-                    .as_ref()
-                    .map(|types| {
-                        self.map(types.iter(), |this, ty| {
-                            Ok(this
-                                .scalar_type_copy(Some(ty))?
-                                .expect("constructor argument type"))
-                        })
-                    })
-                    .transpose()?,
-            }),
+            Source::Borrowed(binding) => {
+                crate::catalog::work::inline(self.composite_binding_from(binding, &mut ()))
+            }
         }
     }
 
@@ -166,41 +155,13 @@ impl Lowering<'_> {
         &mut self,
         source: Option<Source<'_, Box<crate::expr::composites::CompositeConstantSource>>>,
     ) -> Result<Option<Box<crate::expr::composites::CompositeConstantSource>>> {
-        use crate::expr::composites::{
-            CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor,
-        };
-        source
-            .map(|source| match source {
-                Source::Owned(source) => Ok(source),
-                Source::Borrowed(source) => self.boxed(|this| {
-                    Ok(CompositeConstantSource {
-                        value: this.value(Source::Borrowed(&source.value))?,
-                        descriptors: this.map(source.descriptors.iter(), |this, descriptor| {
-                            Ok(CompositeTypeDescriptor {
-                                dropped: this.map(descriptor.dropped.iter(), |_, attribute| {
-                                    Ok(*attribute)
-                                })?,
-                                type_oid: descriptor.type_oid,
-                                relation_oid: descriptor.relation_oid,
-                                attributes: this.map(
-                                    descriptor.attributes.iter(),
-                                    |this, attribute| {
-                                        Ok(CompositeAttribute {
-                                            collation_oid: attribute.collation_oid,
-                                            name: this.copy_text(&attribute.name)?,
-                                            ty: this
-                                                .scalar_type_copy(Some(&attribute.ty))?
-                                                .expect("source attribute type"),
-                                            number: attribute.number,
-                                        })
-                                    },
-                                )?,
-                            })
-                        })?,
-                    })
-                }),
-            })
-            .transpose()
+        match source {
+            Some(Source::Owned(source)) => Ok(Some(source)),
+            Some(Source::Borrowed(source)) => crate::catalog::work::inline(
+                self.composite_source_from(Some(source.as_ref()), &mut ()),
+            ),
+            None => Ok(None),
+        }
     }
 
     pub(super) fn value(&mut self, source: Source<'_, Value>) -> Result<Value> {

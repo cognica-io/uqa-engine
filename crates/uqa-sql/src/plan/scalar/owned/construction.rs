@@ -82,7 +82,7 @@ impl OwnedScalarExpr {
         if let Some(children) = &mut lowering.owned_children {
             children.reserve(1)?;
         }
-        let Self { expression, memory } = child;
+        let (expression, memory) = child.into_rewrite_parts();
         if let Some(children) = &mut lowering.owned_children {
             children
                 .push(memory)

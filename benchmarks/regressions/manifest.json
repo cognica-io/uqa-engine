@@ -2,6 +2,188 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_keeps_destination_allowance_separate_from_work_channel",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Retained value production",
+      "workload": "Use distinct destination/work allowances and cancel either owner while a large native payload is suspended.",
+      "invariant": "Complete values preserve original admission; cancellation releases partial payloads without reading source bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_keeps_both_cancellation_owners_active_inside_large_payloads",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Retained value production",
+      "workload": "Use distinct destination/work allowances and cancel either owner while a large native payload is suspended.",
+      "invariant": "Complete values preserve original admission; cancellation releases partial payloads without reading source bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_preserves_bound_identity_invocation_types_and_exact_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_retires_every_suspended_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_bounds_wide_invocations_and_admits_destination_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_preserves_assignment_paths_and_both_resolution_error_variants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_preserves_all_containers_windows_and_movable_child_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_retires_every_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_keeps_wide_work_bounded_and_releases_discarded_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_uses_constant_poll_stack_for_deep_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_rejects_queries_without_leaking_partial_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_owner_retires_without_allocating_or_recursing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_freezing_releases_only_ownership_metadata_without_recursive_folds",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_rewrite_failure_retires_detached_child_and_remaining_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_legacy_routine_binding_admits_complete_grants_and_retires_denied_validation",

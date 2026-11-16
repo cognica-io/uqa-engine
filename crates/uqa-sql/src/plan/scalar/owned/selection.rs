@@ -50,7 +50,7 @@ impl OwnedScalarExpr {
         let replacement = map(&self.expression, child)?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let Self { expression, memory } = replacement;
+        let (expression, memory) = replacement.into_rewrite_parts();
         *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
         if let Some(parent) = &mut self.memory {
             parent.children[index] = memory;
@@ -122,7 +122,7 @@ impl OwnedScalarExpr {
             parent.reserve_children(count.saturating_sub(previous_count))?;
         }
         let previous_bytes = args.capacity() * size_of::<ScalarExpr>();
-        let Self { expression, memory } = replacement;
+        let (expression, memory) = replacement.into_rewrite_parts();
         let (ScalarExpr::And(items) | ScalarExpr::Or(items)) = expression else {
             unreachable!();
         };

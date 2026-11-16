@@ -11,6 +11,7 @@ mod construction;
 mod copies;
 mod edits;
 mod fixtures;
+mod retirement;
 
 fn text(length: usize) -> ScalarExpr {
     ScalarExpr::Literal(Value::Str("x".repeat(length)))

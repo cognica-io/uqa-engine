@@ -21,7 +21,7 @@ impl OwnedScalarExpr {
         replacement.assert_owner(control);
         control.check()?;
         let previous = self.take_child(index);
-        let Self { expression, memory } = replacement;
+        let (expression, memory) = replacement.into_rewrite_parts();
         *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
         if let Some(parent) = &mut self.memory {
             parent.children[index] = memory;
@@ -127,7 +127,7 @@ impl OwnedScalarExpr {
             panic!("CASE fallback edit requires a CASE expression");
         };
         if let Some(branch) = else_branch {
-            let Self { expression, memory } = replacement;
+            let (expression, memory) = replacement.into_rewrite_parts();
             **branch = expression;
             if let Some(parent) = &mut self.memory {
                 *parent.children.last_mut().expect("CASE fallback owner") = memory;
@@ -137,7 +137,7 @@ impl OwnedScalarExpr {
                 parent.reserve_children(1)?;
             }
             let boxed = control.reserve(size_of::<ScalarExpr>())?;
-            let Self { expression, memory } = replacement;
+            let (expression, memory) = replacement.into_rewrite_parts();
             *else_branch = Some(Box::new(expression));
             if let Some(parent) = &mut self.memory {
                 parent
