@@ -71814,6 +71814,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_releases_deep_mixed_trees_without_stack_growth_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_bounds_wide_container_and_descriptor_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_preserves_independently_retained_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_transfers_shared_metadata_to_one_final_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_finishes_every_suspended_prefix_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literals_retire_deep_values_and_original_composites_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literal_retirement_bounds_container_and_descriptor_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literal_retirement_keeps_payload_leases_through_each_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_syntax_literals_retire_deep_values_and_original_composites_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/ownership/tests.rs",
+      "capability": "Native syntax value ownership",
+      "workload": "Deep native literals and original composite sources beneath 2,048 syntax nodes on a 256 KiB stack.",
+      "invariant": "Native syntax destruction delegates evaluated values to the same Core tree owner without allocation or recursive stack growth.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

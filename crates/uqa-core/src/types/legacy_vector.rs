@@ -113,6 +113,10 @@ impl LegacyVectorValue {
         self.array.elements()
     }
 
+    pub(in crate::types) fn retirement_values(&mut self) -> &mut Vec<Value> {
+        self.array.retirement_values()
+    }
+
     /// Owned payload size, excluding this value's inline layout, saturated if its buffers exceed the addressable sum. Elements are inline integers and have no additional retained payload.
     pub fn retained_bytes(&self) -> usize {
         self.array.retained_buffer_bytes().unwrap_or(usize::MAX)

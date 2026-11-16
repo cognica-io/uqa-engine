@@ -100,6 +100,12 @@ impl RecordValue {
     pub fn values_mut(&mut self) -> &mut [Value] {
         &mut self.storage.values
     }
+    pub(in crate::types) fn retirement_values(&mut self) -> &mut Vec<Value> {
+        &mut self.storage.values
+    }
+    pub(in crate::types) fn retirement_names(&mut self) -> Option<Box<[String]>> {
+        self.storage.descriptor.retirement_names()
+    }
     pub fn iter(&self) -> RecordIter<'_> {
         self.descriptor().field_names().iter().zip(self.values())
     }

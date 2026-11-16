@@ -117,6 +117,10 @@ impl ArrayValue {
         &self.storage.elements
     }
 
+    pub(in crate::types) fn retirement_values(&mut self) -> &mut Vec<Value> {
+        &mut self.storage.elements
+    }
+
     /// Optional SQL element identity retained independently of native element equality. SQL owns admission and interpretation; Core copies this metadata without resolving a catalog.
     pub fn element_type_oid(&self) -> Option<u32> {
         self.storage.element_type_oid

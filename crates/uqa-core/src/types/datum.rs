@@ -82,6 +82,10 @@ impl DatumValue {
         self.record_fields.as_deref().map(Vec::as_slice)
     }
 
+    pub(in crate::types) fn retirement_fields(&mut self) -> Option<Vec<RecordDatumField>> {
+        self.record_fields.take().and_then(Arc::into_inner)
+    }
+
     /// Preserve an expanded record's descriptor without decoding its fields.
     pub fn with_record_fields(mut self, fields: Vec<RecordDatumField>) -> Self {
         self.record_fields = Some(Arc::new(fields));

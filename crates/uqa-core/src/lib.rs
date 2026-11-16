@@ -56,8 +56,8 @@ pub use types::{
     RecordIterMut, RecordValue, RowDescriptor, RowValue, TemporalDate, TemporalDateOrder,
     TemporalDateStyle, TemporalDateTime, TemporalInfinity, TemporalInputError,
     TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence, TokenOccurrenceError,
-    TokenOffsets, Value, ValueCopyWork, ValueRetentionError, ValueSerialization, VectorGeneration,
-    VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
+    TokenOffsets, Value, ValueCopyWork, ValueRetentionError, ValueRetirement, ValueSerialization,
+    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
     MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 

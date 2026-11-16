@@ -21,6 +21,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod values;
+
 fn ty(depth: usize) -> ColumnType {
     let mut value = ColumnType::Text;
     for index in 0..depth {

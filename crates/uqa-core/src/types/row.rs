@@ -54,6 +54,10 @@ impl RowValue {
         &self.storage.values
     }
 
+    pub(in crate::types) fn retirement_values(&mut self) -> &mut Vec<Value> {
+        &mut self.storage.values
+    }
+
     #[must_use]
     pub fn as_slice(&self) -> &[Value] {
         self.values()

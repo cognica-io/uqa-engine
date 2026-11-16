@@ -22,6 +22,7 @@ mod observation;
 mod production;
 mod retained_map;
 mod retained_value;
+mod retirement;
 mod small_vec;
 mod string;
 mod vec;
@@ -47,6 +48,7 @@ pub use retained_map::{
 };
 pub(crate) use retained_value::{Admitted as AdmittedRetainedValue, Owner as RetainedValueOwner};
 pub use retained_value::{RetainedValue, RetainedValueIdentity};
+pub use retirement::{RetirementNode, TreeRetirement};
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

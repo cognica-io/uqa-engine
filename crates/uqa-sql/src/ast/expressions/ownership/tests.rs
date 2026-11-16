@@ -28,3 +28,44 @@ fn native_scalar_retirement_uses_constant_stack_without_allocating() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn native_syntax_literals_retire_deep_values_and_original_composites_without_allocation() {
+    fn value(depth: usize) -> uqa_core::Value {
+        let mut value = uqa_core::Value::Str("leaf".into());
+        for _ in 0..depth {
+            value = uqa_core::Value::List(vec![value]);
+        }
+        value
+    }
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            for typed in [false, true] {
+                let mut expr = if typed {
+                    Expr::TypedLiteral {
+                        value: value(8192),
+                        ty: "public.record".into(),
+                        collation_oid: None,
+                        composite_source: Some(Box::new(
+                            crate::expr::composites::CompositeConstantSource {
+                                value: value(8192),
+                                descriptors: Vec::new(),
+                            },
+                        )),
+                    }
+                } else {
+                    Expr::Literal(value(8192))
+                };
+                for _ in 0..2048 {
+                    expr = Expr::Not(Box::new(expr));
+                }
+                let released = allocation_counter::measure(|| drop(expr));
+                assert_eq!(released.count_total, 0);
+                assert!(released.count_current < -10_000);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

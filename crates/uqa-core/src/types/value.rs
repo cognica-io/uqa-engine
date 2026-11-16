@@ -24,6 +24,8 @@ mod identity;
 pub mod image;
 mod nonfinite;
 mod observation;
+mod ownership;
+pub use ownership::ValueRetirement;
 mod retention;
 mod serialization;
 pub use decoding::JsonValueDecoder;
