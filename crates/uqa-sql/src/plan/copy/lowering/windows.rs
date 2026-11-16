@@ -7,28 +7,26 @@
 //! Window definitions share ordered scalar construction and retain partial fields across input suspension.
 
 use super::{
-    input::{InlineScalarInput, ScalarInput},
+    input::{scalars::construct_scalars, InlineScalarInput, ScalarInput, TextInput},
     Copying, QueryArena, Result,
 };
 use crate::{
-    ast::{Expr, FrameBound, WindowSpec},
-    plan::{
-        retirement::{Pending, Retire},
-        AggregateClassifier,
-    },
+    ast::{Expr, FrameBound, WindowDefinition, WindowSpec},
+    plan::{retirement::Pending, AggregateClassifier},
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
+
 use uqa_core::memory::BudgetedVec;
 
 impl Copying<'_> {
-    pub(super) fn lower_window(
+    pub(super) fn lower_windows(
         &mut self,
-        window: &WindowSpec,
+        windows: &[WindowDefinition],
         aggregates: &dyn AggregateClassifier,
         arena: &mut QueryArena<'_>,
-    ) -> Result<ScalarWindowSpec> {
-        crate::catalog::work::inline(construct_window(
-            window,
+    ) -> Result<Vec<WindowDefinition<ScalarWindowSpec>>> {
+        crate::catalog::work::inline(construct_windows(
+            windows,
             self,
             &mut InlineScalarInput { aggregates, arena },
         ))
@@ -36,7 +34,47 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_window<'s, I: ScalarInput<&'s crate::ast::Expr>>(
+pub(super) async fn construct_windows<'s, I: ScalarInput<&'s Expr> + TextInput<&'s str>>(
+    source: &'s [WindowDefinition],
+    copying: &mut Copying<'_>,
+    input: &mut I,
+) -> Result<Pending<Vec<WindowDefinition<ScalarWindowSpec>>>> {
+    input.checkpoint().await?;
+    copying.check()?;
+    let mut values = Pending::new(BudgetedVec::new(
+        copying.control.budget().expect("window allowance"),
+    ));
+    values.reserve(source.len())?;
+    copying
+        .fields
+        .as_mut()
+        .expect("window fields")
+        .reserve(source.len())?;
+    for source in source {
+        input.checkpoint().await?;
+        let mut field = copying.begin_input_field()?;
+        let name = match source.name.as_deref() {
+            Some(name) => Some(field.take(input.text(name, copying.control).await?)),
+            None => None,
+        };
+        let mut spec = field.begin_input_field()?;
+        let value = construct_window(&source.spec, &mut spec, input).await?;
+        field.finish_input_field("spec", spec);
+        values
+            .push(WindowDefinition {
+                name,
+                inherited: source.inherited,
+                spec: value.take(),
+            })
+            .expect("admitted window slot");
+        copying.finish_input_field("item", field);
+    }
+    let (values, memory) = values.take().into_parts();
+    copying.absorb(Some(memory));
+    Ok(Pending::new(values))
+}
+
+async fn construct_window<'s, I: ScalarInput<&'s Expr>>(
     window: &'s WindowSpec,
     copying: &mut Copying<'_>,
     input: &mut I,
@@ -100,38 +138,7 @@ async fn construct_window<'s, I: ScalarInput<&'s crate::ast::Expr>>(
     }))
 }
 
-async fn construct_scalars<'s, T: Sync, U: Retire + Send, I: ScalarInput<&'s crate::ast::Expr>>(
-    source: &'s [T],
-    copying: &mut Copying<'_>,
-    input: &mut I,
-    expression: fn(&T) -> &Expr,
-    construct: fn(&T, ScalarExpr) -> U,
-) -> Result<Pending<Vec<U>>> {
-    copying.check()?;
-    let budget = copying.control.budget().expect("controlled scalar fields");
-    let mut values = Pending::new(BudgetedVec::new(budget));
-    values.reserve(source.len())?;
-    copying
-        .fields
-        .as_mut()
-        .expect("scalar fields")
-        .reserve(source.len())?;
-    for source in source {
-        input.checkpoint().await?;
-        let mut field = copying.begin_input_field()?;
-        let scalar = input.scalar(expression(source), copying.control).await?;
-        let scalar = field.take_scalar(scalar)?;
-        values
-            .push(construct(source, scalar))
-            .expect("admitted scalar field");
-        copying.finish_input_field("item", field);
-    }
-    let (values, memory) = values.take().into_parts();
-    copying.absorb(Some(memory));
-    Ok(Pending::new(values))
-}
-
-async fn construct_bound<'s, I: ScalarInput<&'s crate::ast::Expr>>(
+async fn construct_bound<'s, I: ScalarInput<&'s Expr>>(
     source: &'s FrameBound,
     copying: &mut Copying<'_>,
     input: &mut I,

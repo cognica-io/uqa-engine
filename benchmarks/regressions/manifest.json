@@ -70605,6 +70605,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_fields_preserve_slots_ordering_flags_and_optional_shape",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct scalar vectors, ordering vectors and optional boxed/unboxed roots, including empty fields, through one-step work windows.",
+      "invariant": "Preserve original query slots, ordering/null flags and optional shape; complete outputs retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_fields_retire_cancelled_prefixes_and_denied_destinations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Abandon every suspended prefix of long Unicode vectors and optional roots; cancel each owner and deny output allowances.",
+      "invariant": "No partial field escapes; all work and destination leases retire while an independent sibling lease remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_vectors_retire_deep_prefixes_after_late_query_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Reject a later scalar query after retaining an 8,192-level earlier root on a 256 KiB stack.",
+      "invariant": "Preserve the original query error and retire the deep prefix without recursive cleanup or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_fields_preserve_query_order_inheritance_and_owned_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct query projections and window-definition vectors through retained scalar and text input, including long Unicode names and inherited window slots.",
+      "invariant": "Preserve ordinary scalar/query order, aliases, names, inheritance and flags; published native values outlive source retirement and need no cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_vectors_retire_every_cancelled_or_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Abandon or cancel every long-name projection/window prefix and deny destination allowances.",
+      "invariant": "Every name and scalar remains admitted until publication; both cancellation owners retire complete prefixes without consuming an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_vectors_bound_empty_and_wide_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct empty and 2,048-element projection and window-definition vectors through one-step work windows.",
+      "invariant": "Preserve exact projection values and window fields; empty and wide vectors consume bounded work and release every destination and work reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

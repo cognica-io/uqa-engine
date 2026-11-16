@@ -6,7 +6,7 @@
 
 use super::{Copying, QueryArena, Result, SyntaxCopy};
 use crate::{
-    ast::{Expr, SelectStmt, WindowDefinition},
+    ast::{Expr, SelectStmt},
     plan::{
         AccessPathPlan, AggregateClassifier, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan,
     },
@@ -115,9 +115,7 @@ impl Copying<'_> {
             left,
             right,
             order_by: self.field("order_by", |copying| {
-                copying.map(set.combined_order_by.iter(), |copying, order| {
-                    copying.lower_order(order, aggregates, &mut arena)
-                })
+                copying.lower_orders(&set.combined_order_by, aggregates, &mut arena)
             })?,
             limit: self.field("limit", |copying| {
                 copying.lower_optional_scalar_box(
@@ -156,20 +154,10 @@ impl Copying<'_> {
         let mut arena = QueryArena::new(self.control, self.parameters);
         // Scalar-subquery indices follow the established lowering order, including windows after projection roots.
         let projections = self.field("projections", |copying| {
-            copying.map(statement.projections.iter(), |copying, projection| {
-                copying.lower_projection(projection, aggregates, &mut arena)
-            })
+            copying.lower_projections(&statement.projections, aggregates, &mut arena)
         })?;
         let windows = self.field("windows", |copying| {
-            copying.map(statement.windows.iter(), |copying, window| {
-                Ok(WindowDefinition {
-                    name: copying.optional_text(window.name.as_deref())?,
-                    inherited: window.inherited,
-                    spec: copying.field("spec", |copying| {
-                        copying.lower_window(&window.spec, aggregates, &mut arena)
-                    })?,
-                })
-            })
+            copying.lower_windows(&statement.windows, aggregates, &mut arena)
         })?;
         let mut block = QueryBlockPlan {
             deferred_outer_rewrites: self.field("deferred_outer_rewrites", |copying| {
@@ -190,9 +178,7 @@ impl Copying<'_> {
             })?,
             compute: ComputePlan::Project,
             group_by: self.field("group_by", |copying| {
-                copying.map(statement.group_by.iter(), |copying, expression| {
-                    copying.lower_scalar(expression, aggregates, &mut arena)
-                })
+                copying.lower_scalars(&statement.group_by, aggregates, &mut arena)
             })?,
             grouping_sets: self.field("grouping_sets", |copying| {
                 copying.lower_rows(&statement.grouping_sets, aggregates, &mut arena)
@@ -202,9 +188,7 @@ impl Copying<'_> {
                 copying.lower_optional_scalar(statement.having.as_ref(), aggregates, &mut arena)
             })?,
             order_by: self.field("order_by", |copying| {
-                copying.map(statement.order_by.iter(), |copying, order| {
-                    copying.lower_order(order, aggregates, &mut arena)
-                })
+                copying.lower_orders(&statement.order_by, aggregates, &mut arena)
             })?,
             limit: self.field("limit", |copying| {
                 copying.lower_optional_scalar(statement.limit.as_ref(), aggregates, &mut arena)
@@ -215,9 +199,7 @@ impl Copying<'_> {
             })?,
             distinct: statement.distinct,
             distinct_on: self.field("distinct_on", |copying| {
-                copying.map(statement.distinct_on.iter(), |copying, expression| {
-                    copying.lower_scalar(expression, aggregates, &mut arena)
-                })
+                copying.lower_scalars(&statement.distinct_on, aggregates, &mut arena)
             })?,
             subqueries: self.take_arena(arena)?,
             access: AccessPathPlan::Row,

@@ -14,7 +14,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
-    memory::MemoryBudget,
+    memory::{MemoryBudget, Produced},
     CancellationToken, Value,
 };
 
@@ -54,7 +54,7 @@ impl<'s> ScalarInput<&'s crate::ast::Expr> for NativeProjection<'_> {
     }
 }
 
-impl<'s> ProjectionInput<&'s crate::ast::Expr, &'s str> for NativeProjection<'_> {
+impl<'s> TextInput<&'s str> for NativeProjection<'_> {
     async fn text(
         &mut self,
         source: &'s str,
@@ -67,7 +67,7 @@ impl<'s> ProjectionInput<&'s crate::ast::Expr, &'s str> for NativeProjection<'_>
 fn retained_projection<
     's: 'a,
     'a,
-    I: ProjectionInput<&'s crate::ast::Expr, &'s str> + Send + 'a,
+    I: ScalarInput<&'s crate::ast::Expr> + TextInput<&'s str> + Send + 'a,
 >(
     source: &'s Projection,
     control: ProductionControl<'a>,

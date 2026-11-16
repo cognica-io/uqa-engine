@@ -12,7 +12,12 @@ use crate::{
     plan::{AggregateClassifier, OwnedScalarExpr},
 };
 use std::future::{ready, Future};
-use uqa_core::memory::ProductionControl;
+use uqa_core::memory::{Produced, ProductionControl};
+
+pub(super) mod scalars;
+
+#[cfg(test)]
+mod tests;
 
 pub(super) trait ScalarInput<Expression> {
     fn checkpoint(&mut self) -> impl Future<Output = Result<()>> + Send;
@@ -23,9 +28,27 @@ pub(super) trait ScalarInput<Expression> {
     ) -> impl Future<Output = Result<OwnedScalarExpr>> + Send;
 }
 
+pub(super) trait TextInput<Text> {
+    fn text(
+        &mut self,
+        source: Text,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<String>>> + Send;
+}
+
 pub(super) struct InlineScalarInput<'a, 'c> {
     pub(super) aggregates: &'a dyn AggregateClassifier,
     pub(super) arena: &'a mut QueryArena<'c>,
+}
+
+impl<'s> TextInput<&'s str> for InlineScalarInput<'_, '_> {
+    fn text(
+        &mut self,
+        source: &'s str,
+        control: ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<String>>> + Send {
+        ready(control.copy_text(source).map_err(Into::into))
+    }
 }
 
 impl<'s> ScalarInput<&'s crate::ast::Expr> for InlineScalarInput<'_, '_> {

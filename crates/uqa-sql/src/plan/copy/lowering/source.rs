@@ -131,9 +131,7 @@ impl Copying<'_> {
                 output_name: self.field("output_name", |copying| copying.text(output_name))?,
                 relations: self.field("relations", |copying| relations.copy_syntax(copying))?,
                 args: self.field("args", |copying| {
-                    copying.map(args.iter(), |copying, expression| {
-                        copying.lower_scalar(expression, aggregates, arena)
-                    })
+                    copying.lower_scalars(args, aggregates, arena)
                 })?,
                 alias: self.optional_text(alias.as_deref())?,
                 column_aliases: self.texts(column_aliases)?,
@@ -187,9 +185,7 @@ impl Copying<'_> {
                 function.relations.copy_syntax(copying)
             })?,
             args: self.field("args", |copying| {
-                copying.map(function.args.iter(), |copying, expression| {
-                    copying.lower_scalar(expression, aggregates, arena)
-                })
+                copying.lower_scalars(&function.args, aggregates, arena)
             })?,
             column_aliases: self.texts(&function.column_aliases)?,
             column_types: self.texts(&function.column_types)?,

@@ -4,32 +4,39 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Copying, QueryArena, Result};
+use super::{
+    input::{InlineScalarInput, ScalarInput},
+    Copying, QueryArena, Result,
+};
 use crate::{
-    ast::{Expr, OrderBy},
-    plan::{AggregateClassifier, ExpressionPlan, OrderPlan},
+    ast::Expr,
+    plan::{retirement::Pending, AggregateClassifier, ExpressionPlan},
     ScalarExpr,
 };
 
 impl Copying<'_> {
-    pub(super) fn lower_optional_scalar(
-        &mut self,
-        expression: Option<&Expr>,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Option<ScalarExpr>> {
-        expression
-            .map(|expression| self.lower_scalar(expression, aggregates, arena))
-            .transpose()
-    }
-
     pub(super) fn lower_scalar_box(
         &mut self,
         expression: &Expr,
         aggregates: &dyn AggregateClassifier,
         arena: &mut QueryArena<'_>,
     ) -> Result<Box<ScalarExpr>> {
-        self.boxed(|copying| copying.lower_scalar(expression, aggregates, arena))
+        self.lower_optional_scalar_box(Some(expression), aggregates, arena)
+            .map(|value| value.expect("supplied scalar expression"))
+    }
+
+    pub(super) fn lower_optional_scalar(
+        &mut self,
+        expression: Option<&Expr>,
+        aggregates: &dyn AggregateClassifier,
+        arena: &mut QueryArena<'_>,
+    ) -> Result<Option<ScalarExpr>> {
+        crate::catalog::work::inline(construct_optional_scalar(
+            expression,
+            self,
+            &mut InlineScalarInput { aggregates, arena },
+        ))
+        .map(Pending::take)
     }
 
     pub(super) fn lower_optional_scalar_box(
@@ -38,22 +45,12 @@ impl Copying<'_> {
         aggregates: &dyn AggregateClassifier,
         arena: &mut QueryArena<'_>,
     ) -> Result<Option<Box<ScalarExpr>>> {
-        expression
-            .map(|expression| self.lower_scalar_box(expression, aggregates, arena))
-            .transpose()
-    }
-
-    pub(super) fn lower_order(
-        &mut self,
-        order: &OrderBy,
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<OrderPlan> {
-        Ok(OrderPlan {
-            expr: self.lower_scalar(&order.expr, aggregates, arena)?,
-            descending: order.descending,
-            nulls: order.nulls,
-        })
+        crate::catalog::work::inline(construct_optional_scalar_box(
+            expression,
+            self,
+            &mut InlineScalarInput { aggregates, arena },
+        ))
+        .map(Pending::take)
     }
 
     pub(super) fn lower_expression(
@@ -68,4 +65,35 @@ impl Copying<'_> {
             subqueries: self.take_arena(arena)?,
         })
     }
+}
+
+pub(super) async fn construct_optional_scalar<'s, I: ScalarInput<&'s Expr>>(
+    expression: Option<&'s Expr>,
+    copying: &mut Copying<'_>,
+    input: &mut I,
+) -> Result<Pending<Option<ScalarExpr>>> {
+    copying.check()?;
+    input.checkpoint().await?;
+    copying.check()?;
+    let Some(expression) = expression else {
+        return Ok(Pending::new(None));
+    };
+    let value = input.scalar(expression, copying.control).await?;
+    Ok(Pending::new(Some(copying.take_scalar(value)?)))
+}
+
+pub(super) async fn construct_optional_scalar_box<'s, I: ScalarInput<&'s Expr>>(
+    expression: Option<&'s Expr>,
+    copying: &mut Copying<'_>,
+    input: &mut I,
+) -> Result<Pending<Option<Box<ScalarExpr>>>> {
+    copying.check()?;
+    input.checkpoint().await?;
+    copying.check()?;
+    let Some(expression) = expression else {
+        return Ok(Pending::new(None));
+    };
+    copying.reserve(size_of::<ScalarExpr>())?;
+    let value = input.scalar(expression, copying.control).await?;
+    Ok(Pending::new(Some(Box::new(copying.take_scalar(value)?))))
 }

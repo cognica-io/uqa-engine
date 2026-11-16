@@ -7,35 +7,30 @@
 //! Projection expressions keep their scalar owner until alias production and destination admission complete.
 
 use super::{
-    input::{InlineScalarInput, ScalarInput},
+    input::{InlineScalarInput, ScalarInput, TextInput},
     Copying, QueryArena, Result,
 };
 use crate::{
     ast::Projection,
-    plan::{AggregateClassifier, OwnedProjection, ProjectionPlan},
+    plan::{retirement::Pending, AggregateClassifier, OwnedProjection, ProjectionPlan},
 };
-use std::future::{ready, Future};
-use uqa_core::memory::{Produced, ProductionControl};
-
-trait ProjectionInput<Expression, Text>: ScalarInput<Expression> {
-    fn text(
-        &mut self,
-        source: Text,
-        control: ProductionControl<'_>,
-    ) -> impl Future<Output = Result<Produced<String>>> + Send;
-}
-
-impl<'s> ProjectionInput<&'s crate::ast::Expr, &'s str> for InlineScalarInput<'_, '_> {
-    fn text(
-        &mut self,
-        source: &'s str,
-        control: ProductionControl<'_>,
-    ) -> impl Future<Output = Result<Produced<String>>> + Send {
-        ready(control.copy_text(source).map_err(Into::into))
-    }
-}
+use uqa_core::memory::{BudgetedVec, ProductionControl};
 
 impl Copying<'_> {
+    pub(super) fn lower_projections(
+        &mut self,
+        projections: &[Projection],
+        aggregates: &dyn AggregateClassifier,
+        arena: &mut QueryArena<'_>,
+    ) -> Result<Vec<ProjectionPlan>> {
+        crate::catalog::work::inline(construct_projections(
+            projections,
+            self,
+            &mut InlineScalarInput { aggregates, arena },
+        ))
+        .map(Pending::take)
+    }
+
     pub(super) fn lower_projection(
         &mut self,
         projection: &Projection,
@@ -51,7 +46,7 @@ impl Copying<'_> {
     }
 }
 
-async fn construct_projection<'s, I: ProjectionInput<&'s crate::ast::Expr, &'s str>>(
+async fn construct_projection<'s, I: ScalarInput<&'s crate::ast::Expr> + TextInput<&'s str>>(
     projection: &'s Projection,
     control: ProductionControl<'_>,
     input: &mut I,
@@ -64,6 +59,38 @@ async fn construct_projection<'s, I: ProjectionInput<&'s crate::ast::Expr, &'s s
         None => None,
     };
     Ok(OwnedProjection { expression, alias })
+}
+
+pub(super) async fn construct_projections<
+    's,
+    I: ScalarInput<&'s crate::ast::Expr> + TextInput<&'s str>,
+>(
+    source: &'s [Projection],
+    copying: &mut Copying<'_>,
+    input: &mut I,
+) -> Result<Pending<Vec<ProjectionPlan>>> {
+    input.checkpoint().await?;
+    copying.check()?;
+    let mut values = Pending::new(BudgetedVec::new(
+        copying.control.budget().expect("projection allowance"),
+    ));
+    values.reserve(source.len())?;
+    copying
+        .fields
+        .as_mut()
+        .expect("projection fields")
+        .reserve(source.len())?;
+    for source in source {
+        let mut field = copying.begin_input_field()?;
+        let projection = construct_projection(source, copying.control, input).await?;
+        values
+            .push(field.take_projection(projection)?)
+            .expect("admitted projection slot");
+        copying.finish_input_field("item", field);
+    }
+    let (values, memory) = values.take().into_parts();
+    copying.absorb(Some(memory));
+    Ok(Pending::new(values))
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
-    memory::{MemoryBudget, ProductionControl},
+    memory::{BudgetedVec, MemoryBudget, ProductionControl},
     CancellationToken, Value,
 };
 
