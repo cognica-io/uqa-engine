@@ -217,7 +217,7 @@ fn require_mutation(command: &CommandPlan) -> Result<()> {
     }
 }
 
-type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + 'a;
+type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + Sync + 'a;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CopyPurpose {

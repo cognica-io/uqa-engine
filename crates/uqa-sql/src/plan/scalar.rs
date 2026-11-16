@@ -22,6 +22,8 @@ mod binding;
 mod copy;
 mod lowering;
 pub(in crate::plan) use lowering::lower_scalar_with_arena;
+#[cfg(test)]
+pub(in crate::plan) use lowering::ScalarQueryInput;
 pub(in crate::plan) use resources::input::Work as ScalarInputWork;
 mod owned;
 pub(in crate::plan) use owned::windows::OwnedWindowSpec;

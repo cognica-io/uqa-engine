@@ -43,22 +43,6 @@ impl Copying<'_> {
             .transpose()
     }
 
-    pub(super) fn lower_rows(
-        &mut self,
-        rows: &[Vec<Expr>],
-        aggregates: &dyn AggregateClassifier,
-        arena: &mut QueryArena<'_>,
-    ) -> Result<Vec<Vec<ScalarExpr>>> {
-        self.map(rows.iter(), |copying, row| {
-            let control = copying.control;
-            copying.scalar_values(row.iter().map(|expression| {
-                Ok(crate::plan::scalar::lower_scalar_with_arena(
-                    expression, aggregates, arena, control,
-                )?)
-            }))
-        })
-    }
-
     pub(super) fn lower_projection(
         &mut self,
         projection: &Projection,

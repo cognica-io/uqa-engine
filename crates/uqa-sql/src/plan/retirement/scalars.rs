@@ -34,6 +34,13 @@ impl<T: Retire> Retire for Vec<T> {
         }
     }
 }
+impl<T: Retire> Retire for uqa_core::memory::BudgetedVec<T> {
+    fn retire(&mut self) {
+        for value in self.iter_mut() {
+            value.retire();
+        }
+    }
+}
 impl<T: Retire> Retire for Option<T> {
     fn retire(&mut self) {
         if let Some(value) = self {

@@ -27,7 +27,8 @@ impl Copying<'_> {
         if let Some(owners) = &mut owners {
             owners.reserve(values.len())?;
         }
-        let mut output = uqa_core::memory::BudgetedVec::new(budget);
+        let mut output =
+            crate::plan::retirement::Pending::new(uqa_core::memory::BudgetedVec::new(budget));
         output.reserve(values.len())?;
         for value in values {
             let value = value?.rewrite(&self.control, Ok::<_, crate::SQLError>)?;
@@ -43,7 +44,7 @@ impl Copying<'_> {
                 self.absorb(Some(memory.expect("controlled scalar").into_reservation()));
             }
         }
-        let (output, memory) = output.into_parts();
+        let (output, memory) = output.take().into_parts();
         self.absorb(Some(memory));
         self.scalar_items = owners;
         Ok(output)

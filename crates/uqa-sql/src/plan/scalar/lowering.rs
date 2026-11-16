@@ -7,6 +7,8 @@
 //! AST lowering can publish independently movable scalar children directly.
 
 mod input;
+#[cfg(test)]
+pub(in crate::plan) use input::ScalarQueryInput;
 
 use super::{
     resources::{Control, Lowering, Result},

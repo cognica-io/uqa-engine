@@ -23,6 +23,7 @@ mod ctes;
 mod expressions;
 mod mutations;
 mod query;
+mod rows;
 mod source;
 
 impl crate::plan::ExpressionPlan {

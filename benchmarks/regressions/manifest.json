@@ -4,6 +4,58 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "retained_value_rows_share_ordinary_shape_and_independently_movable_cells",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Lower empty, scalar and composite rows through ordinary and one-step native construction, then detach one cell.",
+      "invariant": "Row values and retained bytes agree; only the selected cell remains charged after its parent retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_retire_every_prefix_cancellation_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Stop at every suspended prefix, cancel either owner, deny five allowances and reject a later query after completing a large row.",
+      "invariant": "All abandoned or failed rows release destination and work memory while an independent sibling lease survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_count_empty_rows_against_each_work_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Build 2,048 empty rows before a payload row with one work step per poll.",
+      "invariant": "Empty rows consume bounded work; the detached last cell retains exactly its original bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_release_completed_and_partial_deep_cells_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Retire complete rows, extracted iterators and partial native input containing an 8,192-level cell on a 256 KiB stack.",
+      "invariant": "Cleanup allocates nothing and releases all row payload and ownership reservations without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "deep_query_constructor_records_fold_and_drop_without_recursive_cleanup",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
