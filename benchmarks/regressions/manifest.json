@@ -2,6 +2,45 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_query_input_preserves_ordinary_query_slot_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Compare nested IN, CASE, array and window query slots with ordinary lowering.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_parameter_input_suppresses_replaced_subtree_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Replace a parameter and a query subtree whose construction would fail.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_query_input_retires_each_prefix_and_failed_query_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Cancel either retained owner at every query construction prefix and reject a later query.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "retained_value_copy_keeps_destination_allowance_separate_from_work_channel",

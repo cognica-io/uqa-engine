@@ -13,6 +13,8 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod queries;
+
 type Input = ImageDecoder<OwnedScalarExpr, SQLError>;
 
 fn expression(sql: &str) -> Expr {

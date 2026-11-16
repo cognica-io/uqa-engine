@@ -4,12 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Expr, Lowering, SQLError, ScalarExpr};
+use super::{Expr, Lowering, SQLError, ScalarExpr, ScalarQueryInput};
 use crate::plan::scalar::resources::input::{boxed_from, map_from};
 use crate::{
     ast::{FrameBound, OrderBy, ReferenceName, WindowSpec},
     ir::{ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec},
-    schema::retention::CatalogRetentionError,
 };
 use uqa_core::image_io::AsyncImageInput;
 
@@ -18,9 +17,10 @@ impl Lowering<'_> {
         clippy::too_many_lines,
         reason = "the exhaustive AST constructor retains every scalar field"
     )]
-    pub(super) async fn scalar_node_from(
+    pub(super) async fn scalar_node_from<Q: ScalarQueryInput>(
         &mut self,
         source: &Expr,
+        queries: &mut Q,
         work: &mut AsyncImageInput<'_>,
     ) -> Result<ScalarExpr, SQLError> {
         self.checkpoint(work).await?;
@@ -134,9 +134,18 @@ impl Lowering<'_> {
                 expr: self.scalar_slot(work).await?,
                 ty: self.text_from(ty, work).await?,
             },
-            Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
-                return Err(CatalogRetentionError::UnexpectedSubquery.into());
+            Expr::ScalarSubquery(query) => {
+                ScalarExpr::ScalarSubquery(queries.append(query, &self.production(), work).await?)
             }
+            Expr::Exists { body, negated } => ScalarExpr::Exists {
+                subquery: queries.append(body, &self.production(), work).await?,
+                negated: *negated,
+            },
+            Expr::InSubquery { negated, .. } => ScalarExpr::InSubquery {
+                expr: self.scalar_slot(work).await?,
+                subquery: 0,
+                negated: *negated,
+            },
         })
     }
 

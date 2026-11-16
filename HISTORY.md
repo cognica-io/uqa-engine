@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Retain scalar lowering, call metadata and native value production across bounded work windows with independent destination allowances. Retire deep mutable scalar trees and fold their ownership metadata without recursive stack growth or additional allocation. Complete routine finalization and public backup restoration remain in progress.
+- Retain scalar lowering, call metadata and native value production across bounded work windows with independent destination allowances. Preserve nested query slot order and suppress replaced parameter subtrees through the same private construction boundary. Retire deep mutable scalar trees and fold their ownership metadata without recursive stack growth or additional allocation. Complete routine finalization and public backup restoration remain in progress.
 - Share intrinsic routine cost/row estimates, support identities, language, parameter-order, default and pseudo-type checks between ordinary declarations and private backup validation. Reject invalid captured source declarations before activation while preserving deferred bodies and input/output names. Reject domains over arrays as VARIADIC parameter types, while preserving arrays of domains, matching PostgreSQL 18. Complete public backup restoration remains in progress.
 - Restore persistent scoring parameters through bounded native catalog input. Preserve opaque names and values, selected snapshots and original allocation ownership; native image publication also resumes long-name comparisons. Failed or abandoned private input releases its read transaction without publishing a partial catalog. Complete public backup restoration remains in progress.
 
