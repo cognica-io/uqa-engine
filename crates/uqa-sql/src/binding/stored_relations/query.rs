@@ -14,11 +14,32 @@ use crate::{
     SQLError,
 };
 use std::collections::BTreeSet;
-use uqa_core::RelationIdentity;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    RelationIdentity,
+};
 
 pub trait StoredQuerySequences {
     fn query_sequence(&self, reference: &str) -> Result<String, String>;
     fn loaded_query_sequence(&self, reference: &str) -> Result<String, String>;
+
+    /// External callbacks own name construction; their returned buffer transfers without copying. Native catalogs override this boundary to admit candidates and the selected name before allocation.
+    fn query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        sequences::external_name(|| self.query_sequence(reference), control)
+    }
+
+    /// Resolve only against already-loaded catalog state with the same ownership contract as the live lookup.
+    fn loaded_query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        sequences::external_name(|| self.loaded_query_sequence(reference), control)
+    }
 }
 /// Namespace metadata captured at the start of a stored query binding pass.
 pub struct StoredQueryNamespace {
@@ -40,17 +61,26 @@ pub struct StoredQueryBindingContext<
 pub fn resolve_loaded_query_sequence(
     reference: &str,
     candidates: Vec<RelationIdentity>,
-    mut contains: impl FnMut(&RelationIdentity) -> bool,
+    contains: impl FnMut(&RelationIdentity) -> bool,
 ) -> Result<String, String> {
-    candidates
-        .into_iter()
-        .find(|candidate| contains(candidate))
-        .map(|candidate| candidate.qualified_name())
-        .ok_or_else(|| format!("Sequence `{reference}` does not exist"))
+    sequences::resolve_loaded_query_sequence_with_control(
+        reference,
+        &candidates,
+        contains,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|name| name.into_uncontrolled().expect("ordinary sequence lookup"))
+    .map_err(|error| match error {
+        SQLError::Unsupported(message) => message,
+        error => error.to_string(),
+    })
 }
 
-pub fn bind_stored_query_relations(
-    catalog: &StoredQueryBindingContext<'_>,
+pub fn bind_stored_query_relations<
+    R: StoredRelationCatalog + ?Sized,
+    S: StoredQuerySequences + ?Sized,
+>(
+    catalog: &StoredQueryBindingContext<'_, R, S>,
     plan: &mut QueryPlan,
     context: &str,
     reject_transition_relations: bool,
@@ -73,16 +103,17 @@ pub fn bind_stored_query_relations(
         )
     })?;
     bind_query_plan_sequence_references(plan, &mut |reference| {
-        let resolved = if loaded_catalog {
-            catalog.sequences.loaded_query_sequence(reference)
-        } else {
-            catalog.sequences.query_sequence(reference)
-        };
-        resolved.map_err(|error| {
-            SQLError::Unsupported(format!(
-                "{context} sequence reference `{reference}`: {error}"
-            ))
-        })
+        Ok::<_, SQLError>(
+            catalog
+                .canonical_sequence_with_control(
+                    reference,
+                    context,
+                    loaded_catalog,
+                    &ProductionControl::uncontrolled(),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary sequence binding"),
+        )
     })?;
     Ok(uses_temporary_relation)
 }
@@ -98,6 +129,8 @@ pub(super) fn composite_relation_error(canonical: &str) -> SQLError {
 }
 
 mod production;
+mod sequences;
+pub use sequences::{resolve_query_sequence_with_control, select_query_sequence_with_control};
 
 #[cfg(test)]
 mod tests;

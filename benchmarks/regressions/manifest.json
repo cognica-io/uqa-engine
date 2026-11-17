@@ -72542,6 +72542,103 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_completes_relations_before_sequences_in_each_lookup_mode",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Compare complete CTE, mutation-child and set-operation queries across live/loaded and dynamic/bound lookup modes.",
+      "invariant": "Finish every relation lookup before the first sequence lookup, preserve complete output and transfer each admitted canonical-name buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_preserves_relation_and_sequence_failure_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Combine missing row sources, a later missing sequence and an original typed permission diagnostic.",
+      "invariant": "Preserve the first relation or sequence failure, original detail and hint, skip later callbacks and release private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_retires_every_interrupted_composed_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Abandon and independently cancel every pending boundary across complete relation and sequence passes.",
+      "invariant": "Retire both passes and their nested constructors without allocation while preserving an unrelated 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_candidates_preserve_order_quoted_names_and_controlled_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/sequences/tests.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Select the first matching quoted identity from ordered namespace candidates and reject exhausted or cancelled construction.",
+      "invariant": "Preserve canonical spelling and lookup order, stop before later candidates and release all temporary and result reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_external_names_transfer_capacity_and_keep_legacy_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/sequences/tests.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Transfer an external callback name with 4,096-byte capacity through the existing production-value owner.",
+      "invariant": "Keep the original name buffer, charge actual returned capacity without copying, preserve ordinary missing-name context and retain an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_catalog_names_share_live_sequence_selection_without_consuming_values",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/binding.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Bind retained and ordinary queries through Engine with two namespace orders, live and loaded catalogs, and memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Preserve complete plans and selected sequence identities, release native ownership and leave both sequence values unconsumed.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_sequence_lookup_keeps_resource_failures_and_catalog_state",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/binding.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Reject malformed and missing sequence names, denied admission and both cancellation scopes through all four Engine providers.",
+      "invariant": "Preserve original name diagnostics and typed resource SQLSTATEs, release private reservations and leave the sequence ready at its original value.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
     }
   ]
 }

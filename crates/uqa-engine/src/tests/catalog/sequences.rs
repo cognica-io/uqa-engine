@@ -5,6 +5,7 @@
 //
 
 mod alteration_authority;
+mod binding;
 mod dependencies;
 mod lifecycle;
 mod native;

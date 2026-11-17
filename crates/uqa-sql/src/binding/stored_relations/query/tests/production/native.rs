@@ -518,4 +518,5 @@ fn retained_relation_binding_preserves_mutation_roots_and_original_target_flags(
     }
 }
 
+mod catalog;
 mod sequences;

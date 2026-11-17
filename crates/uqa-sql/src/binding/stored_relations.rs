@@ -10,8 +10,9 @@ mod production;
 mod query;
 pub(crate) use production::canonical_catalog_relation_with_control;
 pub use query::{
-    bind_stored_query_relations, resolve_loaded_query_sequence, StoredQueryBindingContext,
-    StoredQueryNamespace, StoredQuerySequences,
+    bind_stored_query_relations, resolve_loaded_query_sequence,
+    resolve_query_sequence_with_control, select_query_sequence_with_control,
+    StoredQueryBindingContext, StoredQueryNamespace, StoredQuerySequences,
 };
 
 use crate::{
