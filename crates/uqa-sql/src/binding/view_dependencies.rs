@@ -13,7 +13,7 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
-mod owned;
+pub(crate) mod owned;
 mod references;
 pub(crate) use owned::bind_query_relation_targets_owned;
 pub use references::{

@@ -11,8 +11,7 @@ use super::{
     MutableSourcePlan, QueryChildSlot, SourceChildSlot,
 };
 use crate::{
-    binding::production::BindingMap,
-    plan::{CommandPlan, CtePlan, RelationalPlan, SourcePlan},
+    plan::{CommandPlan, RelationalPlan, SourcePlan},
     SQLError,
 };
 use uqa_core::memory::ProductionControl;
@@ -37,6 +36,13 @@ pub trait OwnedScopedPlanVisitor {
     }
 }
 
+mod input;
+mod scope;
+use super::edits::BodySlot;
+use crate::catalog::work::{self, Work};
+use input::Input;
+use scope::Scope;
+
 impl MutableExecutablePlan {
     pub fn visit_scoped(
         self,
@@ -47,225 +53,272 @@ impl MutableExecutablePlan {
     }
 
     pub(crate) fn visit_scoped_in(
-        self,
+        mut self,
         control: &ProductionControl<'_>,
         outer: &dyn Fn(&str) -> bool,
         visitor: &mut dyn OwnedScopedPlanVisitor,
     ) -> Result<Self, SQLError> {
-        plan(self, outer, visitor, control)
+        let mut input = input::Immediate::new(outer, visitor);
+        work::inline(plan(&mut self, Scope::root(), control, &mut input))?;
+        Ok(self)
     }
 }
 
-fn names(ctes: &[CtePlan], control: &ProductionControl<'_>) -> Result<BindingMap<usize>, SQLError> {
-    let mut names = BindingMap::new();
-    for (position, cte) in ctes.iter().enumerate() {
-        control.check()?;
-        if !names.contains_key(&cte.name) {
-            names.insert_with_control(&cte.name, position, control)?;
+async fn checkpoint<I: Input>(
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    control.check()?;
+    input.work().checkpoint().await?;
+    control.check()?;
+    Ok(())
+}
+
+async fn plan<I: Input>(
+    value: &mut MutableExecutablePlan,
+    scope: Scope,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    match value {
+        MutableExecutablePlan::Query(value) => query(value, scope, control, input).await,
+        MutableExecutablePlan::Command(value) => command(value, scope, control, input).await,
+    }
+}
+
+async fn body<I: Input>(
+    slot: BodySlot<'_>,
+    scope: Scope,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    match slot {
+        BodySlot::Query(mut slot) => {
+            let value = input.query(slot.take(), scope, control)?.await?;
+            slot.restore(value);
+        }
+        BodySlot::Command(mut slot) => {
+            let value = input.command(slot.take(), scope, control)?.await?;
+            slot.restore(value);
         }
     }
-    Ok(names)
+    Ok(())
 }
-fn plan(
-    input: MutableExecutablePlan,
-    outer: &dyn Fn(&str) -> bool,
-    visitor: &mut dyn OwnedScopedPlanVisitor,
+
+async fn query<I: Input>(
+    value: &mut MutableQueryPlan,
+    outer: Scope,
     control: &ProductionControl<'_>,
-) -> Result<MutableExecutablePlan, SQLError> {
-    control.check()?;
-    Ok(match input {
-        MutableExecutablePlan::Query(input) => {
-            MutableExecutablePlan::Query(query(input, outer, visitor, control)?)
+    input: &mut I,
+) -> Result<(), SQLError> {
+    value.assert_owner(control);
+    checkpoint(control, input).await?;
+    let (scope, recursive) = outer.extend(&value.ctes, control, input.work()).await?;
+    let result = async {
+        for index in 0..value.ctes.len() {
+            body(
+                value.cte_slot(index),
+                scope.before(index, recursive),
+                control,
+                input,
+            )
+            .await?;
         }
-        MutableExecutablePlan::Command(input) => {
-            MutableExecutablePlan::Command(command(input, outer, visitor, control)?)
+        match &value.root {
+            RelationalPlan::QueryBlock(_) => {
+                if let Some(mut slot) = value.source_slot()? {
+                    let value = input.source(slot.take(), scope.clone(), control)?.await?;
+                    slot.restore(value);
+                }
+            }
+            RelationalPlan::SetOp { .. } => {
+                for child in [QueryChildSlot::Left, QueryChildSlot::Right] {
+                    checkpoint(control, input).await?;
+                    let mut slot = value.query_slot(child);
+                    let value = input.query(slot.take(), scope.clone(), control)?.await?;
+                    slot.restore(value);
+                }
+            }
+            RelationalPlan::Values { .. } => {}
         }
-    })
-}
-fn query(
-    mut input: MutableQueryPlan,
-    outer: &dyn Fn(&str) -> bool,
-    visitor: &mut dyn OwnedScopedPlanVisitor,
-    control: &ProductionControl<'_>,
-) -> Result<MutableQueryPlan, SQLError> {
-    control.check()?;
-    let names = names(&input.ctes, control)?;
-    let recursive = input.ctes.iter().any(|cte| cte.recursive);
-    for index in 0..input.ctes.len() {
-        let visible = |name: &str| {
-            names
-                .get(name)
-                .is_some_and(|position| recursive || *position < index)
-                || outer(name)
+        let count = match &value.root {
+            RelationalPlan::QueryBlock(block) => block.subqueries.len(),
+            RelationalPlan::SetOp { subqueries, .. }
+            | RelationalPlan::Values { subqueries, .. } => subqueries.len(),
         };
-        input = input.map_cte(index, control, |body| {
-            plan(body, &visible, visitor, control)
-        })?;
-    }
-    let visible = |name: &str| names.contains_key(name) || outer(name);
-    match &input.root {
-        RelationalPlan::QueryBlock(_) => {
-            input = input.map_source(control, |input| source(input, &visible, visitor, control))?;
+        for index in 0..count {
+            checkpoint(control, input).await?;
+            let mut slot = value.query_slot(QueryChildSlot::Subquery(index));
+            let value = input.query(slot.take(), scope.clone(), control)?.await?;
+            slot.restore(value);
         }
-        RelationalPlan::SetOp { .. } => {
-            input = input.map_query_child(QueryChildSlot::Left, control, |input| {
-                query(input, &visible, visitor, control)
-            })?;
-            input = input.map_query_child(QueryChildSlot::Right, control, |input| {
-                query(input, &visible, visitor, control)
-            })?;
-        }
-        RelationalPlan::Values { .. } => {}
+        input.query_complete(value, control)?.await
     }
-    let count = match &input.root {
-        RelationalPlan::QueryBlock(block) => block.subqueries.len(),
-        RelationalPlan::SetOp { subqueries, .. } | RelationalPlan::Values { subqueries, .. } => {
-            subqueries.len()
-        }
-    };
-    for index in 0..count {
-        input = input.map_query_child(QueryChildSlot::Subquery(index), control, |input| {
-            query(input, &visible, visitor, control)
-        })?;
-    }
-    visitor.query_complete(input)
+    .await;
+    let retired = scope.retire(control, input.work()).await;
+    result.and(retired)
 }
-fn source(
-    input: MutableSourcePlan,
-    visible: &dyn Fn(&str) -> bool,
-    visitor: &mut dyn OwnedScopedPlanVisitor,
+
+async fn source<I: Input>(
+    value: &mut MutableSourcePlan,
+    scope: Scope,
     control: &ProductionControl<'_>,
-) -> Result<MutableSourcePlan, SQLError> {
-    control.check()?;
-    let (mut input, descend) = visitor.source(input, visible)?;
-    if !descend {
-        return Ok(input);
+    input: &mut I,
+) -> Result<(), SQLError> {
+    value.assert_owner(control);
+    checkpoint(control, input).await?;
+    if !input.source_enter(value, &scope, control)?.await? {
+        return Ok(());
     }
-    match &*input {
+    match &**value {
         SourcePlan::Subquery { .. } => {
-            input.map_query(control, |input| query(input, visible, visitor, control))
+            if let Some(mut slot) = value.query_slot()? {
+                let value = input.query(slot.take(), scope, control)?.await?;
+                slot.restore(value);
+            }
         }
         SourcePlan::Table {
             name,
             executable_query: Some(_),
             ..
         } => {
-            let cte = match uqa_core::RelationIdentity::borrowed_reference(name)
-                .filter(|reference| reference.schema.is_none())
-            {
-                Some(reference) => visible(&control.format(format_args!("{}", reference.name))?),
-                None => false,
+            let cte = match work::reference(name, control, input.work()).await? {
+                Some(reference) if reference.schema.is_none() => {
+                    let local = work::decoded_name(reference.name, control, input.work()).await?;
+                    input.visible(&scope, &local, control).await?
+                }
+                _ => false,
             };
-            input.map_query(control, |input| {
-                query(
-                    input,
-                    if cte { visible } else { &|_| false },
-                    visitor,
-                    control,
-                )
-            })
+            if let Some(mut slot) = value.query_slot()? {
+                let value = input
+                    .query(
+                        slot.take(),
+                        if cte { scope } else { Scope::default() },
+                        control,
+                    )?
+                    .await?;
+                slot.restore(value);
+            }
         }
         SourcePlan::Join { .. } => {
-            input = input.map_child(SourceChildSlot::Left, control, |input| {
-                source(input, visible, visitor, control)
-            })?;
-            input.map_child(SourceChildSlot::Right, control, |input| {
-                source(input, visible, visitor, control)
-            })
+            for child in [SourceChildSlot::Left, SourceChildSlot::Right] {
+                checkpoint(control, input).await?;
+                let mut slot = value.child_slot(child);
+                let value = input.source(slot.take(), scope.clone(), control)?.await?;
+                slot.restore(value);
+            }
         }
-        _ => Ok(input),
+        _ => {}
     }
+    Ok(())
 }
-fn command(
-    input: MutableCommandPlan,
-    outer: &dyn Fn(&str) -> bool,
-    visitor: &mut dyn OwnedScopedPlanVisitor,
+
+async fn command_query<I: Input>(
+    value: &mut MutableCommandPlan,
+    selected: CommandQuerySlot,
+    scope: &Scope,
     control: &ProductionControl<'_>,
-) -> Result<MutableCommandPlan, SQLError> {
-    control.check()?;
-    let (mut input, descend) = visitor.command(input, outer)?;
-    if !descend {
-        return Ok(input);
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    if let Some(mut slot) = value.query_slot(selected) {
+        let value = input.query(slot.take(), scope.clone(), control)?.await?;
+        slot.restore(value);
     }
-    match &*input {
+    Ok(())
+}
+
+async fn command<I: Input>(
+    value: &mut MutableCommandPlan,
+    outer: Scope,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    value.assert_owner(control);
+    checkpoint(control, input).await?;
+    if !input.command_enter(value, &outer, control)?.await? {
+        return Ok(());
+    }
+    match &**value {
         CommandPlan::CreateView { .. }
         | CommandPlan::CreateTableAs { .. }
         | CommandPlan::CreateMaterializedView { .. }
         | CommandPlan::DeclareCursor { .. } => {
-            return input.map_query_body(control, |input| query(input, outer, visitor, control))
+            return command_query(value, CommandQuerySlot::Body, &outer, control, input).await;
         }
         CommandPlan::Explain { .. } | CommandPlan::Prepare { .. } => {
-            return input.map_executable_body(control, |input| plan(input, outer, visitor, control))
+            return body(value.executable_slot()?, outer, control, input).await;
         }
-        CommandPlan::Call { args, .. } => {
-            let count = args.len();
-            for argument in 0..count {
-                let CommandPlan::Call { args, .. } = &*input else {
-                    unreachable!("retained CALL")
-                };
-                for index in 0..args[argument].subqueries.len() {
-                    input = input.map_query_child(
-                        CommandQuerySlot::CallArgumentSubquery {
-                            argument,
-                            query: index,
-                        },
-                        control,
-                        |input| query(input, outer, visitor, control),
-                    )?;
-                }
-            }
-            return Ok(input);
-        }
-        CommandPlan::Execute { params, .. } => {
+        CommandPlan::Call { args: params, .. } | CommandPlan::Execute { params, .. } => {
             let count = params.len();
             for parameter in 0..count {
-                let CommandPlan::Execute { params, .. } = &*input else {
-                    unreachable!("retained EXECUTE")
+                checkpoint(control, input).await?;
+                let (call, queries) = match &**value {
+                    CommandPlan::Call { args, .. } => (true, args[parameter].subqueries.len()),
+                    CommandPlan::Execute { params, .. } => {
+                        (false, params[parameter].subqueries.len())
+                    }
+                    _ => unreachable!(),
                 };
-                for index in 0..params[parameter].subqueries.len() {
-                    input = input.map_query_child(
-                        CommandQuerySlot::ExecuteParameterSubquery {
-                            parameter,
-                            query: index,
-                        },
-                        control,
-                        |input| query(input, outer, visitor, control),
-                    )?;
+                for query in 0..queries {
+                    let slot = if call {
+                        CommandQuerySlot::CallArgumentSubquery {
+                            argument: parameter,
+                            query,
+                        }
+                    } else {
+                        CommandQuerySlot::ExecuteParameterSubquery { parameter, query }
+                    };
+                    command_query(value, slot, &outer, control, input).await?;
                 }
             }
-            return Ok(input);
+            return Ok(());
         }
         CommandPlan::Insert(_)
         | CommandPlan::Update(_)
         | CommandPlan::Delete(_)
         | CommandPlan::Merge(_) => {}
-        _ => return Ok(input),
+        _ => return Ok(()),
     }
-    let names = names(input.ctes(), control)?;
-    let recursive = input.ctes().iter().any(|cte| cte.recursive);
-    for index in 0..input.ctes().len() {
-        let visible = |name: &str| {
-            names
-                .get(name)
-                .is_some_and(|position| recursive || *position < index)
-                || outer(name)
-        };
-        input = input.map_cte(index, control, |body| {
-            plan(body, &visible, visitor, control)
-        })?;
+    let (scope, recursive) = outer.extend(value.ctes(), control, input.work()).await?;
+    let result = async {
+        for index in 0..value.ctes().len() {
+            body(
+                value.cte_slot(index),
+                scope.before(index, recursive),
+                control,
+                input,
+            )
+            .await?;
+        }
+        if let Some(mut slot) = value.source_slot() {
+            let value = input.source(slot.take(), scope.clone(), control)?.await?;
+            slot.restore(value);
+        }
+        if matches!(&**value, CommandPlan::Insert(insert) if insert.source.is_some()) {
+            command_query(
+                value,
+                CommandQuerySlot::InsertSource,
+                &scope,
+                control,
+                input,
+            )
+            .await?;
+        }
+        for index in 0..value.scalar_subqueries().len() {
+            command_query(
+                value,
+                CommandQuerySlot::Subquery(index),
+                &scope,
+                control,
+                input,
+            )
+            .await?;
+        }
+        Ok(())
     }
-    let visible = |name: &str| names.contains_key(name) || outer(name);
-    input = input.map_source(control, |input| source(input, &visible, visitor, control))?;
-    if matches!(&*input,CommandPlan::Insert(insert) if insert.source.is_some()) {
-        input = input.map_query_child(CommandQuerySlot::InsertSource, control, |input| {
-            query(input, &visible, visitor, control)
-        })?;
-    }
-    let count = input.scalar_subqueries().len();
-    for index in 0..count {
-        input = input.map_query_child(CommandQuerySlot::Subquery(index), control, |input| {
-            query(input, &visible, visitor, control)
-        })?;
-    }
-    Ok(input)
+    .await;
+    let retired = scope.retire(control, input.work()).await;
+    result.and(retired)
 }

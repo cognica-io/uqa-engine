@@ -107,3 +107,43 @@ pub(crate) fn inline<F: Future>(future: F) -> F::Output {
         Poll::Pending => unreachable!("inline catalog work never suspends"),
     }
 }
+
+pub(crate) async fn reference<'a, W: Work + Send>(
+    value: &'a str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<uqa_core::RelationReference<'a>>, SQLError> {
+    match uqa_core::RelationIdentity::try_borrowed_reference_from(
+        value,
+        &mut ReferenceWork { control, work },
+    )
+    .await
+    {
+        Ok(value) => Ok(Some(value)),
+        Err(uqa_core::RelationReferenceInputError::Reference(_)) => Ok(None),
+        Err(uqa_core::RelationReferenceInputError::Input(error)) => Err(error),
+    }
+}
+
+pub(crate) async fn decoded_name<W: Work + Send>(
+    name: uqa_core::RelationName<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<String>, SQLError> {
+    name.decode_from(control, &mut ReferenceWork { control, work })
+        .await
+}
+
+struct ReferenceWork<'a, 'c, W> {
+    control: &'a ProductionControl<'c>,
+    work: &'a mut W,
+}
+impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        self.control.check()?;
+        self.work.checkpoint().await?;
+        self.control.check()?;
+        Ok(())
+    }
+}

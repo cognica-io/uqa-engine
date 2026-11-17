@@ -398,3 +398,5 @@ fn owned_query_relation_admission_retires_partial_names_and_keeps_other_reservat
         "{denied} denied, {completed} completed"
     );
 }
+
+mod native;

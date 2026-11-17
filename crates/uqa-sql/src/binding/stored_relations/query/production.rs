@@ -16,7 +16,7 @@ use uqa_core::{
     RelationIdentity, RelationName,
 };
 
-impl StoredQueryBindingContext<'_> {
+impl<R: super::StoredRelationCatalog + ?Sized, S: ?Sized> StoredQueryBindingContext<'_, R, S> {
     /// Bind the complete relation pass before sequence binding. Existing scoped traversal owns CTE visibility and mutation children; canonical names replace only their original admitted source fields.
     pub fn bind_query_relation_names_with_control(
         &self,
@@ -49,6 +49,41 @@ impl StoredQueryBindingContext<'_> {
 
     /// Select one stored query source and retain the canonical name under the destination allowance. Query traversal owns CTE visibility; this boundary owns catalog mode, transition names, source kind and temporary-relation observation.
     pub fn canonical_relation_with_control(
+        &self,
+        reference: &str,
+        context: &str,
+        reject_transition_relations: bool,
+        loaded_catalog: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Produced<String>, bool), SQLError> {
+        self.relation_names().canonical(
+            reference,
+            context,
+            reject_transition_relations,
+            loaded_catalog,
+            control,
+        )
+    }
+
+    fn relation_names(&self) -> Names<'_, R> {
+        Names {
+            relations: self.relations,
+            lookup_mode: self.lookup_mode,
+            temporary_schema: self.temporary_schema,
+            transition_relations: self.transition_relations,
+        }
+    }
+}
+
+struct Names<'a, R: ?Sized> {
+    relations: &'a R,
+    lookup_mode: RelationLookupMode,
+    temporary_schema: &'a str,
+    transition_relations: &'a std::collections::BTreeSet<String>,
+}
+
+impl<R: super::StoredRelationCatalog + ?Sized> Names<'_, R> {
+    fn canonical(
         &self,
         reference: &str,
         context: &str,
@@ -121,6 +156,44 @@ impl StoredQueryBindingContext<'_> {
             RelationResolution::MissingSchema(_) | RelationResolution::MissingRelation => {
                 Err(SQLError::UnknownTable(reference.to_string()))
             }
+        }
+    }
+}
+
+impl<R: super::StoredRelationCatalog + Sync + ?Sized, S: ?Sized>
+    StoredQueryBindingContext<'_, R, S>
+{
+    /// Bind retained query and mutation relation names through the shared scoped traversal under the plan's original destination allowance. Sequence and routine passes remain separate and run after the complete relation pass. Catalog callbacks retain their existing atomic interface and original canonical-name owners.
+    pub fn bind_query_relation_names_from_input<'a, 'i: 'a>(
+        &'a self,
+        plan: crate::plan::RetainedExecutablePlan,
+        context: &'a str,
+        reject_transition_relations: bool,
+        loaded_catalog: bool,
+        control: &'a ProductionControl<'a>,
+        input: &'a mut uqa_core::image_io::AsyncImageInput<'i>,
+    ) -> impl std::future::Future<
+        Output = Result<(crate::plan::RetainedExecutablePlan, bool), SQLError>,
+    >
+           + Send
+           + 'a
+           + use<'a, 'i, R, S> {
+        let names = self.relation_names();
+        async move {
+            plan.bind_relation_names_from_input(
+                &|reference, _, control| {
+                    names.canonical(
+                        reference,
+                        context,
+                        reject_transition_relations,
+                        loaded_catalog,
+                        control,
+                    )
+                },
+                control,
+                input,
+            )
+            .await
         }
     }
 }

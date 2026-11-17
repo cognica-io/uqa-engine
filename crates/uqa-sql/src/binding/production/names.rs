@@ -10,6 +10,8 @@ use crate::SQLError;
 use std::{borrow::Borrow, cmp::Ordering, collections::BTreeMap};
 use uqa_core::memory::{BudgetedMapIter, OwnedMap, Produced, ProductionControl};
 
+mod input;
+
 pub struct BindingName(Produced<String>);
 impl Borrow<str> for BindingName {
     fn borrow(&self) -> &str {

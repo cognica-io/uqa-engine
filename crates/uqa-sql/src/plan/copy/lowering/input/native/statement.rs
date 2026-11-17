@@ -24,6 +24,19 @@ use uqa_core::image_io::AsyncImageInput;
 pub struct RetainedExecutablePlan(Prefix<MutableExecutablePlan>);
 
 impl RetainedExecutablePlan {
+    pub(crate) async fn bind_relation_names_from_input(
+        self,
+        resolve: &crate::binding::view_dependencies::owned::fields::StoredRelationResolver<'_>,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<(Self, bool)> {
+        let (plan, temporary) = self
+            .0
+            .bind_relation_names_from_input(resolve, control, input)
+            .await?;
+        Ok((Self(plan), temporary))
+    }
+
     pub fn as_plan_ref(&self) -> PlanRef<'_> {
         self.0.as_plan_ref()
     }

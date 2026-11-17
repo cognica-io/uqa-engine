@@ -18,12 +18,12 @@ use std::{
 
 /// Original borrowed syntax diagnostics and typed input failures remain distinct.
 #[derive(Debug)]
-pub enum RelationReferenceInputError<'a> {
+pub enum RelationReferenceInputError<'a, E = ImageIoError> {
     Reference(RelationReferenceError<'a>),
-    Input(ImageIoError),
+    Input(E),
 }
 
-impl std::fmt::Display for RelationReferenceInputError<'_> {
+impl<E: std::fmt::Display> std::fmt::Display for RelationReferenceInputError<'_, E> {
     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Reference(error) => std::fmt::Display::fmt(error, output),
@@ -32,7 +32,7 @@ impl std::fmt::Display for RelationReferenceInputError<'_> {
     }
 }
 
-impl std::error::Error for RelationReferenceInputError<'_> {
+impl<E: std::error::Error + 'static> std::error::Error for RelationReferenceInputError<'_, E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Reference(_) => None,
@@ -48,26 +48,33 @@ impl RelationIdentity {
         original: &CancellationToken,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<RelationReference<'a>, RelationReferenceInputError<'a>> {
-        parse(value, &mut Input { original, input })
-            .await
-            .map_err(|error| match error {
-                Failure::Reference(kind) => {
-                    RelationReferenceInputError::Reference(RelationReferenceError {
-                        kind,
-                        input: value,
-                    })
-                }
-                Failure::Input(error) => RelationReferenceInputError::Input(error),
-            })
+        Self::try_borrowed_reference_from(value, &mut Input { original, input }).await
+    }
+
+    /// Reuse the borrowed reference grammar through an existing work owner. The owner supplies cancellation and suspension without changing name syntax or diagnostics.
+    pub async fn try_borrowed_reference_from<'a, W: RelationReferenceWork>(
+        value: &'a str,
+        work: &mut W,
+    ) -> Result<RelationReference<'a>, RelationReferenceInputError<'a, W::Error>> {
+        parse(value, work).await.map_err(|error| match error {
+            Failure::Reference(kind) => {
+                RelationReferenceInputError::Reference(RelationReferenceError {
+                    kind,
+                    input: value,
+                })
+            }
+            Failure::Input(error) => RelationReferenceInputError::Input(error),
+        })
     }
 }
 
-trait Work: Send {
+/// Cooperative work for the shared borrowed relation-reference parser.
+pub trait RelationReferenceWork: Send {
     type Error;
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-impl Work for () {
+impl RelationReferenceWork for () {
     type Error = std::convert::Infallible;
     async fn checkpoint(&mut self) -> Result<(), Self::Error> {
         Ok(())
@@ -79,7 +86,7 @@ struct Input<'a, 'b> {
     input: &'a mut AsyncImageInput<'b>,
 }
 
-impl Work for Input<'_, '_> {
+impl RelationReferenceWork for Input<'_, '_> {
     type Error = ImageIoError;
     async fn checkpoint(&mut self) -> Result<(), Self::Error> {
         self.original.check()?;
@@ -114,7 +121,7 @@ pub(super) fn ordinary(value: &str) -> Result<RelationReference<'_>, InvalidRefe
     }
 }
 
-async fn parse<'a, W: Work>(
+async fn parse<'a, W: RelationReferenceWork>(
     value: &'a str,
     work: &mut W,
 ) -> Result<RelationReference<'a>, Failure<W::Error>> {
@@ -140,7 +147,7 @@ async fn parse<'a, W: Work>(
     })
 }
 
-async fn component<'a, W: Work>(
+async fn component<'a, W: RelationReferenceWork>(
     remaining: &mut &'a str,
     work: &mut W,
 ) -> Result<RelationName<'a>, Failure<W::Error>> {

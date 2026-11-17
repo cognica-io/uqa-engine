@@ -95,16 +95,35 @@ async fn decoded_component(
     control: &ProductionControl<'_>,
     work: &mut impl Work,
 ) -> Result<Produced<String>, ValueRetentionError> {
-    let mut output = ProductionString::new(*control);
-    for (index, character) in name.chars().enumerate() {
-        if index % 1024 == 0 {
-            control.check()?;
-            work.checkpoint().await?;
-            control.check()?;
+    name.decode_from(control, &mut work::ReferenceWork(work))
+        .await
+}
+
+impl RelationName<'_> {
+    /// Decode one borrowed component through an existing work owner and retain its admitted buffer. Identity construction and SQL lexical binding share this decoder.
+    pub async fn decode_from<W: crate::RelationReferenceWork>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<String>, W::Error>
+    where
+        W::Error: From<ValueRetentionError>,
+    {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        let mut output = ProductionString::new(*control);
+        output.reserve(self.encoded_len())?;
+        for (index, character) in self.chars().enumerate() {
+            if index != 0 && index % 1024 == 0 {
+                control.check()?;
+                work.checkpoint().await?;
+                control.check()?;
+            }
+            output.push(character)?;
         }
-        output.push(character)?;
+        output.finish().map_err(Into::into)
     }
-    output.finish()
 }
 
 async fn render(

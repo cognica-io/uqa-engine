@@ -16,6 +16,14 @@ pub(super) trait Work: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ValueRetentionError>> + Send;
 }
 
+pub(super) struct ReferenceWork<'a, W>(pub(super) &'a mut W);
+impl<W: Work> crate::RelationReferenceWork for ReferenceWork<'_, W> {
+    type Error = ValueRetentionError;
+    async fn checkpoint(&mut self) -> Result<(), ValueRetentionError> {
+        self.0.checkpoint().await
+    }
+}
+
 impl Work for () {
     async fn checkpoint(&mut self) -> Result<(), ValueRetentionError> {
         Ok(())

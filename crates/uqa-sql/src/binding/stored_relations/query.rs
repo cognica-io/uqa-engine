@@ -25,10 +25,14 @@ pub struct StoredQueryNamespace {
     pub temporary_schema: String,
     pub transition_relations: BTreeSet<String>,
 }
-pub struct StoredQueryBindingContext<'a> {
-    pub relations: &'a dyn StoredRelationCatalog,
+pub struct StoredQueryBindingContext<
+    'a,
+    R: ?Sized = dyn StoredRelationCatalog + 'a,
+    S: ?Sized = dyn StoredQuerySequences + 'a,
+> {
+    pub relations: &'a R,
     pub lookup_mode: RelationLookupMode,
-    pub sequences: &'a dyn StoredQuerySequences,
+    pub sequences: &'a S,
     pub temporary_schema: &'a str,
     pub transition_relations: &'a BTreeSet<String>,
 }
