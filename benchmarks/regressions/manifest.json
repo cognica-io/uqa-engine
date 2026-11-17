@@ -72811,6 +72811,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_preserves_names_binding_slots_and_observation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Select routine output aliases and single/grouped table-function bindings from original node observations, including duplicate names, explicit labels and multibyte names.",
+      "invariant": "Preserve selected positions and exact names in inline and suspended work, consume only source selections, and retain parameter observations for scalar replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_retires_every_pending_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon or independently cancel every pending prefix of projection-name copying and grouped function binding selection.",
+      "invariant": "Retire all selected payloads, pending result buffers and observation maps without cleanup allocation, preserving an independent 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_rejects_unfunded_names_and_reuses_released_binding_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Exhaust the destination allowance after observing names and calls, then select aliases or transfer function bindings.",
+      "invariant": "Reject an unfunded name copy with 53200; transfer already owned calls using released observation-node space and release all private owners on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_bounds_wide_sources_and_long_names_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Select 4,096 projections, 4,096 grouped functions or a 73,728-byte UTF-8 output name on a 256 KiB stack.",
+      "invariant": "Complete at most one admitted selection or text-copy work step per single-step window, preserve nonempty output and return all destination and work reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

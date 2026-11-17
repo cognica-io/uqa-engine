@@ -8,6 +8,7 @@
 
 use super::{AnalysisIdentity, InputConstants, ParameterTypes, QuerySchemas};
 use crate::{
+    catalog::work::{inline, Work},
     plan::{
         AnalyzedSource, MutableExecutablePlan, QueryMetadataUpdate, RelationalPlan,
         SharedAnalyzedSource, SourceMetadataUpdate, SourcePlan,
@@ -126,8 +127,20 @@ impl InputConstants {
         projections: &[crate::plan::ProjectionPlan],
         control: &ProductionControl<'_>,
     ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
+        inline(self.projection_aliases_from(projections, control, &mut ()))
+    }
+
+    async fn projection_aliases_from<W: Work + Send>(
+        &self,
+        projections: &[crate::plan::ProjectionPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
         let mut aliases = ProductionVec::new(*control);
         for (index, projection) in projections.iter().enumerate() {
+            control.check()?;
+            work.checkpoint().await?;
+            control.check()?;
             if projection.alias.is_none()
                 && self
                     .11
@@ -136,7 +149,7 @@ impl InputConstants {
                 if let crate::ScalarExpr::Column(name)
                 | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
                 {
-                    let name = control.copy_text(name)?;
+                    let name = work.text(name, control).await?;
                     aliases.push_produced(
                         control.finish((index, name), control.empty_reservation())?,
                     )?;
@@ -151,29 +164,65 @@ impl InputConstants {
         source: &SourcePlan,
         control: &ProductionControl<'_>,
     ) -> Result<SourceMetadataUpdate, SQLError> {
+        inline(self.source_metadata_from(source, control, &mut ()))
+    }
+
+    async fn source_metadata_from<W: Work + Send>(
+        &mut self,
+        source: &SourcePlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<SourceMetadataUpdate, SQLError> {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
         // Commands have no QueryPlan descriptor carrier; their source schema has already served ordered analysis.
         self.8.sources.remove(&AnalysisIdentity::from(source));
         let mut selected = ProductionVec::new(*control);
-        let mut include = |index, binding: &Option<crate::ast::FunctionBinding>| {
-            if let Some(binding) = self.7.remove(&AnalysisIdentity::from(binding)) {
-                selected.push_produced(
-                    control.finish((index, binding), control.empty_reservation())?,
+        match source {
+            SourcePlan::Function { binding, .. } => {
+                self.select_source_binding(
+                    0,
+                    AnalysisIdentity::from(binding),
+                    &mut selected,
+                    control,
                 )?;
             }
-            Ok::<_, SQLError>(())
-        };
-        match source {
-            SourcePlan::Function { binding, .. } => include(0, binding)?,
             SourcePlan::FunctionGroup { functions, .. } => {
                 for (index, function) in functions.iter().enumerate() {
-                    include(index, &function.binding)?;
+                    control.check()?;
+                    work.checkpoint().await?;
+                    control.check()?;
+                    self.select_source_binding(
+                        index,
+                        AnalysisIdentity::from(&function.binding),
+                        &mut selected,
+                        control,
+                    )?;
                 }
             }
             _ => {}
         }
         Ok(selected.finish()?)
     }
+
+    fn select_source_binding(
+        &mut self,
+        index: usize,
+        identity: AnalysisIdentity<Option<crate::ast::FunctionBinding>>,
+        selected: &mut ProductionVec<'_, (usize, Produced<crate::ast::FunctionBinding>)>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        if let Some(binding) = self.7.remove(&identity) {
+            selected
+                .push_produced(control.finish((index, binding), control.empty_reservation())?)?;
+        }
+        Ok(())
+    }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl QuerySchemas {
     fn take_source_with_control(
