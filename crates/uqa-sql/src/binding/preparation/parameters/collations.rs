@@ -63,19 +63,24 @@ impl CollationInputs {
         Ok(())
     }
 
-    pub(super) fn apply_owned(
+    pub(super) async fn apply_owned_from<W: crate::plan::ScalarInputWork>(
         &mut self,
         identity: AnalysisIdentity<ScalarExpr>,
         expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
-    ) -> Result<OwnedScalarExpr, SQLError> {
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, W::Error>
+    where
+        W::Error: From<SQLError> + From<crate::schema::retention::CatalogRetentionError>,
+    {
         let Some(clause) = self.0.remove(&identity) else {
             return Ok(expression);
         };
         if scalar_clause(&expression)?.is_none() {
             return Err(SQLError::Internal(
                 "retained collation no longer matches its syntax".into(),
-            ));
+            )
+            .into());
         }
         if clause.retain {
             let binding = FunctionBinding::dispatched_with_control(
@@ -84,9 +89,11 @@ impl CollationInputs {
                 },
                 control,
             )?;
-            Ok(expression.replace_call_binding(Some(binding), control)?)
+            expression
+                .replace_call_binding_from(Some(binding), control, work)
+                .await
         } else {
-            Ok(expression.select_child(0))
+            expression.select_child_from(0, control, work).await
         }
     }
 

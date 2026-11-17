@@ -72,11 +72,31 @@ impl ResultCollation {
     }
 
     pub(crate) fn validate(self, ty: &ColumnType) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.validate_from(
+            ty,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .map_err(Into::into)
+    }
+
+    pub(crate) async fn validate_from<W: crate::plan::ScalarInputWork>(
+        self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error>
+    where
+        W::Error: From<SQLError>,
+    {
         self.derivation.validate()?;
-        crate::catalog::collations::expression::validate_literal_collation(
+        crate::catalog::collations::expression::validate_literal_collation_from(
             Some(ty),
             Some(self.oid()),
+            control,
+            work,
         )
+        .await
     }
 }
 

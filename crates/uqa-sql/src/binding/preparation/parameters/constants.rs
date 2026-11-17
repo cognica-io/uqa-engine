@@ -88,32 +88,13 @@ impl InputConstants {
                 )?;
             }
         }
-        if let Some(collation) = self.6.remove(&identity) {
-            if matches!(
-                &*expression,
-                ScalarExpr::Func {
-                    binding: Some(_),
-                    ..
-                }
-            ) {
-                expression = expression.set_call_input_collation(collation, control)?;
-            }
-        }
-        if let Some(constant) = self.0.remove(&identity) {
-            expression = constant.expression;
-        }
-        expression = self.3.apply_owned(identity, expression, control)?;
-        expression = self.4.apply_owned(identity, expression, control)?;
-        if let Some(target) = self.5.remove(&identity) {
-            expression = OwnedScalarExpr::cast(
-                expression,
-                target.catalog_name_with_control(control)?,
-                true,
-                control,
-            )?;
-        }
-        control.check()?;
-        Ok(expression)
+        crate::catalog::work::inline(self.apply_selected_inputs_from(
+            identity,
+            expression,
+            control,
+            &mut (),
+        ))
+        .map_err(Into::into)
     }
 
     #[cfg(test)]

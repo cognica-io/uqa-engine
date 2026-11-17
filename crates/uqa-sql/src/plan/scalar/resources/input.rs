@@ -31,11 +31,39 @@ pub(crate) trait Work: Send {
         ty: &ColumnType,
         control: &ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<ColumnType>, Self::Error>> + Send;
+    fn type_name(
+        &mut self,
+        ty: &ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<String>, Self::Error>> + Send {
+        async move {
+            ty.catalog_name_with_input_work(control, &mut TypeWork(self))
+                .await
+        }
+    }
     fn value(
         &mut self,
         value: &Value,
         control: &ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<Value>, Self::Error>> + Send;
+}
+
+struct TypeWork<'a, W: ?Sized>(&'a mut W);
+
+impl<W: Work + ?Sized> crate::ast::ColumnTypeInputWork for TypeWork<'_, W> {
+    type Error = W::Error;
+
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        self.0.checkpoint().await
+    }
+
+    async fn text(
+        &mut self,
+        source: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, Self::Error> {
+        self.0.text(source, control).await
+    }
 }
 
 impl Work for () {

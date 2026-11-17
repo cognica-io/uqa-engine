@@ -88,24 +88,29 @@ impl SelectedResults {
         Ok(())
     }
 
-    pub(super) fn apply_owned(
+    pub(super) async fn apply_owned_from<W: crate::plan::ScalarInputWork>(
         &mut self,
         identity: AnalysisIdentity<ScalarExpr>,
         expression: OwnedScalarExpr,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<OwnedScalarExpr, SQLError> {
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, W::Error>
+    where
+        W::Error: From<SQLError> + From<crate::schema::retention::CatalogRetentionError>,
+    {
         let Some((ty, collation)) = self.selected.remove(&identity) else {
             return Ok(expression);
         };
-        collation.validate(&ty)?;
+        collation.validate_from(&ty, control, work).await?;
         if let (ScalarExpr::TypedLiteral { .. }, Some(oid)) =
             (&*expression, collation.implicit_oid())
         {
+            ty.retire_from(control, work).await?;
             Ok(expression.set_literal_collation(oid, control)?)
         } else {
             Ok(OwnedScalarExpr::collated(
                 expression,
-                ty.into_produced(control)?,
+                ty.into_produced_from(control, work).await?,
                 collation,
                 control,
             )?)

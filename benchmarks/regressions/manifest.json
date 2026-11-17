@@ -73565,6 +73565,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_preserves_identity_modifiers_and_original_named_text",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render builtin modifiers, OID identity and quoted Unicode names with two array dimensions through one-step input.",
+      "invariant": "Explicit spellings match both ordinary and suspended production; retained bytes equal the actual destination capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_releases_every_cancelled_prefix_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render a long Unicode named type, abandon or cancel every suspended prefix and deny the destination allowance.",
+      "invariant": "Both cancellation owners preserve 57014, denial preserves 53200 and private output retires without affecting a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_bounds_deep_arrays_without_recursive_formatting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render an 8192-level array type through ordinary and one-step work on a 256 KiB stack.",
+      "invariant": "The same formatter retains the exact scalar spelling and every suffix while traversal and output consume bounded work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_input_application_preserves_order_and_every_suspended_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Apply nine unchanged, constant, COLLATE, result, cast and call-collation selections, then abandon or cancel every suspended prefix.",
+      "invariant": "Original application order, values, type identities, collation and parameter metadata and reservations agree; private owners retire without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_input_application_retires_replaced_trees_and_rejects_unadmitted_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Replace an 8192-level scalar on a 256 KiB stack, deny allocating wrappers and consume released observation storage for a smaller final wrapper.",
+      "invariant": "Replaced trees consume bounded work before releasing their leases, allocation denial preserves 53200 and retired storage becomes reusable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_result_types_share_readers_and_bound_validation_copy_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Apply 8192-level selected array types to collated expressions and typed literals with and without an independent shared reader.",
+      "invariant": "Validation, copying and last-reader retirement consume one-step work without bulk productive destruction; original readers retain their own leases.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

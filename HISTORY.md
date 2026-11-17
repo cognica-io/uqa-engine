@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share constant replacement, COLLATE selection, result metadata and implicit casts between ordinary and suspended input application. Reuse existing scalar/type constructors and retirement, preserve independent shared type readers, and bound catalog-name formatting and collation inspection for deeply nested array/domain types. Complete routine restoration remains in progress.
+
 - Share generated scalar containers, call-binding replacement and selected IN-list construction between ordinary and suspended work. Move existing child payloads and reservations, retire replaced metadata through the existing owners, and preserve iterative cleanup after late CASE or binary-constructor admission failures.
 
 - Share CTE traversal, derived-source descent, local source scalars and mutation fields across arena-aware edits and ordinary scalar transforms. Preserve child-query completion before parent occurrence copies and isolate CYCLE marker expressions in their own scalar-query scope.

@@ -70,10 +70,46 @@ impl AnalysisType {
         self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ColumnType>, SQLError> {
+        crate::catalog::work::inline(self.into_produced_from(control, &mut ())).map_err(Into::into)
+    }
+
+    pub(in crate::binding::preparation) async fn into_produced_from<
+        W: crate::plan::ScalarInputWork,
+    >(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<ColumnType>, W::Error> {
         match self {
             Self::Inline(ty) => Ok(control.finish(ty, control.empty_reservation())?),
-            Self::Shared(ty) => ty.clone_with_control(control).map_err(Into::into),
+            Self::Shared(ty) => {
+                let output = work.ty(&ty, control).await?;
+                Self::Shared(ty).retire_from(control, work).await?;
+                Ok(output)
+            }
         }
+    }
+
+    pub(in crate::binding::preparation) async fn retire_from<W: crate::plan::ScalarInputWork>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error> {
+        if let Self::Shared(ty) = self {
+            if let Some(ty) = Arc::into_inner(ty) {
+                // Tuple fields retire in order: the selected type precedes its original payload and shared-header reservation on every exit.
+                let mut owned = ty.into_parts();
+                loop {
+                    control.check()?;
+                    work.checkpoint().await?;
+                    control.check()?;
+                    if owned.0.retire_step() {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn into_ordinary(self) -> ColumnType {
