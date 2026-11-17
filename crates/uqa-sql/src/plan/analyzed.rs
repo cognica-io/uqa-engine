@@ -11,7 +11,7 @@ use crate::SQLError;
 use std::{ops::Deref, sync::Arc};
 use uqa_core::memory::{PairedRetirementNode, Produced, ProductionControl, TreeRetirement};
 
-mod retirement;
+pub(super) mod retirement;
 
 #[derive(Clone)]
 pub struct SharedAnalyzedSource(Option<Storage>);

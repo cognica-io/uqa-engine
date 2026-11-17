@@ -19,20 +19,23 @@ use uqa_core::memory::{BudgetedVec, MemoryError, Produced, ProductionControl};
 
 mod retirement;
 pub(in crate::plan) use retirement::Retirement;
+mod local;
+use local::{Local, NodeRetirement};
 
 #[cfg(test)]
 mod tests;
 
 #[derive(Debug)]
-struct Frame {
+struct Frame<L = ScalarRetirement> {
     node: Node,
     position: usize,
     retiring: bool,
+    local: std::marker::PhantomData<L>,
 }
 
-impl RetirementFrame for Frame {
+impl<L: NodeRetirement> RetirementFrame for Frame<L> {
     type Node = Node;
-    type Local = ScalarRetirement;
+    type Local = L;
     fn empty() -> Node {
         Node::Empty
     }
@@ -44,9 +47,10 @@ impl RetirementFrame for Frame {
             node,
             position: 0,
             retiring: false,
+            local: std::marker::PhantomData,
         }
     }
-    fn advance_retirement(&mut self, local: &mut ScalarRetirement) -> bool {
+    fn advance_retirement(&mut self, local: &mut L) -> bool {
         if self.retiring {
             return true;
         }
@@ -128,6 +132,35 @@ impl Context {
             .frames
             .capacity();
         Retirement::new(capacity, control)
+    }
+
+    /// Admit an independently constructed subtree at its destination depth before transferring its payload. Both constructor workspaces remain available if admission fails.
+    pub(in crate::plan) fn admit_replacement(
+        &self,
+        replacement: &Self,
+        depth: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), crate::SQLError> {
+        control.check()?;
+        let capacity = replacement
+            .workspace
+            .lock()
+            .expect("replacement retirement workspace")
+            .0
+            .frames
+            .capacity();
+        let capacity = self
+            .depth
+            .checked_add(depth)
+            .and_then(|depth| depth.checked_add(capacity))
+            .ok_or(MemoryError::SizeOverflow)?;
+        self.workspace
+            .lock()
+            .expect("destination retirement workspace")
+            .0
+            .frames
+            .reserve(capacity)?;
+        Ok(())
     }
 }
 

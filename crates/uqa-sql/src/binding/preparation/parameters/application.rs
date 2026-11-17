@@ -10,8 +10,8 @@ use super::{AnalysisIdentity, InputConstants, ParameterTypes};
 use crate::{
     catalog::work::{inline, Work},
     plan::{
-        MetadataObserver, MutableExecutablePlan, ProjectionAliasUpdates, ProjectionPlan,
-        SourceMetadataUpdate, SourcePlan,
+        MetadataObserver, MetadataTarget, MutableExecutablePlan, ProjectionAliasUpdates,
+        ProjectionPlan, SourceMetadataUpdate, SourcePlan,
     },
     routines::RoutineResolution,
     SQLError, SQLParam,

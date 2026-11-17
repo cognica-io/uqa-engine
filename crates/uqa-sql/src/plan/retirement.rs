@@ -12,6 +12,7 @@ use super::{
 
 mod commands;
 pub(in crate::plan) mod construction;
+pub(in crate::plan) mod layouts;
 mod scalars;
 mod tree;
 pub(in crate::plan) mod windows;

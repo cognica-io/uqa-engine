@@ -6,23 +6,44 @@
 
 //! A detached discarded query retains its own admitted frames while the original context remains available for parent and sibling destruction.
 
-use super::{Frame, Node, RetainedTree};
-use crate::{catalog::work::Work, plan::QueryPlan, SQLError};
-use uqa_core::memory::ProductionControl;
+use super::{Frame, Local, Node, RetainedTree};
+use crate::{
+    catalog::work::Work,
+    plan::{QueryPlan, SourcePlan},
+    SQLError,
+};
+use uqa_core::memory::{MemoryReservation, ProductionControl};
 
-pub(in crate::plan) struct Retirement(RetainedTree<Frame>);
+pub(in crate::plan) struct Retirement {
+    tree: Box<RetainedTree<Frame<Local>>>,
+    // The detached workspace retires its payload and storage before returning its fixed allocation.
+    _memory: Option<MemoryReservation>,
+}
 
 impl Retirement {
     pub(super) fn new(capacity: usize, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
-        let mut tree = RetainedTree::with_budget(control.budget());
+        let memory = control.reserve(size_of::<RetainedTree<Frame<Local>>>())?;
+        let mut tree = Box::new(RetainedTree::with_budget(control.budget()));
         tree.frames.reserve(capacity.max(1))?;
-        Ok(Self(tree))
+        control.check()?;
+        Ok(Self {
+            tree,
+            _memory: memory,
+        })
     }
 
     /// Transfer the payload before creating or polling any fallible cleanup future.
     pub(in crate::plan) fn query(&mut self, query: QueryPlan) {
-        assert!(matches!(self.0.root, Node::Empty) && self.0.frames.is_empty());
-        self.0.root = Node::Query(query);
+        self.node(Node::Query(query));
+    }
+
+    pub(in crate::plan) fn source(&mut self, source: SourcePlan) {
+        self.node(Node::Source(source));
+    }
+
+    fn node(&mut self, node: Node) {
+        assert!(matches!(self.tree.root, Node::Empty) && self.tree.frames.is_empty());
+        self.tree.root = node;
     }
 
     pub(in crate::plan) async fn retire_from<W: Work>(
@@ -34,7 +55,7 @@ impl Retirement {
             control.check()?;
             work.checkpoint().await?;
             control.check()?;
-            if self.0.advance() {
+            if self.tree.advance() {
                 return Ok(());
             }
         }

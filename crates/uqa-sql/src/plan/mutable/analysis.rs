@@ -6,7 +6,7 @@
 
 //! Ordered preparation observes original addresses and installs only typed independently owned metadata.
 
-use super::{MutableExecutablePlan, MutableQueryPlan, RewriteMemory};
+use super::{MutableExecutablePlan, RewriteMemory};
 use crate::{
     ast::FunctionBinding,
     catalog::work::Work,
@@ -17,15 +17,18 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionContr
 
 mod observation;
 pub(crate) use observation::MetadataObserver;
+mod replacement;
+pub(crate) use replacement::{QueryReplacement, SourceReplacement};
 #[cfg(test)]
 mod tests;
 mod traversal;
+pub(crate) use traversal::MetadataTarget;
 
 pub(crate) type ProjectionAliasUpdates = Produced<Vec<(usize, Produced<String>)>>;
 
 #[derive(Default)]
 pub(crate) struct QueryMetadataUpdate {
-    pub root: Option<MutableQueryPlan>,
+    pub root: Option<QueryReplacement>,
     pub layouts: Option<QueryLayoutUpdate>,
     pub grouping: Option<Produced<crate::semantics::grouping_sets::AnalyzedGroupingSets>>,
 }
@@ -54,15 +57,9 @@ impl QueryLayoutUpdate {
         work: &mut W,
     ) -> Result<(), SQLError> {
         control.check()?;
-        let previous_output = std::mem::replace(&mut query.analyzed_output, self.output);
-        let previous_source = std::mem::replace(&mut query.analyzed_source, self.source);
-        if let Some(output) = previous_output {
-            output.retire_from(control, work).await?;
-        }
-        if let Some(source) = previous_source {
-            source.retire_from(control, work).await?;
-        }
-        Ok(())
+        crate::plan::retirement::layouts::Layouts::replace(query, self.output, self.source)
+            .retire_from(control, work)
+            .await
     }
 }
 
@@ -73,35 +70,39 @@ impl QueryMetadataUpdate {
         memory: Option<&mut RewriteMemory>,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        crate::catalog::work::inline(self.install_from(query, memory, control, &mut ()))
+        crate::catalog::work::inline(self.install_from(
+            query,
+            memory,
+            replacement::Scope::default(),
+            control,
+            &mut (),
+        ))
     }
 
-    pub(super) async fn install_from<W: Work>(
+    async fn install_from<W: Work>(
         self,
         query: &mut QueryPlan,
         mut memory: Option<&mut RewriteMemory>,
+        scope: replacement::Scope<'_>,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        if let Some(root) = self.root {
-            root.assert_owner(control);
-            let MutableQueryPlan {
-                query: replacement,
-                memory: mut replacement_memory,
-            } = root;
-            query.root = replacement.root;
-            if let Some(memory) = memory.as_deref_mut() {
-                *memory.field_mut("root") = replacement_memory
-                    .as_mut()
-                    .expect("replacement query owner")
-                    .field_mut("root")
-                    .take();
+        let Self {
+            root,
+            layouts,
+            grouping,
+        } = self;
+        if let Some(root) = root {
+            if let Some(mut discarded) =
+                root.install(query, memory.as_deref_mut(), scope, control)?
+            {
+                discarded.retire_from(control, work).await?;
             }
         }
-        if let Some(layouts) = self.layouts {
+        if let Some(layouts) = layouts {
             layouts.install_from(query, control, work).await?;
         }
-        if let Some(grouping) = self.grouping {
+        if let Some(grouping) = grouping {
             let (grouping, lease) = grouping.into_parts();
             let (grouping, lease) = control.finish(grouping, lease)?.into_parts();
             query.analyzed_grouping = Some(grouping);
@@ -122,13 +123,13 @@ type ProjectionObserver<'a> =
     dyn FnMut(&[ProjectionPlan]) -> Result<ProjectionAliasUpdates, SQLError> + 'a;
 pub(super) type QueryObserver<'a> =
     dyn FnMut(&QueryPlan) -> Result<QueryMetadataUpdate, SQLError> + 'a;
-type SourceReplacement<'a> =
+type SourceObserver<'a> =
     dyn FnMut(&SourcePlan) -> Result<Option<super::MutableSourcePlan>, SQLError> + 'a;
 
 struct Walker<'a, 'c> {
     query: Option<&'a mut QueryObserver<'a>>,
     projections: Option<&'a mut ProjectionObserver<'a>>,
-    replacement: Option<&'a mut SourceReplacement<'a>>,
+    replacement: Option<&'a mut SourceObserver<'a>>,
     control: ProductionControl<'c>,
     mark_relations: bool,
 }
@@ -185,7 +186,7 @@ impl MutableExecutablePlan {
     pub fn replace_sources<'a>(
         &mut self,
         control: &ProductionControl<'_>,
-        replace: &'a mut SourceReplacement<'a>,
+        replace: &'a mut SourceObserver<'a>,
     ) -> Result<(), SQLError> {
         Walker {
             query: None,

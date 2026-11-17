@@ -87,14 +87,6 @@ impl SharedAnalyzedSource {
             },
         }
     }
-
-    pub(crate) async fn retire_from<W: crate::catalog::work::Work>(
-        mut self,
-        control: &uqa_core::memory::ProductionControl<'_>,
-        work: &mut W,
-    ) -> Result<(), crate::SQLError> {
-        self.take_retirement().retire_from(control, work).await
-    }
 }
 
 impl AnalyzedSource {

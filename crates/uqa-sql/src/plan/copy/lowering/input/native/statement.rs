@@ -16,7 +16,8 @@ use crate::{
         copy::ParameterLookup,
         retirement::construction::Context,
         scalar::{ScalarEdit, SequenceBinding},
-        MutableCommandPlan, MutableExecutablePlan, PlanRef, UnifiedPlan,
+        MetadataObserver, MetadataTarget, MutableCommandPlan, MutableExecutablePlan, PlanRef,
+        QueryReplacement, UnifiedPlan,
     },
 };
 use uqa_core::image_io::AsyncImageInput;
@@ -24,6 +25,37 @@ use uqa_core::image_io::AsyncImageInput;
 /// A completed private executable with its original mutable field leases and admitted retirement workspace. Observation borrows the native plan; dropping the owner retires its complete tree before returning those leases.
 #[derive(Debug)]
 pub struct RetainedExecutablePlan(Prefix<MutableExecutablePlan>);
+
+impl MetadataTarget for RetainedExecutablePlan {
+    fn apply_metadata_from<W: crate::catalog::work::Work + Send, O: MetadataObserver<W>>(
+        &mut self,
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        self.0.apply_metadata_from(observe, control, work)
+    }
+}
+
+impl TryFrom<RetainedExecutablePlan> for QueryReplacement {
+    type Error = SQLError;
+    fn try_from(value: RetainedExecutablePlan) -> Result<Self> {
+        if !matches!(value.as_plan_ref(), PlanRef::Query(_)) {
+            return Err(SQLError::Internal(
+                "query replacement requires a query constructor".into(),
+            ));
+        }
+        Ok(value
+            .0
+            .map(|plan| {
+                let MutableExecutablePlan::Query(query) = plan else {
+                    unreachable!("query constructor")
+                };
+                query
+            })
+            .into())
+    }
+}
 
 #[cfg(test)]
 mod tests;

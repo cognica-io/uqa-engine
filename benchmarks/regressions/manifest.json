@@ -73292,6 +73292,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_replacement_preserves_headers_and_moves_original_root_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace a native query root while retaining a CTE, bound-relation flag and shared output descriptor.",
+      "invariant": "CTE and projection buffers preserve their original addresses, descendants retain visitation order and all reservations return after final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_source_replacement_preserves_parent_and_visits_new_descendants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace a native FROM source with an independently constructed derived query and nested scalar query.",
+      "invariant": "Parent projections and the incoming query box retain their original addresses; traversal visits the replacement descendants and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_retires_every_suspended_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/interruption.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace query roots and FROM sources, then abandon every work prefix or cancel either owner.",
+      "invariant": "Every interrupted prefix returns both allowances while the independent sibling lease survives; completed output preserves selected columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_denial_and_missing_constructor_leave_destination_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/interruption.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Deny root and source replacement admission or supply an update without its native constructor owner.",
+      "invariant": "Both failures preserve the destination syntax and return candidate reservations; terminal cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_root_replacement_retires_wide_syntax_and_original_layouts_in_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Discard 2048 projections and replacement-header metadata containing 64 columns with 32 nested type levels.",
+      "invariant": "Individual work windows bound released allocations; original descriptor owners and constructor records retire before all reservations return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_native_replacement_admits_new_depth_before_small_stack_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Insert 512 query levels beneath 128 existing levels and retire on a 256 KiB thread stack.",
+      "invariant": "The existing constructor owner admits the combined depth before publication and complete cleanup allocates no new traversal storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_depth_does_not_accumulate_across_sibling_queries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace the last scalar query among 16 or 256 siblings with a 32-level native query.",
+      "invariant": "Replacement reservation changes are identical across widths; collection continuations do not increase structural depth.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

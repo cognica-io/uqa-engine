@@ -17,6 +17,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod replacement;
+
 struct Labels(usize);
 impl<W: Work + Send> MetadataObserver<W> for Labels {
     async fn projections(

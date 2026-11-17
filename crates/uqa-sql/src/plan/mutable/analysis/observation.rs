@@ -9,7 +9,7 @@
 use super::{ProjectionAliasUpdates, QueryMetadataUpdate, SourceMetadataUpdate, Walker};
 use crate::{
     catalog::work::Work,
-    plan::{MutableSourcePlan, ProjectionPlan, QueryPlan, SourcePlan},
+    plan::{ProjectionPlan, QueryPlan, SourcePlan, SourceReplacement},
     SQLError,
 };
 use std::future::{ready, Future};
@@ -35,7 +35,7 @@ pub(crate) trait MetadataObserver<W: Work> {
         _: &SourcePlan,
         _: &ProductionControl<'_>,
         _: &mut W,
-    ) -> impl Future<Output = Result<Option<MutableSourcePlan>, SQLError>> + Send {
+    ) -> impl Future<Output = Result<Option<SourceReplacement>, SQLError>> + Send {
         ready(Ok(None))
     }
     fn source(
@@ -81,9 +81,9 @@ impl<W: Work> MetadataObserver<W> for Walker<'_, '_> {
         source: &SourcePlan,
         _: &ProductionControl<'_>,
         _: &mut W,
-    ) -> impl Future<Output = Result<Option<MutableSourcePlan>, SQLError>> + Send {
+    ) -> impl Future<Output = Result<Option<SourceReplacement>, SQLError>> + Send {
         ready(match &mut self.replacement {
-            Some(replace) => replace(source),
+            Some(replace) => replace(source).map(|value| value.map(Into::into)),
             None => Ok(None),
         })
     }

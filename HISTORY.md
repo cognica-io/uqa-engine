@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Transfer query and source replacements through their original constructor owners. Preserve stationary query headers and incoming buffers, admit combined structural depth before installation, and retire discarded plans, descriptors and field records through the existing work owners.
+
 - Retire row-schema fields and nested record, collation, relation and lateral metadata through the existing type, collection and tree owners. Transfer original buffers and reservations without copying lookup structures, and use the same cleanup for ordinary destruction, query-layout replacement and discarded source observations. Preserve shared readers and release admitted native metadata across work boundaries without allocating cleanup storage. Complete routine analysis, descriptor-input qualification and public backup restoration remain in progress.
 
 - Share routine parameter observation and projection-label preservation between ordinary and owned binding. Complete parameter replacement through the existing window normalizer so each window call retains its canonical definition's bound parameters. Captured input observations use opaque original-node identities, allowing their admitted values and metadata to transfer between tasks without moving the analyzed plan or exposing pointer access. Fixed analysis state also transfers without unused callback references, while ordinary input providers retain their existing threading contract. Scheduled SQL construction preserves each task's source/stored analysis mode across suspension and thread changes, restoring the invoking thread after every poll.

@@ -41,8 +41,8 @@ pub use mutable::{
     ScalarQueryArena, SourceChildSlot, SourceScalarSlot,
 };
 pub(crate) use mutable::{
-    MetadataObserver, ProjectionAliasUpdates, QueryLayoutUpdate, QueryMetadataUpdate,
-    SourceMetadataUpdate,
+    MetadataObserver, MetadataTarget, ProjectionAliasUpdates, QueryLayoutUpdate,
+    QueryMetadataUpdate, QueryReplacement, SourceMetadataUpdate, SourceReplacement,
 };
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;

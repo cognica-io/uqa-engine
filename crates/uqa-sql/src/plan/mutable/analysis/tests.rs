@@ -265,7 +265,7 @@ fn metadata_traversal_visits_replacements_and_keeps_table_query_selection() {
         .apply_query_metadata(&control, &mut |_| {
             calls.set(calls.get() + 1);
             Ok(QueryMetadataUpdate {
-                root: replacement.take(),
+                root: replacement.take().map(Into::into),
                 ..Default::default()
             })
         })

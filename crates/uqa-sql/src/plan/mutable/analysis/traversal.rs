@@ -14,6 +14,7 @@ use crate::{
     catalog::work::{inline, Work},
     construction::Stack,
     plan::{
+        retirement::construction::{Context, Prefix},
         CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, ProjectionPlan, RelationalPlan,
         UnifiedPlan,
     },
@@ -96,10 +97,36 @@ struct Task<'a> {
     cte_command: bool,
 }
 
-type Tasks<'a> = Stack<Task<'a>, 4>;
+struct Tasks<'a> {
+    pending: Stack<(Task<'a>, usize), 4>,
+    depth: usize,
+}
+impl<'a> Tasks<'a> {
+    fn new(control: ProductionControl<'_>) -> Self {
+        Self {
+            pending: Stack::new(control),
+            depth: 0,
+        }
+    }
+    fn pop(&mut self) -> Option<Task<'a>> {
+        let (task, depth) = self.pending.pop()?;
+        self.depth = depth;
+        Some(task)
+    }
+}
 
 fn push<'a>(tasks: &mut Tasks<'a>, node: Node<'a>, cte_command: bool) -> Result<()> {
-    Ok(tasks.push(Task { node, cte_command })?)
+    let depth = tasks
+        .depth
+        .checked_add(1)
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    Ok(tasks.pending.push((Task { node, cte_command }, depth))?)
+}
+
+fn resume<'a>(tasks: &mut Tasks<'a>, node: Node<'a>, cte_command: bool) -> Result<()> {
+    Ok(tasks
+        .pending
+        .push((Task { node, cte_command }, tasks.depth))?)
 }
 
 impl Walker<'_, '_> {
@@ -112,6 +139,7 @@ impl Walker<'_, '_> {
         let control = self.control;
         inline(walk(
             Node::Executable(plan, memory),
+            None,
             self,
             &control,
             &mut (),
@@ -119,14 +147,18 @@ impl Walker<'_, '_> {
     }
 }
 
+pub(crate) trait MetadataTarget {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
+        &mut self,
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>>;
+}
+
 impl MutableExecutablePlan {
-    pub(crate) fn apply_metadata_from<'a, 'c, W: Work + Send, O: MetadataObserver<W>>(
-        &'a mut self,
-        observe: &'a mut O,
-        control: &'a ProductionControl<'c>,
-        work: &'a mut W,
-    ) -> impl std::future::Future<Output = Result<()>> + use<'a, 'c, W, O> {
-        let root = match self {
+    fn metadata_root(&mut self, control: &ProductionControl<'_>) -> Node<'_> {
+        match self {
             Self::Query(query) => {
                 query.assert_owner(control);
                 Node::Query(&mut query.query, query.memory.as_mut())
@@ -135,27 +167,44 @@ impl MutableExecutablePlan {
                 command.assert_owner(control);
                 Node::Command(&mut command.command, command.memory.as_mut())
             }
-        };
-        walk(root, observe, control, work)
+        }
     }
 }
 
-async fn install_query<'a, W: Work + Send, O: MetadataObserver<W>>(
+impl MetadataTarget for MutableExecutablePlan {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
+        &mut self,
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        walk(self.metadata_root(control), None, observe, control, work)
+    }
+}
+
+impl MetadataTarget for Prefix<MutableExecutablePlan> {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
+        &mut self,
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        let context = self.context().clone();
+        walk(
+            self.metadata_root(control),
+            Some(context),
+            observe,
+            control,
+            work,
+        )
+    }
+}
+
+fn push_query<'a>(
     tasks: &mut Tasks<'a>,
-    (query, mut memory): (&'a mut QueryPlan, Memory<'a>),
+    (query, memory): (&'a mut QueryPlan, Memory<'a>),
     cte_command: bool,
-    observe: &mut O,
-    control: &ProductionControl<'_>,
-    work: &mut W,
 ) -> Result<()> {
-    if observe.mark_relations() {
-        query.relations_bound = true;
-    }
-    if let Some(update) = observe.query(query, control, work).await? {
-        update
-            .install_from(query, memory.as_deref_mut(), control, work)
-            .await?;
-    }
     let [ctes, root] = fields(memory, ["ctes", "root"]);
     push(
         tasks,
@@ -172,6 +221,7 @@ async fn install_query<'a, W: Work + Send, O: MetadataObserver<W>>(
 
 async fn walk<W: Work + Send, O: MetadataObserver<W>>(
     root: Node<'_>,
+    context: Option<Context>,
     observe: &mut O,
     control: &ProductionControl<'_>,
     work: &mut W,
@@ -192,25 +242,40 @@ async fn walk<W: Work + Send, O: MetadataObserver<W>>(
                 };
                 push(&mut tasks, child, cte_command)?;
             }
-            Node::Query(query, memory) => {
-                install_query(
-                    &mut tasks,
-                    (query, memory),
-                    cte_command,
-                    observe,
-                    control,
-                    work,
-                )
-                .await?;
+            Node::Query(query, mut memory) => {
+                if observe.mark_relations() {
+                    query.relations_bound = true;
+                }
+                if let Some(update) = observe.query(query, control, work).await? {
+                    update
+                        .install_from(
+                            query,
+                            memory.as_deref_mut(),
+                            super::replacement::Scope {
+                                context: context.as_ref(),
+                                depth: tasks.depth,
+                            },
+                            control,
+                            work,
+                        )
+                        .await?;
+                }
+                push_query(&mut tasks, (query, memory), cte_command)?;
             }
             Node::Root(root, memory) => push_root(&mut tasks, root, memory, cte_command)?,
             Node::Source(source, mut memory) => {
                 if let Some(replacement) = observe.source_replacement(source, control, work).await?
                 {
-                    let (value, owner) = replacement.into_rewrite_parts(control)?;
-                    *source = value;
-                    if let Some(memory) = memory.as_deref_mut() {
-                        *memory = owner.expect("replacement source owner");
+                    if let Some(mut discarded) = replacement.install(
+                        source,
+                        memory.as_deref_mut(),
+                        super::replacement::Scope {
+                            context: context.as_ref(),
+                            depth: tasks.depth,
+                        },
+                        control,
+                    )? {
+                        discarded.retire_from(control, work).await?;
                     }
                 }
                 if let Some(updates) = observe.source(source, control, work).await? {
@@ -240,19 +305,10 @@ async fn walk<W: Work + Send, O: MetadataObserver<W>>(
                 }
             }
             Node::Ctes(items) => push_cte(&mut tasks, items, cte_command)?,
-            Node::Queries(mut items) => {
-                if let Some((query, memory)) = items.next() {
-                    push(&mut tasks, Node::Queries(items), cte_command)?;
-                    push(
-                        &mut tasks,
-                        Node::Query(query, field(memory, "query")),
-                        cte_command,
-                    )?;
-                }
-            }
+            Node::Queries(items) => push_queries(&mut tasks, items, cte_command)?,
             Node::Expressions(mut items) => {
                 if let Some((expression, memory)) = items.next() {
-                    push(&mut tasks, Node::Expressions(items), cte_command)?;
+                    resume(&mut tasks, Node::Expressions(items), cte_command)?;
                     push(
                         &mut tasks,
                         Node::Queries(Elements::new(
@@ -268,13 +324,29 @@ async fn walk<W: Work + Send, O: MetadataObserver<W>>(
     control.check().map_err(Into::into)
 }
 
+fn push_queries<'a>(
+    tasks: &mut Tasks<'a>,
+    mut items: Elements<'a, QueryPlan>,
+    cte_command: bool,
+) -> Result<()> {
+    if let Some((query, memory)) = items.next() {
+        resume(tasks, Node::Queries(items), cte_command)?;
+        push(
+            tasks,
+            Node::Query(query, field(memory, "query")),
+            cte_command,
+        )?;
+    }
+    Ok(())
+}
+
 fn push_cte<'a>(
     tasks: &mut Tasks<'a>,
     mut items: Elements<'a, CtePlan>,
     cte_command: bool,
 ) -> Result<()> {
     if let Some((cte, memory)) = items.next() {
-        push(tasks, Node::Ctes(items), cte_command)?;
+        resume(tasks, Node::Ctes(items), cte_command)?;
         let memory = field(memory, "body");
         let (body, nested_command) = match &mut cte.body {
             CtePlanBody::Query(query) => (Node::Query(query, field(memory, "query")), cte_command),
