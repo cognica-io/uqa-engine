@@ -73058,6 +73058,110 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_slots_transfer_original_entries_without_lookup_copy_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Consume empty and colliding indexes with 1, 17 and 64 non-Clone keys while their allowance is exhausted.",
+      "invariant": "Every step exposes one original bucket; key/value pointers and independent reservations survive without hashing, equality, copying or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "transferred_key_and_value_keep_independent_allowances_after_cursor_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Keep one transferred key/value pair after retiring its original index.",
+      "invariant": "The bucket allowance and other entries retire while each selected payload keeps its exact original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "draining_detaches_the_layout_and_leaves_a_valid_empty_index",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Detach an index buffer while retaining both the cursor and its source.",
+      "invariant": "The source has no entries or buckets; the cursor independently retains the original storage and allowance without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "abandoning_each_bucket_prefix_releases_only_the_cursor_owned_storage",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Abandon every occupied/empty bucket prefix of a colliding index.",
+      "invariant": "Every cursor prefix retires without allocation and preserves the independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_retirement_preserves_original_entries_and_buffer_allowances",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Consume admitted hashed and sorted schema indexes with exhausted destination capacity.",
+      "invariant": "Every original pointer and payload reservation survives; sorted order and exact slot counts hold without copying or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_last_owner_retires_each_partial_prefix_without_affecting_shared_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Retain an independent schema lookup reader and abandon every private slot prefix.",
+      "invariant": "Readers keep the original lookup generation; final or partial cleanup releases only its own allowance without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_entries_keep_their_original_owners_after_detached_storage_retires",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Keep a produced key/value pair after the hashed or sorted schema-index storage retires.",
+      "invariant": "Each returned payload independently retains its original allowance until its own owner is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concurrent_schema_index_retirement_selects_exactly_one_last_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Release four shared hashed or sorted index owners concurrently through the consuming interface.",
+      "invariant": "Exactly one thread acquires the original entries; every key/value pointer survives and all allowance retires after completion.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -28,7 +28,7 @@ mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
-pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter};
+pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter, BudgetedHashIndexSlots};
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
