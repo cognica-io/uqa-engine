@@ -16,7 +16,7 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionContr
 
 mod traversal;
 
-type ProjectionAliasUpdates = Produced<Vec<(usize, Produced<String>)>>;
+pub(crate) type ProjectionAliasUpdates = Produced<Vec<(usize, Produced<String>)>>;
 
 #[derive(Default)]
 pub(crate) struct QueryMetadataUpdate {
@@ -87,6 +87,25 @@ struct Walker<'a, 'c> {
     control: ProductionControl<'c>,
     mark_relations: bool,
     cte_command: bool,
+}
+
+impl crate::plan::UnifiedPlan {
+    /// Ordinary input replacement shares projection selection and installation with independently owned plans.
+    pub(crate) fn apply_projection_aliases<'a>(
+        &mut self,
+        observe: &'a mut ProjectionObserver<'a>,
+    ) -> Result<(), SQLError> {
+        Walker {
+            query: None,
+            projections: Some(observe),
+            source: None,
+            replacement: None,
+            control: ProductionControl::uncontrolled(),
+            mark_relations: false,
+            cte_command: false,
+        }
+        .executable(self, None)
+    }
 }
 
 impl MutableExecutablePlan {

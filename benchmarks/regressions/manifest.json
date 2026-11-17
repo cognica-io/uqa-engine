@@ -72639,6 +72639,35 @@
         "case_3_sqlite_kv",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_routine_references_preserve_stored_query_scopes_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine parameter binding",
+      "workload": "Compare ordinary and owned parameter binding with the existing scoped walk across query sources, shadowing, CTEs, grouping, windows, set operations and failed lookups.",
+      "invariant": "Share parameter observation and alias publication, retain complete bound windows and preserve original plans and diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "routine_window_parameters_preserve_results_and_persistent_bodies",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/function_sqlbody.rs",
+      "capability": "Routine parameter binding",
+      "workload": "Execute SQL-standard and source routine windows with successive partition and frame parameters on all four providers and reopen each persistent catalog.",
+      "invariant": "Match PostgreSQL 18.4 rows, retain output labels and reuse declarations without stale window parameter bindings.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
     }
   ]
 }

@@ -22,6 +22,7 @@ mod membership;
 mod ownership;
 mod parameters;
 mod production;
+pub(in crate::binding) use production::bind_routine_parameter_references;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{

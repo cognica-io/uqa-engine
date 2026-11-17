@@ -91,24 +91,11 @@ impl InputConstants {
                 ..Default::default()
             })
         })?;
-        plan.apply_projection_aliases(control, &mut |projections| {
-            let mut aliases = ProductionVec::new(*control);
-            for (index, projection) in projections.iter().enumerate() {
-                if projection.alias.is_none()
-                    && self.11.contains_key(&NonNull::from(&projection.expr))
-                {
-                    if let crate::ScalarExpr::Column(name)
-                    | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
-                    {
-                        let name = control.copy_text(name)?;
-                        aliases.push_produced(
-                            control.finish((index, name), control.empty_reservation())?,
-                        )?;
-                    }
-                }
-            }
-            Ok(aliases.finish()?)
-        })?;
+        if !self.11.is_empty() {
+            plan.apply_projection_aliases(control, &mut |projections| {
+                self.projection_aliases(projections, control)
+            })?;
+        }
         plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
         let mut groupings = std::mem::take(&mut self.8.groupings);
         plan.transform_scalar_arenas_with_metadata(
@@ -129,6 +116,28 @@ impl InputConstants {
         }
         control.check()?;
         Ok(())
+    }
+
+    pub(super) fn projection_aliases(
+        &self,
+        projections: &[crate::plan::ProjectionPlan],
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
+        let mut aliases = ProductionVec::new(*control);
+        for (index, projection) in projections.iter().enumerate() {
+            if projection.alias.is_none() && self.11.contains_key(&NonNull::from(&projection.expr))
+            {
+                if let crate::ScalarExpr::Column(name)
+                | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
+                {
+                    let name = control.copy_text(name)?;
+                    aliases.push_produced(
+                        control.finish((index, name), control.empty_reservation())?,
+                    )?;
+                }
+            }
+        }
+        Ok(aliases.finish()?)
     }
 
     fn source_metadata(

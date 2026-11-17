@@ -28,7 +28,7 @@ impl Walker<'_, '_> {
         }
     }
 
-    fn executable(
+    pub(super) fn executable(
         &mut self,
         plan: &mut UnifiedPlan,
         memory: Option<&mut RewriteMemory>,

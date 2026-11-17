@@ -166,6 +166,11 @@ impl InputConstants {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         plan.visit_queries_mut(&mut |query| self.apply_query(query));
+        if !self.11.is_empty() {
+            plan.apply_projection_aliases(&mut |projections| {
+                self.projection_aliases(projections, &ProductionControl::uncontrolled())
+            })?;
+        }
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
         // Consume all selected inputs at their original address before a parent transfers its children.

@@ -40,7 +40,7 @@ pub use mutable::{
     OwnedProjectionIter, OwnedValueRow, QueryChildSlot, QueryScalarSlot, ScalarArenaTransform,
     ScalarQueryArena, SourceChildSlot, SourceScalarSlot,
 };
-pub(crate) use mutable::{QueryMetadataUpdate, SourceMetadataUpdate};
+pub(crate) use mutable::{ProjectionAliasUpdates, QueryMetadataUpdate, SourceMetadataUpdate};
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod owned;
