@@ -36,7 +36,7 @@ pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&m
     regclass_literal_mut(args.first_mut()?)
 }
 
-fn is_sequence_function(name: &str) -> bool {
+pub(crate) fn is_sequence_function(name: &str) -> bool {
     let local = match name.split_once('.') {
         Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
         None => name,
@@ -54,31 +54,27 @@ pub fn sequence_function_reference(expression: &ScalarExpr) -> Option<&str> {
     if !is_sequence_function(name) {
         return None;
     }
-    fn regclass_literal(expression: &ScalarExpr) -> Option<&str> {
+    let mut expression = args.first()?;
+    loop {
         match expression {
-            ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
-            ScalarExpr::Cast { expr, ty, .. }
-                if crate::ColumnType::from_sql_name(ty)
-                    .is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass)) =>
-            {
-                regclass_literal(expr)
-            }
-            _ => None,
+            ScalarExpr::Literal(Value::Str(reference)) => return Some(reference),
+            ScalarExpr::Cast { expr, ty, .. } if is_regclass_cast(ty) => expression = expr,
+            _ => return None,
         }
     }
-    regclass_literal(args.first()?)
 }
 
-pub fn regclass_literal_mut(expression: &mut ScalarExpr) -> Option<&mut String> {
-    match expression {
-        ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
-        ScalarExpr::Cast { expr, ty, .. }
-            if crate::ColumnType::from_sql_name(ty)
-                .is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass)) =>
-        {
-            regclass_literal_mut(expr)
+pub(crate) fn is_regclass_cast(ty: &str) -> bool {
+    crate::ColumnType::from_sql_name(ty).is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass))
+}
+
+pub fn regclass_literal_mut(mut expression: &mut ScalarExpr) -> Option<&mut String> {
+    loop {
+        match expression {
+            ScalarExpr::Literal(Value::Str(reference)) => return Some(reference),
+            ScalarExpr::Cast { expr, ty, .. } if is_regclass_cast(ty) => expression = expr,
+            _ => return None,
         }
-        _ => None,
     }
 }
 

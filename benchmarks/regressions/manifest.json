@@ -22197,7 +22197,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -72370,6 +72370,84 @@
       "capability": "Relation-name ownership",
       "workload": "Decode empty, Unicode and wide borrowed components with an independently cancelled work token, then decode an escaped quoted component.",
       "invariant": "Observe work cancellation before any buffer allocation and retain exactly the successful decoded buffer allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_preserves_scalar_fields_order_and_catalog_buffers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Bind nested calls, regclass casts, ordering, FILTER and window fields through inline and suspended scalar editing.",
+      "invariant": "Match established raw scalar binding for complete syntax and callback order, and transfer exact admitted catalog buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_retires_each_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Abandon and independently cancel every suspended sequence-binding boundary with an unrelated live reservation.",
+      "invariant": "Retire private scalar, traversal and work owners without allocation or loss of the unrelated reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_preserves_first_failure_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Fail the second catalog lookup and sweep remaining destination allowances after constructing the private scalar.",
+      "invariant": "Preserve the first SQLSTATE, skip later callbacks, reject unadmitted names and release all private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_bounds_wide_work_and_handles_deep_casts_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Bind 2,048 calls and 8,192 nested regclass casts one work step at a time on a 256 KiB stack.",
+      "invariant": "Bound productive allocations per window, preserve all expected lookups and retire completed owners without allocation or recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_scalar_edits_preserve_original_analysis_identities_and_replacement_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/traversal.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Compare original scalar-node identities and window field order with the established raw traversal, and replace a leaf with a new subtree.",
+      "invariant": "Preserve post-order identity selection and pre-order traversal of newly inserted children with complete constructor ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_scalar_edits_keep_deep_traversal_and_failure_cleanup_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/traversal.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Transform and replace 8,192 nested scalar nodes, with successful and failing callbacks on a 256 KiB stack.",
+      "invariant": "Share admitted traversal for inline editing, stop at the first callback error and release all private storage while preserving a sibling reservation.",
       "case_names": [
         ""
       ]

@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn deep(control: &ProductionControl<'_>) -> OwnedScalarExpr {
+pub(super) fn deep(control: &ProductionControl<'_>) -> OwnedScalarExpr {
     let mut value = OwnedScalarExpr::literal(
         control.copy_value(&Value::Str("leaf".into())).unwrap(),
         control,

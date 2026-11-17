@@ -32,6 +32,8 @@ mod query_ids;
 mod references;
 mod replacement;
 mod selection;
+mod sequences;
+mod traversal;
 pub(in crate::plan) mod windows;
 pub use iteration::OwnedScalarChildren;
 pub use replacement::ScalarNodeTransform;

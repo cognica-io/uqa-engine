@@ -6,7 +6,7 @@
 
 //! Address-stable scalar edits keep read-only selection separate from paired payload/owner replacement.
 
-use super::{children, OwnedScalarExpr, ScalarExpr, ScalarMemory};
+use super::{traversal::Edit, OwnedScalarExpr, ScalarExpr, ScalarMemory};
 use crate::SQLError;
 use std::ptr::NonNull;
 use uqa_core::memory::ProductionControl;
@@ -51,42 +51,11 @@ impl OwnedScalarExpr {
 
     pub(crate) fn transform_nodes_in_place(
         expression: &mut ScalarExpr,
-        mut memory: Option<&mut ScalarMemory>,
+        memory: Option<&mut ScalarMemory>,
         control: &ProductionControl<'_>,
         transform: &mut ScalarNodeTransform<'_>,
     ) -> Result<(), SQLError> {
-        control.check()?;
-        let count = children::count(expression);
-        for ordinal in 0..count {
-            let index = visit_index(expression, ordinal, count);
-            let child = children::get_mut(expression, index).expect("scalar child");
-            let owner = memory
-                .as_mut()
-                .map(|memory| memory.children[index].as_mut().expect("scalar child owner"));
-            Self::transform_nodes_in_place(child, owner, control, transform)?;
-        }
-        let identity = NonNull::from(&*expression);
-        let owner = memory.as_mut().map(|owner| {
-            let direct = control.empty_reservation().expect("controlled scalar slot");
-            let empty = ScalarMemory {
-                children: Vec::new(),
-                direct,
-            };
-            std::mem::replace(*owner, empty)
-        });
-        let input = Self::from_rewrite_parts(
-            std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null)),
-            owner,
-        );
-        let output = transform(identity, input)?;
-        output.assert_owner(control);
-        control.check()?;
-        let (output, owner) = output.into_rewrite_parts();
-        *expression = output;
-        if let Some(memory) = memory {
-            *memory = owner.expect("controlled scalar transformation");
-        }
-        Ok(())
+        edit_in_place(expression, memory, control, &mut Transform(transform))
     }
 
     /// Replace selected nodes in pre-order. The observer receives no mutable syntax; every returned node carries its own complete constructor owner.
@@ -107,30 +76,75 @@ impl OwnedScalarExpr {
 
     pub(crate) fn replace_nodes_in_place(
         expression: &mut ScalarExpr,
-        mut memory: Option<&mut ScalarMemory>,
+        memory: Option<&mut ScalarMemory>,
         control: &ProductionControl<'_>,
         replacement: &mut Replacement<'_>,
     ) -> Result<(), SQLError> {
-        control.check()?;
-        if let Some(output) = replacement(expression)? {
-            output.assert_owner(control);
-            let (output, owner) = output.into_rewrite_parts();
-            *expression = output;
-            if let Some(memory) = &mut memory {
-                **memory = owner.expect("replacement has its own scalar constructor");
-            }
-        }
-        let count = children::count(expression);
-        for ordinal in 0..count {
-            let index = visit_index(expression, ordinal, count);
-            let child = children::get_mut(expression, index).expect("scalar child");
-            let owner = memory
-                .as_mut()
-                .map(|memory| memory.children[index].as_mut().expect("scalar child owner"));
-            Self::replace_nodes_in_place(child, owner, control, replacement)?;
-        }
-        control.check()?;
-        Ok(())
+        edit_in_place(expression, memory, control, &mut Replace(replacement))
+    }
+}
+
+fn edit_in_place<E: Edit<()>>(
+    expression: &mut ScalarExpr,
+    mut memory: Option<&mut ScalarMemory>,
+    control: &ProductionControl<'_>,
+    edit: &mut E,
+) -> Result<(), SQLError> {
+    control.check()?;
+    let identity = E::identity(expression);
+    let owner = memory.as_mut().map(|owner| {
+        std::mem::replace(
+            *owner,
+            ScalarMemory {
+                children: Vec::new(),
+                direct: control.empty_reservation().expect("controlled scalar slot"),
+            },
+        )
+    });
+    let input = OwnedScalarExpr::from_rewrite_parts(
+        std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null)),
+        owner,
+    );
+    let output = crate::catalog::work::inline(input.edit_from(identity, control, &mut (), edit))?;
+    let (output, owner) = output.into_rewrite_parts();
+    *expression = output;
+    if let Some(memory) = memory {
+        *memory = owner.expect("controlled scalar edit");
+    }
+    Ok(())
+}
+
+struct Transform<'a, 'b>(&'a mut ScalarNodeTransform<'b>);
+impl Edit<()> for Transform<'_, '_> {
+    type Identity = NonNull<ScalarExpr>;
+    const BEFORE_CHILDREN: bool = false;
+    fn identity(expression: &ScalarExpr) -> Self::Identity {
+        NonNull::from(expression)
+    }
+    fn apply(
+        &mut self,
+        identity: Self::Identity,
+        expression: OwnedScalarExpr,
+        _: &ProductionControl<'_>,
+        (): &mut (),
+    ) -> impl std::future::Future<Output = Result<OwnedScalarExpr, SQLError>> + Send {
+        std::future::ready((self.0)(identity, expression))
+    }
+}
+
+struct Replace<'a, 'b>(&'a mut Replacement<'b>);
+impl Edit<()> for Replace<'_, '_> {
+    type Identity = ();
+    const BEFORE_CHILDREN: bool = true;
+    fn identity(_: &ScalarExpr) {}
+    fn apply(
+        &mut self,
+        (): (),
+        expression: OwnedScalarExpr,
+        _: &ProductionControl<'_>,
+        (): &mut (),
+    ) -> impl std::future::Future<Output = Result<OwnedScalarExpr, SQLError>> + Send {
+        std::future::ready((self.0)(&expression).map(|value| value.unwrap_or(expression)))
     }
 }
 

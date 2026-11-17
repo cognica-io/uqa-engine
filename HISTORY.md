@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Share admitted scalar traversal across window normalization, pre-order replacement, post-order analysis edits and retained sequence-name binding. Preserve original analysis identities, scalar field order and catalog name buffers; deep edits and failures retire without recursive stack growth. Complete statement sequence/routine binding and public backup restoration remain in progress.
+
 - Retire directly owned query, source, CTE and mutation metadata through the existing field, vector, type and function-binding cleanup states. Wide name/signature lists and deep column types release across work boundaries without cleanup allocations, preserving completed prefixes and independent reservations through cancellation and abandonment.
 
 - Retain shared native literals through their existing value owner, including deep reads, rejected shared-header admission and later capture metadata failures. Transfer final shared value/type ownership into the existing stepped retirement states without copying or invalidating other readers. Keep constant-storage inputs owned through cancellation and memory failure while preserving the published resident or spilled prefix.
