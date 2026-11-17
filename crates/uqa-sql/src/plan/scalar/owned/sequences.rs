@@ -94,6 +94,19 @@ impl OwnedScalarExpr {
         crate::catalog::work::inline(self.edit_from((), control, &mut (), &mut Bind(resolve)))
     }
 
+    pub(in crate::plan) async fn bind_sequence_references_from<W: Work, F>(
+        self,
+        resolve: &mut F,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, SQLError>
+    where
+        W::Error: Into<SQLError>,
+        F: FnMut(&str, &ProductionControl<'_>) -> Result<Produced<String>, SQLError> + Send,
+    {
+        self.edit_from((), control, work, &mut Bind(resolve)).await
+    }
+
     /// Resume the same scalar binding under the original destination allowance. Query traversal must finish relation binding before invoking this sequence pass. Catalog resolution and SQL type-name interpretation retain their existing atomic interfaces.
     pub async fn bind_sequence_references_from_input<F>(
         self,
@@ -104,7 +117,8 @@ impl OwnedScalarExpr {
     where
         F: FnMut(&str, &ProductionControl<'_>) -> Result<Produced<String>, SQLError> + Send,
     {
-        self.edit_from((), control, input, &mut Bind(resolve)).await
+        self.bind_sequence_references_from(resolve, control, input)
+            .await
     }
 }
 

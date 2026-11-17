@@ -18,7 +18,7 @@ use uqa_core::memory::ProductionControl;
 
 pub(super) mod roots;
 pub(super) mod transformation;
-pub(super) use transformation::{transform_ctes, transform_query, transform_source};
+pub(super) use transformation::transform_query;
 
 pub(in crate::plan::mutable) fn transform_local_source(
     source: &mut SourcePlan,

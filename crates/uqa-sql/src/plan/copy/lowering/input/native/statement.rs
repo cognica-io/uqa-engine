@@ -37,6 +37,22 @@ impl RetainedExecutablePlan {
         Ok((Self(plan), temporary))
     }
 
+    /// Bind sequence references in a freshly lowered statement after its complete relation pass. The retained constructor owns every nested query and mutation; catalog lookup uses the supplied admitted-name producer.
+    pub async fn bind_sequence_references_from_input(
+        self,
+        resolve: &(dyn Fn(&str, &ProductionControl<'_>) -> Result<uqa_core::memory::Produced<String>>
+              + Send
+              + Sync),
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self> {
+        Ok(Self(
+            self.0
+                .bind_sequence_names_from_input(resolve, control, input)
+                .await?,
+        ))
+    }
+
     pub fn as_plan_ref(&self) -> PlanRef<'_> {
         self.0.as_plan_ref()
     }

@@ -7,11 +7,27 @@
 //! Complete query transformation follows the existing CTE, source, scalar and child-query order without moving selected syntax before its callback.
 
 use super::{
-    query_scalars, scalar_memory, source_scalars, MutableQueryPlan, OwnedScalarExpr, QueryPlan,
-    RelationalPlan, RewriteMemory, SQLError, ScalarMemory, SourceChildSlot, SourcePlan,
+    MutableQueryPlan, QueryPlan, RelationalPlan, RewriteMemory, SQLError, SourceChildSlot,
+    SourcePlan,
 };
 use crate::plan::{CtePlan, CtePlanBody, ScalarNodeTransform};
+use input::{checkpoint, Immediate, Input};
 use uqa_core::memory::ProductionControl;
+pub(in crate::plan::mutable) mod input;
+
+pub(in crate::plan::mutable) fn transform_query(
+    query: &mut QueryPlan,
+    memory: Option<&mut RewriteMemory>,
+    control: &ProductionControl<'_>,
+    transform: &mut ScalarNodeTransform<'_>,
+) -> Result<(), SQLError> {
+    crate::catalog::work::inline(query_from(
+        query,
+        memory,
+        control,
+        &mut Immediate::new(transform),
+    ))
+}
 
 impl MutableQueryPlan {
     pub fn transform_scalar_nodes(
@@ -26,57 +42,60 @@ impl MutableQueryPlan {
     }
 }
 
-pub(in crate::plan::mutable) fn transform_query(
+pub(in crate::plan::mutable) async fn query_from<I: Input>(
     query: &mut QueryPlan,
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
-    control.check()?;
-    transform_ctes(
+    checkpoint(control, input).await?;
+    ctes_from(
         &mut query.ctes,
         memory
             .as_mut()
             .map(|memory| memory.field_mut("ctes").as_mut().expect("CTE vector")),
         control,
-        transform,
-    )?;
+        input,
+    )
+    .await?;
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
             for pending in &mut block.deferred_outer_rewrites {
-                pending.transform_scalar_nodes(control, transform)?;
+                input.deferred(pending, control)?.await?;
             }
             if let Some(source) = &mut block.from {
-                let memory = memory.as_mut().map(|memory| {
-                    super::super::sources::query_source_memory(memory)
-                        .as_mut()
-                        .expect("source owner")
-                });
-                transform_source(source, memory, control, transform)?;
+                let memory = memory
+                    .as_mut()
+                    .map(|memory| super::super::sources::query_source_memory(memory));
+                input.source(source, memory, control)?.await?;
             }
         }
         RelationalPlan::SetOp { left, right, .. } => {
-            transform_query(
-                left,
-                memory.as_mut().map(|memory| query_child(memory, "left")),
-                control,
-                transform,
-            )?;
-            transform_query(
-                right,
-                memory.as_mut().map(|memory| query_child(memory, "right")),
-                control,
-                transform,
-            )?;
+            input
+                .query(
+                    left,
+                    memory.as_mut().map(|memory| query_child(memory, "left")),
+                    control,
+                )?
+                .await?;
+            input
+                .query(
+                    right,
+                    memory.as_mut().map(|memory| query_child(memory, "right")),
+                    control,
+                )?
+                .await?;
         }
         RelationalPlan::Values { .. } => {}
     }
-    let mut action = |expression: &mut crate::ScalarExpr,
-                      memory: Option<&mut ScalarMemory>,
-                      control: &ProductionControl<'_>| {
-        OwnedScalarExpr::transform_nodes_in_place(expression, memory, control, transform)
-    };
-    query_scalars(query, memory.as_deref_mut(), true, control, &mut action)?;
+    super::roots::query(
+        query,
+        memory.as_deref_mut(),
+        super::roots::QueryScope::Analysis,
+        control,
+        input,
+    )
+    .await?;
     let (queries, block) = match &mut query.root {
         RelationalPlan::QueryBlock(block) => (&mut block.subqueries, true),
         RelationalPlan::SetOp { subqueries, .. } | RelationalPlan::Values { subqueries, .. } => {
@@ -101,16 +120,14 @@ pub(in crate::plan::mutable) fn transform_query(
                 .as_mut()
                 .expect("query item")
                 .field_mut("query")
-                .as_mut()
-                .expect("query child")
         });
-        transform_query(query, memory, control, transform)?;
+        input.query(query, memory, control)?.await?;
     }
-    control.check()?;
+    checkpoint(control, input).await?;
     Ok(())
 }
 
-fn query_child<'a>(memory: &'a mut RewriteMemory, field: &str) -> &'a mut RewriteMemory {
+fn query_child<'a>(memory: &'a mut RewriteMemory, field: &str) -> &'a mut Option<RewriteMemory> {
     memory
         .field_mut("root")
         .as_mut()
@@ -119,41 +136,35 @@ fn query_child<'a>(memory: &'a mut RewriteMemory, field: &str) -> &'a mut Rewrit
         .as_mut()
         .expect("query child box")
         .field_mut("query")
-        .as_mut()
-        .expect("query child")
 }
 
-pub(in crate::plan::mutable) fn transform_source(
+pub(in crate::plan::mutable) async fn source_from<I: Input>(
     source: &mut SourcePlan,
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
-    control.check()?;
+    checkpoint(control, input).await?;
     match source {
         SourcePlan::Join { left, right, .. } => {
-            transform_source(
-                left,
-                memory.as_mut().map(|memory| {
-                    SourceChildSlot::Left
-                        .memory_mut(memory)
+            input
+                .source(
+                    left,
+                    memory
                         .as_mut()
-                        .expect("left source")
-                }),
-                control,
-                transform,
-            )?;
-            transform_source(
-                right,
-                memory.as_mut().map(|memory| {
-                    SourceChildSlot::Right
-                        .memory_mut(memory)
+                        .map(|memory| SourceChildSlot::Left.memory_mut(memory)),
+                    control,
+                )?
+                .await?;
+            input
+                .source(
+                    right,
+                    memory
                         .as_mut()
-                        .expect("right source")
-                }),
-                control,
-                transform,
-            )?;
+                        .map(|memory| SourceChildSlot::Right.memory_mut(memory)),
+                    control,
+                )?
+                .await?;
         }
         SourcePlan::Subquery { body, .. } => {
             let memory = memory.as_mut().map(|memory| {
@@ -162,31 +173,22 @@ pub(in crate::plan::mutable) fn transform_source(
                     .as_mut()
                     .expect("source query box")
                     .field_mut("query")
-                    .as_mut()
-                    .expect("source query")
             });
-            transform_query(body, memory, control, transform)?;
+            input.query(body, memory, control)?.await?;
         }
         _ => {}
     }
-    source_scalars(
-        source,
-        memory,
-        control,
-        &mut |expression, memory, control| {
-            OwnedScalarExpr::transform_nodes_in_place(expression, memory, control, transform)
-        },
-    )
+    super::roots::source(source, memory, control, input).await
 }
 
-pub(in crate::plan::mutable) fn transform_ctes(
+pub(in crate::plan::mutable) async fn ctes_from<I: Input>(
     ctes: &mut [CtePlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, cte) in ctes.iter_mut().enumerate() {
-        control.check()?;
+        checkpoint(control, input).await?;
         let mut item = memory
             .as_mut()
             .map(|memory| memory.item_mut(index).as_mut().expect("CTE item"));
@@ -194,54 +196,38 @@ pub(in crate::plan::mutable) fn transform_ctes(
             .as_mut()
             .map(|item| item.field_mut("body").as_mut().expect("CTE body"));
         match &mut cte.body {
-            CtePlanBody::Query(query) => transform_query(
-                query,
-                body.map(|body| body.field_mut("query").as_mut().expect("CTE query")),
-                control,
-                transform,
-            )?,
+            CtePlanBody::Query(query) => {
+                input
+                    .query(query, body.map(|body| body.field_mut("query")), control)?
+                    .await?;
+            }
             CtePlanBody::Command(command) => {
-                super::super::commands::transformation::transform_command(
-                    command,
-                    body.map(|body| body.field_mut("command").as_mut().expect("CTE command")),
-                    control,
-                    transform,
-                )?;
+                input
+                    .command(command, body.map(|body| body.field_mut("command")), control)?
+                    .await?;
             }
         }
         if let Some(cycle) = &mut cte.cycle {
             let mut cycle_memory =
                 item.map(|item| item.field_mut("cycle").as_mut().expect("CTE cycle"));
             let mark = cycle_memory.as_mut().map(|memory| {
-                scalar_memory(
-                    memory
-                        .field_mut("mark_value")
-                        .as_mut()
-                        .expect("cycle mark")
-                        .scalar_mut(),
-                )
+                memory
+                    .field_mut("mark_value")
+                    .as_mut()
+                    .expect("cycle mark")
+                    .scalar_mut()
             });
-            OwnedScalarExpr::transform_nodes_in_place(
-                &mut cycle.mark_value,
-                mark,
-                control,
-                transform,
-            )?;
+            input.scalar(&mut cycle.mark_value, mark, control).await?;
             let default = cycle_memory.as_mut().map(|memory| {
-                scalar_memory(
-                    memory
-                        .field_mut("mark_default")
-                        .as_mut()
-                        .expect("cycle default")
-                        .scalar_mut(),
-                )
+                memory
+                    .field_mut("mark_default")
+                    .as_mut()
+                    .expect("cycle default")
+                    .scalar_mut()
             });
-            OwnedScalarExpr::transform_nodes_in_place(
-                &mut cycle.mark_default,
-                default,
-                control,
-                transform,
-            )?;
+            input
+                .scalar(&mut cycle.mark_default, default, control)
+                .await?;
         }
     }
     Ok(())

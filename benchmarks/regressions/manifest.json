@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -72474,6 +72474,71 @@
       "capability": "Stored scalar binding",
       "workload": "Transform and replace 8,192 nested scalar nodes, with successful and failing callbacks on a 256 KiB stack.",
       "invariant": "Share admitted traversal for inline editing, stop at the first callback error and release all private storage while preserving a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_preserve_complete_fields_order_and_name_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind sequence references across thirteen complete SELECT, VALUES, CTE and mutation fixtures and compare the complete plans and lookup trace with the established raw traversal.",
+      "invariant": "Preserve structural and scalar field order, transfer original canonical-name buffers and retire every original constructor owner without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_retire_every_interrupted_structural_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon and independently cancel every suspended prefix of a command CTE, nested query and joined VALUES source.",
+      "invariant": "Preserve both cancellation scopes, allocation-free private cleanup and a separate 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequence_failures_keep_first_diagnostics_and_sibling_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Reject the second ordered sequence lookup and sweep remaining destination allowances with an independent live reservation.",
+      "invariant": "Preserve the first typed failure, skip later lookups and release all private plan and work ownership after denied admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_bound_wide_scalar_and_empty_command_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind 4,096 projected sequence calls or visit 4,096 scalar-free assignment-field steps in one-step windows.",
+      "invariant": "Each productive window allocates at most sixteen objects and retires at most sixty-four; field width consumes independent work and final cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_keep_deep_children_and_failures_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind successful and failing sequence references beneath 512 nested queries with independent CTE bodies on a 256 KiB stack.",
+      "invariant": "Preserve all 512 preceding CTE lookups and the final leaf diagnostic, and retire the complete retained tree without recursive stack growth or sibling-owner loss.",
       "case_names": [
         ""
       ]

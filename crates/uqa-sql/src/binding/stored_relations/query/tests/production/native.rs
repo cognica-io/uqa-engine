@@ -517,3 +517,5 @@ fn retained_relation_binding_preserves_mutation_roots_and_original_target_flags(
         assert_eq!((native.used(), work.used()), (0, 0));
     }
 }
+
+mod sequences;

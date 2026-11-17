@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Share admitted scalar traversal across window normalization, pre-order replacement, post-order analysis edits and retained sequence-name binding. Query and source scalar fields share their existing traversal with window normalization, including work checkpoints for empty containers. Preserve original analysis identities, scalar field order and catalog name buffers; deep edits and failures retire without recursive stack growth. Complete statement sequence/routine binding and public backup restoration remain in progress.
+- Share admitted scalar traversal across window normalization, pre-order replacement, post-order analysis edits and retained sequence-name binding. Query and source scalar fields share their existing traversal with window normalization, including work checkpoints for empty containers. Fresh retained statements also reuse the complete query, CTE, source and mutation traversal for sequence names. Preserve original analysis identities, field and lookup order, catalog name buffers and constructor ownership; deep edits and failures retire without recursive stack growth. Catalog binding composition, routine finalization and public backup restoration remain in progress.
 
 - Retire directly owned query, source, CTE and mutation metadata through the existing field, vector, type and function-binding cleanup states. Wide name/signature lists and deep column types release across work boundaries without cleanup allocations, preserving completed prefixes and independent reservations through cancellation and abandonment.
 
