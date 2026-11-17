@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -73874,6 +73874,45 @@
       "capability": "Shared retained membership application",
       "workload": "Apply 4096 selected casts and replace an 8192-level left operand with 8192-level target declarations on a 256 KiB stack.",
       "invariant": "Each one-step poll destroys fewer than 64 allocations; completed structure, cast spelling and replacement constants are preserved and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_preserve_distinct_visit_orders_and_original_field_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Remap every existing scalar child-shape fixture and nested IN/EXISTS/repeated query references through ordinary pre-order, ordinary post-order and one-step suspended post-order.",
+      "invariant": "Original visitor order, non-Send ordinary callbacks, field addresses, query identities and exact constructor reservations are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_retire_every_interrupted_prefix_and_preserve_first_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Abandon or cancel either owner at every suspended occurrence-remapping prefix and fail each occurrence callback in turn.",
+      "invariant": "No later callback runs after the selected error; detached parents and children retire without cleanup allocation while an independent sibling reservation survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_bound_deep_traversal_and_unadmitted_scratch_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Remap 8192 cast levels on a 256 KiB stack and deny scratch admission at every prefix of a retained nested expression.",
+      "invariant": "Ordinary and suspended edits reuse the scalar editor; work windows remain bounded, rejected scratch precedes the query callback and all payloads and reservations retire.",
       "case_names": [
         ""
       ]

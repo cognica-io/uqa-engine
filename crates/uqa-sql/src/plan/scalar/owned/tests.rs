@@ -12,6 +12,7 @@ mod copies;
 mod edits;
 mod fixtures;
 mod input;
+mod query_ids;
 mod retirement;
 mod traversal;
 
