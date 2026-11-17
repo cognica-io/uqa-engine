@@ -89,11 +89,11 @@ pub fn decode_value_image(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> ValueImageResult<Budgeted<Value>> {
-    let value = read_value_image(&mut input, memory, cancellation)?;
+    let value = read_value_image(&mut input, memory, cancellation)?.into_owned_value();
     if !input.is_empty() {
         return Err(ValueImageError::Invalid("trailing bytes"));
     }
-    Ok(value)
+    Ok(value.into_value())
 }
 
 fn check_depth(depth: usize) -> ValueImageResult<()> {

@@ -25,6 +25,7 @@ pub mod image;
 mod nonfinite;
 mod observation;
 mod ownership;
+pub(crate) use ownership::OwnedValue;
 pub use ownership::ValueRetirement;
 mod retention;
 mod serialization;

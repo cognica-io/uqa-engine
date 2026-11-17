@@ -5,10 +5,10 @@
 //
 
 use super::{Budgeted, BudgetedVec, Reader, Value, ValueImageResult};
-use crate::{DatumValue, RecordDatumField};
+use crate::{types::OwnedValue, DatumValue, RecordDatumField};
 
 impl Reader<'_, '_> {
-    pub(super) async fn datum(&mut self) -> ValueImageResult<Budgeted<Value>> {
+    pub(super) async fn datum(&mut self) -> ValueImageResult<Budgeted<OwnedValue>> {
         let oid = u32::from_le_bytes(self.fixed().await?);
         let offset = u32::from_le_bytes(self.fixed().await?);
         let bytes = self.blob().await?;
@@ -38,6 +38,6 @@ impl Reader<'_, '_> {
             memory.absorb(field_memory);
             datum = datum.with_record_fields(fields);
         }
-        Ok(Budgeted::new(Value::Datum(datum), memory))
+        Ok(Budgeted::new(OwnedValue::new(Value::Datum(datum)), memory))
     }
 }

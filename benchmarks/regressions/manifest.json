@@ -71931,6 +71931,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_retires_deep_completed_children_at_late_cancellation_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Copy 8,192-level lists inside lists, maps, rows, records and arrays on a 256 KiB stack, then cancel at each of the final thirteen checked boundaries.",
+      "invariant": "Completed children and metadata keep their original reservation until allocation-free iterative retirement; no native allocation or sibling reservation leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_retires_every_pending_prefix_with_original_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Interrupt each pending copy prefix by abandonment, either cancellation owner or exhausted destination allowance while retaining a separate work allowance and sibling reservation.",
+      "invariant": "The original allocation and cancellation owners remain effective before the first work request and throughout native copy construction; interrupted state retires without new allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_and_external_admission_share_iterative_private_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Copy an 8,192-level ordinary value, deny external payload admission and cancel immediately after a transform supplies a completed deep replacement.",
+      "invariant": "Ordinary and controlled copies reuse the existing iterative copier; private admission and replacement failures retire the original payload without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_retirement_preserves_leases_at_every_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Decode mixed records and typed rows with seven-byte, one-step windows; abandon, cancel or exhaust admission at every pending prefix.",
+      "invariant": "Every prefix retains its completed children and original reservations, successful output preserves the complete value and interrupted cleanup neither allocates nor releases sibling resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_retires_completed_children_after_metadata_and_trailing_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Truncate late record or row metadata, append trailing bytes and reject a legacy-vector array containing an 8,192-level invalid element on a 256 KiB stack.",
+      "invariant": "Original diagnostics are preserved while completed private values release all reservations and allocations through the shared native retirement owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_preserves_the_existing_nesting_limit",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Encode and decode native values at and beyond the existing 128-level image nesting limit.",
+      "invariant": "The unchanged native image contract accepts the limit, rejects excess nesting and releases all original payload reservations.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -8,6 +8,7 @@ use super::*;
 use crate::{memory::MemoryError, DecimalValue, TemporalValue};
 
 mod input;
+mod retirement;
 
 fn values() -> Vec<Value> {
     vec![

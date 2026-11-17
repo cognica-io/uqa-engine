@@ -13,6 +13,7 @@ mod map;
 mod owned;
 mod small_vec;
 mod string;
+mod value;
 mod vec;
 pub use map::ProductionMap;
 pub use owned::OwnedProductionControl;
@@ -124,7 +125,7 @@ impl<'a> ProductionControl<'a> {
         value: Value,
     ) -> Result<Produced<Value>, ValueRetentionError> {
         let mut output = Produced {
-            value,
+            value: crate::types::OwnedValue::new(value),
             memory: self.empty_reservation(),
         };
         self.check()?;
@@ -140,28 +141,16 @@ impl<'a> ProductionControl<'a> {
             )?;
         }
         self.check()?;
-        Ok(output)
+        Ok(output.into_value())
     }
 
     pub fn copy_value(&self, value: &Value) -> Result<Produced<Value>, ValueRetentionError> {
         self.check()?;
-        let result = match self.budget {
-            Some(budget) => Produced::from(value.clone_budgeted_with_check(budget, || {
-                if let Some(original) = self.original {
-                    original.check()?;
-                }
-                if let Some(invoking) = self.invoking {
-                    invoking.check()?;
-                }
-                Ok(())
-            })?),
-            None => Produced {
-                value: value.clone(),
-                memory: None,
-            },
-        };
+        let result = value
+            .transform_with_control(self, |_| Ok::<_, ValueRetentionError>(None))?
+            .into_owned_value();
         self.check()?;
-        Ok(result)
+        Ok(result.into_value())
     }
 
     pub fn copy_text(&self, text: &str) -> Result<Produced<String>, ValueRetentionError> {

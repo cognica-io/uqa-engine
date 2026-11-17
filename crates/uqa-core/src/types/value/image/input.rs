@@ -63,6 +63,6 @@ impl ValueImageInput {
         }
         let value = reader.value(0).await?;
         cancellation.check()?;
-        Ok(value)
+        Ok(value.into_value())
     }
 }
