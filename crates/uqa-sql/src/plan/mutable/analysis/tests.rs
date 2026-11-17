@@ -292,14 +292,21 @@ fn metadata_traversal_visits_replacements_and_keeps_table_query_selection() {
     };
     *executable_query = Some(table_body);
     let mut destination = source.copy_for_rewrite(&control).unwrap();
-    let mut visited = 0;
-    destination
-        .apply_source_metadata(&control, &mut |_| {
-            visited += 1;
-            Ok(ProductionVec::new(control).finish()?)
-        })
-        .unwrap();
-    assert_eq!(visited, 1);
+    struct Sources(usize);
+    impl<W: Work + Send> MetadataObserver<W> for Sources {
+        async fn source(
+            &mut self,
+            _: &SourcePlan,
+            control: &ProductionControl<'_>,
+            _: &mut W,
+        ) -> Result<Option<SourceMetadataUpdate>, SQLError> {
+            self.0 += 1;
+            Ok(Some(ProductionVec::new(*control).finish()?))
+        }
+    }
+    let mut sources = Sources(0);
+    inline(destination.apply_metadata_from(&mut sources, &control, &mut ())).unwrap();
+    assert_eq!(sources.0, 1);
     let mut names = Names::default();
     inline(destination.apply_metadata_from(&mut names, &control, &mut ())).unwrap();
     assert_eq!(names.visited, ["outer_col", "table_col"]);

@@ -87,19 +87,6 @@ impl<W: Work> MetadataObserver<W> for Walker<'_, '_> {
             None => Ok(None),
         })
     }
-    fn source(
-        &mut self,
-        source: &SourcePlan,
-        _: &ProductionControl<'_>,
-        _: &mut W,
-    ) -> impl Future<Output = Result<Option<SourceMetadataUpdate>, SQLError>> + Send {
-        ready(
-            self.source
-                .as_mut()
-                .map(|observe| observe(source))
-                .transpose(),
-        )
-    }
     fn projections(
         &mut self,
         projections: &[ProjectionPlan],

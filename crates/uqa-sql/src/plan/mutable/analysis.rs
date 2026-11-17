@@ -80,14 +80,12 @@ type ProjectionObserver<'a> =
     dyn FnMut(&[ProjectionPlan]) -> Result<ProjectionAliasUpdates, SQLError> + 'a;
 pub(super) type QueryObserver<'a> =
     dyn FnMut(&QueryPlan) -> Result<QueryMetadataUpdate, SQLError> + 'a;
-type SourceObserver<'a> = dyn FnMut(&SourcePlan) -> Result<SourceMetadataUpdate, SQLError> + 'a;
 type SourceReplacement<'a> =
     dyn FnMut(&SourcePlan) -> Result<Option<super::MutableSourcePlan>, SQLError> + 'a;
 
 struct Walker<'a, 'c> {
     query: Option<&'a mut QueryObserver<'a>>,
     projections: Option<&'a mut ProjectionObserver<'a>>,
-    source: Option<&'a mut SourceObserver<'a>>,
     replacement: Option<&'a mut SourceReplacement<'a>>,
     control: ProductionControl<'c>,
     mark_relations: bool,
@@ -102,7 +100,6 @@ impl crate::plan::UnifiedPlan {
         Walker {
             query: None,
             projections: Some(observe),
-            source: None,
             replacement: None,
             control: ProductionControl::uncontrolled(),
             mark_relations: false,
@@ -135,7 +132,6 @@ impl MutableExecutablePlan {
         Walker {
             query: None,
             projections: None,
-            source: None,
             replacement: None,
             control: *control,
             mark_relations: true,
@@ -152,7 +148,6 @@ impl MutableExecutablePlan {
         Walker {
             query: None,
             projections: None,
-            source: None,
             replacement: Some(replace),
             control: *control,
             mark_relations: false,
@@ -168,23 +163,6 @@ impl MutableExecutablePlan {
         Walker {
             query: Some(observe),
             projections: None,
-            source: None,
-            replacement: None,
-            mark_relations: false,
-            control: *control,
-        }
-        .plan(self)
-    }
-
-    pub(crate) fn apply_source_metadata<'a>(
-        &mut self,
-        control: &ProductionControl<'_>,
-        observe: &'a mut SourceObserver<'a>,
-    ) -> Result<(), SQLError> {
-        Walker {
-            query: None,
-            projections: None,
-            source: Some(observe),
             replacement: None,
             mark_relations: false,
             control: *control,

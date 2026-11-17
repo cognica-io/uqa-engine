@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -73003,6 +73003,45 @@
       "capability": "Stored statement binding",
       "workload": "Assemble 512 nested JOINs containing 1,025 source layouts on a 256 KiB stack using single-step windows.",
       "invariant": "Complete at most one topology work step per window, preserve original row indexes and retire the complete result without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_preserves_complete_plans_and_original_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Apply query layouts, parameter labels and source-call bindings across six query, mutation, utility and replacement shapes.",
+      "invariant": "Immediate and suspended paths preserve complete plans, original row-schema indexes and function-name buffers while keeping scalar reference observations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_retires_each_interruption_and_rejects_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Abandon or independently cancel every suspended metadata-application prefix and exhaust destination capacity at each prefix.",
+      "invariant": "Every failure retires private state without allocation and preserves an independent reservation; new allocations reject with 53200 while reusable released capacity remains available.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_bounds_wide_installation_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Install metadata for 4096 projected names and 4096 table-function bindings on a 256 KiB stack.",
+      "invariant": "Each single-step window completes at most one work checkpoint, all original metadata owners transfer and cleanup allocates nothing.",
       "case_names": [
         ""
       ]

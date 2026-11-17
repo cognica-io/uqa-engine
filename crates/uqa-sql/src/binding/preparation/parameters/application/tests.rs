@@ -7,7 +7,7 @@
 use super::*;
 use crate::{
     ast::FunctionBinding,
-    plan::{ProjectionAliasUpdates, ProjectionPlan, TableFunctionPlan},
+    plan::{ProjectionAliasUpdates, ProjectionPlan, RelationalPlan, TableFunctionPlan},
     ScalarExpr,
 };
 use std::sync::{
@@ -267,9 +267,9 @@ fn metadata_selection_preserves_names_binding_slots_and_observation_ownership() 
             Fixture::Aliases(projections) => {
                 Output::Aliases(constants.projection_aliases(projections, &control).unwrap())
             }
-            Fixture::Source(source) => {
-                Output::Source(constants.source_metadata(source, &control).unwrap())
-            }
+            Fixture::Source(source) => Output::Source(
+                inline(constants.source_metadata_from(source, &control, &mut ())).unwrap(),
+            ),
         };
         let actual = decoder(
             fixture,

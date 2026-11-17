@@ -7,6 +7,8 @@
 use super::*;
 use crate::plan::{PlanRef, UnifiedPlan};
 
+mod metadata;
+
 fn observe_plan(plan: &MutableExecutablePlan, control: &ProductionControl<'_>) -> InputConstants {
     let mut constants = InputConstants::new(control);
     plan.as_plan_ref()

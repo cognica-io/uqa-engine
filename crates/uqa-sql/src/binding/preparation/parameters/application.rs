@@ -11,13 +11,15 @@ use crate::{
     catalog::work::{inline, Work},
     plan::{
         MetadataObserver, MutableExecutablePlan, ProjectionAliasUpdates, ProjectionPlan,
-        QueryMetadataUpdate, RelationalPlan, SharedAnalyzedSource, SourceMetadataUpdate,
-        SourcePlan,
+        SourceMetadataUpdate, SourcePlan,
     },
     routines::RoutineResolution,
     SQLError, SQLParam,
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+
+mod layouts;
+use layouts::QueryLayouts;
 
 impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn apply_owned_query_schemas(
@@ -28,32 +30,13 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.take().expect("query layout observation");
-        plan.apply_query_metadata(control, &mut |query| {
-            let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => self
-                    .rewritten_blocks
-                    .remove(&AnalysisIdentity::from(block.as_ref())),
-                _ => None,
-            };
-            let selected = root.as_deref().unwrap_or(query);
-            let source = match &selected.root {
-                RelationalPlan::QueryBlock(block) => block
-                    .from
-                    .as_ref()
-                    .map(|source| schemas.take_source_with_control(source, control))
-                    .transpose()?
-                    .flatten(),
-                _ => None,
-            };
-            Ok(QueryMetadataUpdate {
-                root,
-                output: schemas.outputs.remove(&AnalysisIdentity::from(query)),
-                source: source
-                    .map(|source| SharedAnalyzedSource::from_produced(source, control))
-                    .transpose()?,
-                ..Default::default()
-            })
-        })?;
+        inline(
+            QueryLayouts(&mut schemas, &mut self.rewritten_blocks).apply_from(
+                plan,
+                control,
+                &mut (),
+            ),
+        )?;
         plan.apply_query_metadata(control, &mut |query| {
             schemas.groupings.metadata(query, routines, params, control)
         })?;
@@ -69,36 +52,7 @@ impl InputConstants {
         params: &[SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        plan.apply_query_metadata(control, &mut |query| {
-            let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => {
-                    self.10.remove(&AnalysisIdentity::from(block.as_ref()))
-                }
-                _ => None,
-            };
-            let selected = root.as_deref().unwrap_or(query);
-            let source = match &selected.root {
-                RelationalPlan::QueryBlock(block) => block
-                    .from
-                    .as_ref()
-                    .map(|source| self.8.take_source_with_control(source, control))
-                    .transpose()?
-                    .flatten(),
-                _ => None,
-            };
-            Ok(QueryMetadataUpdate {
-                root,
-                output: self.8.outputs.remove(&AnalysisIdentity::from(query)),
-                source: source
-                    .map(|source| SharedAnalyzedSource::from_produced(source, control))
-                    .transpose()?,
-                ..Default::default()
-            })
-        })?;
-        if !self.11.is_empty() {
-            inline(self.apply_projection_aliases_owned_from(plan, control, &mut ()))?;
-        }
-        plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
+        inline(self.apply_metadata_owned_from(plan, control, &mut ()))?;
         let mut groupings = std::mem::take(&mut self.8.groupings);
         plan.transform_scalar_arenas_with_metadata(
             control,
@@ -119,6 +73,23 @@ impl InputConstants {
         }
         control.check()?;
         Ok(())
+    }
+
+    async fn apply_metadata_owned_from<W: Work + Send>(
+        &mut self,
+        plan: &mut MutableExecutablePlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        QueryLayouts(&mut self.8, &mut self.10)
+            .apply_from(plan, control, work)
+            .await?;
+        if !self.11.is_empty() {
+            self.apply_projection_aliases_owned_from(plan, control, work)
+                .await?;
+        }
+        plan.apply_metadata_from(&mut SourceCalls(self), control, work)
+            .await
     }
 
     async fn apply_projection_aliases_owned_from<W: Work + Send>(
@@ -166,14 +137,6 @@ impl InputConstants {
             }
         }
         Ok(aliases.finish()?)
-    }
-
-    fn source_metadata(
-        &mut self,
-        source: &SourcePlan,
-        control: &ProductionControl<'_>,
-    ) -> Result<SourceMetadataUpdate, SQLError> {
-        inline(self.source_metadata_from(source, control, &mut ()))
     }
 
     async fn source_metadata_from<W: Work + Send>(
@@ -231,6 +194,22 @@ impl InputConstants {
 }
 
 struct ParameterNames<'a>(&'a InputConstants);
+
+struct SourceCalls<'a>(&'a mut InputConstants);
+
+impl<W: Work + Send> MetadataObserver<W> for SourceCalls<'_> {
+    async fn source(
+        &mut self,
+        source: &SourcePlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<SourceMetadataUpdate>, SQLError> {
+        self.0
+            .source_metadata_from(source, control, work)
+            .await
+            .map(Some)
+    }
+}
 
 impl<W: Work + Send> MetadataObserver<W> for ParameterNames<'_> {
     fn visit_table_queries(&self) -> bool {
