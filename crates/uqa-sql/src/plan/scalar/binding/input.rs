@@ -17,6 +17,17 @@ impl Lowering<'_> {
         field_projection: Option<(bool, Option<&crate::ColumnType>)>,
         work: &mut W,
     ) -> Result<FunctionBinding, W::Error> {
+        self.binding_fields_from(binding, field_projection, true, work)
+            .await
+    }
+
+    pub(in crate::plan::scalar) async fn binding_fields_from<W: Work>(
+        &mut self,
+        binding: &FunctionBinding,
+        field_projection: Option<(bool, Option<&crate::ColumnType>)>,
+        retain_invocation: bool,
+        work: &mut W,
+    ) -> Result<FunctionBinding, W::Error> {
         self.checkpoint(work).await?;
         let FunctionBinding {
             object_id,
@@ -39,13 +50,13 @@ impl Lowering<'_> {
             builtin: *builtin,
             dispatch: *dispatch,
             invocation: match invocation {
-                Some(invocation) => Some(boxed_from!(
+                Some(invocation) if retain_invocation => Some(boxed_from!(
                     self,
                     work,
                     RoutineInvocationBinding,
                     self.invocation_from(invocation, work).await?
                 )),
-                None => None,
+                _ => None,
             },
             value_binding: match value_binding {
                 Some(binding) => Some(boxed_from!(

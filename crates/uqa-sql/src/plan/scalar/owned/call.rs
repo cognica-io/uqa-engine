@@ -122,7 +122,7 @@ impl OwnedScalarExpr {
     }
 
     pub(crate) async fn replace_call_metadata_from<W: Work>(
-        mut self,
+        self,
         name: Produced<String>,
         binding: Option<Produced<FunctionBinding>>,
         control: &ProductionControl<'_>,
@@ -131,7 +131,30 @@ impl OwnedScalarExpr {
     where
         W::Error: From<CatalogRetentionError>,
     {
+        self.replace_call_fields_from(name, binding, None, control, work)
+            .await
+    }
+
+    /// Replace call metadata and optionally its argument container through the same field producer, preserving ordering and filter owners.
+    pub(crate) async fn replace_call_fields_from<W: Work>(
+        mut self,
+        name: Produced<String>,
+        binding: Option<Produced<FunctionBinding>>,
+        mut replacement: Option<Self>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         self.assert_owner(control);
+        if let Some(arguments) = &replacement {
+            arguments.assert_owner(control);
+            assert!(
+                matches!(arguments.expression, ScalarExpr::And(_) | ScalarExpr::Or(_)),
+                "argument replacement requires a boolean container"
+            );
+        }
         control.check()?;
         let ScalarExpr::Func {
             args,
@@ -144,18 +167,24 @@ impl OwnedScalarExpr {
         else {
             panic!("metadata replacement requires a function call");
         };
-        let (argument_count, order_count, has_filter, distinct, order_syntax) = (
+        let (original_argument_count, order_count, has_filter, distinct, order_syntax) = (
             args.len(),
             order_by.len(),
             filter.is_some(),
             *distinct,
             *order_syntax,
         );
+        let argument_count = replacement
+            .as_ref()
+            .map_or(original_argument_count, Self::child_count);
         let mut lowering = owned_lowering(control);
         let mut output = call_fields(&mut lowering, name, binding);
         let arguments = children_from(
             &mut lowering,
-            (0..argument_count).map(|index| self.take_child(index)),
+            (0..argument_count).map(|index| match &mut replacement {
+                Some(arguments) => arguments.take_child(index),
+                None => self.take_child(index),
+            }),
             work,
         )
         .await?;
@@ -182,7 +211,10 @@ impl OwnedScalarExpr {
             };
             let (descending, nulls) = (order_by[index].descending, order_by[index].nulls);
             orders.push(ScalarOrder {
-                expr: Self::attach_child(&mut lowering, self.take_child(argument_count + index))?,
+                expr: Self::attach_child(
+                    &mut lowering,
+                    self.take_child(original_argument_count + index),
+                )?,
                 descending,
                 nulls,
             });
@@ -192,10 +224,13 @@ impl OwnedScalarExpr {
             lowering.admit_box::<ScalarExpr>()?;
             *filter = Some(Box::new(Self::attach_child(
                 &mut lowering,
-                self.take_child(argument_count + order_count),
+                self.take_child(original_argument_count + order_count),
             )?));
         }
         let output = finish(output.take(), lowering, control)?;
+        if let Some(arguments) = replacement {
+            arguments.retire_from(control, work).await?;
+        }
         self.retire_from(control, work).await?;
         control.check()?;
         Ok(output)

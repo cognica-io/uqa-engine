@@ -58,7 +58,7 @@ impl WindowRetirement {
     }
 }
 
-pub(in crate::plan) async fn checkpoint<W: Work>(
+pub(crate) async fn checkpoint<W: Work>(
     control: &ProductionControl<'_>,
     work: &mut W,
 ) -> Result<(), W::Error> {

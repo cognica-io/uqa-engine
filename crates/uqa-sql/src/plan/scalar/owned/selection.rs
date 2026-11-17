@@ -13,12 +13,25 @@ use uqa_core::memory::ProductionControl;
 impl OwnedScalarExpr {
     /// Remove validated call-argument markers by transferring their value child and immediately retiring marker metadata and containers.
     pub fn into_call_argument(
-        mut self,
+        self,
         control: &ProductionControl<'_>,
     ) -> std::result::Result<Self, crate::SQLError> {
+        Ok(crate::catalog::work::inline(
+            self.into_call_argument_from(control, &mut ()),
+        )?)
+    }
+
+    pub(crate) async fn into_call_argument_from<W: crate::plan::ScalarInputWork>(
+        mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<crate::SQLError> + From<CatalogRetentionError>,
+    {
         self.assert_owner(control);
         control.check()?;
-        crate::scalar_call_argument(&self)?;
+        crate::scalar_call_argument(&self).map_err(W::Error::from)?;
         while let ScalarExpr::Func { binding, args, .. } = &self.expression {
             if !binding
                 .as_ref()
@@ -28,7 +41,7 @@ impl OwnedScalarExpr {
                 break;
             }
             let index = args.len() - 1;
-            self = self.select_child(index);
+            self = self.select_child_from(index, control, work).await?;
         }
         control.check()?;
         Ok(self)

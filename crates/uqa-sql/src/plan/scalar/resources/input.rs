@@ -41,6 +41,20 @@ pub(crate) trait Work: Send {
                 .await
         }
     }
+    fn parse_type(
+        &mut self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<Produced<ColumnType>, Self::Error>> + Send
+    where
+        Self::Error: From<SQLError> + Into<SQLError>,
+    {
+        async move {
+            ColumnType::from_sql_name_with_input_work(name, control, &mut TypeWork(self))
+                .await
+                .map_err(Into::into)
+        }
+    }
     fn value(
         &mut self,
         value: &Value,

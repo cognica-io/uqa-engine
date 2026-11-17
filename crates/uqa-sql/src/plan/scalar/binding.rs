@@ -26,13 +26,35 @@ impl FunctionBinding {
         self.clone_with_input_work(control, work).await
     }
 
-    pub(in crate::plan) async fn clone_with_input_work<
-        W: super::ScalarInputWork<Error = crate::SQLError>,
-    >(
+    pub(crate) async fn clone_with_input_work<W: super::ScalarInputWork>(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
         work: &mut W,
-    ) -> std::result::Result<uqa_core::memory::Produced<Self>, crate::SQLError> {
+    ) -> std::result::Result<uqa_core::memory::Produced<Self>, W::Error> {
+        self.copy_with_input_work(true, control, work).await
+    }
+
+    /// Copy the surviving call metadata through its existing field producer after invocation normalization.
+    pub(crate) async fn normalized_with_input_work<W: super::ScalarInputWork>(
+        &self,
+        dispatch: crate::ast::FunctionDispatch,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<uqa_core::memory::Produced<Self>, W::Error> {
+        let (mut binding, memory) = self
+            .copy_with_input_work(false, control, work)
+            .await?
+            .into_parts();
+        binding.dispatch = Some(dispatch);
+        Ok(control.finish(binding, memory)?)
+    }
+
+    async fn copy_with_input_work<W: super::ScalarInputWork>(
+        &self,
+        invocation: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<uqa_core::memory::Produced<Self>, W::Error> {
         control.check()?;
         let mut copying = Lowering {
             control: control
@@ -40,7 +62,9 @@ impl FunctionBinding {
                 .map(|_| super::resources::Control::from_production(*control)),
             owned_children: None,
         };
-        let binding = copying.binding_from(self, None, work).await?;
+        let binding = copying
+            .binding_fields_from(self, None, invocation, work)
+            .await?;
         Ok(control.finish(binding, copying.control.map(|owner| owner.memory))?)
     }
 

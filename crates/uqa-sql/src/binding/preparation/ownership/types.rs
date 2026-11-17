@@ -97,16 +97,7 @@ impl AnalysisType {
     ) -> Result<(), W::Error> {
         if let Self::Shared(ty) = self {
             if let Some(ty) = Arc::into_inner(ty) {
-                // Tuple fields retire in order: the selected type precedes its original payload and shared-header reservation on every exit.
-                let mut owned = ty.into_parts();
-                loop {
-                    control.check()?;
-                    work.checkpoint().await?;
-                    control.check()?;
-                    if owned.0.retire_step() {
-                        break;
-                    }
-                }
+                crate::plan::retirement::retire_produced_from(ty, control, work).await?;
             }
         }
         Ok(())

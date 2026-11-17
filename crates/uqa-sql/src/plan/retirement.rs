@@ -19,7 +19,26 @@ pub(in crate::plan) mod windows;
 pub(crate) use scalars::fields as scalar_fields;
 pub(crate) use scalars::{Pending, Retire, ScalarRetirement};
 pub(crate) use tree::{RetainedTree, RetirementFrame};
+pub(crate) use windows::checkpoint;
 pub(in crate::plan) use windows::WindowRetirement;
+
+/// Retire a produced field through its original metadata state while retaining its payload allowance across every work window.
+pub(crate) async fn retire_produced_from<T: Retire, W: super::ScalarInputWork>(
+    value: uqa_core::memory::Produced<T>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), W::Error> {
+    let (value, memory) = value.into_parts();
+    let mut owned = (Pending::new(value), memory);
+    let mut retirement = ScalarRetirement::default();
+    loop {
+        checkpoint(control, work).await?;
+        if retirement.advance(&mut *owned.0) {
+            break;
+        }
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 pub(crate) mod tests;

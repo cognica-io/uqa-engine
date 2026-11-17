@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -73747,6 +73747,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_matches_existing_calls_and_preserves_child_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path normalization",
+      "workload": "Compare expanded, named and explicit variadic inputs with the existing aggregate-lease normalizer.",
+      "invariant": "Immediate and suspended calls retain exact scalar structure, dispatch, collation, object identity, ordering and filter payload addresses under identical reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_retires_every_interrupted_or_denied_prefix",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path ownership",
+      "workload": "Abandon every suspended prefix or cancel either owner or exhaust the remaining allowance.",
+      "invariant": "Existing scalar and field retirement release all private allocations without new cleanup allocation, preserve an independent sibling lease and allow completion from storage already admitted."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_keeps_invalid_invocations_and_parse_errors_ordered",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path validation",
+      "workload": "Mismatched source, target and position vectors, duplicate or invalid positions, and an unknown target declaration.",
+      "invariant": "Native work preserves the selected invocation diagnostic and type-input failure before publishing a replacement call."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_bounds_wide_calls_and_deep_operand_retirement",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path work bounds",
+      "workload": "Normalize 4,096 path operands including 8,192 cast levels on a 256 KiB stack with one-step input windows.",
+      "invariant": "Existing argument constructors and retirement bound productive destruction below 64 allocations per poll, preserve all paths and release final owners without allocating cleanup state."
     }
   ]
 }

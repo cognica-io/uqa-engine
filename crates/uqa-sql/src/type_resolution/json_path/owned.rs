@@ -9,15 +9,19 @@
 use super::{binding, resolve_call, FunctionTypeResolver, JsonPathFunction, RoutineCallDescriptor};
 use crate::{
     ast::{FunctionBinding, FunctionDispatch},
-    plan::OwnedScalarExpr,
+    plan::{
+        retirement::{checkpoint, retire_produced_from},
+        OwnedScalarExpr, ScalarInputWork as Work,
+    },
+    schema::retention::CatalogRetentionError,
     type_resolution::{
         call::{Arguments, InferType},
-        FunctionBindingParts, OwnedBindingCall,
+        OwnedBindingCall,
     },
     ColumnType, SQLError, SQLParam, ScalarExpr,
 };
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionVec},
+    memory::{ProductionControl, ProductionVec},
     Value,
 };
 
@@ -83,6 +87,19 @@ pub(crate) fn normalize_retained_owned(
     expression: OwnedScalarExpr,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
+    Ok(crate::catalog::work::inline(
+        normalize_retained_owned_from(expression, control, &mut ()),
+    )?)
+}
+
+pub(crate) async fn normalize_retained_owned_from<W: Work>(
+    expression: OwnedScalarExpr,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<OwnedScalarExpr, W::Error>
+where
+    W::Error: From<SQLError> + Into<SQLError> + From<CatalogRetentionError>,
+{
     let ScalarExpr::Func {
         binding: Some(binding),
         ..
@@ -97,7 +114,7 @@ pub(crate) fn normalize_retained_owned(
     {
         return Ok(expression);
     }
-    let binding = binding.clone_with_control(control)?;
+    let binding = binding.clone_with_input_work(control, work).await?;
     let invocation = binding
         .invocation
         .as_ref()
@@ -105,11 +122,16 @@ pub(crate) fn normalize_retained_owned(
     let mut original = ProductionVec::new(*control);
     original.reserve(invocation.argument_sources.len())?;
     for source in &invocation.argument_sources {
+        checkpoint(control, work).await?;
         let parsed = match source.as_deref() {
-            Some(source) => match ColumnType::from_sql_name_with_control(source, control) {
+            Some(source) => match work
+                .parse_type(source, control)
+                .await
+                .map_err(Into::<SQLError>::into)
+            {
                 Ok(value) => Some(value),
                 Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                    return Err(error)
+                    return Err(error.into())
                 }
                 Err(_) => None,
             },
@@ -126,36 +148,70 @@ pub(crate) fn normalize_retained_owned(
         invocation.variadic_mode,
         crate::ast::RoutineVariadicMode::Explicit { .. }
     );
-    normalize(
-        OwnedBindingCall::new(expression, control)?,
+    let output = normalize_from(
+        OwnedBindingCall::new(expression, control).map_err(W::Error::from)?,
         &binding,
         &original,
         explicit,
         control,
+        work,
     )
-    .map(OwnedBindingCall::into_expression)
+    .await?
+    .into_expression();
+    retire_produced_from(original, control, work).await?;
+    retire_produced_from(binding, control, work).await?;
+    Ok(output)
 }
 
 fn normalize(
-    mut call: OwnedBindingCall,
+    call: OwnedBindingCall,
     binding: &FunctionBinding,
     original: &[Option<ColumnType>],
     explicit_variadic: bool,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedBindingCall, SQLError> {
+    Ok(crate::catalog::work::inline(normalize_from(
+        call,
+        binding,
+        original,
+        explicit_variadic,
+        control,
+        &mut (),
+    ))?)
+}
+
+async fn normalize_from<W: Work>(
+    mut call: OwnedBindingCall,
+    binding: &FunctionBinding,
+    original: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<OwnedBindingCall, W::Error>
+where
+    W::Error: From<SQLError> + Into<SQLError> + From<CatalogRetentionError>,
+{
     let entry = JsonPathFunction::lookup(&binding.name).expect("selected JSON path declaration");
-    let invocation = binding::invocation(
+    let invocation = binding::invocation_from(
         binding,
         call.arguments().len(),
         original.len(),
         explicit_variadic,
-    )?;
+        control,
+        work,
+    )
+    .await?;
     let mut document = None;
-    let mut paths = Arguments::new(call.arguments().len().saturating_sub(1), control)?;
+    let mut paths = Arguments::new(call.arguments().len().saturating_sub(1), control)
+        .map_err(W::Error::from)?;
     for (index, original) in original.iter().enumerate() {
-        let target =
-            ColumnType::from_sql_name_with_control(&invocation.argument_targets[index], control)?;
-        let value = crate::scalar_call_argument(&call.arguments()[index])?.value;
+        checkpoint(control, work).await?;
+        let target = work
+            .parse_type(&invocation.argument_targets[index], control)
+            .await?;
+        let value = crate::scalar_call_argument(&call.arguments()[index])
+            .map_err(W::Error::from)?
+            .value;
         let actual = match value {
             ScalarExpr::TypedLiteral {
                 bound_type: Some(ty),
@@ -163,71 +219,65 @@ fn normalize(
             } => Some(ty),
             _ => original.as_ref(),
         };
-        let needs_cast = actual != Some(&target)
+        let needs_cast = !matches_target(actual, &target, control, work).await?
             || matches!(
                 value,
                 ScalarExpr::Literal(Value::Str(_) | Value::Null) | ScalarExpr::Param(_)
             );
-        let (next, value) = call.take_argument(index, control)?;
+        let (next, value) = call.take_argument(index, control).map_err(W::Error::from)?;
         call = next;
-        let mut value = value.into_call_argument(control)?;
+        let mut value = value.into_call_argument_from(control, work).await?;
         if needs_cast {
             value = OwnedScalarExpr::cast(
                 value,
-                target.catalog_name_with_control(control)?,
+                work.type_name(&target, control).await?,
                 true,
                 control,
             )?;
         }
+        retire_produced_from(target, control, work).await?;
         if invocation.argument_positions[index] == 0 {
             document = Some(value);
         } else {
-            paths.push(value)?;
+            paths.push(value).map_err(W::Error::from)?;
         }
     }
     let path = if explicit_variadic {
-        paths.finish()?.select_child(0)
+        paths
+            .finish_from(false, work)
+            .await?
+            .select_child_from(0, control, work)
+            .await?
     } else {
-        paths.finish_array()?
+        paths.finish_from(true, work).await?
     };
-    let document =
-        document.ok_or_else(|| SQLError::Internal("JSON path input disappeared".into()))?;
-    let arguments = OwnedScalarExpr::boolean([document, path].into_iter(), false, control)?;
-    call = call.replace_arguments(arguments, control)?;
-    call.rebind(
-        normalized_binding(binding, entry.dispatch(), control)?,
-        control,
-    )
+    let document = document
+        .ok_or_else(|| W::Error::from(SQLError::Internal("JSON path input disappeared".into())))?;
+    let arguments =
+        OwnedScalarExpr::boolean_from([document, path].into_iter(), false, control, work).await?;
+    let binding = binding
+        .normalized_with_input_work(entry.dispatch(), control, work)
+        .await?;
+    call.replace_from(arguments, binding, control, work).await
 }
 
-fn normalized_binding(
-    binding: &FunctionBinding,
-    dispatch: FunctionDispatch,
+// Parsed SQL targets contain only array wrappers and built-in scalar leaves. Reuse scalar equality after walking those wrappers without recursive comparison.
+async fn matches_target<W: Work>(
+    actual: Option<&ColumnType>,
+    mut target: &ColumnType,
     control: &ProductionControl<'_>,
-) -> Result<Produced<FunctionBinding>, SQLError> {
-    let mut types = ProductionVec::new(*control);
-    types.reserve(binding.argument_types.len())?;
-    for name in &binding.argument_types {
-        types.push_produced(control.copy_text(name)?)?;
+    work: &mut W,
+) -> Result<bool, W::Error> {
+    let Some(mut actual) = actual else {
+        return Ok(false);
+    };
+    while let ColumnType::Array(target_child) = target {
+        checkpoint(control, work).await?;
+        let ColumnType::Array(actual_child) = actual else {
+            return Ok(false);
+        };
+        actual = actual_child;
+        target = target_child;
     }
-    FunctionBindingParts {
-        object_id: binding.object_id,
-        name: control.copy_text(&binding.name)?,
-        argument_types: types.finish()?,
-        builtin: binding.builtin,
-        dispatch: Some(dispatch),
-        invocation: None,
-        value_binding: binding
-            .value_binding
-            .as_deref()
-            .map(|value| crate::plan::copy::copy_syntax_with_control(value, control))
-            .transpose()?,
-        resolution_error: binding
-            .resolution_error
-            .as_deref()
-            .map(|error| crate::plan::copy::copy_syntax_with_control(error, control))
-            .transpose()?,
-        input_collation: binding.input_collation,
-    }
-    .finish(control)
+    Ok(actual == target)
 }
