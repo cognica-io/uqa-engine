@@ -11,6 +11,16 @@ use crate::{catalog::roles::RoleReference, plan::copy::Copying};
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl MutableCommandPlan {
+    pub(crate) fn mark_stored_cte_target_bound(
+        mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        self.command.mark_stored_cte_target_bound();
+        Ok(self)
+    }
+
     pub fn set_target_privilege_subject(
         mut self,
         subject: Produced<RoleReference>,

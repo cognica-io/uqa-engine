@@ -12,6 +12,25 @@ use super::{
 };
 
 impl CommandPlan {
+    /// A stored CTE mutation binds its own target before binding its query inputs.
+    pub(crate) fn mark_stored_cte_target_bound(&mut self) {
+        match self {
+            CommandPlan::Insert(plan) => {
+                plan.target_relation_bound = true;
+                plan.relations_bound = true;
+            }
+            CommandPlan::Update(plan) => {
+                plan.target_relation_bound = true;
+                plan.relations_bound = true;
+            }
+            CommandPlan::Delete(plan) => {
+                plan.target_relation_bound = true;
+                plan.relations_bound = true;
+            }
+            _ => {}
+        }
+    }
+
     /// WITH definitions owned by this command, in declaration order.
     pub fn ctes(&self) -> &[CtePlan] {
         match self {

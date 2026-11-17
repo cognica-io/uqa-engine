@@ -54,52 +54,19 @@ pub fn bind_stored_query_relations(
 ) -> Result<bool, SQLError> {
     let mut uses_temporary_relation = false;
     bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-        if catalog.lookup_mode == RelationLookupMode::Dynamic {
-            if let Some(canonical) = catalog
-                .relations
-                .resolve_age_label_relation_name(reference)?
-            {
-                return Ok(canonical);
-            }
-        }
-        if RelationIdentity::parse_reference(reference).is_ok_and(|(schema, relation)| {
-            schema.is_none() && catalog.transition_relations.contains(&relation)
-        }) {
-            if reject_transition_relations {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "transition tables cannot be referenced in a view definition".into(),
-                });
-            }
-            return Ok(reference.to_string());
-        }
-        let resolved = match (catalog.lookup_mode, loaded_catalog) {
-            (RelationLookupMode::Bound, _) => {
-                catalog.relations.resolve_bound_relation_kind(reference)?
-            }
-            (RelationLookupMode::Dynamic, true) => catalog
-                .relations
-                .resolve_loaded_visible_relation_kind(reference)?,
-            (RelationLookupMode::Dynamic, false) => {
-                catalog.relations.resolve_visible_relation_kind(reference)?
-            }
-        }
-        .into_found();
-        match resolved {
-            Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
-                uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
-                    .is_ok_and(|relation| relation.schema == catalog.temporary_schema);
-                Ok(canonical)
-            }
-            Some((canonical, "composite type")) => Err(composite_relation_error(&canonical)),
-            Some((canonical, kind)) => Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!(
-                    "{context} source \"{canonical}\" is a {kind}, not a row relation"
-                ),
-            }),
-            None => Err(SQLError::UnknownTable(reference.to_string())),
-        }
+        let (canonical, temporary) = catalog.canonical_relation_with_control(
+            reference,
+            context,
+            reject_transition_relations,
+            loaded_catalog,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
+        uses_temporary_relation |= temporary;
+        Ok::<_, SQLError>(
+            canonical
+                .into_uncontrolled()
+                .expect("ordinary stored binding"),
+        )
     })?;
     bind_query_plan_sequence_references(plan, &mut |reference| {
         let resolved = if loaded_catalog {
@@ -125,6 +92,8 @@ pub(super) fn composite_relation_error(canonical: &str) -> SQLError {
     }
     .error()
 }
+
+mod production;
 
 #[cfg(test)]
 mod tests;

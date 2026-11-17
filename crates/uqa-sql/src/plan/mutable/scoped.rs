@@ -11,12 +11,16 @@ use super::{
     MutableSourcePlan, QueryChildSlot, SourceChildSlot,
 };
 use crate::{
+    binding::production::BindingMap,
     plan::{CommandPlan, CtePlan, RelationalPlan, SourcePlan},
     SQLError,
 };
-use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
+use uqa_core::memory::ProductionControl;
 
 pub trait OwnedScopedPlanVisitor {
+    fn query_complete(&mut self, query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
+        Ok(query)
+    }
     fn command(
         &mut self,
         command: MutableCommandPlan,
@@ -39,19 +43,28 @@ impl MutableExecutablePlan {
         control: &ProductionControl<'_>,
         visitor: &mut dyn OwnedScopedPlanVisitor,
     ) -> Result<Self, SQLError> {
-        plan(self, &|_| false, visitor, control)
+        self.visit_scoped_in(control, &|_| false, visitor)
+    }
+
+    pub(crate) fn visit_scoped_in(
+        self,
+        control: &ProductionControl<'_>,
+        outer: &dyn Fn(&str) -> bool,
+        visitor: &mut dyn OwnedScopedPlanVisitor,
+    ) -> Result<Self, SQLError> {
+        plan(self, outer, visitor, control)
     }
 }
 
-fn names(
-    ctes: &[CtePlan],
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<String>>, SQLError> {
-    let mut names = ProductionVec::new(*control);
-    for cte in ctes {
-        names.push_produced(control.copy_text(&cte.name)?)?;
+fn names(ctes: &[CtePlan], control: &ProductionControl<'_>) -> Result<BindingMap<usize>, SQLError> {
+    let mut names = BindingMap::new();
+    for (position, cte) in ctes.iter().enumerate() {
+        control.check()?;
+        if !names.contains_key(&cte.name) {
+            names.insert_with_control(&cte.name, position, control)?;
+        }
     }
-    Ok(names.finish()?)
+    Ok(names)
 }
 fn plan(
     input: MutableExecutablePlan,
@@ -78,18 +91,18 @@ fn query(
     control.check()?;
     let names = names(&input.ctes, control)?;
     let recursive = input.ctes.iter().any(|cte| cte.recursive);
-    for index in 0..names.len() {
+    for index in 0..input.ctes.len() {
         let visible = |name: &str| {
-            names[..if recursive { names.len() } else { index }]
-                .iter()
-                .any(|candidate| candidate == name)
+            names
+                .get(name)
+                .is_some_and(|position| recursive || *position < index)
                 || outer(name)
         };
         input = input.map_cte(index, control, |body| {
             plan(body, &visible, visitor, control)
         })?;
     }
-    let visible = |name: &str| names.iter().any(|candidate| candidate == name) || outer(name);
+    let visible = |name: &str| names.contains_key(name) || outer(name);
     match &input.root {
         RelationalPlan::QueryBlock(_) => {
             input = input.map_source(control, |input| source(input, &visible, visitor, control))?;
@@ -115,7 +128,7 @@ fn query(
             query(input, &visible, visitor, control)
         })?;
     }
-    Ok(input)
+    visitor.query_complete(input)
 }
 fn source(
     input: MutableSourcePlan,
@@ -230,18 +243,18 @@ fn command(
     }
     let names = names(input.ctes(), control)?;
     let recursive = input.ctes().iter().any(|cte| cte.recursive);
-    for index in 0..names.len() {
+    for index in 0..input.ctes().len() {
         let visible = |name: &str| {
-            names[..if recursive { names.len() } else { index }]
-                .iter()
-                .any(|candidate| candidate == name)
+            names
+                .get(name)
+                .is_some_and(|position| recursive || *position < index)
                 || outer(name)
         };
         input = input.map_cte(index, control, |body| {
             plan(body, &visible, visitor, control)
         })?;
     }
-    let visible = |name: &str| names.iter().any(|candidate| candidate == name) || outer(name);
+    let visible = |name: &str| names.contains_key(name) || outer(name);
     input = input.map_source(control, |input| source(input, &visible, visitor, control))?;
     if matches!(&*input,CommandPlan::Insert(insert) if insert.source.is_some()) {
         input = input.map_query_child(CommandQuerySlot::InsertSource, control, |input| {

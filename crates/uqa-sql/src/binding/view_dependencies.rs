@@ -13,7 +13,9 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+mod owned;
 mod references;
+pub(crate) use owned::bind_query_relation_targets_owned;
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
     visit_stored_plan_relation_references,
@@ -691,21 +693,7 @@ fn bind_cte_relation_targets<E>(
     if let Some(target) = command.mutation_target_mut() {
         *target = resolve(target, include_descendants)?;
     }
-    match command.as_mut() {
-        crate::plan::CommandPlan::Insert(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        crate::plan::CommandPlan::Update(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        crate::plan::CommandPlan::Delete(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        _ => {}
-    }
+    command.mark_stored_cte_target_bound();
     let mut visible = inherited.clone();
     if let Some(ctes) = command.ctes_mut() {
         let recursive = ctes.iter().any(|cte| cte.recursive).then(|| {

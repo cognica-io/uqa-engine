@@ -72204,6 +72204,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_name_selection_shares_lookup_modes_and_original_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind stored source names across dynamic/bound and loaded/live catalogs, transition visibility, quoted names, temporary schemas and relation kinds.",
+      "invariant": "Preserve canonical names, temporary-source flags, callback route, SQLSTATE and diagnostics while the returned name owns exactly its admitted buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_name_selection_transfers_the_catalog_lease_and_rejects_cancelled_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Transfer a controlled catalog name, cancel before selection and deny each insufficient destination allowance.",
+      "invariant": "Retain the original catalog buffer and reservation without recopying; cancelled work makes no callback and failure preserves sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_binding_finishes_relation_resolution_before_sequence_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind CTE and enclosing relation sources before a failing sequence reference; fail an earlier relation separately.",
+      "invariant": "Preserve the complete relation pass before sequence resolution and the first observable catalog failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_binding_preserves_cte_scopes_mutations_and_source_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind owned recursive/nonrecursive CTEs, INSERT/UPDATE/DELETE bodies, set operations, scalar arenas, function sources and temporary relations.",
+      "invariant": "Reuse scoped traversal and source replacements, preserving full plans, target flags, callback order and exact remaining field reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_failure_releases_completed_fields_without_sibling_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Fail a later relation after successful CTE, mutation and set-operation source replacements.",
+      "invariant": "Return the ordinary first diagnostic and release completed private source fields while unrelated reservations remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_admission_retires_partial_names_and_keeps_other_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Sweep 512 destination allowances after constructing an owned CTE and JOIN query, preserving two independent reservations.",
+      "invariant": "Reject unadmitted field and lexical-name buffers, release each failed or completed private result completely and preserve the original source.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

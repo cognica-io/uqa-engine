@@ -8,6 +8,8 @@ use super::*;
 use crate::{catalog::resolution::RelationResolution, plan::UnifiedPlan};
 use std::cell::RefCell;
 
+mod production;
+
 #[derive(Default)]
 struct Catalog {
     bound: RefCell<Vec<String>>,
