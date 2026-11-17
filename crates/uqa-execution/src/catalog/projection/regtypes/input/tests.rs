@@ -52,7 +52,7 @@ fn ordinary(
     ty: &ColumnType,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    use super::super as regtypes;
+    use crate::catalog::projection::regtypes;
     match ty {
         ColumnType::Regclass => regtypes::resolve_regclass_oid(context, name),
         ColumnType::Regtype => regtypes::resolve_regtype_oid(context, name),
