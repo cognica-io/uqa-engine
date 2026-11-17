@@ -9,18 +9,20 @@
 use super::super::analysis::QueryObserver;
 use super::super::{
     nodes, CommandQuerySlot, MutableExecutablePlan, MutableQueryPlan, OwnedScalarExpr,
-    QueryChildSlot, RewriteMemory, SourceChildSlot,
+    QueryChildSlot, RewriteMemory,
 };
 use super::owner::ScalarQueryArena;
+use crate::catalog::work::inline;
 use crate::{
-    plan::{
-        CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, QueryPlan, RelationalPlan, SourcePlan,
-        UnifiedPlan,
-    },
+    plan::{CommandPlan, ExpressionPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
     SQLError, ScalarExpr,
 };
+use input::{Immediate, Input};
+use nodes::transformation::{ctes_from, input::checkpoint};
 use std::ptr::NonNull;
 use uqa_core::memory::ProductionControl;
+
+mod input;
 
 pub type ScalarArenaTransform<'a> = dyn FnMut(
         NonNull<ScalarExpr>,
@@ -57,19 +59,19 @@ impl MutableExecutablePlan {
         transform: &mut ScalarArenaTransform<'_>,
         complete: &mut QueryObserver<'_>,
     ) -> Result<(), SQLError> {
+        let mut input = Immediate::new(transform, complete);
         let mut walker = Walker {
             control,
-            transform,
-            complete,
+            input: &mut input,
         };
         match self {
             Self::Query(query) => {
                 query.assert_owner(control);
-                walker.query(&mut query.query, query.memory.as_mut())
+                inline(walker.query(&mut query.query, query.memory.as_mut()))
             }
             Self::Command(command) => {
                 command.assert_owner(control);
-                walker.command(&mut command.command, command.memory.as_mut())
+                inline(walker.command(&mut command.command, command.memory.as_mut()))
             }
         }
     }
@@ -90,10 +92,9 @@ impl MutableQueryPlan {
     }
 }
 
-struct Walker<'a, 'c, 't, 'q> {
+struct Walker<'a, 'c, I> {
     control: &'a ProductionControl<'c>,
-    transform: &'a mut ScalarArenaTransform<'t>,
-    complete: &'a mut QueryObserver<'q>,
+    input: &'a mut I,
 }
 
 fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
@@ -114,42 +115,61 @@ fn item(memory: Option<&mut RewriteMemory>, index: usize) -> Option<&mut Rewrite
     })
 }
 
-impl Walker<'_, '_, '_, '_> {
-    fn executable(
+fn field_slot<'a>(
+    memory: Option<&'a mut RewriteMemory>,
+    name: &str,
+) -> Option<&'a mut Option<RewriteMemory>> {
+    memory.map(|memory| memory.field_mut(name))
+}
+
+impl<I: Input> Walker<'_, '_, I> {
+    async fn executable(
         &mut self,
         plan: &mut UnifiedPlan,
         memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
         match plan {
-            UnifiedPlan::Query(query) => self.query(query, field(memory, "query")),
-            UnifiedPlan::Command(command) => self.command(command, field(memory, "command")),
+            UnifiedPlan::Query(query) => {
+                self.input
+                    .query(query, field_slot(memory, "query"), self.control)?
+                    .await
+            }
+            UnifiedPlan::Command(command) => {
+                self.input
+                    .command(command, field_slot(memory, "command"), self.control)?
+                    .await
+            }
         }
     }
 
-    fn query(
+    async fn query(
         &mut self,
         query: &mut QueryPlan,
         mut memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
-        self.control.check()?;
-        self.ctes(&mut query.ctes, field(memory.as_deref_mut(), "ctes"))?;
+        checkpoint(self.control, self.input).await?;
+        ctes_from(
+            &mut query.ctes,
+            field(memory.as_deref_mut(), "ctes"),
+            self.control,
+            self.input,
+        )
+        .await?;
         match &mut query.root {
             RelationalPlan::QueryBlock(block) => {
                 if let Some(source) = &mut block.from {
-                    let owner = memory.as_deref_mut().map(|memory| {
-                        super::super::sources::query_source_memory(memory)
-                            .as_mut()
-                            .expect("query source")
-                    });
-                    self.source_children(source, owner)?;
+                    let owner = memory
+                        .as_deref_mut()
+                        .map(super::super::sources::query_source_memory);
+                    self.input.source(source, owner, self.control)?.await?;
                 }
             }
             RelationalPlan::SetOp { .. } => {
                 for slot in [QueryChildSlot::Left, QueryChildSlot::Right] {
-                    let owner = memory
-                        .as_deref_mut()
-                        .map(|memory| slot.memory_mut(memory).as_mut().expect("set query"));
-                    self.query(slot.query_mut(query), owner)?;
+                    let owner = memory.as_deref_mut().map(|memory| slot.memory_mut(memory));
+                    self.input
+                        .query(slot.query_mut(query), owner, self.control)?
+                        .await?;
                 }
             }
             RelationalPlan::Values { .. } => {}
@@ -157,152 +177,69 @@ impl Walker<'_, '_, '_, '_> {
         let count = query_arena(&mut query.root).len();
         for index in 0..count {
             let slot = QueryChildSlot::Subquery(index);
-            let owner = memory
-                .as_deref_mut()
-                .map(|memory| slot.memory_mut(memory).as_mut().expect("scalar query"));
-            self.query(slot.query_mut(query), owner)?;
+            let owner = memory.as_deref_mut().map(|memory| slot.memory_mut(memory));
+            self.input
+                .query(slot.query_mut(query), owner, self.control)?
+                .await?;
         }
-        let mut arena = ScalarQueryArena {
+        self.input.enter_arena(ScalarQueryArena {
             queries: std::mem::take(query_arena(&mut query.root)),
             memory: memory
                 .as_deref_mut()
                 .and_then(|memory| query_memory(memory).take()),
-        };
-        let control = self.control;
-        let transform = &mut self.transform;
-        let mut action = |expression: &mut ScalarExpr,
-                          memory: Option<&mut nodes::ScalarMemory>,
-                          control: &ProductionControl<'_>| {
-            OwnedScalarExpr::transform_nodes_in_place(
-                expression,
-                memory,
-                control,
-                &mut |identity, expression| transform(identity, expression, &mut arena),
-            )
-        };
+        });
         if let RelationalPlan::QueryBlock(block) = &mut query.root {
             if let Some(source) = &mut block.from {
-                let owner = memory.as_deref_mut().map(|memory| {
-                    super::super::sources::query_source_memory(memory)
-                        .as_mut()
-                        .expect("query source")
-                });
-                nodes::local_source(source, owner, control, &mut action)?;
+                let owner = memory
+                    .as_deref_mut()
+                    .map(super::super::sources::query_source_memory);
+                self.input
+                    .local_source(source, owner, self.control)?
+                    .await?;
             }
         }
-        nodes::query_scalars(query, memory.as_deref_mut(), false, control, &mut action)?;
+        nodes::roots::query(
+            query,
+            memory.as_deref_mut(),
+            nodes::roots::QueryScope::Local,
+            self.control,
+            self.input,
+        )
+        .await?;
+        let arena = self.input.leave_arena();
         *query_arena(&mut query.root) = arena.queries;
         if let Some(memory) = memory.as_deref_mut() {
             *query_memory(memory) = arena.memory;
         }
-        (self.complete)(query)?.install(query, memory, control)
+        self.input.complete(query, memory, self.control).await
     }
 
-    fn source_children(
-        &mut self,
-        source: &mut SourcePlan,
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.control.check()?;
-        match source {
-            SourcePlan::Join { left, right, .. } => {
-                self.source_children(
-                    left,
-                    memory.as_deref_mut().map(|memory| {
-                        SourceChildSlot::Left
-                            .memory_mut(memory)
-                            .as_mut()
-                            .expect("left source")
-                    }),
-                )?;
-                self.source_children(
-                    right,
-                    memory.map(|memory| {
-                        SourceChildSlot::Right
-                            .memory_mut(memory)
-                            .as_mut()
-                            .expect("right source")
-                    }),
-                )?;
-            }
-            SourcePlan::Subquery { body, .. } => {
-                self.query(body, field(field(memory, "body"), "query"))?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn ctes(
-        &mut self,
-        ctes: &mut [CtePlan],
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        for (index, cte) in ctes.iter_mut().enumerate() {
-            self.control.check()?;
-            let mut owner = item(memory.as_deref_mut(), index);
-            let body = field(owner.as_deref_mut(), "body");
-            match &mut cte.body {
-                CtePlanBody::Query(query) => self.query(query, field(body, "query"))?,
-                CtePlanBody::Command(command) => self.command(command, field(body, "command"))?,
-            }
-            if let Some(cycle) = &mut cte.cycle {
-                let mut owner = field(owner, "cycle");
-                self.scalar_without_arena(
-                    &mut cycle.mark_value,
-                    field(owner.as_deref_mut(), "mark_value"),
-                )?;
-                self.scalar_without_arena(&mut cycle.mark_default, field(owner, "mark_default"))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn scalar_without_arena(
-        &mut self,
-        expression: &mut ScalarExpr,
-        memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        let mut arena = ScalarQueryArena {
-            queries: Vec::new(),
-            memory: None,
-        };
-        let memory = memory.map(|memory| nodes::scalar_memory(memory.scalar_mut()));
-        OwnedScalarExpr::transform_nodes_in_place(
-            expression,
-            memory,
-            self.control,
-            &mut |identity, expression| (self.transform)(identity, expression, &mut arena),
-        )
-    }
-
-    fn expression(
+    async fn expression(
         &mut self,
         expression: &mut ExpressionPlan,
         mut memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
         for (index, query) in expression.subqueries.iter_mut().enumerate() {
-            let owner = field(
+            let owner = field_slot(
                 item(field(memory.as_deref_mut(), "subqueries"), index),
                 "query",
             );
-            self.query(query, owner)?;
+            self.input.query(query, owner, self.control)?.await?;
         }
-        let mut arena = ScalarQueryArena {
+        self.input.enter_arena(ScalarQueryArena {
             queries: std::mem::take(&mut expression.subqueries),
             memory: memory
                 .as_deref_mut()
                 .and_then(|memory| memory.field_mut("subqueries").take()),
-        };
-        let owner = memory
-            .as_deref_mut()
-            .map(|memory| nodes::scalar_memory(memory.scalar_mut()));
-        OwnedScalarExpr::transform_nodes_in_place(
-            &mut expression.scalar,
-            owner,
-            self.control,
-            &mut |identity, expression| (self.transform)(identity, expression, &mut arena),
-        )?;
+        });
+        self.input
+            .scalar(
+                &mut expression.scalar,
+                memory.as_deref_mut().map(|memory| memory.scalar_mut()),
+                self.control,
+            )
+            .await?;
+        let arena = self.input.leave_arena();
         expression.subqueries = arena.queries;
         if let Some(memory) = memory {
             *memory.field_mut("subqueries") = arena.memory;
@@ -310,39 +247,45 @@ impl Walker<'_, '_, '_, '_> {
         Ok(())
     }
 
-    fn command(
+    async fn command(
         &mut self,
         command: &mut CommandPlan,
         mut memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
-        self.control.check()?;
+        checkpoint(self.control, self.input).await?;
         if let Some(ctes) = command.ctes_mut() {
-            self.ctes(ctes, field(field(memory.as_deref_mut(), "value0"), "ctes"))?;
+            ctes_from(
+                ctes,
+                field(field(memory.as_deref_mut(), "value0"), "ctes"),
+                self.control,
+                self.input,
+            )
+            .await?;
         }
         if let Some(source) = command.source_input_mut() {
-            let owner = memory.as_deref_mut().map(|memory| {
-                super::super::commands::children::source_memory(memory)
-                    .as_mut()
-                    .expect("command source")
-            });
-            self.source_children(source, owner)?;
+            let owner = memory
+                .as_deref_mut()
+                .map(super::super::commands::children::source_memory);
+            self.input.source(source, owner, self.control)?.await?;
         }
         if matches!(command, CommandPlan::Insert(_)) {
             self.command_query(
                 command,
                 memory.as_deref_mut(),
                 CommandQuerySlot::InsertSource,
-            )?;
+            )
+            .await?;
         }
         for index in 0..command.scalar_subqueries().len() {
             self.command_query(
                 command,
                 memory.as_deref_mut(),
                 CommandQuerySlot::Subquery(index),
-            )?;
+            )
+            .await?;
         }
         if let Some(queries) = command_arena(command) {
-            let mut arena = ScalarQueryArena {
+            self.input.enter_arena(ScalarQueryArena {
                 queries: std::mem::take(queries),
                 memory: memory.as_deref_mut().and_then(|memory| {
                     field(Some(memory), "value0")
@@ -350,24 +293,24 @@ impl Walker<'_, '_, '_, '_> {
                         .field_mut("subqueries")
                         .take()
                 }),
-            };
-            let control = self.control;
-            let transform = &mut self.transform;
-            let mut local = |identity, expression| transform(identity, expression, &mut arena);
-            super::super::commands::transformation::transform_local_command(
+            });
+            super::super::commands::transformation::command_from(
                 command,
                 memory.as_deref_mut(),
-                control,
-                &mut local,
-            )?;
+                self.control,
+                self.input,
+                false,
+            )
+            .await?;
             if let Some(source) = command.source_input_mut() {
-                let owner = memory.as_deref_mut().map(|memory| {
-                    super::super::commands::children::source_memory(memory)
-                        .as_mut()
-                        .expect("command source")
-                });
-                nodes::transform_local_source(source, owner, control, &mut local)?;
+                let owner = memory
+                    .as_deref_mut()
+                    .map(super::super::commands::children::source_memory);
+                self.input
+                    .local_source(source, owner, self.control)?
+                    .await?;
             }
+            let arena = self.input.leave_arena();
             *command_arena(command).expect("mutation arena") = arena.queries;
             if let Some(memory) = memory {
                 *field(Some(memory), "value0")
@@ -381,41 +324,48 @@ impl Walker<'_, '_, '_, '_> {
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
-                self.query(query, field(field(memory, "query"), "query"))?;
+                self.input
+                    .query(
+                        query,
+                        field_slot(field(memory, "query"), "query"),
+                        self.control,
+                    )?
+                    .await?;
             }
             CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
-                self.executable(body, field(memory, "body"))?;
+                self.executable(body, field(memory, "body")).await?;
             }
-            CommandPlan::Call { args, .. } => self.expressions(args, field(memory, "args"))?,
+            CommandPlan::Call { args, .. } => self.expressions(args, field(memory, "args")).await?,
             CommandPlan::Execute { params, .. } => {
-                self.expressions(params, field(memory, "params"))?;
+                self.expressions(params, field(memory, "params")).await?;
             }
             _ => {}
         }
         Ok(())
     }
 
-    fn command_query(
+    async fn command_query(
         &mut self,
         command: &mut CommandPlan,
         memory: Option<&mut RewriteMemory>,
         slot: CommandQuerySlot,
     ) -> Result<(), SQLError> {
         if let Some(query) = slot.query_mut(command) {
-            let owner =
-                memory.map(|memory| slot.memory_mut(memory).as_mut().expect("command query"));
-            self.query(query, owner)?;
+            let owner = memory.map(|memory| slot.memory_mut(memory));
+            self.input.query(query, owner, self.control)?.await?;
         }
         Ok(())
     }
 
-    fn expressions(
+    async fn expressions(
         &mut self,
         expressions: &mut [ExpressionPlan],
         mut memory: Option<&mut RewriteMemory>,
     ) -> Result<(), SQLError> {
         for (index, expression) in expressions.iter_mut().enumerate() {
-            self.expression(expression, item(memory.as_deref_mut(), index))?;
+            checkpoint(self.control, self.input).await?;
+            self.expression(expression, item(memory.as_deref_mut(), index))
+                .await?;
         }
         Ok(())
     }

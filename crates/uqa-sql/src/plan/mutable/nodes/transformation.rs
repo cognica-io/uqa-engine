@@ -144,6 +144,16 @@ pub(in crate::plan::mutable) async fn source_from<I: Input>(
     control: &ProductionControl<'_>,
     input: &mut I,
 ) -> Result<(), SQLError> {
+    source_children_from(source, memory.as_deref_mut(), control, input).await?;
+    super::roots::source(source, memory, control, input).await
+}
+
+pub(in crate::plan::mutable) async fn source_children_from<I: Input>(
+    source: &mut SourcePlan,
+    mut memory: Option<&mut RewriteMemory>,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
     checkpoint(control, input).await?;
     match source {
         SourcePlan::Join { left, right, .. } => {
@@ -178,7 +188,7 @@ pub(in crate::plan::mutable) async fn source_from<I: Input>(
         }
         _ => {}
     }
-    super::roots::source(source, memory, control, input).await
+    Ok(())
 }
 
 pub(in crate::plan::mutable) async fn ctes_from<I: Input>(
@@ -217,7 +227,9 @@ pub(in crate::plan::mutable) async fn ctes_from<I: Input>(
                     .expect("cycle mark")
                     .scalar_mut()
             });
-            input.scalar(&mut cycle.mark_value, mark, control).await?;
+            input
+                .standalone_scalar(&mut cycle.mark_value, mark, control)
+                .await?;
             let default = cycle_memory.as_mut().map(|memory| {
                 memory
                     .field_mut("mark_default")
@@ -226,7 +238,7 @@ pub(in crate::plan::mutable) async fn ctes_from<I: Input>(
                     .scalar_mut()
             });
             input
-                .scalar(&mut cycle.mark_default, default, control)
+                .standalone_scalar(&mut cycle.mark_default, default, control)
                 .await?;
         }
     }

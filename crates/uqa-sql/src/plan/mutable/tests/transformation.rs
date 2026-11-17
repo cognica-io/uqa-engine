@@ -30,7 +30,7 @@ fn command_scalar_transforms_follow_original_postorder_and_owner_wrappers() {
         let source = reference.clone();
         let mut expected = Vec::new();
         reference.rewrite_scalar_expressions(&mut |node| {
-            expected.push(serde_json::to_value(node).unwrap())
+            expected.push(serde_json::to_value(node).unwrap());
         });
         let budget = MemoryBudget::new(8 * 1024 * 1024);
         let token = CancellationToken::new();
@@ -151,6 +151,77 @@ fn scalar_arena_edits_keep_mutation_roots_separate_from_detached_query_owners() 
             assert_eq!(budget.used(), 0);
         }
     }
+}
+
+#[test]
+fn scalar_arena_edits_finish_ctes_and_nested_queries_before_copying_parent_occurrences() {
+    let source = UnifiedPlan::lower(
+        crate::compile(
+            "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n FROM c) \
+             CYCLE n SET cycle_mark TO 2 DEFAULT 3 USING path \
+             SELECT (SELECT 4) FROM (SELECT 5 AS n) l JOIN (SELECT 7 AS n) r ON 6 = 6 WHERE 8 = 8",
+        )
+        .unwrap()
+        .remove(0),
+    );
+    let budget = MemoryBudget::new(8 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut input = source.copy_for_rewrite(&control).unwrap();
+    let events = std::cell::RefCell::new(Vec::new());
+    input
+        .transform_scalar_arenas_with_metadata(
+            &control,
+            &mut |_, node, arena| {
+                if let ScalarExpr::Literal(Value::Int(value)) = &*node {
+                    events.borrow_mut().push(*value);
+                    if matches!(value, 2 | 3) {
+                        assert!(arena.queries().is_empty(), "CYCLE scalar scope");
+                    }
+                }
+                if matches!(&*node, ScalarExpr::ScalarSubquery(_)) {
+                    assert!(events.borrow().contains(&-4), "child metadata is complete");
+                    return arena.copy_subquery_occurrences(node, &control);
+                }
+                Ok(node)
+            },
+            &mut |query| {
+                let value = match &query.root {
+                    RelationalPlan::QueryBlock(block) => match &block.projections[0].expr {
+                        ScalarExpr::Literal(Value::Int(value)) => -*value,
+                        _ => 0,
+                    },
+                    RelationalPlan::SetOp { .. } => -10,
+                    RelationalPlan::Values { .. } => panic!("query block or set operation"),
+                };
+                events.borrow_mut().push(value);
+                Ok(crate::plan::QueryMetadataUpdate::default())
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        *events.borrow(),
+        [1, -1, 0, -10, 2, 3, 5, -5, 7, -7, 4, -4, 6, 6, 8, 8, 0]
+    );
+    assert_eq!(input.reserved_bytes(), budget.used());
+    let output = input.finish(&control).unwrap();
+    let UnifiedPlan::Query(query) = &*output else {
+        panic!("query")
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("query block")
+    };
+    assert!(matches!(
+        block.projections[0].expr,
+        ScalarExpr::ScalarSubquery(1)
+    ));
+    assert_eq!(block.subqueries.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&block.subqueries[0]).unwrap(),
+        serde_json::to_value(&block.subqueries[1]).unwrap()
+    );
+    drop(output);
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]

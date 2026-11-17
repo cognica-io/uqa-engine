@@ -92,22 +92,6 @@ pub(in crate::plan::mutable) fn transform_command(
     ))
 }
 
-/// The caller owns nested arenas and local source ordering; visit only this command's direct mutation roots.
-pub(in crate::plan::mutable) fn transform_local_command(
-    command: &mut CommandPlan,
-    memory: Option<&mut RewriteMemory>,
-    control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
-) -> Result<(), SQLError> {
-    crate::catalog::work::inline(command_from(
-        command,
-        memory,
-        control,
-        &mut Immediate::new(transform),
-        false,
-    ))
-}
-
 fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
     memory.map(|memory| {
         memory

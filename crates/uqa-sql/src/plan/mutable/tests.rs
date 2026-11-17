@@ -14,6 +14,7 @@ mod construction;
 mod executable_bodies;
 mod projections;
 mod query_visitation;
+mod transformation;
 mod traversal;
 mod vectors;
 

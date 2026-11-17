@@ -66,7 +66,7 @@ impl Input for Immediate<'_, '_> {
     }
 }
 
-async fn checkpoint<I: Input>(
+pub(in crate::plan::mutable) async fn checkpoint<I: Input>(
     control: &ProductionControl<'_>,
     input: &mut I,
 ) -> Result<(), SQLError> {

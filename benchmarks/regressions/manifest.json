@@ -73435,6 +73435,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_scalar_transforms_follow_original_postorder_and_owner_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Visit scalar roots in 13 mutation and utility statements.",
+      "invariant": "Callbacks preserve the original postorder and finished statements retain their original serialized plans and exact constructor reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_scalar_replacements_release_retired_payloads_and_all_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Replace long string payloads inside a nested UPDATE, then inject failure, either cancellation token and unwinding.",
+      "invariant": "Live allocation changes match retained reservations; every unsuccessful path releases all constructor ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_arena_edits_keep_mutation_roots_separate_from_detached_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Visit 13 mutation and utility statements through both copied and borrowed lowering owners.",
+      "invariant": "No-op arena edits allocate nothing, preserve the complete statement and retain exactly the original live reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_arena_edits_finish_ctes_and_nested_queries_before_copying_parent_occurrences",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Complete a recursive CTE and CYCLE marks, two derived sources, a scalar subquery and parent JOIN and WHERE expressions.",
+      "invariant": "The explicit callback order completes child metadata before copying a query occurrence, isolates CYCLE scalar namespaces and retains the original constructor reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_mutation_arena_edits_release_detached_queries_and_remaining_command_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Fail or cancel an IN expression in DELETE with a separate RETURNING subquery, including unwinding.",
+      "invariant": "Every detached query and remaining command allocation is released while an independent sibling reservation survives.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

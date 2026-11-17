@@ -8,7 +8,7 @@
 
 use super::{query_from, source_from};
 use crate::{
-    catalog::work::{inline, Work},
+    catalog::work::inline,
     plan::{
         mutable::{
             commands::transformation::command_from,
@@ -26,6 +26,14 @@ use uqa_core::memory::ProductionControl;
 type Result<T> = std::result::Result<T, SQLError>;
 
 pub(in crate::plan::mutable) trait Input: roots::Input {
+    fn standalone_scalar(
+        &mut self,
+        expression: &mut ScalarExpr,
+        memory: Option<&mut Option<ScalarMemory>>,
+        control: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        self.scalar(expression, memory, control)
+    }
     fn query<'v>(
         &mut self,
         value: &'v mut QueryPlan,
@@ -51,15 +59,7 @@ pub(in crate::plan::mutable) trait Input: roots::Input {
     ) -> Result<impl Future<Output = Result<()>> + Send>;
 }
 
-pub(in crate::plan::mutable) async fn checkpoint<I: Input>(
-    control: &ProductionControl<'_>,
-    input: &mut I,
-) -> Result<()> {
-    control.check()?;
-    input.work().checkpoint().await?;
-    control.check()?;
-    Ok(())
-}
+pub(in crate::plan::mutable) use roots::checkpoint;
 
 pub(in crate::plan::mutable) struct Immediate<'a, 'b> {
     transform: &'a mut ScalarNodeTransform<'b>,
