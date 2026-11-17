@@ -6,6 +6,8 @@
 
 //! Expression-kind restrictions at the ordered SQL binding boundary.
 
+use crate::binding::preparation::LiteralInput;
+
 use super::{error, Preparation, RowSchema, SQLError, ScalarExpr};
 use crate::ast::FunctionBinding;
 use crate::plan::AggregateClassifier;
@@ -42,10 +44,27 @@ pub(super) struct SchemaExpressionContext<'a> {
     pub(super) kind: SchemaExpressionKind,
 }
 
-impl Preparation<'_> {
+pub(super) trait SchemaContext {
+    fn schema_expression(&self) -> Option<SchemaExpressionContext<'_>>;
+}
+
+impl SchemaContext for Option<SchemaExpressionContext<'_>> {
+    fn schema_expression(&self) -> Option<SchemaExpressionContext<'_>> {
+        *self
+    }
+}
+
+impl SchemaContext for () {
+    fn schema_expression(&self) -> Option<SchemaExpressionContext<'_>> {
+        None
+    }
+}
+
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn check_schema_column(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
         if !self
             .schema_expression
+            .schema_expression()
             .is_some_and(|context| matches!(context.kind, SchemaExpressionKind::TableCheck))
         {
             return Ok(());
@@ -66,7 +85,7 @@ impl Preparation<'_> {
     }
 
     pub(super) fn check_schema_subquery(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        let Some(context) = self.schema_expression else {
+        let Some(context) = self.schema_expression.schema_expression() else {
             return Ok(());
         };
         if matches!(
@@ -89,7 +108,7 @@ impl Preparation<'_> {
         call: (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),
         input: &RowSchema,
     ) -> Result<(), SQLError> {
-        let Some(context) = self.schema_expression else {
+        let Some(context) = self.schema_expression.schema_expression() else {
             return Ok(());
         };
         super::super::analysis::validate_window_function(
@@ -115,7 +134,7 @@ impl Preparation<'_> {
         selected: Option<&FunctionBinding>,
         input: &RowSchema,
     ) -> Result<(), SQLError> {
-        let Some(context) = self.schema_expression else {
+        let Some(context) = self.schema_expression.schema_expression() else {
             return Ok(());
         };
         let ScalarExpr::Func { name, args, .. } = expression else {

@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -72691,6 +72691,32 @@
       "capability": "Prepared input ownership",
       "workload": "Abandon transferred parameter observations or fail application through either cancellation owner and denied alias admission.",
       "invariant": "Retire all captured values and map storage while preserving the original input and an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_analysis_state_transfers_with_its_original_scopes_and_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine analysis ownership",
+      "workload": "Transfer complete routine reference analysis to a worker and return its populated state across eight query and mutation shapes, then apply it to the stationary original plan.",
+      "invariant": "Row and parameter scopes, complete output syntax, labels and canonical window specifications match ordinary binding; analysis and output reservations retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferred_routine_analysis_retires_partial_state_without_changing_its_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine analysis ownership",
+      "workload": "Transfer a partially populated routine analysis owner before abandonment, original cancellation, invoking cancellation and denied admission.",
+      "invariant": "Both cancellation owners retain SQLSTATE 57014, denied admission retains 53200, the original plan is unchanged and independent reservations remain live.",
       "case_names": [
         ""
       ]

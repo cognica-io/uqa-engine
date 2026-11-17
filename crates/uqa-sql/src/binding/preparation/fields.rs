@@ -6,6 +6,8 @@
 
 //! Declared field results reuse the original argument analysis and the selected attribute metadata.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::function_calls::ObservedFunctionArguments;
 use super::{ColumnType, ExpressionType, Preparation, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, FunctionDispatch};
@@ -51,7 +53,7 @@ pub(super) fn whole_row_descriptor(
     )
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn declared_field_selection(
         &self,
         binding: Option<&FunctionBinding>,

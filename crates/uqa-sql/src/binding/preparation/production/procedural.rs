@@ -6,6 +6,8 @@
 
 //! Reached procedural statements retain converted inputs and selected dependencies in their own executable destination.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{
     include_plan_dependencies, retain_input_metadata_owned, AnalyzedResult, ColumnType,
     ControlledBindingContext, MutableExecutablePlan, OidAliasInput, ParameterTypes, PlanRef,
@@ -242,15 +244,15 @@ fn routine_parameter_references(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
-        schema_expression: None,
+        schema_expression: (),
     };
     analysis.observe_routine_parameter_references(plan, parameters.schema())?;
     Ok(analysis.parameters.take_reference_constants())
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Parameter binding follows statement namespaces without selecting the calls that later statement analysis owns.
-    fn observe_routine_parameter_references(
+    pub(in crate::binding::preparation) fn observe_routine_parameter_references(
         &mut self,
         plan: PlanRef<'_>,
         outer: &crate::RowSchema,

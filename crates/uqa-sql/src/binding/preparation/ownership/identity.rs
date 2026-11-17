@@ -10,7 +10,7 @@ use std::{cmp::Ordering, marker::PhantomData, ptr::NonNull};
 
 /// An opaque location within one live analysis input. The input owner keeps each selected node in place until its observation is consumed; equal syntax at different locations has distinct keys. No pointer can be recovered from this key, and moving the observation does not move or grant access to its input. These keys never enter a published executable or survive the input generation.
 #[derive(Debug)]
-pub(in crate::binding::preparation) struct AnalysisIdentity<T> {
+pub(in crate::binding) struct AnalysisIdentity<T> {
     address: usize,
     kind: PhantomData<fn() -> T>,
 }

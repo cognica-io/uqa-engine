@@ -6,6 +6,8 @@
 
 //! Ordered analysis owns its executable destination, parameter observations and published dependency nodes independently.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{ParameterTypes, Preparation, RoutineResolution, SQLError, SchemaScope};
 use crate::{
     binding::{
@@ -202,7 +204,7 @@ fn include_plan_dependencies(
     status
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn observe_owned_plan(
         &mut self,
         plan: &MutableExecutablePlan,
@@ -345,7 +347,7 @@ pub(in crate::binding) fn retain_input_metadata_owned(
             scope: &mut scope,
             parameters: ParameterTypes::fixed_with_control(params, control)?
                 .with_composite_retention(),
-            schema_expression: None,
+            schema_expression: (),
         };
         analysis.observe_owned_plan(&plan, None)?;
         let mut replacements = analysis.parameters.take_composite_inputs();
@@ -389,7 +391,7 @@ pub fn resolve_variable_sites_owned(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?,
-        schema_expression: None,
+        schema_expression: (),
     };
     let walked = analysis.observe_owned_plan(plan, None);
     let resolutions = scope

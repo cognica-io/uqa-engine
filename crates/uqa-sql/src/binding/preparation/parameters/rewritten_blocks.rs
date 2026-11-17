@@ -27,7 +27,7 @@ pub(super) fn install_rewritten_block(blocks: &mut RewrittenBlocks, query: &mut 
     }
 }
 
-impl ParameterTypes<'_> {
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn take_rewritten_block(
         &mut self,
         original: &QueryBlockPlan,

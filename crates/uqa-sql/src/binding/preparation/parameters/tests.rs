@@ -237,7 +237,7 @@ fn domain_array_input_is_read_once_and_retains_element_identity_and_bounds() {
 fn domain_array_metadata_inference_does_not_invoke_or_require_input_functions() {
     let inputs = Inputs::default();
     let mut parameters = ParameterTypes::new(&[]);
-    parameters.catalog_inputs = Some(&inputs);
+    parameters.inputs.catalog_inputs = Some(&inputs);
     let expression = ScalarExpr::Literal(Value::Str("{not read}".into()));
     let mut inferred = ExpressionType::unknown_literal(&expression, "{not read}".into());
     parameters

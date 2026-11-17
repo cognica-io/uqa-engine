@@ -17,7 +17,7 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-impl ParameterTypes<'_> {
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn apply_owned_query_schemas(
         mut self,
         plan: &mut MutableExecutablePlan,

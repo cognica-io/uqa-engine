@@ -11,7 +11,7 @@ use super::{
     SQLError, ScalarExpr, Value,
 };
 
-impl ParameterTypes<'_> {
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(super) fn read_literal(
         &mut self,
         origin: AnalysisIdentity<ScalarExpr>,
@@ -62,7 +62,7 @@ impl ParameterTypes<'_> {
             if self.input_constants.is_none() {
                 return Ok(None);
             }
-            let catalog = self.catalog_inputs.ok_or_else(|| {
+            let catalog = self.inputs.catalog_inputs().ok_or_else(|| {
                 SQLError::Internal(format!(
                     "catalog input functions are unavailable for {}",
                     input_type.sql_name()
@@ -76,7 +76,7 @@ impl ParameterTypes<'_> {
         let input = control.finish(Value::Str(owned_text), memory)?;
         if self.input_constants.is_some() && crate::expr::enums::is_enum_bearing(input_type) {
             if let Some(value) = crate::expr::enums::fold_unknown_literal_with_control(
-                self.enum_labels,
+                self.inputs.enum_labels(),
                 &input,
                 input_type,
                 &control,
@@ -85,7 +85,7 @@ impl ParameterTypes<'_> {
             }
         }
         if crate::type_resolution::catalog_input_type(input_type) {
-            return self.aliases.map_or(Ok(None), |catalog| {
+            return self.inputs.aliases().map_or(Ok(None), |catalog| {
                 crate::schema::dependencies::oid_alias::read_unknown_constant_with_control(
                     catalog, input_type, text, &control,
                 )

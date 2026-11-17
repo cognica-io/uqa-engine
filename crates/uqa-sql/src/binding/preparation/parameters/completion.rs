@@ -8,7 +8,7 @@
 
 use super::{error, ColumnType, ParameterTypes, SQLError};
 
-impl ParameterTypes<'_> {
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn finish_references(
         self,
     ) -> Result<Vec<Option<ColumnType>>, SQLError> {

@@ -6,12 +6,14 @@
 
 //! Set-returning call placement in analysis order, as `PostgreSQL`'s parse analysis checks it while it transforms each expression.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{Preparation, SQLError};
 use crate::ast::FunctionBinding;
 use crate::semantics::sets::placement::SetPlacement;
 use crate::semantics::sets::placement_scope::placing_set_calls;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Analyze `clause` as the expression kind `placement`, then restore the enclosing kind.
     pub(super) fn in_placement<T>(
         &mut self,

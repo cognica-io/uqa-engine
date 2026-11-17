@@ -6,6 +6,8 @@
 
 //! Command input analysis, mutation parameter coercion and RETURNING descriptions at preparation time.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::assignment::targets;
 use crate::ast::AssignmentTarget;
@@ -15,7 +17,7 @@ use crate::plan::{
 use crate::semantics::sets::placement::SetPlacement;
 use std::borrow::Cow;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
         let lookup = self.scope.resolution.lookup_mode();
         self.scope.set_command_lookup_mode(command);

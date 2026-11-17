@@ -16,7 +16,7 @@ pub(super) struct GroupingInputs(
     AnalysisMap<AnalysisIdentity<QueryBlockPlan>, (RowSchema, Option<RowSchema>)>,
 );
 
-impl ParameterTypes<'_> {
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn retain_distinct_grouping(
         &mut self,
         block: &QueryBlockPlan,

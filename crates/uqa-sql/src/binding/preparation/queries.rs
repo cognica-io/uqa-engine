@@ -6,6 +6,8 @@
 
 //! Query analysis follows `PostgreSQL`'s source, target, clause, and coercion order.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::super::{analysis, overlay_outer_schema_with_control};
 use super::ownership::{AnalysisIdentity, AnalysisVec};
 use super::{
@@ -20,7 +22,7 @@ thread_local! {
     pub(crate) static BLOCK_ANALYSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn scalar_query_schema(
         &mut self,
         index: usize,

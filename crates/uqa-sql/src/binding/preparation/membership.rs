@@ -6,6 +6,8 @@
 
 //! Retain membership analysis at the input-preparation boundary, before planning can duplicate or fold expressions. Each copied left-side subquery receives its own query-arena slot and therefore its own initialization cache.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::catalog::collations::derivation::Derivation;
@@ -21,7 +23,7 @@ pub(super) struct MembershipAnalysis {
     pub left_constants: AnalysisVec<Option<super::parameters::ConvertedInput>>,
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn in_list(
         &mut self,
         expression: &ScalarExpr,

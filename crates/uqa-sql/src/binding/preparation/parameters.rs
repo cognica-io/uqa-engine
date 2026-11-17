@@ -16,6 +16,8 @@ use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, Prod
 use uqa_core::Value;
 
 mod application;
+mod callbacks;
+pub(super) use callbacks::{InputCatalogs, LiteralInput};
 mod call_collations;
 mod collations;
 mod completion;
@@ -55,15 +57,13 @@ enum UnknownOrigin {
     Field,
 }
 
-pub(super) struct ParameterTypes<'a> {
+pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
     pub(super) collations: super::collations::PendingCollations,
     types: AnalysisVec<Option<Produced<ColumnType>>>,
     fixed_values: Option<&'a [SQLParam]>,
     occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
-    aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-    enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-    catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+    inputs: I,
     call_collations: Option<CallCollations>,
     query_schemas: Option<QuerySchemas>,
     /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
@@ -181,6 +181,72 @@ impl QuerySchemas {
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
+        Self::new_with_control(types, &ProductionControl::uncontrolled())
+            .expect("ordinary analysis parameter types")
+    }
+
+    pub(super) fn new_with_control(
+        types: &[Option<ColumnType>],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::new_with_inputs(types, InputCatalogs::default(), control)
+    }
+
+    pub(super) fn with_input_constants(
+        types: &[Option<ColumnType>],
+        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
+        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+    ) -> Self {
+        Self::with_input_constants_with_control(
+            types,
+            aliases,
+            enum_labels,
+            catalog_inputs,
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary input analysis")
+    }
+
+    pub(super) fn with_input_constants_with_control(
+        types: &[Option<ColumnType>],
+        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
+        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            input_constants: Some(InputConstants::new(control)),
+            inputs: InputCatalogs {
+                aliases,
+                enum_labels,
+                catalog_inputs,
+            },
+            ..Self::new_with_control(types, control)?
+        })
+    }
+}
+
+impl<'a> ParameterTypes<'a, ()> {
+    /// Output binding borrows caller parameters and preserves their explicit declarations.
+    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
+        Self::fixed_with_control(values, &ProductionControl::uncontrolled())
+            .expect("ordinary fixed parameter analysis")
+    }
+
+    pub(super) fn fixed_with_control(
+        values: &'a [SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            fixed_values: Some(values),
+            ..Self::new_with_inputs(&[], (), control)?
+        })
+    }
+}
+
+impl<I: LiteralInput> ParameterTypes<'_, I> {
     pub(super) fn take_row_expansion(&mut self, expression: &ScalarExpr) -> RowExpansion {
         self.row_expansions
             .remove(&AnalysisIdentity::from(expression))
@@ -412,13 +478,9 @@ impl<'a> ParameterTypes<'a> {
         Ok(())
     }
 
-    pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
-        Self::new_with_control(types, &ProductionControl::uncontrolled())
-            .expect("ordinary analysis parameter types")
-    }
-
-    pub(super) fn new_with_control(
+    fn new_with_inputs(
         types: &[Option<ColumnType>],
+        inputs: I,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let mut admitted = AnalysisVec::new(control);
@@ -437,9 +499,7 @@ impl<'a> ParameterTypes<'a> {
             occurrences: AnalysisVec::new(control),
             input_constants: None,
             collations: super::collations::PendingCollations::new(control),
-            aliases: None,
-            enum_labels: None,
-            catalog_inputs: None,
+            inputs,
             call_collations: None,
             query_schemas: None,
             row_expansions: RowExpansions::new(control),
@@ -529,22 +589,6 @@ impl<'a> ParameterTypes<'a> {
         self.reference(number)
     }
 
-    /// Output binding borrows caller parameters and preserves their explicit declarations.
-    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
-        Self::fixed_with_control(values, &ProductionControl::uncontrolled())
-            .expect("ordinary fixed parameter analysis")
-    }
-
-    pub(super) fn fixed_with_control(
-        values: &'a [SQLParam],
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        Ok(Self {
-            fixed_values: Some(values),
-            ..Self::new_with_control(&[], control)?
-        })
-    }
-
     pub(super) fn with_stored_inputs(mut self) -> Self {
         self.input_constants = Some(InputConstants::new(&self.control()));
         self
@@ -598,38 +642,6 @@ impl<'a> ParameterTypes<'a> {
     /// Fixed output binding can describe a subtree after ordered statement analysis, without its enclosing SQL clause.
     pub(super) fn is_output_binding(&self) -> bool {
         self.fixed_values.is_some()
-    }
-
-    pub(super) fn with_input_constants(
-        types: &[Option<ColumnType>],
-        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
-    ) -> Self {
-        Self::with_input_constants_with_control(
-            types,
-            aliases,
-            enum_labels,
-            catalog_inputs,
-            &ProductionControl::uncontrolled(),
-        )
-        .expect("ordinary input analysis")
-    }
-
-    pub(super) fn with_input_constants_with_control(
-        types: &[Option<ColumnType>],
-        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        Ok(Self {
-            input_constants: Some(InputConstants::new(control)),
-            aliases,
-            enum_labels,
-            catalog_inputs,
-            ..Self::new_with_control(types, control)?
-        })
     }
 
     /// Keep the declaration selected by analysis on the original call, without
