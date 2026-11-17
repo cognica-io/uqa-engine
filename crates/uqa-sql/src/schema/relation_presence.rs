@@ -32,6 +32,7 @@ impl std::ops::DerefMut for PresenceBindings {
 }
 
 mod production;
+mod retirement;
 
 impl RelationPresence {
     fn insert(&mut self, qualifier: &str, marker: InternalColumnRef) {

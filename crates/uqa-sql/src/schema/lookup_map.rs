@@ -20,7 +20,7 @@ use uqa_core::memory::{
 type Ordinary<K, V> = HashMap<K, V, ahash::RandomState>;
 type Admitted<K, V> = Arc<Produced<RetainedIndex<K, V>>>;
 
-mod retirement;
+pub(super) mod retirement;
 
 pub(crate) enum RetainedIndex<K, V> {
     Hash(BudgetedHashIndex<K, V, ahash::RandomState>),

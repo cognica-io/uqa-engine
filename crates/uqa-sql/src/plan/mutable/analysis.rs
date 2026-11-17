@@ -39,8 +39,30 @@ pub(crate) struct QueryLayoutUpdate {
 
 impl QueryLayoutUpdate {
     pub(crate) fn install(self, query: &mut QueryPlan) {
-        query.analyzed_output = self.output;
-        query.analyzed_source = self.source;
+        crate::catalog::work::inline(self.install_from(
+            query,
+            &ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("ordinary layout replacement has no cancellation or resource limit");
+    }
+
+    pub(crate) async fn install_from<W: Work>(
+        self,
+        query: &mut QueryPlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let previous_output = std::mem::replace(&mut query.analyzed_output, self.output);
+        let previous_source = std::mem::replace(&mut query.analyzed_source, self.source);
+        if let Some(output) = previous_output {
+            output.retire_from(control, work).await?;
+        }
+        if let Some(source) = previous_source {
+            source.retire_from(control, work).await?;
+        }
+        Ok(())
     }
 }
 
@@ -48,8 +70,18 @@ impl QueryMetadataUpdate {
     pub(super) fn install(
         self,
         query: &mut QueryPlan,
+        memory: Option<&mut RewriteMemory>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.install_from(query, memory, control, &mut ()))
+    }
+
+    pub(super) async fn install_from<W: Work>(
+        self,
+        query: &mut QueryPlan,
         mut memory: Option<&mut RewriteMemory>,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
         if let Some(root) = self.root {
             root.assert_owner(control);
@@ -67,7 +99,7 @@ impl QueryMetadataUpdate {
             }
         }
         if let Some(layouts) = self.layouts {
-            layouts.install(query);
+            layouts.install_from(query, control, work).await?;
         }
         if let Some(grouping) = self.grouping {
             let (grouping, lease) = grouping.into_parts();

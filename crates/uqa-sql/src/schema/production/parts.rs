@@ -10,11 +10,11 @@ use super::{
 };
 use crate::{
     schema::{
-        ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata, SchemaColdMetadata, SchemaIndex,
+        retirement::IndexOwner, ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata,
+        SchemaColdMetadata, SchemaIndex,
     },
     SQLError,
 };
-use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) fn produce(
@@ -141,7 +141,7 @@ pub(super) fn publish(
         _memory: SchemaMemory::new(control.combine(memory, metadata_memory.into_reservation())),
     };
     let schema = RowSchema {
-        index: Arc::new(index),
+        index: IndexOwner::new(index),
     };
     control.check()?;
     Ok(schema)

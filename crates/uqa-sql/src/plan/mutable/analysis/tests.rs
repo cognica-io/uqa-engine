@@ -20,6 +20,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod layouts;
+
 fn plan(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
 }

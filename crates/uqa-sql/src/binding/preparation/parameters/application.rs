@@ -30,13 +30,11 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.take().expect("query layout observation");
-        inline(
-            QueryLayouts(&mut schemas, &mut self.rewritten_blocks).apply_from(
-                plan,
-                control,
-                &mut (),
-            ),
-        )?;
+        inline(plan.apply_metadata_from(
+            &mut QueryLayouts(&mut schemas, &mut self.rewritten_blocks),
+            control,
+            &mut (),
+        ))?;
         plan.apply_query_metadata(control, &mut |query| {
             schemas.groupings.metadata(query, routines, params, control)
         })?;
@@ -81,8 +79,7 @@ impl InputConstants {
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        QueryLayouts(&mut self.8, &mut self.10)
-            .apply_from(plan, control, work)
+        plan.apply_metadata_from(&mut QueryLayouts(&mut self.8, &mut self.10), control, work)
             .await?;
         if !self.11.is_empty() {
             self.apply_projection_aliases_owned_from(plan, control, work)
@@ -149,7 +146,9 @@ impl InputConstants {
         work.checkpoint().await?;
         control.check()?;
         // Commands have no QueryPlan descriptor carrier; their source schema has already served ordered analysis.
-        self.8.sources.remove(&AnalysisIdentity::from(source));
+        if let Some(schema) = self.8.sources.remove(&AnalysisIdentity::from(source)) {
+            schema.retire_from(control, work).await?;
+        }
         let mut selected = ProductionVec::new(*control);
         match source {
             SourcePlan::Function { binding, .. } => {

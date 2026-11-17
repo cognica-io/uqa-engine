@@ -329,6 +329,11 @@ impl<T: Retire> std::ops::DerefMut for Pending<T> {
         self.0.as_mut().expect("pending native field")
     }
 }
+impl<T: Retire> Retire for Pending<T> {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        self.0.retire_step(positions, scalar)
+    }
+}
 impl<T: Retire> Drop for Pending<T> {
     fn drop(&mut self) {
         self.0.retire();

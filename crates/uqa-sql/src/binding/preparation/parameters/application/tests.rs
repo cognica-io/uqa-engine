@@ -20,6 +20,7 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod cleanup;
 mod installation;
 
 enum Fixture {

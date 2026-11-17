@@ -13,7 +13,7 @@ use crate::{
     plan::{AnalyzedSource, SourcePlan},
     RowSchema, SQLError,
 };
-use uqa_core::memory::{Produced, ProductionControl, TreeRetirement};
+use uqa_core::memory::{Produced, ProductionControl};
 
 enum Frame<'a> {
     Source(&'a SourcePlan),
@@ -72,6 +72,8 @@ impl QuerySchemas {
                     if let Some(left) = output.take() {
                         frames.push(Frame::Right { schema, left })?;
                         frames.push(Frame::Source(right))?;
+                    } else {
+                        schema.retire_from(control, work).await?;
                     }
                 }
                 Frame::Right { schema, left } => {
@@ -91,30 +93,14 @@ impl QuerySchemas {
                         )?);
                     } else {
                         // A missing right descriptor discards the already assembled left topology through the same retirement owner used on abandonment.
-                        retire(left, control, work).await?;
+                        AnalyzedSource::retire_produced_from(left, control, work).await?;
+                        schema.retire_from(control, work).await?;
                     }
                 }
             }
         }
         control.check()?;
         Ok(output)
-    }
-}
-
-async fn retire<W: Work>(
-    value: Produced<AnalyzedSource>,
-    control: &ProductionControl<'_>,
-    work: &mut W,
-) -> Result<(), SQLError> {
-    let (mut source, _memory) = value.into_parts();
-    let mut children = TreeRetirement::take(&mut source.children);
-    loop {
-        control.check()?;
-        work.checkpoint().await?;
-        control.check()?;
-        if children.advance() {
-            return Ok(());
-        }
     }
 }
 

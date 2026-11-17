@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 mod columns;
 mod production;
+mod retirement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Denial {
@@ -23,7 +24,7 @@ enum Denial {
 struct DiagnosticNamespace {
     name: Box<str>,
     columns: Vec<Box<str>>,
-    _memory: super::production::lease::SchemaMemory,
+    memory: super::production::lease::SchemaMemory,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub(super) struct LateralRestrictions {
     unavailable_ambiguous_columns: SchemaSet<Box<str>>,
     unavailable_qualifiers: SchemaMap<Box<str>, bool>,
     unavailable_columns: SchemaMap<Box<str>, Vec<(Box<str>, bool)>>,
-    _memory: super::production::lease::SchemaMemory,
+    memory: super::production::lease::SchemaMemory,
 }
 
 impl RowSchema {
@@ -78,7 +79,14 @@ impl RowSchema {
         (!column_namespaces.is_empty()).then(|| {
             Arc::new(LateralRestrictions {
                 column_namespaces,
-                ..LateralRestrictions::default()
+                qualifiers: SchemaMap::default(),
+                columns: SchemaMap::default(),
+                ambiguous_qualifiers: SchemaSet::default(),
+                namespaces: Vec::new(),
+                unavailable_ambiguous_columns: SchemaSet::default(),
+                unavailable_qualifiers: SchemaMap::default(),
+                unavailable_columns: SchemaMap::default(),
+                memory: super::production::lease::SchemaMemory::default(),
             })
         })
     }
@@ -138,7 +146,7 @@ impl RowSchema {
                 .iter()
                 .map(|identity| identity.column().into())
                 .collect(),
-            _memory: crate::schema::production::lease::SchemaMemory::default(),
+            memory: crate::schema::production::lease::SchemaMemory::default(),
         })];
         // Missing-column hints search range entries, excluding the synthetic join entry. A derived relation starts its own range entry instead of exposing its body's namespaces.
         if !joined {

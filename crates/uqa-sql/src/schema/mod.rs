@@ -28,6 +28,7 @@ mod record_fields;
 mod relation_presence;
 mod relation_types;
 mod result_columns;
+pub(crate) mod retirement;
 mod schema_composition;
 mod schema_construction;
 mod schema_layout;
@@ -186,7 +187,7 @@ pub struct PhysicalLayout {
 /// to change row shape without moving any values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSchema {
-    index: Arc<SchemaIndex>,
+    index: retirement::IndexOwner,
 }
 
 /// Physical source of one scalar-projection output. Direct input slots stay in the child row; only computed values extend its physical layout.

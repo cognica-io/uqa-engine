@@ -11,6 +11,10 @@ use uqa_core::memory::{Produced, ProductionControl};
 pub(crate) struct SchemaSet<T>(SchemaMap<T, ()>);
 
 impl<T> SchemaSet<T> {
+    pub(in crate::schema) fn into_map(self) -> SchemaMap<T, ()> {
+        self.0
+    }
+
     pub(in crate::schema) fn from_map(map: SchemaMap<T, ()>) -> Self {
         Self(map)
     }

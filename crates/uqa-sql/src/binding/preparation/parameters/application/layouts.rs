@@ -10,25 +10,14 @@ use super::super::{AnalysisIdentity, QuerySchemas, RewrittenBlocks};
 use crate::{
     catalog::work::Work,
     plan::{
-        MetadataObserver, MutableExecutablePlan, QueryLayoutUpdate, QueryMetadataUpdate, QueryPlan,
-        RelationalPlan, SharedAnalyzedSource,
+        MetadataObserver, QueryLayoutUpdate, QueryMetadataUpdate, QueryPlan, RelationalPlan,
+        SharedAnalyzedSource,
     },
     SQLError,
 };
 use uqa_core::memory::ProductionControl;
 
 pub(super) struct QueryLayouts<'a>(pub &'a mut QuerySchemas, pub &'a mut RewrittenBlocks);
-
-impl QueryLayouts<'_> {
-    pub(super) async fn apply_from<W: Work + Send>(
-        &mut self,
-        plan: &mut MutableExecutablePlan,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> Result<(), SQLError> {
-        plan.apply_metadata_from(self, control, work).await
-    }
-}
 
 impl<W: Work + Send> MetadataObserver<W> for QueryLayouts<'_> {
     fn visit_table_queries(&self) -> bool {

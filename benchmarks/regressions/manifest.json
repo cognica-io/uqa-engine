@@ -73162,6 +73162,136 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_schema_retirement_preserves_readers_and_releases_native_fields_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "128-column admitted schema with 16-level types, a shared reader and exhausted allowance.",
+      "invariant": "The reader retains original storage; productive retirement allocates nothing, bounds each deallocation window and releases only the final owned generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "every_row_schema_retirement_prefix_keeps_independent_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Abandon every retirement prefix of a multi-column typed schema.",
+      "invariant": "Every prefix retires without allocation and leaves an independent reservation intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_record_fields_keep_the_original_vector_and_shared_external_fields_keep_their_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Owned vectors and externally shared unsized field arrays with nested SQL types.",
+      "invariant": "Owned construction preserves the vector pointer; both representations preserve independent readers and release without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concurrent_schema_owners_select_one_original_generation_for_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Four concurrent owners release a shared typed row schema.",
+      "invariant": "Exactly one owner acquires the original fields; the entire original allowance retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_analyzed_sources_and_type_metadata_retire_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "8,192 source levels sharing an 8,192-level type on a 256 KiB stack.",
+      "invariant": "Ordinary analyzed-source destruction uses the existing tree and type owners without allocation or stack growth with depth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_schema_metadata_keeps_independent_descriptors_and_diagnostic_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests/metadata.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Shared admitted record fields, named descriptors, collations and lateral diagnostic generations.",
+      "invariant": "Schema retirement preserves independent descriptor storage and reservations until the last original reader releases them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "last_schema_descriptor_retires_native_types_and_names_one_work_unit_at_a_time",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests/metadata.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "128-field admitted record descriptor with 32-level types and exhausted allowance.",
+      "invariant": "Productive retirement releases nested types through existing transitions without allocation or unbounded deallocation batches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_layout_replacement_retires_old_generations_with_bounded_native_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests/layouts.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Replace shared output and analyzed-source layouts containing 64 columns and 32-level types with one-step windows.",
+      "invariant": "Both old slots retire through existing ownership with bounded deallocation, exhausted allowance and no allocation; explicit absence clears both destinations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_layout_replacement_cleans_every_suspended_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests/layouts.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Abandon or cancel every suspended layout replacement prefix while retaining the new output independently.",
+      "invariant": "Original and invoking cancellation preserve their diagnostic, all old owners retire, and the independent output generation remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_source_observations_retire_wide_type_metadata_between_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/cleanup.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Consume a command source observation with 64 columns, 32-level types and exhausted allowance.",
+      "invariant": "Source-call binding consumes the same row retirement owner with no allocation and bounded deallocation per work window.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

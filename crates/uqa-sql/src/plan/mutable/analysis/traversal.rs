@@ -120,12 +120,12 @@ impl Walker<'_, '_> {
 }
 
 impl MutableExecutablePlan {
-    pub(crate) async fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
-        &mut self,
-        observe: &mut O,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> Result<()> {
+    pub(crate) fn apply_metadata_from<'a, 'c, W: Work + Send, O: MetadataObserver<W>>(
+        &'a mut self,
+        observe: &'a mut O,
+        control: &'a ProductionControl<'c>,
+        work: &'a mut W,
+    ) -> impl std::future::Future<Output = Result<()>> + use<'a, 'c, W, O> {
         let root = match self {
             Self::Query(query) => {
                 query.assert_owner(control);
@@ -136,8 +136,38 @@ impl MutableExecutablePlan {
                 Node::Command(&mut command.command, command.memory.as_mut())
             }
         };
-        walk(root, observe, control, work).await
+        walk(root, observe, control, work)
     }
+}
+
+async fn install_query<'a, W: Work + Send, O: MetadataObserver<W>>(
+    tasks: &mut Tasks<'a>,
+    (query, mut memory): (&'a mut QueryPlan, Memory<'a>),
+    cte_command: bool,
+    observe: &mut O,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<()> {
+    if observe.mark_relations() {
+        query.relations_bound = true;
+    }
+    if let Some(update) = observe.query(query, control, work).await? {
+        update
+            .install_from(query, memory.as_deref_mut(), control, work)
+            .await?;
+    }
+    let [ctes, root] = fields(memory, ["ctes", "root"]);
+    push(
+        tasks,
+        Node::Root(&mut query.root, present(root)),
+        cte_command,
+    )?;
+    push(
+        tasks,
+        Node::Ctes(Elements::new(&mut query.ctes, present(ctes))),
+        cte_command,
+    )?;
+    Ok(())
 }
 
 async fn walk<W: Work + Send, O: MetadataObserver<W>>(
@@ -162,24 +192,16 @@ async fn walk<W: Work + Send, O: MetadataObserver<W>>(
                 };
                 push(&mut tasks, child, cte_command)?;
             }
-            Node::Query(query, mut memory) => {
-                if observe.mark_relations() {
-                    query.relations_bound = true;
-                }
-                if let Some(update) = observe.query(query, control, work).await? {
-                    update.install(query, memory.as_deref_mut(), control)?;
-                }
-                let [ctes, root] = fields(memory, ["ctes", "root"]);
-                push(
+            Node::Query(query, memory) => {
+                install_query(
                     &mut tasks,
-                    Node::Root(&mut query.root, present(root)),
+                    (query, memory),
                     cte_command,
-                )?;
-                push(
-                    &mut tasks,
-                    Node::Ctes(Elements::new(&mut query.ctes, present(ctes))),
-                    cte_command,
-                )?;
+                    observe,
+                    control,
+                    work,
+                )
+                .await?;
             }
             Node::Root(root, memory) => push_root(&mut tasks, root, memory, cte_command)?,
             Node::Source(source, mut memory) => {
