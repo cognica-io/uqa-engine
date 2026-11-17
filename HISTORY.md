@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Retire directly owned query, source, CTE and mutation metadata through the existing field, vector, type and function-binding cleanup states. Wide name/signature lists and deep column types release across work boundaries without cleanup allocations, preserving completed prefixes and independent reservations through cancellation and abandonment.
+
 - Retain shared native literals through their existing value owner, including deep reads, rejected shared-header admission and later capture metadata failures. Transfer final shared value/type ownership into the existing stepped retirement states without copying or invalidating other readers. Keep constant-storage inputs owned through cancellation and memory failure while preserving the published resident or spilled prefix.
 
 - Share the existing tree-retirement implementation across native values, SQL syntax and scalar ownership. Keep partial copies, decoded containers and completed private values with their original reservations through cancellation, denied admission and metadata errors, preventing recursive stack overflow when a deep copy fails. Ordinary and controlled value production use the existing iterative copier; native image encoding and nesting limits are unchanged.
