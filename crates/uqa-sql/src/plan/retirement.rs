@@ -22,7 +22,7 @@ pub(crate) use tree::{RetainedTree, RetirementFrame};
 pub(in crate::plan) use windows::WindowRetirement;
 
 #[cfg(test)]
-pub(in crate::plan) mod tests;
+pub(crate) mod tests;
 
 #[derive(Debug)]
 pub(crate) enum Node {

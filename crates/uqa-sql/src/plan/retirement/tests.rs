@@ -13,10 +13,10 @@ use uqa_core::{memory::MemoryBudget, Value};
 
 /// Observe final native payload release independently of the retirement state machine.
 #[derive(Debug)]
-pub(in crate::plan) struct ScalarSource {
-    pub(in crate::plan) native: MemoryBudget,
-    pub(in crate::plan) minimum: Arc<AtomicUsize>,
-    pub(in crate::plan) retired: Arc<AtomicUsize>,
+pub(crate) struct ScalarSource {
+    pub(crate) native: MemoryBudget,
+    pub(crate) minimum: Arc<AtomicUsize>,
+    pub(crate) retired: Arc<AtomicUsize>,
 }
 
 impl ConstantValueSource for ScalarSource {

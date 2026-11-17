@@ -27,13 +27,7 @@ impl OwnedScalarExpr {
         control: &ProductionControl<'_>,
         transform: &mut ScalarNodeTransform<'_>,
     ) -> Result<Self, SQLError> {
-        self.assert_owner(control);
-        Self::transform_nodes_in_place(
-            &mut self.expression,
-            self.memory.as_mut(),
-            control,
-            transform,
-        )?;
+        self.transform_retained_nodes(control, transform)?;
         Ok(self)
     }
 
@@ -43,13 +37,31 @@ impl OwnedScalarExpr {
         control: &ProductionControl<'_>,
         transform: &mut ScalarNodeTransform<'_>,
     ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.edit_retained_from(
+            control,
+            &mut (),
+            &mut Transform(transform),
+        ))
+    }
+
+    pub(crate) async fn edit_retained_from<W: super::super::resources::input::Work, E: Edit<W>>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        edit: &mut E,
+    ) -> Result<(), SQLError>
+    where
+        W::Error: Into<SQLError>,
+    {
         self.assert_owner(control);
-        Self::transform_nodes_in_place(
+        edit_in_place_from(
             &mut self.expression,
             self.memory.as_mut(),
             control,
-            transform,
+            work,
+            edit,
         )
+        .await
     }
 
     pub(crate) fn transform_nodes_in_place(
@@ -89,10 +101,29 @@ impl OwnedScalarExpr {
 
 fn edit_in_place<E: Edit<()>>(
     expression: &mut ScalarExpr,
-    mut memory: Option<&mut ScalarMemory>,
+    memory: Option<&mut ScalarMemory>,
     control: &ProductionControl<'_>,
     edit: &mut E,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(edit_in_place_from(
+        expression,
+        memory,
+        control,
+        &mut (),
+        edit,
+    ))
+}
+
+async fn edit_in_place_from<W: super::super::resources::input::Work, E: Edit<W>>(
+    expression: &mut ScalarExpr,
+    mut memory: Option<&mut ScalarMemory>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    edit: &mut E,
+) -> Result<(), SQLError>
+where
+    W::Error: Into<SQLError>,
+{
     control.check()?;
     let identity = E::identity(expression);
     let owner = memory.as_mut().map(|owner| {
@@ -108,7 +139,7 @@ fn edit_in_place<E: Edit<()>>(
         std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null)),
         owner,
     );
-    let output = crate::catalog::work::inline(input.edit_from(identity, control, &mut (), edit))?;
+    let output = input.edit_from(identity, control, work, edit).await?;
     let (output, owner) = output.into_rewrite_parts();
     *expression = output;
     if let Some(memory) = memory {

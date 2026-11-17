@@ -5,8 +5,8 @@
 //
 
 use super::{
-    install_rewritten_block, AnalysisIdentity, AnalysisVec, InputConstants, OwnedScalarExpr,
-    ProductionControl, SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
+    install_rewritten_block, AnalysisIdentity, InputConstants, OwnedScalarExpr, ProductionControl,
+    SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
 };
 
 impl InputConstants {
@@ -46,39 +46,7 @@ impl InputConstants {
             expression = ScalarExpr::Param(index).copy_for_rewrite(control)?;
         }
         if let Some(expanded) = self.9.remove(&identity) {
-            if !matches!(&*expression, ScalarExpr::Row(_)) {
-                return Err(SQLError::Internal(
-                    "analyzed ROW expansion lost its constructor".into(),
-                ));
-            }
-            let mut selected = AnalysisVec::new(control);
-            let extra = expanded
-                .iter()
-                .map(|(_, fields)| fields.len())
-                .sum::<usize>();
-            selected.reserve(
-                expression.child_count().saturating_sub(expanded.len()) + extra,
-                control,
-            )?;
-            let mut expanded = expanded.into_iter().peekable();
-            for (position, item) in expression.into_children().enumerate() {
-                if expanded.peek().is_some_and(|(index, _)| *index == position) {
-                    let (_, fields) = expanded.next().expect("selected ROW expansion");
-                    let (mut fields, memory) = fields.into_parts();
-                    for field in &mut fields {
-                        field.transform_retained_nodes(control, &mut |identity, field| {
-                            self.apply_node_owned(identity.into(), field, control)
-                        })?;
-                    }
-                    let fields = control.finish(fields, memory)?;
-                    for field in super::super::ownership::AnalysisItems::from_produced(fields) {
-                        selected.push(field, control)?;
-                    }
-                } else {
-                    selected.push(item, control)?;
-                }
-            }
-            expression = OwnedScalarExpr::row(selected.into_iter(), control)?;
+            expression = super::rows::expand(expression, expanded, control, self)?;
         }
         if let Some(selected) = self.1.remove(&identity) {
             if matches!(&*expression, ScalarExpr::Func { .. }) {

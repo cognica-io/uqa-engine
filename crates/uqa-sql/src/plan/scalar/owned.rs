@@ -35,7 +35,7 @@ mod selection;
 mod sequences;
 mod traversal;
 pub(in crate::plan) use sequences::Bind as SequenceBinding;
-pub(in crate::plan) use traversal::{Edit as ScalarEdit, EditIdentity as ScalarEditIdentity};
+pub(crate) use traversal::{Edit as ScalarEdit, EditIdentity as ScalarEditIdentity};
 pub(in crate::plan) mod windows;
 pub use iteration::OwnedScalarChildren;
 pub use replacement::ScalarNodeTransform;

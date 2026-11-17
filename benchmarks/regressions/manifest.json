@@ -73643,6 +73643,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_consumes_original_field_identities_in_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Expand selected ROW positions through ordinary input application and one-step work, with nested original identities, an empty expansion and unchanged siblings.",
+      "invariant": "Original field identities are consumed before moves, ordered selected values agree and untouched payload addresses and exact reservations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_retires_each_cancelled_or_unadmitted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Abandon, cancel either owner or exhaust native allowance at every suspended ROW expansion prefix.",
+      "invariant": "Private selected fields and original children retire without cleanup allocation, both cancellation scopes preserve 57014 and denied admission preserves 53200 without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_bounds_wide_fields_and_deep_field_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Expand 4096 fields, edit 8192-level selected operands and retire 8192-level replaced children on a 256 KiB stack through one-step work.",
+      "invariant": "The existing scalar traversal, child retirement and ROW constructor bound productive work while preserving every selected value and releasing all native owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_keeps_field_buffer_admission_until_payload_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/retirement.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Reject the first selected field while the second retains the existing payload-lifetime probe, for immediate and suspended work.",
+      "invariant": "The original field buffer reservation remains live when unvisited field payloads retire; the same existing retirement probe observes release without reading constants.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

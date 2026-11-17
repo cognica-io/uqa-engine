@@ -26,6 +26,7 @@ mod expression_type;
 mod grouping;
 mod inputs;
 mod results;
+mod rows;
 mod selection;
 pub(super) use call_collations::CallCollations;
 

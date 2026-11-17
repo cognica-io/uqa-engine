@@ -11,14 +11,14 @@ use crate::{construction::Stack, plan::scalar::resources::input::Work, SQLError}
 use std::future::Future;
 use uqa_core::memory::ProductionControl;
 
-pub(in crate::plan) trait EditIdentity {
+pub(crate) trait EditIdentity {
     type Identity: Copy;
     const BEFORE_CHILDREN: bool;
 
     fn identity(expression: &ScalarExpr) -> Self::Identity;
 }
 
-pub(in crate::plan) trait Edit<W: Work>: EditIdentity {
+pub(crate) trait Edit<W: Work>: EditIdentity {
     fn apply(
         &mut self,
         identity: Self::Identity,
