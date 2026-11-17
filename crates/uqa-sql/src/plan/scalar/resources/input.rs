@@ -17,7 +17,7 @@ use uqa_core::{
     Value, ValueRetentionError,
 };
 
-pub(in crate::plan) trait Work: Send {
+pub(crate) trait Work: Send {
     type Error: From<ValueRetentionError>;
 
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;

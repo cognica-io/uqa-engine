@@ -35,7 +35,7 @@ impl ScalarExpr {
         crate::catalog::work::inline(self.copy_for_rewrite_from(control, &mut ()))
     }
 
-    pub(in crate::plan) async fn copy_for_rewrite_from<W: Work>(
+    pub(crate) async fn copy_for_rewrite_from<W: Work>(
         &self,
         control: &ProductionControl<'_>,
         work: &mut W,

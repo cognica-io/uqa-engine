@@ -11,6 +11,7 @@ mod construction;
 mod copies;
 mod edits;
 mod fixtures;
+mod input;
 mod retirement;
 mod traversal;
 

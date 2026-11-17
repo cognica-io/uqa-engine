@@ -73500,6 +73500,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_scalar_inputs_preserve_fields_payload_addresses_and_each_cancelled_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Construct arrays, rows, Boolean lists, CASE and calls; replace call metadata through one-step input and abandon or cancel every suspended prefix.",
+      "invariant": "Inline and suspended output and retained bytes agree, original child addresses and call decorations survive, and all private allocations retire without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_scalar_failure_retires_attached_deep_children_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Reject a binary right box or CASE branch vector after an 8192-level left operand or base has moved into the destination on a 256 KiB stack.",
+      "invariant": "Admission failure retires previously attached children iteratively before releasing their leases and leaves the independent held reservation intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "call_replacement_consumes_work_for_wide_children_and_old_binding_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Replace a call containing 4096 arguments and 4096 old binding type names using one-step work windows.",
+      "invariant": "Argument order survives, construction and replaced metadata consume work proportional to their width, and both allowances return to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_input_matches_stored_rewrite_and_retires_every_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/membership/owned/tests.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Rewrite IN and NOT IN with four array-position shapes, then cancel or abandon every one-step prefix and deny destination admission.",
+      "invariant": "The existing stored-syntax rewrite independently establishes exact output and query references; interrupted inputs and partial outputs release all private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_input_copies_deep_operands_without_recursive_polls_or_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/membership/owned/tests.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Rewrite two comparisons with an 8192-level left operand on a 256 KiB stack and interrupt selected copy and completion prefixes.",
+      "invariant": "Left copies use bounded iterative input; both cancellation owners retain SQLSTATE 57014 and terminal cleanup allocates nothing or retains either allowance.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

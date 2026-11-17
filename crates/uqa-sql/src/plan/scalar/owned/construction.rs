@@ -6,12 +6,15 @@
 
 //! Scalar containers admit their own allocation without merging the independently movable children.
 
-use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
-use crate::plan::scalar::resources::{Control, Lowering};
-use uqa_core::{
-    memory::{BudgetedVec, ProductionControl},
-    Value,
+use super::{
+    generated::{children_from, finish, owned_lowering},
+    OwnedScalarExpr, Result, ScalarExpr, ScalarMemory,
 };
+use crate::{
+    plan::scalar::resources::{input::Work, Lowering},
+    schema::retention::CatalogRetentionError,
+};
+use uqa_core::{memory::ProductionControl, Value};
 
 impl OwnedScalarExpr {
     /// Construct an unbound typed NULL, admitting the declared type name before copying it. This storage constructor performs no type resolution or value evaluation.
@@ -41,30 +44,27 @@ impl OwnedScalarExpr {
         conjunction: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        crate::catalog::work::inline(Self::boolean_from(children, conjunction, control, &mut ()))
+    }
+
+    pub(crate) async fn boolean_from<W: Work>(
+        children: impl ExactSizeIterator<Item = Self>,
+        conjunction: bool,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         control.check()?;
-        let mut lowering = Lowering {
-            control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: control.budget().map(BudgetedVec::new),
-        };
-        let items = lowering.map(children, Self::attach_child)?;
+        let mut lowering = owned_lowering(control);
+        let items = children_from(&mut lowering, children, work).await?;
         let expression = if conjunction {
-            ScalarExpr::And(items)
+            ScalarExpr::And(items.take())
         } else {
-            ScalarExpr::Or(items)
+            ScalarExpr::Or(items.take())
         };
-        let output = Self {
-            expression,
-            memory: lowering.control.map(|control| {
-                ScalarMemory::from_parts(
-                    control.memory,
-                    lowering
-                        .owned_children
-                        .expect("mutable scalar construction"),
-                )
-            }),
-        };
-        control.check()?;
-        Ok(output)
+        Ok(finish(expression, lowering, control)?)
     }
 
     pub(in crate::plan::scalar) fn attach_child(

@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Frozen scalars keep iterative retirement until their final fallible publication completes.
+//! Frozen and retiring scalars keep payload cleanup ahead of their constructor reservations.
 
 use super::{
     folding::Folding, OwnedScalarExpr, Produced, ProductionControl, Result, ScalarExpr,
     ScalarMemory,
 };
 use crate::plan::{
-    retirement::{Pending, Retire},
+    retirement::{Pending, Retire, ScalarRetirement},
     scalar::resources::input::Work,
 };
 
@@ -36,6 +36,22 @@ impl Publication<ScalarExpr> {
 }
 
 impl<T: Retire> Publication<T> {
+    pub(super) async fn retire_from<W: Work>(
+        mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<(), W::Error> {
+        let mut retirement = ScalarRetirement::default();
+        loop {
+            crate::plan::retirement::windows::checkpoint(control, work).await?;
+            if retirement.advance(&mut self.value) {
+                break;
+            }
+        }
+        drop(self.prepare_from(control, work).await?);
+        Ok(())
+    }
+
     pub(in crate::plan::scalar) fn from_parts(
         value: Pending<T>,
         memory: Option<ScalarMemory>,

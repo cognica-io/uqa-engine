@@ -23,7 +23,7 @@ mod copy;
 mod lowering;
 pub(in crate::plan) use lowering::lower_scalar_with_arena;
 pub(in crate::plan) use lowering::ScalarQueryInput;
-pub(in crate::plan) use resources::input::Work as ScalarInputWork;
+pub(crate) use resources::input::Work as ScalarInputWork;
 mod owned;
 pub(in crate::plan) use owned::windows::OwnedWindowSpec;
 pub(crate) use owned::ScalarMemory;
