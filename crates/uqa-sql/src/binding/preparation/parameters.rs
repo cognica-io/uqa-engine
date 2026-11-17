@@ -276,7 +276,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.unwrap_or_default();
         query.try_visit_queries_mut(&mut |query| {
-            install_rewritten_block(&mut self.rewritten_blocks, query);
+            install_rewritten_block(&mut self.rewritten_blocks, query)?;
             schemas.apply_query(query)
         })?;
         schemas.groupings.apply_query(query, routines, params)

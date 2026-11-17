@@ -73383,6 +73383,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_preserves_plans_and_original_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Apply retained query outputs, source layouts, projection labels and function selections to five native statement shapes, including a constructed replacement query.",
+      "invariant": "The original maps and shared installer preserve complete ordinary output, selected allocation identities and later scalar observation keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_bounds_wide_labels_and_retains_private_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Install metadata and 2048 projection labels into a native statement through one-step work windows.",
+      "invariant": "Each window completes at most one checkpoint; original scalar observations survive metadata application and every allowance returns after release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_retires_every_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native/interruption.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Abandon every pending prefix of native observation application or cancel either operation, including a retained rewritten query.",
+      "invariant": "Original constructor owners travel through the observation map and release without allocation; independent sibling reservations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_releases_observations_after_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native/interruption.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Exhaust the destination allowance before applying a native replacement and its output/source observations.",
+      "invariant": "Admission fails and all private plan, map and descriptor owners release while the independent sibling lease remains live.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

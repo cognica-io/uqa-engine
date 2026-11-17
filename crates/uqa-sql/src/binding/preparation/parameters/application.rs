@@ -73,9 +73,9 @@ impl InputConstants {
         Ok(())
     }
 
-    async fn apply_metadata_owned_from<W: Work + Send>(
+    async fn apply_metadata_owned_from<W: Work + Send, P: MetadataTarget>(
         &mut self,
-        plan: &mut MutableExecutablePlan,
+        plan: &mut P,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {
@@ -89,9 +89,9 @@ impl InputConstants {
             .await
     }
 
-    async fn apply_projection_aliases_owned_from<W: Work + Send>(
+    async fn apply_projection_aliases_owned_from<W: Work + Send, P: MetadataTarget>(
         &self,
-        plan: &mut MutableExecutablePlan,
+        plan: &mut P,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {

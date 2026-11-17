@@ -210,7 +210,7 @@ impl InputConstants {
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
-        install_rewritten_block(&mut self.10, query);
+        install_rewritten_block(&mut self.10, query)?;
         self.8.apply_query(query)
     }
 

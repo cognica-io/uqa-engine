@@ -22,6 +22,13 @@ enum Storage<T: Root> {
     Retained(Prefix<T>),
 }
 impl<T: Root> Storage<T> {
+    fn value(&self) -> &T {
+        match self {
+            Self::Ordinary(value) => value,
+            Self::Retained(value) => value,
+        }
+    }
+
     fn value_mut(&mut self) -> &mut T {
         match self {
             Self::Ordinary(value) => value,
@@ -53,6 +60,13 @@ macro_rules! replacement {
 }
 replacement!(QueryReplacement, MutableQueryPlan);
 replacement!(SourceReplacement, MutableSourcePlan);
+
+impl std::ops::Deref for QueryReplacement {
+    type Target = QueryPlan;
+    fn deref(&self) -> &QueryPlan {
+        self.0.value()
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Scope<'a> {
@@ -100,6 +114,16 @@ impl Discarded {
 }
 
 impl QueryReplacement {
+    pub(crate) fn install_uncontrolled(self, query: &mut QueryPlan) -> Result<(), SQLError> {
+        self.install(
+            query,
+            None,
+            Scope::default(),
+            &ProductionControl::uncontrolled(),
+        )
+        .map(drop)
+    }
+
     pub(super) fn install(
         mut self,
         query: &mut QueryPlan,

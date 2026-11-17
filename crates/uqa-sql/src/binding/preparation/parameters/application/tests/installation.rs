@@ -9,22 +9,21 @@ use crate::plan::{PlanRef, UnifiedPlan};
 
 mod metadata;
 
-fn observe_plan(plan: &MutableExecutablePlan, control: &ProductionControl<'_>) -> InputConstants {
+fn observe_plan(plan: PlanRef<'_>, control: &ProductionControl<'_>) -> InputConstants {
     let mut constants = InputConstants::new(control);
-    plan.as_plan_ref()
-        .visit_scalar_expressions(&mut |expression| {
-            expression.visit(&mut |expression| {
-                if matches!(
-                    expression,
-                    ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. }
-                ) {
-                    constants
-                        .11
-                        .insert(AnalysisIdentity::from(expression), 0)
-                        .unwrap();
-                }
-            });
+    plan.visit_scalar_expressions(&mut |expression| {
+        expression.visit(&mut |expression| {
+            if matches!(
+                expression,
+                ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. }
+            ) {
+                constants
+                    .11
+                    .insert(AnalysisIdentity::from(expression), 0)
+                    .unwrap();
+            }
         });
+    });
     constants
 }
 
@@ -49,7 +48,7 @@ fn parameter_alias_installation_uses_original_observations_across_work_windows()
         let control = ProductionControl::new(&native, &token, &token);
         let source = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
         let mut expected = source.copy_for_rewrite(&control).unwrap();
-        let constants = observe_plan(&expected, &control);
+        let constants = observe_plan(expected.as_plan_ref(), &control);
         inline(constants.apply_projection_aliases_owned_from(&mut expected, &control, &mut ()))
             .unwrap();
         let expected_json = json(expected.as_plan_ref());
@@ -65,7 +64,7 @@ fn parameter_alias_installation_uses_original_observations_across_work_windows()
             let mut channel = reader.input();
             let cancellation = channel.cancellation;
             let control = ProductionControl::new(&owner, &original, cancellation);
-            let constants = observe_plan(&plan, &control);
+            let constants = observe_plan(plan.as_plan_ref(), &control);
             let count = constants.11.values().len();
             let mut work = WorkWindows {
                 input: &mut channel,

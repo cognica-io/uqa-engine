@@ -5,7 +5,14 @@
 //
 
 use super::*;
-use crate::{plan::QueryMetadataUpdate, RowSchema};
+use crate::{
+    plan::{QueryMetadataUpdate, QueryPlan, QueryReplacement, RetainedExecutablePlan},
+    RowSchema,
+};
+
+mod native;
+mod observation;
+use observation::{observe_queries, Plan};
 
 #[derive(Default)]
 struct Observations {
@@ -34,22 +41,30 @@ fn prepare(
     replacement: Option<&UnifiedPlan>,
     control: &ProductionControl<'_>,
 ) -> (Box<MutableExecutablePlan>, InputConstants, Observations) {
+    prepare_plans(
+        Box::new(source.copy_for_rewrite(control).unwrap()),
+        replacement.map(|source| Box::new(source.copy_for_rewrite(control).unwrap())),
+        control,
+    )
+}
+
+fn prepare_plans<P: Plan>(
+    mut plan: Box<P>,
+    mut replacement: Option<Box<P>>,
+    control: &ProductionControl<'_>,
+) -> (Box<P>, InputConstants, Observations) {
     // The observation's original query root stays stationary across future ownership transfers.
-    let mut plan = Box::new(source.copy_for_rewrite(control).unwrap());
-    let mut replacement =
-        replacement.map(|source| Box::new(source.copy_for_rewrite(control).unwrap()));
     let selected = replacement.as_mut().unwrap_or(&mut plan);
-    let mut constants = observe_plan(selected, control);
+    let mut constants = observe_plan(selected.as_plan_ref(), control);
     let mut observed = Observations::default();
-    selected
-        .apply_query_metadata(control, &mut |query| {
-            constants.8.outputs.insert(
-                AnalysisIdentity::from(query),
-                schema(&mut observed, control),
-            )?;
-            Ok(QueryMetadataUpdate::default())
-        })
-        .unwrap();
+    observe_queries(&mut **selected, control, &mut |query| {
+        constants.8.outputs.insert(
+            AnalysisIdentity::from(query),
+            schema(&mut observed, control),
+        )?;
+        Ok(QueryMetadataUpdate::default())
+    })
+    .unwrap();
     selected.as_plan_ref().visit_sources(&mut |source| {
         constants
             .8
@@ -99,9 +114,7 @@ fn prepare(
             .outputs
             .remove(&AnalysisIdentity::from(replaced))
             .unwrap();
-        let MutableExecutablePlan::Query(replacement) = *replacement else {
-            unreachable!()
-        };
+        let replacement = (*replacement).into_replacement();
         constants
             .8
             .outputs
@@ -115,8 +128,8 @@ fn prepare(
     (plan, constants, observed)
 }
 
-fn verify(
-    plan: &mut MutableExecutablePlan,
+fn verify<P: Plan>(
+    plan: &mut P,
     constants: &InputConstants,
     observed: &Observations,
     control: &ProductionControl<'_>,
@@ -133,7 +146,7 @@ fn verify(
             .unwrap();
         assert!(schema.shares_index(&observed.schemas[index]));
     };
-    plan.apply_query_metadata(control, &mut |query| {
+    observe_queries(plan, control, &mut |query| {
         check_schema(query.analyzed_output.as_ref().unwrap());
         if let RelationalPlan::QueryBlock(block) = &query.root {
             assert_eq!(query.analyzed_source.is_some(), block.from.is_some());
@@ -199,7 +212,7 @@ fn input(
         };
         let references = constants.11.values().len();
         constants
-            .apply_metadata_owned_from(&mut plan, &control, &mut work)
+            .apply_metadata_owned_from(&mut *plan, &control, &mut work)
             .await?;
         assert_eq!(constants.11.values().len(), references);
         Ok((plan, constants))
@@ -232,8 +245,8 @@ fn input_metadata_application_preserves_complete_plans_and_original_observations
         let token = CancellationToken::new();
         let control = ProductionControl::new(&native, &token, &token);
         let (mut expected, mut constants, observed) = prepare(&source, replacement, &control);
-        inline(constants.apply_metadata_owned_from(&mut expected, &control, &mut ())).unwrap();
-        let expected_json = verify(&mut expected, &constants, &observed, &control);
+        inline(constants.apply_metadata_owned_from(&mut *expected, &control, &mut ())).unwrap();
+        let expected_json = verify(&mut *expected, &constants, &observed, &control);
         drop((expected, constants, observed));
         let (plan, constants, observed) = prepare(&source, replacement, &control);
         let completed = Arc::new(AtomicUsize::new(0));
@@ -243,7 +256,7 @@ fn input_metadata_application_preserves_complete_plans_and_original_observations
             let output = advance(&mut decoder).unwrap();
             assert!(completed.load(Ordering::Relaxed) - before <= 1);
             if let Some((mut plan, constants)) = output {
-                assert_eq!(verify(&mut plan, &constants, &observed, &control), expected_json, "{sql}");
+                assert_eq!(verify(&mut *plan, &constants, &observed, &control), expected_json, "{sql}");
                 drop((plan, constants));
                 break;
             }
@@ -388,7 +401,7 @@ fn input_metadata_application_bounds_wide_installation_on_a_small_stack() {
                 let output = advance(&mut decoder).unwrap();
                 assert!(completed.load(Ordering::Relaxed) - before <= 1);
                 if let Some((mut plan, constants)) = output {
-                    verify(&mut plan, &constants, &observed, &control);
+                    verify(&mut *plan, &constants, &observed, &control);
                     assert_eq!(constants.11.values().len(), 4096);
                     assert_eq!(observed.bindings.len(), 4096);
                     assert_eq!(

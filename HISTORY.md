@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve original query replacement owners in retained input-observation maps, and share layout, parameter-label and source-call installation across ordinary and native plans.
+
 - Transfer query and source replacements through their original constructor owners. Preserve stationary query headers and incoming buffers, admit combined structural depth before installation, and retire discarded plans, descriptors and field records through the existing work owners.
 
 - Retire row-schema fields and nested record, collation, relation and lateral metadata through the existing type, collection and tree owners. Transfer original buffers and reservations without copying lookup structures, and use the same cleanup for ordinary destruction, query-layout replacement and discarded source observations. Preserve shared readers and release admitted native metadata across work boundaries without allocating cleanup storage. Complete routine analysis, descriptor-input qualification and public backup restoration remain in progress.

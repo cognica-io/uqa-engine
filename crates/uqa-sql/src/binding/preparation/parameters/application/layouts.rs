@@ -45,7 +45,7 @@ impl<W: Work + Send> MetadataObserver<W> for QueryLayouts<'_> {
             _ => None,
         };
         Ok(Some(QueryMetadataUpdate {
-            root: root.map(Into::into),
+            root,
             layouts: Some(QueryLayoutUpdate {
                 output: self.0.outputs.remove(&AnalysisIdentity::from(query)),
                 source: source
