@@ -72126,6 +72126,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_metadata_retirement_bounds_wide_names_and_deep_types_per_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire seven native source/CTE shapes with 2048 names and a 4096-level column type under one-step work windows.",
+      "invariant": "Bound each productive step to at most sixteen deallocations and zero new allocations while the native allowance is exhausted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_metadata_retirement_releases_each_cancelled_or_abandoned_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Cancel either owner or abandon every suspended prefix of seven source/CTE metadata shapes.",
+      "invariant": "Retire every private field without new allocations and release both work and native workspace while preserving an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_metadata_retirement_bounds_rule_fields_without_cleanup_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire INSERT, UPDATE, DELETE and MERGE bodies with 2048 retained rule metadata fields.",
+      "invariant": "Reuse native field and vector retirement, bounding each work window independently of metadata width with no cleanup allocation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

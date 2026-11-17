@@ -52,7 +52,7 @@ impl Retire for Node {
                 RelationalPlan::Values { rows, .. } => rows.retire_step(positions, scalar),
             },
             Node::Source(source) => source.retire_step(positions, scalar),
-            Node::Cte(cte) => cte.cycle.retire_step(positions, scalar),
+            Node::Cte(cte) => cte.retire_step(positions, scalar),
             Node::Command(command) => commands::retire_scalars(command, positions, scalar),
             Node::Expression(expression) => expression.scalar.retire_step(positions, scalar),
         }

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Native scalar fields retain their declared order across immediate and stepped retirement.
+//! Native plan fields retain their declared order across immediate and stepped retirement.
 
 use crate::{
     ast::{
@@ -21,6 +21,7 @@ use crate::{
 
 mod steps;
 pub(crate) use steps::ScalarRetirement;
+mod metadata;
 
 pub(crate) trait Retire: Sized {
     fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool;
@@ -40,11 +41,63 @@ pub(crate) use fields;
 impl Retire for SourcePlan {
     fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Table { .. } | Self::Subquery { .. } | Self::RetainedRows(_) => true,
-            Self::Join { on, .. } => on.retire_step(positions, scalar),
-            Self::Values { rows, .. } => rows.retire_step(positions, scalar),
-            Self::Function { args, .. } => args.retire_step(positions, scalar),
-            Self::FunctionGroup { functions, .. } => functions.retire_step(positions, scalar),
+            Self::Table {
+                name,
+                qualifier,
+                alias,
+                column_aliases,
+                bound_columns,
+                ..
+            } => {
+                fields!(positions, scalar; name, qualifier, alias, column_aliases, bound_columns)
+            }
+            Self::Join {
+                on,
+                using,
+                alias,
+                column_aliases,
+                ..
+            } => {
+                fields!(positions, scalar; on, using, alias, column_aliases)
+            }
+            Self::Values {
+                rows,
+                alias,
+                column_aliases,
+                internal_column_types,
+                ..
+            } => {
+                fields!(positions, scalar; rows, alias, column_aliases, internal_column_types)
+            }
+            Self::Function {
+                args,
+                name,
+                binding,
+                output_name,
+                relations,
+                alias,
+                column_aliases,
+                column_types,
+                ..
+            } => {
+                fields!(positions, scalar; args, name, binding, output_name, relations, alias, column_aliases, column_types)
+            }
+            Self::FunctionGroup {
+                functions,
+                alias,
+                column_aliases,
+                ..
+            } => {
+                fields!(positions, scalar; functions, alias, column_aliases)
+            }
+            Self::Subquery {
+                alias,
+                column_aliases,
+                ..
+            } => {
+                fields!(positions, scalar; alias, column_aliases)
+            }
+            Self::RetainedRows(_) => true,
         }
     }
 }
@@ -126,25 +179,46 @@ macro_rules! scalar_fields {
         }
     };
 }
+pub(super) use scalar_fields;
 
-scalar_fields!(ProjectionPlan { expr } skip { alias });
-scalar_fields!(TableFunctionPlan { args } skip { name, binding, output_name, relations, column_aliases, column_types });
+scalar_fields!(ProjectionPlan { expr, alias });
+scalar_fields!(TableFunctionPlan {
+    args,
+    name,
+    binding,
+    output_name,
+    relations,
+    column_aliases,
+    column_types
+});
 scalar_fields!(OrderPlan { expr } skip { descending, nulls });
 scalar_fields!(ScalarOrder { expr } skip { descending, nulls });
 scalar_fields!(ScalarWindowSpec { partition_by, order_by, frame } skip { definition });
 scalar_fields!(ScalarWindowFrame { start, end } skip { mode, between, exclusion });
-scalar_fields!(WindowDefinition<ScalarWindowSpec> { spec } skip { name, inherited });
-scalar_fields!(AssignmentTarget<ScalarExpr> { indirection } skip { column });
+scalar_fields!(WindowDefinition<ScalarWindowSpec> { spec, name } skip { inherited });
+scalar_fields!(AssignmentTarget<ScalarExpr> { indirection, column });
 scalar_fields!(MultipleAssignmentTargets<ScalarExpr> { targets } skip { source_positions, source_width });
 scalar_fields!(AssignmentPlan { target, value });
-scalar_fields!(ConflictPlan { predicate, expressions, action } skip { constraint, conflict_columns });
-scalar_fields!(ViewCheckPlan { predicate } skip { view });
-scalar_fields!(CteCyclePlan { mark_value, mark_default } skip { columns, mark_column, path_column });
+scalar_fields!(ConflictPlan {
+    predicate,
+    expressions,
+    action,
+    constraint,
+    conflict_columns
+});
+scalar_fields!(ViewCheckPlan { predicate, view });
+scalar_fields!(CteCyclePlan {
+    mark_value,
+    mark_default,
+    columns,
+    mark_column,
+    path_column
+});
 
 impl Retire for QueryBlockPlan {
     fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         fields!(positions, scalar; self.windows, self.projections, self.r#where, self.group_by,
-            self.grouping_sets, self.having, self.order_by, self.limit, self.offset, self.distinct_on)
+            self.grouping_sets, self.having, self.order_by, self.limit, self.offset, self.distinct_on, self.locking)
     }
 }
 impl Retire for ScalarFrameBound {
@@ -166,7 +240,7 @@ impl Retire for AssignmentTargets<ScalarExpr> {
 impl Retire for AssignmentStep<ScalarExpr> {
     fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
         match self {
-            Self::Field(_) => true,
+            Self::Field(name) => name.retire_step(positions, scalar),
             Self::Index(value) => value.retire_step(positions, scalar),
             Self::Slice { lower, upper } => fields!(positions, scalar; lower, upper),
         }

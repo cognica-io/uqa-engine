@@ -23,6 +23,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod metadata;
+
 fn tree(
     depth: usize,
     context: &Context,

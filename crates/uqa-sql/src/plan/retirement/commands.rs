@@ -70,11 +70,10 @@ impl Retire for InsertPlan {
         positions: &mut [usize],
         scalar: &mut Option<crate::ir::ownership::Retirement>,
     ) -> bool {
-        super::scalars::fields!(positions, scalar; self.columns, self.rows, self.on_conflict, self.returning, self.view_checks)
-            && self
-                .view_rule_returning
-                .as_mut()
-                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
+        super::scalars::fields!(positions, scalar; self.columns, self.rows, self.on_conflict,
+            self.returning, self.view_checks, self.view_rule_returning, self.table,
+            self.target_qualifier, self.target_alias, self.returning_aliases,
+            self.view_rule_relations, self.view_rule_insert_plans)
     }
 }
 impl Retire for UpdatePlan {
@@ -83,11 +82,10 @@ impl Retire for UpdatePlan {
         positions: &mut [usize],
         scalar: &mut Option<crate::ir::ownership::Retirement>,
     ) -> bool {
-        super::scalars::fields!(positions, scalar; self.assignments, self.predicate, self.returning, self.view_checks)
-            && self
-                .view_rule_returning
-                .as_mut()
-                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
+        super::scalars::fields!(positions, scalar; self.assignments, self.predicate, self.returning,
+            self.view_checks, self.view_rule_returning, self.table, self.target_qualifier,
+            self.target_alias, self.returning_aliases, self.view_rule_relations,
+            self.view_rule_update_plans)
     }
 }
 impl Retire for DeletePlan {
@@ -96,11 +94,9 @@ impl Retire for DeletePlan {
         positions: &mut [usize],
         scalar: &mut Option<crate::ir::ownership::Retirement>,
     ) -> bool {
-        super::scalars::fields!(positions, scalar; self.predicate, self.returning)
-            && self
-                .view_rule_returning
-                .as_mut()
-                .is_none_or(|rule| rule.returning.retire_step(positions, scalar))
+        super::scalars::fields!(positions, scalar; self.predicate, self.returning,
+            self.view_rule_returning, self.table, self.target_qualifier, self.target_alias,
+            self.returning_aliases, self.view_rule_relations)
     }
 }
 impl Retire for MergePlan {
@@ -109,7 +105,9 @@ impl Retire for MergePlan {
         positions: &mut [usize],
         scalar: &mut Option<crate::ir::ownership::Retirement>,
     ) -> bool {
-        super::scalars::fields!(positions, scalar; self.target_predicate, self.join_condition, self.when_clauses, self.returning, self.view_checks)
+        super::scalars::fields!(positions, scalar; self.target_predicate, self.join_condition,
+            self.when_clauses, self.returning, self.view_checks, self.target,
+            self.target_qualifier, self.target_alias, self.returning_aliases)
     }
 }
 
