@@ -17,6 +17,8 @@ use crate::{
 };
 use uqa_core::memory::ProductionControl;
 
+mod application;
+
 pub(super) struct MembershipAnalysis {
     pub array_items: AnalysisVec<usize>,
     pub array_coercions: AnalysisVec<(usize, AnalysisType)>,
@@ -230,64 +232,16 @@ impl MembershipAnalysis {
 
     fn apply_with(
         self,
-        mut expression: OwnedScalarExpr,
+        expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
         copy_queries: &mut impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        control.check()?;
-        if !matches!(&*expression, ScalarExpr::InList { .. }) {
-            return Err(SQLError::Internal(
-                "retained membership no longer matches its syntax".into(),
-            ));
-        }
-        for (index, target) in self.array_coercions {
-            expression = expression.map_child(index + 1, control, |item| {
-                OwnedScalarExpr::cast(
-                    item,
-                    target.catalog_name_with_control(control)?,
-                    true,
-                    control,
-                )
-            })?;
-        }
-        expression = crate::type_resolution::membership::rewrite_owned(
+        crate::catalog::work::inline(self.apply_from(
             expression,
-            &self.array_items,
             control,
-        )?;
-        if self.left_constants.is_empty() {
-            return Ok(expression);
-        }
-        let multiple = matches!(&*expression, ScalarExpr::And(_) | ScalarExpr::Or(_));
-        let count = if multiple {
-            expression.child_count()
-        } else {
-            1
-        };
-        if count != self.left_constants.len() {
-            return Err(SQLError::Internal(
-                "analyzed membership comparison count changed".into(),
-            ));
-        }
-        let last = count.saturating_sub(1);
-        for (index, constant) in self.left_constants.into_iter().enumerate() {
-            let apply = |comparison: OwnedScalarExpr| {
-                comparison.map_child(0, control, |left| {
-                    let left = constant.map_or(left, |constant| constant.expression);
-                    if index < last {
-                        copy_queries(left)
-                    } else {
-                        Ok(left)
-                    }
-                })
-            };
-            expression = if multiple {
-                expression.map_child(index, control, apply)?
-            } else {
-                apply(expression)?
-            };
-        }
-        Ok(expression)
+            &mut (),
+            &mut application::Immediate(copy_queries),
+        ))
     }
 }
 

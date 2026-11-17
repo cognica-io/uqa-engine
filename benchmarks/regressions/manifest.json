@@ -73825,6 +73825,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_shares_coercion_constant_and_occurrence_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Apply selected array casts, distinct left constants and occurrence callbacks for IN and NOT IN through immediate and one-step input, including an ordinary callback with non-Send state.",
+      "invariant": "Selected positions, comparison order, constant ownership, callback count and output reservations agree without imposing new threading requirements on ordinary callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_retires_each_interrupted_or_unadmitted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Abandon, cancel either owner or exhaust native allowance at every suspended membership-application prefix.",
+      "invariant": "Each private parent and its detached child retire without cleanup allocation; failed admission preserves the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_preserves_shape_count_and_occurrence_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Reject mismatched syntax, comparison counts and an injected occurrence-copy failure through immediate and suspended input.",
+      "invariant": "The original diagnostic order and callback boundary survive with complete destination and work retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_bounds_wide_coercions_and_deep_replacement_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Apply 4096 selected casts and replace an 8192-level left operand with 8192-level target declarations on a 256 KiB stack.",
+      "invariant": "Each one-step poll destroys fewer than 64 allocations; completed structure, cast spelling and replacement constants are preserved and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

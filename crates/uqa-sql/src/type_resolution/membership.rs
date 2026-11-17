@@ -14,7 +14,7 @@ use uqa_core::{
 };
 
 mod owned;
-pub(crate) use owned::rewrite_owned;
+pub(crate) use owned::{rewrite_owned, rewrite_owned_from};
 
 /// Positions combined into the scalar-array comparison. An empty list selects only individual comparisons.
 #[derive(Debug, Clone, PartialEq, Default)]

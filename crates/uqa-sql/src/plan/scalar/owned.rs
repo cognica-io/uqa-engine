@@ -279,7 +279,7 @@ impl OwnedScalarExpr {
 
     /// Rewrite one immediate child while retaining all parent containers and sibling owners.
     pub fn map_child<E>(
-        mut self,
+        self,
         index: usize,
         control: &ProductionControl<'_>,
         map: impl FnOnce(Self) -> std::result::Result<Self, E>,
@@ -287,9 +287,25 @@ impl OwnedScalarExpr {
     where
         E: From<CatalogRetentionError>,
     {
+        crate::catalog::work::inline(
+            self.map_child_from(index, control, |child| std::future::ready(map(child))),
+        )
+    }
+
+    /// Keep the original parent slot and sibling owners while one child replacement suspends.
+    pub(crate) async fn map_child_from<E, F>(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(Self) -> F,
+    ) -> std::result::Result<Self, E>
+    where
+        E: From<CatalogRetentionError>,
+        F: std::future::Future<Output = std::result::Result<Self, E>>,
+    {
         self.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let replacement = map(self.take_child(index))?;
+        let replacement = map(self.take_child(index)).await?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
         self.restore_child(index, replacement);
