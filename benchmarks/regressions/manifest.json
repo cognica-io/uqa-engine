@@ -71016,7 +71016,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
       "capability": "Retained enclosing query construction",
-      "workload": "Construct 512 nested scalar queries on a 256 KiB thread stack and fail a later outer alias after completing the inner arena.",
+      "workload": "Construct 512 nested scalar queries on a 256 KiB thread stack and fail a later catalog aggregate observation after completing the inner arena.",
       "invariant": "Use independent driver tasks and depth-admitted retirement, with constant polling stack, allocation-free cleanup and no retained memory.",
       "case_names": [
         ""
@@ -71055,7 +71055,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
       "capability": "Retained structural query construction",
-      "workload": "Construct 512 nested joins, derived queries and CTEs on a 256 KiB stack, then reject a later alias.",
+      "workload": "Construct 512 nested joins, derived queries and CTEs on a 256 KiB stack, then fail the enclosing query catalog aggregate observation.",
       "invariant": "Reuse independent child tasks and admitted plan retirement without recursive polling, cleanup allocations or retained memory.",
       "case_names": [
         ""
@@ -71081,7 +71081,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
       "capability": "Retained structural query construction",
-      "workload": "Retain an 8,192-level CYCLE mark before a failed query body, failed mutation body or later CTE name on a 256 KiB stack.",
+      "workload": "Retain an 8,192-level CYCLE mark before catalog classification fails in a query body, mutation body or later CTE body on a 256 KiB stack.",
       "invariant": "The existing scalar and plan-tree owners retain the completed mark through every later boundary and release its full allowance on failure.",
       "case_names": [
         ""
@@ -71133,7 +71133,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
       "capability": "Retained mutation construction",
-      "workload": "Construct 512 nested data-modifying CTE bodies on a 256 KiB stack and reject a later outer target qualifier.",
+      "workload": "Construct 512 nested data-modifying CTE bodies on a 256 KiB stack and fail a later outer RETURNING query catalog observation.",
       "invariant": "Independent child tasks preserve bounded polling stack; complete and failed prefixes retire without cleanup allocations or retained allowances.",
       "case_names": [
         ""
@@ -72162,6 +72162,45 @@
       "capability": "Retained scalar-query compaction",
       "workload": "Retire INSERT, UPDATE, DELETE and MERGE bodies with 2048 retained rule metadata fields.",
       "invariant": "Reuse native field and vector retirement, bounding each work window independently of metadata width with no cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_entry_preserves_registered_aggregates_and_original_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct native query, CTE and mutation roots with an external registered-aggregate classifier and names previously reserved by test rejection fixtures.",
+      "invariant": "Match ordinary complete plan fields and independently assert aggregate selection; production text input accepts the original names and retains its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_entry_preserves_nested_window_error_before_later_catalog_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct a nested query with a removed canonical window definition before a later failing catalog aggregate callback.",
+      "invariant": "Complete each child query normalization before observing later enclosing fields, preserving the ordinary first SQLSTATE and diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_result_keeps_completed_fields_after_source_and_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Complete a native statement with query-local windows, a CTE, nested arenas and a registered aggregate, then retire its input and syntax and cancel both tokens.",
+      "invariant": "Keep the completed native plan independently usable and its original reservations live; allocation-free final retirement preserves an independent sibling lease.",
       "case_names": [
         ""
       ]

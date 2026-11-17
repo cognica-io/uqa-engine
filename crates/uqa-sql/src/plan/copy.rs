@@ -15,6 +15,7 @@ mod attached_queries;
 mod command;
 mod generated_sources;
 mod lowering;
+pub use lowering::RetainedExecutablePlan;
 mod owned_mutation;
 mod production;
 mod query;

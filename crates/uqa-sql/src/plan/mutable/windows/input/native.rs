@@ -4,9 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Retained constructor fixtures drive the shared normalization with independent child tasks.
+//! Retained plans schedule the existing normalization with independent child tasks.
 
-use super::*;
+use super::{
+    command, query, query_fields, source, Context, Future, Input, MutableCommandPlan,
+    MutableQueryPlan, MutableSourcePlan, OwnedScalarExpr, ProductionControl, Result, SourceScope,
+    Windows,
+};
 use crate::{
     construction::{self, Read, Work},
     plan::retirement::construction::Prefix,
@@ -133,26 +137,23 @@ impl<'a> Input for Native<'a> {
     }
 }
 
-pub(super) fn retained_query<'a>(
-    value: Prefix<MutableQueryPlan>,
-    control: &ProductionControl<'_>,
-    work: Work<'a>,
-) -> Result<Read<'a, Result<Prefix<MutableQueryPlan>>>> {
-    let task = run(Task::Query(value), control.capture(), work)?;
-    Ok(Read::new(*control, async move {
-        let Task::Query(value) = task.await? else {
-            unreachable!("query normalization")
-        };
-        Ok(value)
-    })?)
-}
-
 impl Prefix<MutableQueryPlan> {
-    pub(in crate::plan) fn normalize_window_definitions_from<'a>(
-        self,
+    /// Child query constructors have already completed their own normalization. Visit only this query's shared scalar scope and arena before returning to its parent.
+    pub(in crate::plan) fn normalize_local_window_definitions_from<'a>(
+        mut self,
         control: &ProductionControl<'_>,
-        work: construction::Work<'a>,
-    ) -> Result<construction::Read<'a, Result<Self>>> {
-        retained_query(self, control, work)
+        work: Work<'a>,
+    ) -> Result<Read<'a, Result<Self>>> {
+        let owner = control.capture();
+        Ok(Read::new(*control, async move {
+            let mut input = Native {
+                work,
+                retirement: self.context().clone(),
+            };
+            let control = owner.control();
+            query_fields(&mut self, &control, &mut input).await?;
+            control.check()?;
+            Ok(self)
+        })?)
     }
 }

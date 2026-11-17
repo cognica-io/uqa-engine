@@ -5,49 +5,6 @@
 //
 
 use super::*;
-use crate::plan::{copy::lowering::mutations as constructor, CommandPlan};
-
-pub(super) async fn child<'s: 'a, 'c: 'a, 'a>(
-    source: constructor::Source<'s>,
-    copying: &mut Copying<'c>,
-    work: &mut Work<'a>,
-) -> Result<Prefix<CommandPlan>> {
-    let mut field = copying.begin_input_field()?;
-    let output = work.submit(move |work| async move {
-        let command = build(source, &mut field, work)?.await?;
-        Ok::<_, SQLError>((command, field))
-    })?;
-    let (command, field) = construction::receive(output).await?;
-    copying.finish_input_field("value0", field);
-    Ok(command)
-}
-
-fn build<'s: 'w, 'c: 'w, 'w: 'a, 'a>(
-    source: constructor::Source<'s>,
-    copying: &'a mut Copying<'c>,
-    work: Work<'w>,
-) -> Result<construction::Read<'a, Result<Prefix<CommandPlan>>>> {
-    Ok(construction::Read::new(copying.control, async move {
-        let mut scope = copying.enter_plan_node()?;
-        let mut input = Native {
-            queries: Some(Arena::new(&scope, work.clone())),
-            work,
-        };
-        let result = mutation_input(source, &mut scope, &mut input)?.await;
-        result
-    })?)
-}
-
-fn mutation_input<'s: 'a, 'c: 'a, 'a, I: construct::Input<'s, 'c> + Send + 'a>(
-    source: constructor::Source<'s>,
-    copying: &'a mut Copying<'c>,
-    input: &'a mut I,
-) -> Result<construction::Read<'a, Result<Prefix<CommandPlan>>>> {
-    Ok(construction::Read::new(
-        copying.control,
-        constructor::construct(source, copying, input),
-    )?)
-}
 
 #[test]
 fn retained_mutation_roots_preserve_complete_fields_and_query_scopes() {
@@ -87,7 +44,8 @@ fn retained_mutation_roots_bound_nested_cte_bodies_and_late_failure() {
             source = parent;
         }
         if fail {
-            source.target_qualifier = "reject_source_alias".into();
+            source.returning[0].expr =
+                Expr::ScalarSubquery(Box::new(blocks::query("SELECT reject_function()")));
         }
         let source = Arc::new(Statement::Insert(source));
         let retained_source = source.clone();
@@ -102,12 +60,11 @@ fn retained_mutation_roots_bound_nested_cte_bodies_and_late_failure() {
                 if fail {
                     assert_eq!(
                         result.err().unwrap().to_string(),
-                        "internal error: rejected source alias"
+                        "internal error: rejected aggregate classification"
                     );
                 } else {
-                    let (plan, memory) = result.unwrap();
+                    let plan = result.unwrap();
                     assert_eq!(allocation_counter::measure(|| drop(plan)).count_total, 0);
-                    drop(memory);
                 }
                 assert_eq!((native.used(), work.used()), (0, 0));
             })

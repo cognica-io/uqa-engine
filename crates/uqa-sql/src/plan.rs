@@ -27,6 +27,7 @@ mod command_children;
 pub use analyzed::SharedAnalyzedSource;
 mod command_expressions;
 pub(crate) mod copy;
+pub use copy::RetainedExecutablePlan;
 pub mod input_projection;
 mod memory;
 mod model;

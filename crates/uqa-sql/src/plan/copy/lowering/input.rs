@@ -14,6 +14,9 @@ use crate::{
 use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod native;
+pub use native::RetainedExecutablePlan;
+
 pub(super) mod scalars;
 pub(in crate::plan::copy) mod text;
 
@@ -131,12 +134,20 @@ impl Copying<'_> {
 
     /// Transfer a completed field's constructor records into the already admitted parent slot.
     pub(super) fn finish_input_field(&mut self, name: &'static str, child: Self) {
+        self.finish_input_memory(name, child.into_rewrite_memory());
+    }
+
+    pub(super) fn finish_input_memory(
+        &mut self,
+        name: &'static str,
+        memory: crate::plan::mutable::memory::RewriteMemory,
+    ) {
         self.fields
             .as_mut()
             .expect("retained fields")
             .push(RewriteField {
                 name,
-                memory: Some(child.into_rewrite_memory()),
+                memory: Some(memory),
             })
             .expect("field record admitted before construction");
     }

@@ -12,7 +12,7 @@ use crate::{
     plan::{
         mutable::memory::RewriteMemory,
         retirement::{Pending, Retire},
-        ExpressionPlan, OrderPlan, ProjectionPlan, RelationalPlan, UnifiedPlan,
+        OrderPlan, ProjectionPlan, RelationalPlan, UnifiedPlan,
     },
     SQLError, ScalarExpr, ScalarWindowSpec,
 };
@@ -144,22 +144,7 @@ where
         expression: &'s Expr,
         control: ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
-        let mut queries = self.queries.take().expect("active scalar query owner");
-        let control = control.capture();
-        let output = self.work.submit(move |mut work| async move {
-            let control = control.control();
-            let value = ExpressionPlan::lower_scalar_with_query_input(
-                expression,
-                &mut queries,
-                &control,
-                &mut work,
-            )?
-            .await?;
-            Ok::<_, SQLError>((value, queries))
-        })?;
-        let (value, queries) = construction::receive(output).await?;
-        self.queries = Some(queries);
-        Ok(value)
+        super::native::scalar(expression, control, &mut self.work, &mut self.queries).await
     }
 }
 

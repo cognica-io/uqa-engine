@@ -5,164 +5,35 @@
 //
 
 use super::*;
-use crate::plan::{
-    copy::lowering::{
-        query::{block, construct},
-        QueryArena,
-    },
-    retirement::construction::{Context, Prefix},
-    ComputePlan, CtePlan, NoRegisteredAggregates, QueryBlockPlan, QueryPlan, SourcePlan,
-};
+use crate::plan::{AggregateClassifier, NoRegisteredAggregates, PlanRef, RetainedExecutablePlan};
 
 mod ctes;
+mod entry;
 mod mutations;
 mod normalization;
 mod trees;
 
-struct Arena<'a> {
-    value: QueryArena<'a>,
-    work: Work<'a>,
-}
-
-impl<'a> Arena<'a> {
-    fn new<'c: 'a>(copying: &Copying<'c>, work: Work<'a>) -> Self {
-        Self {
-            value: copying.query_arena(),
-            work,
+struct Aggregates;
+impl AggregateClassifier for Aggregates {
+    fn is_registered_aggregate(&self, _: &str) -> bool {
+        false
+    }
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool> {
+        control.check()?;
+        if name == "reject_function" {
+            return Err(SQLError::Internal(
+                "rejected aggregate classification".into(),
+            ));
         }
+        Ok(false)
     }
 }
 
-impl<'s: 'a, 'a> crate::plan::scalar::ScalarQueryInput<&'s Expr, &'s SelectStmt> for Arena<'a> {
-    async fn parameter(
-        &mut self,
-        expression: &'s Expr,
-        control: &ProductionControl<'_>,
-    ) -> Result<Option<usize>> {
-        control.check()?;
-        Ok(self
-            .value
-            .copying
-            .parameters
-            .and_then(|parameters| parameters(expression)))
-    }
-
-    async fn append(
-        &mut self,
-        query: &'s SelectStmt,
-        control: &ProductionControl<'_>,
-    ) -> Result<usize> {
-        self.work.checkpoint().await;
-        control.check()?;
-        self.value.queries.reserve(1)?;
-        let index = self.value.queries.len();
-        let mut item = self.value.copying.begin_input_field()?;
-        let query = child(construct::Source::Select(query), &mut item, &mut self.work).await?;
-        self.value.copying.finish_input_field("item", item);
-        self.value
-            .queries
-            .push(query.take())
-            .expect("admitted nested query slot");
-        Ok(index)
-    }
-}
-
-async fn child<'s: 'a, 'c: 'a, 'a>(
-    source: construct::Source<'s>,
-    copying: &mut Copying<'c>,
-    work: &mut Work<'a>,
-) -> Result<Prefix<QueryPlan>> {
-    let mut field = copying.begin_input_field()?;
-    let output = work.submit(move |work| async move {
-        let query = build(source, &mut field, work)?.await?;
-        Ok::<_, SQLError>((query, field))
-    })?;
-    let (query, field) = construction::receive(output).await?;
-    copying.finish_input_field("query", field);
-    Ok(query)
-}
-
-fn build<'s: 'w, 'c: 'w, 'w: 'a, 'a>(
-    source: construct::Source<'s>,
-    copying: &'a mut Copying<'c>,
-    work: Work<'w>,
-) -> Result<construction::Read<'a, Result<Prefix<QueryPlan>>>> {
-    Ok(construction::Read::new(copying.control, async move {
-        let mut scope = copying.enter_plan_node()?;
-        let mut input = Native {
-            queries: Some(Arena::new(&scope, work.clone())),
-            work,
-        };
-        let mut query = scope.retain_plan(crate::plan::retirement::empty_query());
-        query_input(source, &mut scope, &mut input, &mut query)?.await?;
-        Ok(query)
-    })?)
-}
-
-fn query_input<'s: 'a, 'c: 'a, 'a, I: construct::Input<'s, 'c> + Send + 'a>(
-    source: construct::Source<'s>,
-    copying: &'a mut Copying<'c>,
-    input: &'a mut I,
-    query: &'a mut Prefix<QueryPlan>,
-) -> Result<construction::Read<'a, Result<()>>> {
-    Ok(construction::Read::new(
-        copying.control,
-        construct::construct(source, copying, input, query),
-    )?)
-}
-
-impl<'s: 'a, 'c: 'a, 'a> construct::Input<'s, 'c> for Native<'a, Arena<'a>> {
-    async fn ctes(
-        &mut self,
-        source: &'s [crate::ast::CTE],
-        copying: &mut Copying<'c>,
-    ) -> Result<Prefix<Vec<CtePlan>>> {
-        ctes::list_input(source, copying, self)?.await
-    }
-
-    async fn query(
-        &mut self,
-        source: construct::Source<'s>,
-        copying: &mut Copying<'c>,
-    ) -> Result<Prefix<QueryPlan>> {
-        child(source, copying, &mut self.work).await
-    }
-}
-
-impl<'s: 'a, 'c: 'a, 'a> block::Input<'s, 'c> for Native<'a, Arena<'a>> {
-    async fn source(
-        &mut self,
-        source: &'s crate::ast::FromClause,
-        copying: &mut Copying<'c>,
-    ) -> Result<Prefix<SourcePlan>> {
-        trees::source_child(source, copying, self).await
-    }
-
-    async fn finish_arena(&mut self, copying: &mut Copying<'c>) -> Result<Prefix<Vec<QueryPlan>>> {
-        self.work.checkpoint().await;
-        let queries =
-            copying.take_arena(self.queries.take().expect("completed query arena").value)?;
-        Ok(copying.retain_plan(queries))
-    }
-
-    async fn compute(
-        &mut self,
-        block: &QueryBlockPlan,
-        control: &ProductionControl<'c>,
-    ) -> Result<ComputePlan> {
-        block
-            .compute_with_work(control, &mut self.work, &mut |expression| {
-                crate::semantics::aggregates::is_aggregate_with_control(
-                    &NoRegisteredAggregates,
-                    expression,
-                    control,
-                )
-            })
-            .await
-    }
-}
-
-type PlanOutput = (Prefix<UnifiedPlan>, RewriteMemory);
+type PlanOutput = RetainedExecutablePlan;
 type PlanInput = ImageDecoder<PlanOutput, SQLError>;
 
 fn replace(expression: &Expr) -> Option<usize> {
@@ -182,47 +53,23 @@ fn input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut channel = reader.input();
         let control = ProductionControl::new(&native, &original, channel.cancellation);
-        let mut driver = construction::Driver::new(control)?;
-        let source = source.as_ref();
-        let output = driver.work().submit(move |mut work| async move {
-            let mut copying = Copying::for_rewrite(control).unwrap();
-            copying.plan_retirement = Some(Context::new(&control)?);
-            copying.parameters = parameters.then_some(&replace);
-            let plan = match source {
-                Statement::Select(query) => {
-                    copying.admit_box::<QueryPlan>()?;
-                    let query =
-                        build(construct::Source::Select(query), &mut copying, work)?.await?;
-                    UnifiedPlan::Query(copying.finish_box(query, Prefix::take)?)
-                }
-                Statement::Values { rows } => {
-                    copying.admit_box::<QueryPlan>()?;
-                    let query = build(construct::Source::Values(rows), &mut copying, work)?.await?;
-                    UnifiedPlan::Query(copying.finish_box(query, Prefix::take)?)
-                }
-                source => {
-                    copying.admit_box::<crate::plan::CommandPlan>()?;
-                    let mut scope = copying.enter_plan_node()?;
-                    let command = mutations::child(
-                        crate::plan::copy::lowering::mutations::Source::statement(source)
-                            .expect("query or mutation fixture"),
-                        &mut scope,
-                        &mut work,
-                    )
-                    .await?;
-                    UnifiedPlan::Command(scope.finish_box(command, Prefix::take)?)
-                }
-            };
-            let plan = copying.retain_plan(plan);
-            control.check()?;
-            Ok::<_, SQLError>((plan, copying.into_rewrite_memory()))
-        })?;
-        while driver.advance().await? {
-            channel.checkpoint().await?;
-        }
-        construction::receive(output).await
+        UnifiedPlan::lower_executable_with_parameters_from_input(
+            source.as_ref(),
+            &Aggregates,
+            &control,
+            parameters.then_some(&replace),
+            &mut channel,
+        )
+        .await
     })
     .unwrap()
+}
+
+fn json(plan: PlanRef<'_>) -> serde_json::Value {
+    match plan {
+        PlanRef::Query(query) => serde_json::to_value(query).unwrap(),
+        PlanRef::Command(command) => serde_json::to_value(command).unwrap(),
+    }
 }
 
 fn advance(reader: &mut PlanInput) -> Result<Option<PlanOutput>> {
@@ -286,7 +133,7 @@ fn assert_equivalent(sources: impl IntoIterator<Item = Statement>) {
                 parameters.then_some(&replace),
             )
             .unwrap();
-            let ((query, memory), polls) = complete(&mut input(
+            let (query, polls) = complete(&mut input(
                 source.clone(),
                 &native,
                 &work,
@@ -294,34 +141,18 @@ fn assert_equivalent(sources: impl IntoIterator<Item = Statement>) {
                 &token,
                 parameters,
             ));
-            let (actual_json, expected_json) = match (&*query, &expected) {
-                (
-                    UnifiedPlan::Query(actual),
-                    crate::plan::MutableExecutablePlan::Query(expected),
-                ) => (
-                    serde_json::to_value(&**actual).unwrap(),
-                    serde_json::to_value(&**expected).unwrap(),
-                ),
-                (
-                    UnifiedPlan::Command(actual),
-                    crate::plan::MutableExecutablePlan::Command(expected),
-                ) => (
-                    serde_json::to_value(&**actual).unwrap(),
-                    serde_json::to_value(&**expected).unwrap(),
-                ),
-                _ => panic!("statement kind changed"),
-            };
-            assert_eq!(actual_json, expected_json, "parameters={parameters}");
+            assert_eq!(
+                json(query.as_plan_ref()),
+                json(expected.as_plan_ref()),
+                "parameters={parameters}"
+            );
             if !parameters {
                 let ordinary = UnifiedPlan::lower(source.as_ref().clone());
-                assert_eq!(
-                    serde_json::to_value(&*query).unwrap(),
-                    serde_json::to_value(&ordinary).unwrap()
-                );
+                assert_eq!(json(query.as_plan_ref()), json(PlanRef::from(&ordinary)));
             }
             assert!(polls > 1);
             assert_eq!(allocation_counter::measure(|| drop(query)).count_total, 0);
-            drop((memory, expected));
+            drop(expected);
             assert_eq!((native.used(), work.used()), (0, 0));
         }
     }
@@ -403,7 +234,11 @@ fn retained_enclosing_queries_bound_nested_polling_and_retire_late_failures() {
                     source = parent;
                 }
                 if fail {
-                    source.projections[0].alias = Some("reject_source_alias".into());
+                    source.projections.push(
+                        blocks::query("SELECT reject_function()")
+                            .projections
+                            .remove(0),
+                    );
                 }
                 let result = input(
                     Arc::new(Statement::Select(Box::new(source))),
@@ -417,12 +252,11 @@ fn retained_enclosing_queries_bound_nested_polling_and_retire_late_failures() {
                 if fail {
                     assert_eq!(
                         result.err().unwrap().to_string(),
-                        "internal error: rejected source alias"
+                        "internal error: rejected aggregate classification"
                     );
                 } else {
-                    let (query, memory) = result.unwrap();
+                    let query = result.unwrap();
                     assert_eq!(allocation_counter::measure(|| drop(query)).count_total, 0);
-                    drop(memory);
                 }
                 assert_eq!((native.used(), work.used()), (0, 0));
             }

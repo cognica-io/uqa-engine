@@ -7,8 +7,8 @@
 //! Structural normalization shares semantics while native child jobs retain their constructor's retirement context.
 
 use super::{
-    command, query, source, MutableCommandPlan, MutableQueryPlan, MutableSourcePlan, SourceScope,
-    Windows,
+    command, query, query_fields, source, MutableCommandPlan, MutableQueryPlan, MutableSourcePlan,
+    SourceScope, Windows,
 };
 use crate::{
     catalog::work::Work as CatalogWork,
@@ -141,5 +141,4 @@ impl Input for Immediate {
     }
 }
 
-#[cfg(test)]
-mod tests;
+mod native;

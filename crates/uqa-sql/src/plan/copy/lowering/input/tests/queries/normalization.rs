@@ -5,13 +5,12 @@
 //
 
 use super::*;
-use crate::{ast::SelectStmt, plan::MutableQueryPlan};
 
-type Output = Prefix<MutableQueryPlan>;
+type Output = RetainedExecutablePlan;
 type Input = ImageDecoder<Output, SQLError>;
 
 fn input(
-    source: Arc<SelectStmt>,
+    source: Arc<Statement>,
     native: &MemoryBudget,
     work: &MemoryBudget,
     original: &CancellationToken,
@@ -22,27 +21,13 @@ fn input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut channel = reader.input();
         let control = ProductionControl::new(&native, &original, channel.cancellation);
-        let mut driver = construction::Driver::new(control)?;
-        let source = source.as_ref();
-        let output = driver.work().submit(move |work| async move {
-            let mut copying = Copying::for_rewrite(control).unwrap();
-            copying.plan_retirement = Some(Context::new(&control)?);
-            let query = build(
-                construct::Source::Select(source),
-                &mut copying,
-                work.clone(),
-            )?
-            .await?;
-            let memory = copying.into_rewrite_memory();
-            query
-                .map(|query| MutableQueryPlan::from_rewrite_parts(query, Some(memory)))
-                .normalize_window_definitions_from(&control, work)?
-                .await
-        })?;
-        while driver.advance().await? {
-            channel.checkpoint().await?;
-        }
-        construction::receive(output).await
+        UnifiedPlan::lower_executable_from_input(
+            &source,
+            &NoRegisteredAggregates,
+            &control,
+            &mut channel,
+        )
+        .await
     })
     .unwrap()
 }
@@ -78,9 +63,9 @@ fn retained_query_normalization_preserves_canonical_scopes_and_native_owners() {
     ] {
         let source = blocks::query(sql);
         let expected = UnifiedPlan::lower(Statement::Select(Box::new(source.clone())));
-        let (actual, polls) = complete(&mut input(Arc::new(source), &native, &work, &token, &token));
+        let (actual, polls) = complete(&mut input(Arc::new(Statement::Select(Box::new(source))), &native, &work, &token, &token));
         let UnifiedPlan::Query(expected) = expected else { panic!("query"); };
-        assert_eq!(serde_json::to_value(&**actual).unwrap(), serde_json::to_value(&*expected).unwrap(), "{sql}");
+        assert_eq!(json(actual.as_plan_ref()), serde_json::to_value(&*expected).unwrap(), "{sql}");
         assert!(polls > 1);
         assert_eq!(work.used(), 0);
         let allocations = allocation_counter::measure(|| drop(actual));
@@ -91,7 +76,7 @@ fn retained_query_normalization_preserves_canonical_scopes_and_native_owners() {
 
 #[test]
 fn retained_query_normalization_releases_every_interrupted_prefix() {
-    let source = Arc::new(blocks::query("SELECT row_number() OVER w, (SELECT row_number() OVER w WINDOW w AS (ORDER BY 2)) WINDOW w AS (ORDER BY 1)"));
+    let source = Arc::new(statement("SELECT row_number() OVER w, (SELECT row_number() OVER w WINDOW w AS (ORDER BY 2)) WINDOW w AS (ORDER BY 1)"));
     let native = MemoryBudget::new(32 << 20);
     let work = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
@@ -148,9 +133,15 @@ fn retained_query_normalization_bounds_structural_polling_and_cleanup_stack() {
                 parent.projections[0].expr = Expr::ScalarSubquery(Box::new(source));
                 source = parent;
             }
-            let output = input(Arc::new(source), &native, &work, &token, &token)
-                .read(&mut std::io::empty())
-                .unwrap();
+            let output = input(
+                Arc::new(Statement::Select(Box::new(source))),
+                &native,
+                &work,
+                &token,
+                &token,
+            )
+            .read(&mut std::io::empty())
+            .unwrap();
             let allocations = allocation_counter::measure(|| drop(output));
             assert_eq!(allocations.count_total, 0, "{allocations:?}");
             assert_eq!((native.used(), work.used()), (0, 0));

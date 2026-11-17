@@ -32,6 +32,7 @@ mod commands;
 mod ctes;
 mod expressions;
 pub(super) mod input;
+pub use input::RetainedExecutablePlan;
 mod mutations;
 mod ownership;
 mod projections;

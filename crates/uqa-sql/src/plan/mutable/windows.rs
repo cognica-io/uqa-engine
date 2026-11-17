@@ -148,6 +148,16 @@ async fn query<I: Input>(
         let value = input.query(slot.take(), control)?.await?;
         slot.restore(value);
     }
+    query_fields(query, control, input).await
+}
+
+async fn query_fields<I: Input>(
+    query: &mut MutableQueryPlan,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    query.assert_owner(control);
+    checkpoint(control, input).await?;
     if let RelationalPlan::QueryBlock(block) = &query.root {
         let resolved =
             crate::plan::windows::resolved_window_definitions_from(block, control, input.work())
