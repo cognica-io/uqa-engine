@@ -29,6 +29,7 @@ pub(in crate::plan) use owned::windows::OwnedWindowSpec;
 pub(crate) use owned::ScalarMemory;
 pub(in crate::plan) use owned::ScalarMemoryFolding;
 pub use owned::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
+pub(in crate::plan) use owned::{ScalarEdit, ScalarEditIdentity, SequenceBinding};
 mod resources;
 mod source;
 mod window;

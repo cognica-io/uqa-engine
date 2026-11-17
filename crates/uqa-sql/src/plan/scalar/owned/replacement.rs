@@ -6,7 +6,10 @@
 
 //! Address-stable scalar edits keep read-only selection separate from paired payload/owner replacement.
 
-use super::{traversal::Edit, OwnedScalarExpr, ScalarExpr, ScalarMemory};
+use super::{
+    traversal::{Edit, EditIdentity},
+    OwnedScalarExpr, ScalarExpr, ScalarMemory,
+};
 use crate::SQLError;
 use std::ptr::NonNull;
 use uqa_core::memory::ProductionControl;
@@ -115,12 +118,14 @@ fn edit_in_place<E: Edit<()>>(
 }
 
 struct Transform<'a, 'b>(&'a mut ScalarNodeTransform<'b>);
-impl Edit<()> for Transform<'_, '_> {
+impl EditIdentity for Transform<'_, '_> {
     type Identity = NonNull<ScalarExpr>;
     const BEFORE_CHILDREN: bool = false;
     fn identity(expression: &ScalarExpr) -> Self::Identity {
         NonNull::from(expression)
     }
+}
+impl Edit<()> for Transform<'_, '_> {
     fn apply(
         &mut self,
         identity: Self::Identity,
@@ -133,10 +138,12 @@ impl Edit<()> for Transform<'_, '_> {
 }
 
 struct Replace<'a, 'b>(&'a mut Replacement<'b>);
-impl Edit<()> for Replace<'_, '_> {
+impl EditIdentity for Replace<'_, '_> {
     type Identity = ();
     const BEFORE_CHILDREN: bool = true;
     fn identity(_: &ScalarExpr) {}
+}
+impl Edit<()> for Replace<'_, '_> {
     fn apply(
         &mut self,
         (): (),

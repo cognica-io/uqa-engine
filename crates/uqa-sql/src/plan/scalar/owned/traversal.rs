@@ -11,11 +11,14 @@ use crate::{construction::Stack, plan::scalar::resources::input::Work, SQLError}
 use std::future::Future;
 use uqa_core::memory::ProductionControl;
 
-pub(super) trait Edit<W: Work> {
+pub(in crate::plan) trait EditIdentity {
     type Identity: Copy;
     const BEFORE_CHILDREN: bool;
 
     fn identity(expression: &ScalarExpr) -> Self::Identity;
+}
+
+pub(in crate::plan) trait Edit<W: Work>: EditIdentity {
     fn apply(
         &mut self,
         identity: Self::Identity,
@@ -33,7 +36,7 @@ struct Parent<I> {
 }
 
 impl OwnedScalarExpr {
-    pub(super) async fn edit_from<W: Work, E: Edit<W>>(
+    pub(in crate::plan) async fn edit_from<W: Work, E: Edit<W>>(
         mut self,
         mut identity: E::Identity,
         control: &ProductionControl<'_>,

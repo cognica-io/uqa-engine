@@ -6,7 +6,10 @@
 
 //! Stored sequence edits retain the selected name's original owner and preserve surrounding call and cast metadata.
 
-use super::{traversal::Edit, OwnedScalarExpr, ScalarExpr};
+use super::{
+    traversal::{Edit, EditIdentity},
+    OwnedScalarExpr, ScalarExpr,
+};
 use crate::{
     binding::view_dependencies::{is_regclass_cast, is_sequence_function},
     plan::scalar::resources::input::Work,
@@ -18,17 +21,19 @@ use uqa_core::{
     Value,
 };
 
-struct Bind<F>(F);
+pub(in crate::plan) struct Bind<F>(pub(in crate::plan) F);
+
+impl<F> EditIdentity for Bind<F> {
+    type Identity = ();
+    const BEFORE_CHILDREN: bool = false;
+    fn identity(_: &ScalarExpr) {}
+}
 
 impl<F, W: Work> Edit<W> for Bind<F>
 where
     F: FnMut(&str, &ProductionControl<'_>) -> Result<Produced<String>, SQLError> + Send,
     W::Error: Into<SQLError>,
 {
-    type Identity = ();
-    const BEFORE_CHILDREN: bool = false;
-    fn identity(_: &ScalarExpr) {}
-
     async fn apply(
         &mut self,
         (): (),

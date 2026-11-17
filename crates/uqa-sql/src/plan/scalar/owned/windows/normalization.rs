@@ -9,18 +9,23 @@
 use super::{
     CatalogRetentionError, OwnedScalarExpr, ProductionControl, ScalarExpr, ScalarWindowSpec, Work,
 };
-use crate::{plan::scalar::owned::traversal::Edit, SQLError};
+use crate::{
+    plan::scalar::owned::traversal::{Edit, EditIdentity},
+    SQLError,
+};
 
 struct Normalize<'a>(&'a [ScalarWindowSpec]);
+
+impl EditIdentity for Normalize<'_> {
+    type Identity = ();
+    const BEFORE_CHILDREN: bool = true;
+    fn identity(_: &ScalarExpr) {}
+}
 
 impl<W: Work> Edit<W> for Normalize<'_>
 where
     W::Error: From<CatalogRetentionError> + Into<SQLError> + Send,
 {
-    type Identity = ();
-    const BEFORE_CHILDREN: bool = true;
-    fn identity(_: &ScalarExpr) {}
-
     async fn apply(
         &mut self,
         (): (),

@@ -13,8 +13,10 @@ use super::{
 use crate::{
     ast::Statement,
     plan::{
-        copy::ParameterLookup, retirement::construction::Context, MutableCommandPlan,
-        MutableExecutablePlan, PlanRef, UnifiedPlan,
+        copy::ParameterLookup,
+        retirement::construction::Context,
+        scalar::{ScalarEdit, SequenceBinding},
+        MutableCommandPlan, MutableExecutablePlan, PlanRef, UnifiedPlan,
     },
 };
 use uqa_core::image_io::AsyncImageInput;
@@ -46,11 +48,25 @@ impl RetainedExecutablePlan {
         control: &ProductionControl<'_>,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<Self> {
-        Ok(Self(
-            self.0
-                .bind_sequence_names_from_input(resolve, control, input)
-                .await?,
-        ))
+        let (plan, _) = self
+            .edit_scalars_from_input(SequenceBinding(resolve), control, input)
+            .await?;
+        Ok(plan)
+    }
+
+    /// Share the native structural and scalar traversal while preserving each original scalar selection identity.
+    pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
+        self,
+        edit: E,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<(Self, E)>
+    where
+        E: for<'w> ScalarEdit<construction::Work<'w>, Identity = I> + Send,
+        I: Copy + Send,
+    {
+        let (plan, edit) = self.0.edit_scalars_from_input(edit, control, input).await?;
+        Ok((Self(plan), edit))
     }
 
     pub fn as_plan_ref(&self) -> PlanRef<'_> {

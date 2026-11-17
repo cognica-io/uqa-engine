@@ -8,6 +8,7 @@ use super::*;
 use crate::plan::{AggregateClassifier, NoRegisteredAggregates, PlanRef, RetainedExecutablePlan};
 
 mod ctes;
+mod edits;
 mod entry;
 mod mutations;
 mod normalization;
