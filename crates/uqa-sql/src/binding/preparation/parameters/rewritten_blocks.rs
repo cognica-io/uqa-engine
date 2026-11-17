@@ -6,14 +6,14 @@
 
 //! Rewritten query blocks keep their analyzed expression addresses until installation in the executable tree.
 
-use super::{AnalysisMap, NonNull, ParameterTypes, SQLError};
+use super::{AnalysisIdentity, AnalysisMap, ParameterTypes, SQLError};
 use crate::plan::{MutableQueryPlan, QueryBlockPlan, QueryPlan, RelationalPlan};
 
-pub(super) type RewrittenBlocks = AnalysisMap<NonNull<QueryBlockPlan>, MutableQueryPlan>;
+pub(super) type RewrittenBlocks = AnalysisMap<AnalysisIdentity<QueryBlockPlan>, MutableQueryPlan>;
 
 pub(super) fn install_rewritten_block(blocks: &mut RewrittenBlocks, query: &mut QueryPlan) {
     if let RelationalPlan::QueryBlock(block) = &mut query.root {
-        if let Some(rewritten) = blocks.remove(&NonNull::from(block.as_ref())) {
+        if let Some(rewritten) = blocks.remove(&AnalysisIdentity::from(block.as_ref())) {
             let rewritten = rewritten
                 .finish(&uqa_core::memory::ProductionControl::uncontrolled())
                 .expect("ordinary rewritten block")
@@ -32,7 +32,8 @@ impl ParameterTypes<'_> {
         &mut self,
         original: &QueryBlockPlan,
     ) -> Option<MutableQueryPlan> {
-        self.rewritten_blocks.remove(&NonNull::from(original))
+        self.rewritten_blocks
+            .remove(&AnalysisIdentity::from(original))
     }
 
     pub(in crate::binding::preparation) fn retain_rewritten_block(
@@ -41,7 +42,7 @@ impl ParameterTypes<'_> {
         rewritten: MutableQueryPlan,
     ) -> Result<(), SQLError> {
         self.rewritten_blocks
-            .insert(NonNull::from(original), rewritten)?;
+            .insert(AnalysisIdentity::from(original), rewritten)?;
         Ok(())
     }
 }

@@ -5,7 +5,7 @@
 //
 
 use super::{
-    install_rewritten_block, AnalysisVec, InputConstants, NonNull, OwnedScalarExpr,
+    install_rewritten_block, AnalysisIdentity, AnalysisVec, InputConstants, OwnedScalarExpr,
     ProductionControl, SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
 };
 
@@ -24,7 +24,7 @@ impl InputConstants {
     }
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
-        let identity = NonNull::from(&*expression);
+        let identity = AnalysisIdentity::from(&*expression);
         let input = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
         let control = ProductionControl::uncontrolled();
         *expression = self
@@ -37,7 +37,7 @@ impl InputConstants {
 
     pub(super) fn apply_node_owned(
         &mut self,
-        identity: NonNull<ScalarExpr>,
+        identity: AnalysisIdentity<ScalarExpr>,
         mut expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {
@@ -67,7 +67,7 @@ impl InputConstants {
                     let (mut fields, memory) = fields.into_parts();
                     for field in &mut fields {
                         field.transform_retained_nodes(control, &mut |identity, field| {
-                            self.apply_node_owned(identity, field, control)
+                            self.apply_node_owned(identity.into(), field, control)
                         })?;
                     }
                     let fields = control.finish(fields, memory)?;
@@ -216,9 +216,9 @@ impl InputConstants {
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
         // Command inputs have no enclosing QueryPlan; their validated descriptors are not needed by query-output pruning.
-        self.8.sources.remove(&NonNull::from(&*source));
+        self.8.sources.remove(&AnalysisIdentity::from(&*source));
         let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
-            if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
+            if let Some(selected) = self.7.remove(&AnalysisIdentity::from(&*binding)) {
                 *binding = Some(
                     selected
                         .into_uncontrolled()
@@ -242,7 +242,7 @@ impl InputConstants {
         node: &mut ScalarExpr,
         arena: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
-        if let Some(analysis) = self.2.remove(&NonNull::from(&*node)) {
+        if let Some(analysis) = self.2.remove(&AnalysisIdentity::from(&*node)) {
             analysis.apply(node, arena)?;
         }
         Ok(())

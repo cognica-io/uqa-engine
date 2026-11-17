@@ -350,7 +350,9 @@ pub(in crate::binding) fn retain_input_metadata_owned(
         analysis.observe_owned_plan(&plan, None)?;
         let mut replacements = analysis.parameters.take_composite_inputs();
         plan = plan.transform_scalar_nodes(control, &mut |identity, expression| {
-            Ok(replacements.remove(&identity).unwrap_or(expression))
+            Ok(replacements
+                .remove(&super::ownership::AnalysisIdentity::from(identity))
+                .unwrap_or(expression))
         })?;
         if !replacements.is_empty() {
             return Err(SQLError::Internal(

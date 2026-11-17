@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Share routine parameter observation and projection-label preservation between ordinary and owned binding. Complete parameter replacement through the existing window normalizer so each window call retains its canonical definition's bound parameters.
+- Share routine parameter observation and projection-label preservation between ordinary and owned binding. Complete parameter replacement through the existing window normalizer so each window call retains its canonical definition's bound parameters. Captured input observations use opaque original-node identities, allowing their admitted values and metadata to transfer between tasks without moving the analyzed plan or exposing pointer access.
 
 - Share admitted scalar traversal across window normalization, pre-order replacement, post-order analysis edits and retained sequence-name binding. Query and source scalar fields share their existing traversal with window normalization, including work checkpoints for empty containers. Fresh retained statements also reuse the complete query, CTE, source and mutation traversal for sequence names. Preserve original analysis identities, field and lookup order, catalog name buffers and constructor ownership; deep edits and failures retire without recursive stack growth. Stored query binding completes its relation pass before sequence lookup, shares ordered namespace selection and transfers admitted canonical names through Engine catalog adapters. Routine binding/finalization and public backup restoration remain in progress.
 

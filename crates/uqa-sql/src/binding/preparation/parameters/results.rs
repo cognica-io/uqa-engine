@@ -7,7 +7,8 @@
 //! Sparse result selections from the original analysis, before rewriting inputs.
 
 use super::{
-    AnalysisMap, AnalysisType, ExpressionType, NonNull, OwnedScalarExpr, SQLError, ScalarExpr,
+    AnalysisIdentity, AnalysisMap, AnalysisType, ExpressionType, OwnedScalarExpr, SQLError,
+    ScalarExpr,
 };
 use crate::catalog::collations::{derivation::Derivation, expression::scalar_clause};
 use crate::ir::ResultCollation;
@@ -15,7 +16,7 @@ use crate::ir::ResultCollation;
 #[derive(Default)]
 pub(super) struct SelectedResults {
     pub(super) enabled: bool,
-    selected: AnalysisMap<NonNull<ScalarExpr>, (AnalysisType, ResultCollation)>,
+    selected: AnalysisMap<AnalysisIdentity<ScalarExpr>, (AnalysisType, ResultCollation)>,
 }
 
 impl SelectedResults {
@@ -78,7 +79,7 @@ impl SelectedResults {
             return Ok(());
         }
         self.selected
-            .insert_if_missing(NonNull::from(expression), || {
+            .insert_if_missing(AnalysisIdentity::from(expression), || {
                 Ok((
                     value.ty.clone().expect("selected result type"),
                     ResultCollation::new(value.derivation, value.initial_collation),
@@ -89,7 +90,7 @@ impl SelectedResults {
 
     pub(super) fn apply_owned(
         &mut self,
-        identity: NonNull<ScalarExpr>,
+        identity: AnalysisIdentity<ScalarExpr>,
         expression: OwnedScalarExpr,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {

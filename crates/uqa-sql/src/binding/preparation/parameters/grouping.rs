@@ -6,14 +6,14 @@
 
 //! Keep DISTINCT grouping identity at the analyzed, pre-optimization boundary.
 
-use super::{AnalysisMap, NonNull, ParameterTypes, SQLError, SQLParam};
+use super::{AnalysisIdentity, AnalysisMap, ParameterTypes, SQLError, SQLParam};
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan};
 use crate::{routines::RoutineResolution, RowSchema};
 use uqa_core::memory::ProductionControl;
 
 #[derive(Default)]
 pub(super) struct GroupingInputs(
-    AnalysisMap<NonNull<QueryBlockPlan>, (RowSchema, Option<RowSchema>)>,
+    AnalysisMap<AnalysisIdentity<QueryBlockPlan>, (RowSchema, Option<RowSchema>)>,
 );
 
 impl ParameterTypes<'_> {
@@ -25,10 +25,10 @@ impl ParameterTypes<'_> {
     ) -> Result<(), SQLError> {
         if block.group_distinct {
             if let Some(schemas) = self.query_schemas_mut() {
-                schemas
-                    .groupings
-                    .0
-                    .insert(NonNull::from(block), (input.clone(), outer.cloned()))?;
+                schemas.groupings.0.insert(
+                    AnalysisIdentity::from(block),
+                    (input.clone(), outer.cloned()),
+                )?;
             }
         }
         Ok(())
@@ -53,7 +53,7 @@ impl GroupingInputs {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             return Ok(crate::plan::QueryMetadataUpdate::default());
         };
-        let Some((input, outer)) = self.0.remove(&NonNull::from(block.as_ref())) else {
+        let Some((input, outer)) = self.0.remove(&AnalysisIdentity::from(block.as_ref())) else {
             return Ok(crate::plan::QueryMetadataUpdate::default());
         };
         let grouping = crate::semantics::grouping_sets::analyze_distinct_grouping_with_control(
@@ -79,7 +79,7 @@ impl GroupingInputs {
         let RelationalPlan::QueryBlock(block) = &mut query.root else {
             return Ok(());
         };
-        let Some((input, outer)) = self.0.remove(&NonNull::from(&**block)) else {
+        let Some((input, outer)) = self.0.remove(&AnalysisIdentity::from(&**block)) else {
             return Ok(());
         };
         // All input constants and selected call bindings have been installed. No scalar optimization has run, so equal values cannot conflate different analyzed expressions.

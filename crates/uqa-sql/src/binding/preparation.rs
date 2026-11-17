@@ -61,6 +61,7 @@ use crate::routines::RoutineResolution;
 use crate::schema::dependencies::oid_alias::OidAliasInput;
 use crate::ScalarExpr;
 use crate::{ColumnType, SQLError};
+use ownership::AnalysisIdentity;
 use parameters::{error, ExpressionType, ParameterTypes};
 use schema_expressions::{SchemaExpressionContext, SchemaExpressionKind};
 
@@ -694,7 +695,7 @@ struct QueryOutput {
     types: ownership::AnalysisVec<ExpressionType>,
     open: bool,
     /// Sparse original targets for indeterminate output collations; addresses are never dereferenced.
-    key_origins: ownership::AnalysisVec<(usize, std::ptr::NonNull<ScalarExpr>)>,
+    key_origins: ownership::AnalysisVec<(usize, AnalysisIdentity<ScalarExpr>)>,
     /// Leaf output names of this set-operation query, retained only for inaccessible-column diagnostics.
     set_sources: ownership::AnalysisVec<ownership::AnalysisVec<uqa_core::memory::Produced<String>>>,
     control: uqa_core::memory::OwnedProductionControl,
@@ -712,7 +713,7 @@ impl QueryOutput {
         }
     }
 
-    fn key_origin(&self, position: usize) -> Option<std::ptr::NonNull<ScalarExpr>> {
+    fn key_origin(&self, position: usize) -> Option<AnalysisIdentity<ScalarExpr>> {
         self.key_origins
             .binary_search_by_key(&position, |(position, _)| *position)
             .ok()

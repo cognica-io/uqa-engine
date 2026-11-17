@@ -7,14 +7,14 @@
 //! Text inputs are produced under the same allowance as their retained executable literals.
 
 use super::{
-    ColumnType, ConvertedInput, NonNull, OwnedScalarExpr, ParameterTypes, Produced, SQLError,
-    ScalarExpr, Value,
+    AnalysisIdentity, ColumnType, ConvertedInput, OwnedScalarExpr, ParameterTypes, Produced,
+    SQLError, ScalarExpr, Value,
 };
 
 impl ParameterTypes<'_> {
     pub(super) fn read_literal(
         &mut self,
-        origin: NonNull<ScalarExpr>,
+        origin: AnalysisIdentity<ScalarExpr>,
         text: &str,
         target: &ColumnType,
     ) -> Result<(), SQLError> {

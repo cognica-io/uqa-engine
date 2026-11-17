@@ -7,7 +7,7 @@
 //! Query analysis follows `PostgreSQL`'s source, target, clause, and coercion order.
 
 use super::super::{analysis, overlay_outer_schema_with_control};
-use super::ownership::AnalysisVec;
+use super::ownership::{AnalysisIdentity, AnalysisVec};
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
@@ -605,10 +605,7 @@ impl Preparation<'_> {
                     crate::catalog::collations::derivation::Derivation::Conflict(..)
                 ) {
                     output.key_origins.push(
-                        (
-                            output.types.len(),
-                            std::ptr::NonNull::from(&projection.expr),
-                        ),
+                        (output.types.len(), AnalysisIdentity::from(&projection.expr)),
                         &control,
                     )?;
                     self.parameters

@@ -114,8 +114,10 @@ impl Preparation<'_> {
                     subqueries,
                     outer,
                 )? {
-                    self.parameters
-                        .retain_source_binding(std::ptr::NonNull::from(binding), selected)?;
+                    self.parameters.retain_source_binding(
+                        super::ownership::AnalysisIdentity::from(binding),
+                        selected,
+                    )?;
                 }
             }
             SourcePlan::FunctionGroup { functions, .. } => {
@@ -234,8 +236,10 @@ impl Preparation<'_> {
                 subqueries,
                 outer,
             )? {
-                self.parameters
-                    .retain_source_binding(std::ptr::NonNull::from(&function.binding), selected)?;
+                self.parameters.retain_source_binding(
+                    super::ownership::AnalysisIdentity::from(&function.binding),
+                    selected,
+                )?;
             }
         }
         Ok(())

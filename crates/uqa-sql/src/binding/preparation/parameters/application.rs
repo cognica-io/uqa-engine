@@ -6,7 +6,7 @@
 
 //! Private input destinations keep their original identities until all selected metadata and scalar replacements have transferred.
 
-use super::{InputConstants, NonNull, ParameterTypes, QuerySchemas};
+use super::{AnalysisIdentity, InputConstants, ParameterTypes, QuerySchemas};
 use crate::{
     plan::{
         AnalyzedSource, MutableExecutablePlan, QueryMetadataUpdate, RelationalPlan,
@@ -28,9 +28,9 @@ impl ParameterTypes<'_> {
         let mut schemas = self.query_schemas.take().expect("query layout observation");
         plan.apply_query_metadata(control, &mut |query| {
             let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => {
-                    self.rewritten_blocks.remove(&NonNull::from(block.as_ref()))
-                }
+                RelationalPlan::QueryBlock(block) => self
+                    .rewritten_blocks
+                    .remove(&AnalysisIdentity::from(block.as_ref())),
                 _ => None,
             };
             let selected = root.as_deref().unwrap_or(query);
@@ -45,7 +45,7 @@ impl ParameterTypes<'_> {
             };
             Ok(QueryMetadataUpdate {
                 root,
-                output: schemas.outputs.remove(&NonNull::from(query)),
+                output: schemas.outputs.remove(&AnalysisIdentity::from(query)),
                 source: source
                     .map(|source| SharedAnalyzedSource::from_produced(source, control))
                     .transpose()?,
@@ -69,7 +69,9 @@ impl InputConstants {
     ) -> Result<(), SQLError> {
         plan.apply_query_metadata(control, &mut |query| {
             let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => self.10.remove(&NonNull::from(block.as_ref())),
+                RelationalPlan::QueryBlock(block) => {
+                    self.10.remove(&AnalysisIdentity::from(block.as_ref()))
+                }
                 _ => None,
             };
             let selected = root.as_deref().unwrap_or(query);
@@ -84,7 +86,7 @@ impl InputConstants {
             };
             Ok(QueryMetadataUpdate {
                 root,
-                output: self.8.outputs.remove(&NonNull::from(query)),
+                output: self.8.outputs.remove(&AnalysisIdentity::from(query)),
                 source: source
                     .map(|source| SharedAnalyzedSource::from_produced(source, control))
                     .transpose()?,
@@ -101,6 +103,7 @@ impl InputConstants {
         plan.transform_scalar_arenas_with_metadata(
             control,
             &mut |identity, expression, arena| {
+                let identity = AnalysisIdentity::from(identity);
                 let expression = match self.2.remove(&identity) {
                     Some(membership) => membership.apply_owned(expression, arena, control)?,
                     None => expression,
@@ -125,7 +128,10 @@ impl InputConstants {
     ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
         let mut aliases = ProductionVec::new(*control);
         for (index, projection) in projections.iter().enumerate() {
-            if projection.alias.is_none() && self.11.contains_key(&NonNull::from(&projection.expr))
+            if projection.alias.is_none()
+                && self
+                    .11
+                    .contains_key(&AnalysisIdentity::from(&projection.expr))
             {
                 if let crate::ScalarExpr::Column(name)
                 | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
@@ -146,10 +152,10 @@ impl InputConstants {
         control: &ProductionControl<'_>,
     ) -> Result<SourceMetadataUpdate, SQLError> {
         // Commands have no QueryPlan descriptor carrier; their source schema has already served ordered analysis.
-        self.8.sources.remove(&NonNull::from(source));
+        self.8.sources.remove(&AnalysisIdentity::from(source));
         let mut selected = ProductionVec::new(*control);
         let mut include = |index, binding: &Option<crate::ast::FunctionBinding>| {
-            if let Some(binding) = self.7.remove(&NonNull::from(binding)) {
+            if let Some(binding) = self.7.remove(&AnalysisIdentity::from(binding)) {
                 selected.push_produced(
                     control.finish((index, binding), control.empty_reservation())?,
                 )?;
@@ -176,7 +182,7 @@ impl QuerySchemas {
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<AnalyzedSource>>, SQLError> {
         control.check()?;
-        let Some(schema) = self.sources.remove(&NonNull::from(source)) else {
+        let Some(schema) = self.sources.remove(&AnalysisIdentity::from(source)) else {
             return Ok(None);
         };
         let (children, memory) = match source {

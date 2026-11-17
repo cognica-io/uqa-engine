@@ -233,3 +233,143 @@ fn owned_routine_references_preserve_stored_query_scopes_and_diagnostics() {
         assert_eq!(budget.used(), 0, "{sql}");
     }
 }
+
+#[test]
+fn prepared_input_owners_preserve_original_sites_across_task_transfer() {
+    for sql in [
+        "SELECT '7'::smallint, '7'::bigint, $1 + 2",
+        "WITH c(x) AS (SELECT $1::integer) SELECT x, '7'::smallint FROM c ORDER BY x",
+        "SELECT x, count(*) FROM (VALUES (1), (2)) v(x) GROUP BY GROUPING SETS ((x), ())",
+        "SELECT x, ('2'::smallint = ANY (ARRAY['2'::integer, '3'::integer])) FROM (SELECT NULL AS x UNION ALL SELECT 2::smallint) s",
+        "SELECT sum(x) OVER (PARTITION BY $1 ORDER BY x ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM (VALUES (1), (2)) v(x)",
+    ] {
+        let mut expected = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let input = expected.clone();
+        let binding = assignment_context();
+        let declared = [Some(ColumnType::Integer)];
+        let reference = read_prepared_inputs(&NoRoutines, &mut expected, &declared, &binding, None).unwrap();
+        let budget = MemoryBudget::new(16 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let mut actual = input.copy_for_rewrite(&control).unwrap();
+        let mut scope = SchemaScope::for_analysis_with_control(binding.copy_with_control(&control).unwrap(), &control).unwrap();
+        let mut analysis = Preparation {
+            bound_condition_queries: None,
+            routines: &NoRoutines,
+            scope: &mut scope,
+            parameters: ParameterTypes::with_input_constants_with_control(&declared, None, None, None, &control).unwrap().retain_result_metadata(),
+            schema_expression: None,
+        };
+        let PlanRef::Query(query) = actual.as_plan_ref() else { panic!("query") };
+        analysis.query(query, None).unwrap();
+        let constants = analysis.parameters.take_input_constants();
+        let parameters = analysis.parameters.finish_produced().unwrap();
+        assert_eq!(&*parameters, &reference.parameter_types, "{sql}");
+        let params = crate::prepared::analysis_parameters_with_control(&parameters, &control).unwrap();
+        std::thread::scope(|tasks| {
+            tasks.spawn(|| constants.apply_owned(&mut actual, &NoRoutines, &params, &control)).join().unwrap()
+        }).unwrap();
+        let actual = retain_prepared_input_metadata_owned(&NoRoutines, actual, &parameters, binding.copy_with_control(&control).unwrap(), &control).unwrap();
+        let PlanRef::Query(query) = actual.as_plan_ref() else { panic!("query") };
+        let UnifiedPlan::Query(expected) = expected else { panic!("query") };
+        assert_eq!(serde_json::to_value(query).unwrap(), serde_json::to_value(expected).unwrap(), "{sql}");
+        drop(actual);
+        drop(parameters);
+        drop(params);
+        drop(scope);
+        assert_eq!(budget.used(), 0, "{sql}");
+    }
+}
+
+#[test]
+fn transferred_input_failures_retire_observations_and_preserve_original_owners() {
+    for failure in 0..4 {
+        let budget = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let input = UnifiedPlan::lower(crate::compile("SELECT n, f.n").unwrap().remove(0));
+        let mut plan = input.copy_for_rewrite(&control).unwrap();
+        let independent = budget.reserve(256).unwrap();
+        let retained = budget.used();
+        let parameters =
+            RoutineParameterScope::new("f", vec!["n".into()], vec![Some(ColumnType::Integer)]);
+        let params = [crate::SQLParam::typed_scalar(
+            Value::Null,
+            ColumnType::Integer,
+        )];
+        let mut scope = SchemaScope::for_analysis_with_control(
+            assignment_context().copy_with_control(&control).unwrap(),
+            &control,
+        )
+        .unwrap();
+        scope.routine_parameters = Some(parameters.clone());
+        scope.scalar_binding = crate::binding::ScalarBindingMode::References;
+        scope.preserve_syntax_shape = true;
+        let mut analysis = Preparation {
+            bound_condition_queries: None,
+            routines: &NoRoutines,
+            scope: &mut scope,
+            parameters: ParameterTypes::fixed_with_control(&params, &control)
+                .unwrap()
+                .with_reference_retention(),
+            schema_expression: None,
+        };
+        let PlanRef::Query(query) = plan.as_plan_ref() else {
+            panic!("query")
+        };
+        analysis.query(query, Some(parameters.schema())).unwrap();
+        let constants = analysis.parameters.take_reference_constants();
+        drop(analysis);
+        drop(scope);
+        assert!(budget.used() > retained);
+        let occupied = (failure == 3).then(|| budget.reserve(budget.available()).unwrap());
+        if failure == 1 {
+            original.cancel();
+        }
+        if failure == 2 {
+            invoking.cancel();
+        }
+        std::thread::scope(|tasks| {
+            tasks
+                .spawn(|| {
+                    if failure == 0 {
+                        drop(constants);
+                    } else {
+                        let error = constants
+                            .apply_owned(&mut plan, &NoRoutines, &params, &control)
+                            .unwrap_err();
+                        assert_eq!(
+                            error.sqlstate(),
+                            Some(if failure == 3 { "53200" } else { "57014" })
+                        );
+                    }
+                })
+                .join()
+                .unwrap();
+        });
+        let PlanRef::Query(actual) = plan.as_plan_ref() else {
+            panic!("query")
+        };
+        let UnifiedPlan::Query(expected) = &input else {
+            panic!("query")
+        };
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(
+            budget.used(),
+            retained
+                + occupied
+                    .as_ref()
+                    .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+        );
+        drop(occupied);
+        drop(plan);
+        assert_eq!(budget.used(), independent.bytes());
+        drop(independent);
+        assert_eq!(budget.used(), 0);
+    }
+}

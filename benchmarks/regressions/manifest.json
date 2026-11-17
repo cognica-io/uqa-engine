@@ -72668,6 +72668,32 @@
         "case_3_sqlite_key_value",
         "case_4_redb"
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_input_owners_preserve_original_sites_across_task_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Prepared input ownership",
+      "workload": "Transfer captured input constants to another task and apply them to the original retained plan across coercions, CTEs, grouping, membership and windows.",
+      "invariant": "Preserve distinct original node identities, exact prepared plans and parameter types while retaining each admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferred_input_failures_retire_observations_and_preserve_original_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Prepared input ownership",
+      "workload": "Abandon transferred parameter observations or fail application through either cancellation owner and denied alias admission.",
+      "invariant": "Retire all captured values and map storage while preserving the original input and an independent reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
