@@ -9,11 +9,16 @@
 use super::{MutableExecutablePlan, MutableQueryPlan, RewriteMemory};
 use crate::{
     ast::FunctionBinding,
+    catalog::work::Work,
     plan::{ProjectionPlan, QueryPlan, SharedAnalyzedSource, SourcePlan},
     RowSchema, SQLError,
 };
 use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
 
+mod observation;
+pub(crate) use observation::MetadataObserver;
+#[cfg(test)]
+mod tests;
 mod traversal;
 
 pub(crate) type ProjectionAliasUpdates = Produced<Vec<(usize, Produced<String>)>>;
@@ -86,7 +91,6 @@ struct Walker<'a, 'c> {
     replacement: Option<&'a mut SourceReplacement<'a>>,
     control: ProductionControl<'c>,
     mark_relations: bool,
-    cte_command: bool,
 }
 
 impl crate::plan::UnifiedPlan {
@@ -102,7 +106,6 @@ impl crate::plan::UnifiedPlan {
             replacement: None,
             control: ProductionControl::uncontrolled(),
             mark_relations: false,
-            cte_command: false,
         }
         .executable(self, None)
     }
@@ -136,7 +139,6 @@ impl MutableExecutablePlan {
             replacement: None,
             control: *control,
             mark_relations: true,
-            cte_command: false,
         }
         .plan(&mut self)?;
         Ok(self)
@@ -154,7 +156,6 @@ impl MutableExecutablePlan {
             replacement: Some(replace),
             control: *control,
             mark_relations: false,
-            cte_command: false,
         }
         .plan(self)
     }
@@ -170,25 +171,6 @@ impl MutableExecutablePlan {
             source: None,
             replacement: None,
             mark_relations: false,
-            cte_command: false,
-            control: *control,
-        }
-        .plan(self)
-    }
-
-    /// Preserve observable projection names before scalar replacement, for both queries and mutation RETURNING clauses.
-    pub(crate) fn apply_projection_aliases<'a>(
-        &mut self,
-        control: &ProductionControl<'_>,
-        observe: &'a mut ProjectionObserver<'a>,
-    ) -> Result<(), SQLError> {
-        Walker {
-            query: None,
-            projections: Some(observe),
-            source: None,
-            replacement: None,
-            mark_relations: false,
-            cte_command: false,
             control: *control,
         }
         .plan(self)
@@ -205,121 +187,82 @@ impl MutableExecutablePlan {
             source: Some(observe),
             replacement: None,
             mark_relations: false,
-            cte_command: false,
             control: *control,
         }
         .plan(self)
     }
 }
 
-impl Walker<'_, '_> {
-    fn install_query(
-        &mut self,
-        query: &mut QueryPlan,
-        memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.control.check()?;
-        if self.mark_relations {
-            query.relations_bound = true;
-        }
-        let Some(observe) = &mut self.query else {
-            return Ok(());
-        };
-        let update = observe(query)?;
-        update.install(query, memory, &self.control)
+async fn install_source_updates<W: Work>(
+    source: &mut SourcePlan,
+    mut memory: Option<&mut RewriteMemory>,
+    updates: SourceMetadataUpdate,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    let (values, buffer) = updates.into_parts();
+    struct Updates {
+        values: std::vec::IntoIter<(usize, Produced<FunctionBinding>)>,
+        _buffer: Option<MemoryReservation>,
     }
-
-    fn install_projection_aliases(
-        &mut self,
-        projections: &mut [ProjectionPlan],
-        memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        let Some(observe) = &mut self.projections else {
-            return Ok(());
-        };
-        let aliases = observe(projections)?;
-        install_aliases(projections, memory, aliases, &self.control)
-    }
-
-    fn install_source(
-        &mut self,
-        source: &mut SourcePlan,
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.control.check()?;
-        if let Some(replace) = &mut self.replacement {
-            if let Some(replacement) = replace(source)? {
-                let (value, owner) = replacement.into_rewrite_parts(&self.control)?;
-                *source = value;
-                if let Some(memory) = memory.as_deref_mut() {
-                    *memory = owner.expect("replacement source owner");
-                }
+    let mut updates = Updates {
+        values: values.into_iter(),
+        _buffer: buffer,
+    };
+    for (index, selected) in &mut updates.values {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        let (binding, owner) = match source {
+            SourcePlan::Function { binding, .. } => {
+                assert_eq!(index, 0, "single function source binding");
+                (
+                    binding,
+                    memory
+                        .as_deref_mut()
+                        .map(|memory| memory.field_mut("binding")),
+                )
             }
-        }
-        let Some(observe) = &mut self.source else {
-            return Ok(());
-        };
-        let updates = observe(source)?;
-        let (values, buffer) = updates.into_parts();
-        struct Updates {
-            values: std::vec::IntoIter<(usize, Produced<FunctionBinding>)>,
-            _buffer: Option<MemoryReservation>,
-        }
-        let mut updates = Updates {
-            values: values.into_iter(),
-            _buffer: buffer,
-        };
-        for (index, selected) in &mut updates.values {
-            let (binding, owner) = match source {
-                SourcePlan::Function { binding, .. } => {
-                    assert_eq!(index, 0, "single function source binding");
-                    (
-                        binding,
-                        memory
-                            .as_deref_mut()
-                            .map(|memory| memory.field_mut("binding")),
-                    )
-                }
-                SourcePlan::FunctionGroup { functions, .. } => {
-                    let owner = memory.as_deref_mut().map(|memory| {
-                        memory
-                            .field_mut("functions")
-                            .as_mut()
-                            .expect("function vector")
-                            .item_mut(index)
-                            .as_mut()
-                            .expect("table function")
-                            .field_mut("binding")
-                    });
-                    (&mut functions[index].binding, owner)
-                }
-                _ => {
-                    return Err(SQLError::Internal(
-                        "selected function binding lost its source".into(),
-                    ));
-                }
-            };
-            let (selected, lease) = selected.into_parts();
-            let selected = self.control.finish(selected, lease)?;
-            let (selected, lease) = selected.into_parts();
-            *binding = Some(selected);
-            if let Some(owner) = owner {
-                let direct = lease.expect("admitted selected function binding");
-                *owner = Some(RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
+            SourcePlan::FunctionGroup { functions, .. } => {
+                let owner = memory.as_deref_mut().map(|memory| {
+                    memory
+                        .field_mut("functions")
+                        .as_mut()
+                        .expect("function vector")
+                        .item_mut(index)
+                        .as_mut()
+                        .expect("table function")
+                        .field_mut("binding")
                 });
+                (&mut functions[index].binding, owner)
             }
+            _ => {
+                return Err(SQLError::Internal(
+                    "selected function binding lost its source".into(),
+                ));
+            }
+        };
+        let (selected, lease) = selected.into_parts();
+        let selected = control.finish(selected, lease)?;
+        let (selected, lease) = selected.into_parts();
+        *binding = Some(selected);
+        if let Some(owner) = owner {
+            let direct = lease.expect("admitted selected function binding");
+            *owner = Some(RewriteMemory::Fields {
+                fields: BudgetedVec::new(direct.budget()),
+                direct,
+            });
         }
-        Ok(())
     }
+    Ok(())
 }
 
-fn install_aliases(
+async fn install_aliases<W: Work>(
     projections: &mut [ProjectionPlan],
     mut memory: Option<&mut RewriteMemory>,
     aliases: Produced<Vec<(usize, Produced<String>)>>,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<(), SQLError> {
     let (values, buffer) = aliases.into_parts();
     struct Aliases {
@@ -331,6 +274,8 @@ fn install_aliases(
         _buffer: buffer,
     };
     for (index, alias) in &mut aliases.values {
+        control.check()?;
+        work.checkpoint().await?;
         control.check()?;
         let (alias, lease) = alias.into_parts();
         let (alias, lease) = control.finish(alias, lease)?.into_parts();

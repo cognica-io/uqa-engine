@@ -20,6 +20,8 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod installation;
+
 enum Fixture {
     Aliases(Vec<ProjectionPlan>),
     Source(Box<SourcePlan>),

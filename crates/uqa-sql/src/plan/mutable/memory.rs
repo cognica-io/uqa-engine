@@ -71,6 +71,24 @@ impl RewriteMemory {
             .memory
     }
 
+    /// Lend disjoint constructor fields together while keeping their payloads and reservations in the original owner.
+    pub(super) fn fields_mut<const N: usize>(
+        &mut self,
+        names: [&str; N],
+    ) -> [&mut Option<Self>; N] {
+        let Self::Fields { fields, .. } = self else {
+            panic!("scalar ownership has no named plan fields");
+        };
+        let mut selected = std::array::from_fn::<_, N, _>(|_| None);
+        for field in fields.iter_mut() {
+            if let Some(index) = names.iter().position(|name| *name == field.name) {
+                assert!(selected[index].is_none(), "unique constructor field");
+                selected[index] = Some(&mut field.memory);
+            }
+        }
+        selected.map(|field| field.expect("copied plan field"))
+    }
+
     pub(super) fn item_mut(&mut self, index: usize) -> &mut Option<Self> {
         let Self::Fields { fields, .. } = self else {
             panic!("scalar ownership has no plan items");

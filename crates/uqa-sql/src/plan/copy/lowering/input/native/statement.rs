@@ -25,6 +25,9 @@ use uqa_core::image_io::AsyncImageInput;
 #[derive(Debug)]
 pub struct RetainedExecutablePlan(Prefix<MutableExecutablePlan>);
 
+#[cfg(test)]
+mod tests;
+
 impl RetainedExecutablePlan {
     pub(crate) async fn bind_relation_names_from_input(
         self,

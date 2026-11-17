@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -72860,6 +72860,71 @@
       "capability": "Stored statement binding",
       "workload": "Select 4,096 projections, 4,096 grouped functions or a 73,728-byte UTF-8 output name on a 256 KiB stack.",
       "invariant": "Complete at most one admitted selection or text-copy work step per single-step window, preserve nonempty output and return all destination and work reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_preserves_original_slots_and_statement_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Walk query, CTE, set, VALUES, mutation and utility owners with ordinary and admitted metadata.",
+      "invariant": "Retain original scalar addresses and explicit projection visitation order across sixteen statement shapes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_retires_every_interruption_and_failed_update",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon or cancel every single-step metadata prefix and reject a selected producer or exhausted allowance.",
+      "invariant": "Retire the private plan, pending aliases and traversal stack without allocating; preserve an independent 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_bounds_deep_and_wide_work_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Construct and apply metadata to 512-deep query owners or 4,096 projections on a 256 KiB stack through the existing native constructor.",
+      "invariant": "Suspend traversal and alias production through single-step windows and retire the complete returned owner without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_visits_replacements_and_keeps_table_query_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Replace a query root and a source, visit attached table queries, and use a single-threaded metadata callback.",
+      "invariant": "Visit installed descendants in the original phase, keep source-only table-query exclusion and preserve the ordinary callback threading contract.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "parameter_alias_installation_uses_original_observations_across_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation.rs",
+      "capability": "Stored statement binding",
+      "workload": "Apply actual parameter-label observations to CTE, set, mutation and utility plans through immediate and suspended work.",
+      "invariant": "Preserve identical complete plans and reference observations while completing at most one traversal, selection, text or installation step per window.",
       "case_names": [
         ""
       ]

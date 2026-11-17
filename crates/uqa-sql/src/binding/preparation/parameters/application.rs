@@ -10,8 +10,9 @@ use super::{AnalysisIdentity, InputConstants, ParameterTypes, QuerySchemas};
 use crate::{
     catalog::work::{inline, Work},
     plan::{
-        AnalyzedSource, MutableExecutablePlan, QueryMetadataUpdate, RelationalPlan,
-        SharedAnalyzedSource, SourceMetadataUpdate, SourcePlan,
+        AnalyzedSource, MetadataObserver, MutableExecutablePlan, ProjectionAliasUpdates,
+        ProjectionPlan, QueryMetadataUpdate, RelationalPlan, SharedAnalyzedSource,
+        SourceMetadataUpdate, SourcePlan,
     },
     routines::RoutineResolution,
     SQLError, SQLParam,
@@ -95,9 +96,7 @@ impl InputConstants {
             })
         })?;
         if !self.11.is_empty() {
-            plan.apply_projection_aliases(control, &mut |projections| {
-                self.projection_aliases(projections, control)
-            })?;
+            inline(self.apply_projection_aliases_owned_from(plan, control, &mut ()))?;
         }
         plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
         let mut groupings = std::mem::take(&mut self.8.groupings);
@@ -120,6 +119,16 @@ impl InputConstants {
         }
         control.check()?;
         Ok(())
+    }
+
+    async fn apply_projection_aliases_owned_from<W: Work + Send>(
+        &self,
+        plan: &mut MutableExecutablePlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        plan.apply_metadata_from(&mut ParameterNames(self), control, work)
+            .await
     }
 
     pub(super) fn projection_aliases(
@@ -218,6 +227,26 @@ impl InputConstants {
                 .push_produced(control.finish((index, binding), control.empty_reservation())?)?;
         }
         Ok(())
+    }
+}
+
+struct ParameterNames<'a>(&'a InputConstants);
+
+impl<W: Work + Send> MetadataObserver<W> for ParameterNames<'_> {
+    fn visit_table_queries(&self) -> bool {
+        true
+    }
+
+    async fn projections(
+        &mut self,
+        projections: &[ProjectionPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<ProjectionAliasUpdates>, SQLError> {
+        self.0
+            .projection_aliases_from(projections, control, work)
+            .await
+            .map(Some)
     }
 }
 
