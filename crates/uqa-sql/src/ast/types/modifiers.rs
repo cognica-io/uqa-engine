@@ -6,6 +6,7 @@
 
 //! Parse type modifiers once and retain any reconstructed qualified spelling with its owner.
 
+use super::lexical::{self, Work};
 use std::borrow::Cow;
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -28,19 +29,39 @@ pub(crate) fn split_type_modifier_with_control<'a>(
     ty: &'a str,
     control: &ProductionControl<'_>,
 ) -> Result<(Produced<Cow<'a, str>>, Option<&'a str>), ValueRetentionError> {
-    let (prefix, suffix, modifier) = match (ty.find('('), ty.rfind(')')) {
+    crate::catalog::work::inline(split_type_modifier_from(ty, control, &mut ()))
+}
+
+pub(super) async fn split_type_modifier_from<'a, W: Work>(
+    ty: &'a str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(Produced<Cow<'a, str>>, Option<&'a str>), W::Error> {
+    let mut open = None;
+    let mut close = None;
+    for (index, byte) in ty.bytes().enumerate() {
+        if index % 1024 == 0 {
+            lexical::checkpoint(control, work).await?;
+        }
+        if byte == b'(' && open.is_none() {
+            open = Some(index);
+        } else if byte == b')' {
+            close = Some(index);
+        }
+    }
+    let (prefix, suffix, modifier) = match (open, close) {
         (Some(open), Some(close)) if close > open => (
-            ty[..open].trim_end(),
-            ty[close + 1..].trim(),
-            Some(ty[open + 1..close].trim()),
+            lexical::trim_end(&ty[..open], control, work).await?,
+            lexical::trim(&ty[close + 1..], control, work).await?,
+            Some(lexical::trim(&ty[open + 1..close], control, work).await?),
         ),
         _ => (ty, "", None),
     };
     let base = if suffix.is_empty() {
         control.finish(Cow::Borrowed(prefix), control.empty_reservation())?
     } else {
-        let (text, memory) = control
-            .format(format_args!("{prefix} {suffix}"))?
+        let (text, memory) = lexical::text(&[prefix, " ", suffix], control, work)
+            .await?
             .into_parts();
         control.finish(Cow::Owned(text), memory)?
     };

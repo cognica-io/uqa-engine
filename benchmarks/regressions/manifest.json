@@ -73695,6 +73695,58 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "string_chunks_share_utf8_boundaries_and_admission_with_inline_copying",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/string.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Append text across multibyte UTF-8 boundaries through the ordinary and stepped string constructor, then reject empty or nonempty input under cancellation or exhausted allowance.",
+      "invariant": "Both paths use the same admitted copying step, consume at most 4096 bytes per step and retain the exact completed buffer reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_preserves_scalar_modifiers_aliases_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Parse explicit scalar, catalog, array and modifier cases through immediate and suspended work and compare integer boundaries with standard integer parsing.",
+      "invariant": "Original declarations, quoted names, ignored array-alias modifiers, numeric limits and first diagnostics remain unchanged; no temporary owner survives completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_bounds_long_text_digits_and_deep_arrays",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Parse Unicode whitespace, 32769 leading zeroes per numeric modifier and 8192 array suffixes on a 256 KiB stack.",
+      "invariant": "One shared type grammar consumes bounded text and constructor work without recursion; result shape and exact reservations agree with immediate parsing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_retires_every_interrupted_or_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Abandon, cancel either original owner or exhaust the destination allowance at every suspended type-parsing prefix.",
+      "invariant": "Partial normalized names and constructed arrays retire without cleanup allocation, preserve sibling reservations and return 57014 or 53200 at their original resource boundaries.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

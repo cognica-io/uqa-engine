@@ -65,12 +65,7 @@ pub(crate) async fn copy_text<W: Work + Send>(
     while begin < source.len() {
         work.checkpoint().await?;
         control.check()?;
-        let mut end = begin.saturating_add(4096).min(source.len());
-        while !source.is_char_boundary(end) {
-            end -= 1;
-        }
-        value.push_str(&source[begin..end])?;
-        begin = end;
+        begin += value.push_str_chunk(&source[begin..])?;
     }
     Ok(value.finish()?)
 }

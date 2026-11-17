@@ -12,6 +12,7 @@ mod catalog_names;
 mod display;
 mod identity;
 mod input;
+mod lexical;
 mod modifiers;
 mod names;
 mod ownership;
