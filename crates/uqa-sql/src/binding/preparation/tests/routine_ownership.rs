@@ -432,6 +432,102 @@ fn transferred_routine_analysis_retires_partial_state_without_changing_its_input
 }
 
 #[test]
+fn scheduled_routine_analysis_preserves_stored_and_source_set_placement() {
+    use crate::{
+        catalog::work::inline,
+        construction::{receive, Driver},
+        semantics::sets::placement_scope::{placing_set_calls, SetPlacementScope},
+    };
+    for sql in [
+        "SELECT CASE WHEN true THEN generate_series(1, 2) END",
+        "SELECT coalesce(generate_series(1, 2), 0)",
+        "SELECT sum(generate_series(1, 2))",
+    ] {
+        for stored in [false, true] {
+            let budget = MemoryBudget::new(4 << 20);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&budget, &original, &invoking);
+            let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+            let expected = {
+                let _scope = if stored {
+                    SetPlacementScope::stored_definition()
+                } else {
+                    SetPlacementScope::compiled_source()
+                };
+                crate::binding::infer_prepared_parameter_types(
+                    &NoRoutines,
+                    &plan,
+                    &[],
+                    &assignment_context(),
+                )
+            };
+            assert_eq!(expected.is_ok(), stored, "{sql}");
+            let UnifiedPlan::Query(query) = &plan else {
+                panic!("query")
+            };
+            let mut scope = SchemaScope::for_analysis_with_control(
+                assignment_context().copy_with_control(&control).unwrap(),
+                &control,
+            )
+            .unwrap();
+            let mut analysis = Preparation {
+                routines: &NoRoutines,
+                scope: &mut scope,
+                parameters: ParameterTypes::fixed_with_control(&[], &control)
+                    .unwrap()
+                    .with_reference_retention(),
+                schema_expression: (),
+                bound_condition_queries: None,
+            };
+            let mut driver = Driver::new(control).unwrap();
+            let output = {
+                let _scope = if stored {
+                    SetPlacementScope::stored_definition()
+                } else {
+                    SetPlacementScope::compiled_source()
+                };
+                driver
+                    .work()
+                    .submit(move |mut work| async move {
+                        work.checkpoint().await;
+                        let result = analysis.query(query, None);
+                        work.checkpoint().await;
+                        result
+                    })
+                    .unwrap()
+            };
+            // The executor's unrelated mode must neither change this analysis nor receive its mode.
+            let invoking_scope = if stored {
+                SetPlacementScope::compiled_source()
+            } else {
+                SetPlacementScope::stored_definition()
+            };
+            while inline(driver.advance()).unwrap() {
+                assert_eq!(placing_set_calls(), stored);
+            }
+            let actual = inline(receive(output));
+            match (actual, expected) {
+                (Ok(_), Ok(_)) => (),
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual.sqlstate(), Some("0A000"), "{sql}");
+                    assert_eq!(actual.sqlstate(), expected.sqlstate(), "{sql}");
+                    assert_eq!(actual.to_string(), expected.to_string(), "{sql}");
+                    assert_eq!(actual.hint(), expected.hint(), "{sql}");
+                }
+                (actual, expected) => panic!("{sql}: {actual:?}; {expected:?}"),
+            }
+            drop(driver);
+            drop(scope);
+            assert_eq!(placing_set_calls(), stored);
+            drop(invoking_scope);
+            assert!(placing_set_calls());
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn transferred_input_failures_retire_observations_and_preserve_original_owners() {
     for failure in 0..4 {
         let budget = MemoryBudget::new(1 << 20);

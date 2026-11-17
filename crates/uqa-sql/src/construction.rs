@@ -6,6 +6,7 @@
 
 //! Native SQL constructors retain independent admitted futures. Only the driver polls them, so a suspended parent never adds a recursive poll frame or owns its child's future.
 
+use crate::semantics::sets::placement_scope::SetPlacementMode;
 use std::{
     future::{poll_fn, Future},
     pin::Pin,
@@ -70,7 +71,20 @@ impl<F: Future + ?Sized> Future for RetainedFuture<F> {
     }
 }
 
-type Task<'a> = Read<'a, ()>;
+struct Task<'a> {
+    future: Read<'a, ()>,
+    mode: SetPlacementMode,
+}
+
+impl Future for Task<'_> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, context: &mut std::task::Context<'_>) -> Poll<()> {
+        let task = self.get_mut();
+        let _scope = task.mode.enter();
+        Pin::new(&mut task.future).poll(context)
+    }
+}
 
 struct Queue<'a> {
     child: Option<Task<'a>>,
@@ -99,12 +113,16 @@ impl<'a> Work<'a> {
         let output = shared(None, self.control)?;
         let returned = Arc::clone(&output);
         let work = self.clone();
+        let mode = SetPlacementMode::capture();
         let constructor = constructor(work);
         let future = async move {
             let value = constructor.await;
             *output.lock().expect("private constructor output") = Some(value);
         };
-        let task = Read::new(self.control, future)?;
+        let task = Task {
+            future: Read::new(self.control, future)?,
+            mode,
+        };
         let queue = self.queue.upgrade().expect("active constructor driver");
         let mut queue = queue.lock().expect("private constructor queue");
         assert!(
@@ -189,7 +207,7 @@ impl<'a> Driver<'a> {
             let Some(task) = self.tasks.last_mut() else {
                 return Poll::Ready(Step::Done);
             };
-            let ready = task.future.as_mut().poll(context).is_ready();
+            let ready = Pin::new(task).poll(context).is_ready();
             let mut queue = self.queue.lock().expect("private constructor queue");
             if let Some(child) = queue.child.take() {
                 assert!(!ready, "parent awaits its child");

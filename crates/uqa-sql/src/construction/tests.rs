@@ -200,3 +200,126 @@ fn retained_future_admission_precedes_construction() {
         drop(sibling);
     }
 }
+
+fn mode_task<'a>(
+    depth: usize,
+    expected: bool,
+    control: ProductionControl<'a>,
+    mut work: Work<'a>,
+) -> Result<Read<'a, Result<usize>>> {
+    use crate::semantics::sets::placement_scope::{placing_set_calls, SetPlacementScope};
+    Read::new(control, async move {
+        assert_eq!(placing_set_calls(), expected, "task entry at {depth}");
+        work.checkpoint().await;
+        assert_eq!(placing_set_calls(), expected, "task resumption at {depth}");
+        if depth == 0 {
+            return Ok(1);
+        }
+        let output = {
+            let _scope = if expected {
+                SetPlacementScope::stored_definition()
+            } else {
+                SetPlacementScope::compiled_source()
+            };
+            work.submit(move |work| async move {
+                mode_task(depth - 1, !expected, control, work)?.await
+            })?
+        };
+        assert_eq!(placing_set_calls(), expected, "after child submission");
+        let children = receive(output).await?;
+        assert_eq!(placing_set_calls(), expected, "after child completion");
+        Ok(children + 1)
+    })
+}
+
+#[test]
+fn native_tasks_preserve_nested_analysis_modes_across_threads_and_work_windows() {
+    use crate::semantics::sets::placement_scope::{placing_set_calls, SetPlacementScope};
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut driver = Driver::new(control).unwrap();
+    let output = {
+        let _scope = SetPlacementScope::stored_definition();
+        driver
+            .work()
+            .submit(move |work| async move { mode_task(12, false, control, work)?.await })
+            .unwrap()
+    };
+    assert!(placing_set_calls());
+    let mut finished = false;
+    for step in 0..128 {
+        let current = step % 2 == 0;
+        let (next, advanced) = std::thread::scope(|threads| {
+            threads
+                .spawn(move || {
+                    assert!(placing_set_calls());
+                    let scope = if current {
+                        SetPlacementScope::compiled_source()
+                    } else {
+                        SetPlacementScope::stored_definition()
+                    };
+                    let advanced = crate::catalog::work::inline(driver.advance()).unwrap();
+                    assert_eq!(placing_set_calls(), current, "invoking mode at {step}");
+                    drop(scope);
+                    assert!(placing_set_calls());
+                    (driver, advanced)
+                })
+                .join()
+                .unwrap()
+        });
+        driver = next;
+        assert!(placing_set_calls());
+        if !advanced {
+            finished = true;
+            break;
+        }
+    }
+    assert!(finished);
+    assert_eq!(crate::catalog::work::inline(receive(output)).unwrap(), 13);
+    drop(driver);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn native_task_analysis_scopes_restore_the_invoking_thread_after_failure() {
+    use crate::semantics::sets::placement_scope::{placing_set_calls, SetPlacementScope};
+    for panic in [false, true] {
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let sibling = budget.reserve(43).unwrap();
+        let mut driver = Driver::new(control).unwrap();
+        let output = {
+            let _scope = SetPlacementScope::stored_definition();
+            driver
+                .work()
+                .submit(move |mut work| async move {
+                    assert!(!placing_set_calls());
+                    work.checkpoint().await;
+                    assert!(!placing_set_calls());
+                    assert!(!panic, "task unwind");
+                    Err::<(), _>(SQLError::Internal("selected task failure".into()))
+                })
+                .unwrap()
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            while crate::catalog::work::inline(driver.advance()).unwrap() {
+                assert!(placing_set_calls());
+            }
+        }));
+        assert!(placing_set_calls());
+        assert_eq!(result.is_err(), panic);
+        if !panic {
+            assert!(
+                matches!(crate::catalog::work::inline(receive(output.clone())).unwrap_err(), SQLError::Internal(message) if message == "selected task failure")
+            );
+        }
+        drop(output);
+        drop(driver);
+        assert!(placing_set_calls());
+        assert_eq!(budget.used(), 43);
+        drop(sibling);
+        assert_eq!(budget.used(), 0);
+    }
+}

@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
       "case_names": [
         ""
       ]
@@ -72717,6 +72717,45 @@
       "capability": "Routine analysis ownership",
       "workload": "Transfer a partially populated routine analysis owner before abandonment, original cancellation, invoking cancellation and denied admission.",
       "invariant": "Both cancellation owners retain SQLSTATE 57014, denied admission retains 53200, the original plan is unchanged and independent reservations remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_tasks_preserve_nested_analysis_modes_across_threads_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Resume twelve nested constructor tasks with alternating stored/source analysis modes on different threads and opposing invoking scopes.",
+      "invariant": "Each task retains its submission mode across checkpoints and child completion; every poll restores the invoking thread and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_task_analysis_scopes_restore_the_invoking_thread_after_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Resume stored-definition tasks through a checkpoint and terminate by an ordinary error or unwinding while an independent reservation remains live.",
+      "invariant": "The existing scope restores the invoking mode on failure and unwinding; private task storage retires without releasing the independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scheduled_routine_analysis_preserves_stored_and_source_set_placement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Schedule existing routine analysis of set-returning calls in CASE, COALESCE and aggregate arguments under the opposite invoking mode.",
+      "invariant": "Stored-definition handling and source SQLSTATE, message and hint match ordinary analysis; task completion restores the caller mode and releases analysis storage.",
       "case_names": [
         ""
       ]
