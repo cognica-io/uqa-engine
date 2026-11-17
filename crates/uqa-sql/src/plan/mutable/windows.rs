@@ -8,7 +8,7 @@
 
 use super::{
     edits::BodySlot, CommandQuerySlot, MutableCommandPlan, MutableExecutablePlan, MutableQueryPlan,
-    MutableSourcePlan, QueryChildSlot, QueryScalarSlot, SourceChildSlot, SourceScalarSlot,
+    MutableSourcePlan, QueryChildSlot, SourceChildSlot,
 };
 use crate::{
     catalog::work::Work as CatalogWork,

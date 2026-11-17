@@ -4,6 +4,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "scalar_free_query_and_source_containers_consume_bounded_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/nodes/roots/tests.rs",
+      "capability": "Shared scalar-field traversal",
+      "workload": "Visit 4096 empty VALUES rows or grouping sets through one-step work windows.",
+      "invariant": "Each empty container consumes work without scalar callbacks or polling allocations; complete input releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_free_containers_preserve_cancellation_and_abandonment_at_every_yield",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/nodes/roots/tests.rs",
+      "capability": "Shared scalar-field traversal",
+      "workload": "Abandon each work prefix and cancel either owner while traversing empty query rows, source rows and grouping sets.",
+      "invariant": "Every suspended prefix reports the original cancellation and retires without allocation while the independent sibling reservation remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "retained_value_rows_share_ordinary_shape_and_independently_movable_cells",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
