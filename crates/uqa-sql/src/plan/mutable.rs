@@ -13,7 +13,8 @@ use uqa_core::memory::{Produced, ProductionControl};
 mod analysis;
 mod arenas;
 pub(crate) use analysis::{
-    MetadataObserver, ProjectionAliasUpdates, QueryMetadataUpdate, SourceMetadataUpdate,
+    MetadataObserver, ProjectionAliasUpdates, QueryLayoutUpdate, QueryMetadataUpdate,
+    SourceMetadataUpdate,
 };
 pub use arenas::{ScalarArenaTransform, ScalarQueryArena};
 pub(crate) mod commands;

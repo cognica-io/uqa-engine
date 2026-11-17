@@ -154,8 +154,8 @@ impl QuerySchemas {
         }
     }
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
-        query.analyzed_output = self.outputs.remove(&AnalysisIdentity::from(&*query));
-        query.analyzed_source = match &query.root {
+        let output = self.outputs.remove(&AnalysisIdentity::from(&*query));
+        let source = match &query.root {
             crate::plan::RelationalPlan::QueryBlock(block) => block
                 .from
                 .as_ref()
@@ -174,6 +174,7 @@ impl QuerySchemas {
                 }),
             _ => None,
         };
+        crate::plan::QueryLayoutUpdate { output, source }.install(query);
         Ok(())
     }
 }

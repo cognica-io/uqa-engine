@@ -73045,6 +73045,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "layout_restoration_replaces_absent_source_metadata_and_retires_its_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs/owned.rs",
+      "capability": "Complete query layout replacement",
+      "workload": "Reanalyze four query shapes with obsolete output/source layouts through ordinary and owned restoration.",
+      "invariant": "Both restoration APIs publish the same descriptor presence and release the complete prior layout allowance before the destination is dropped.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

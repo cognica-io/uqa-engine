@@ -26,9 +26,22 @@ pub(crate) type ProjectionAliasUpdates = Produced<Vec<(usize, Produced<String>)>
 #[derive(Default)]
 pub(crate) struct QueryMetadataUpdate {
     pub root: Option<MutableQueryPlan>,
+    pub layouts: Option<QueryLayoutUpdate>,
+    pub grouping: Option<Produced<crate::semantics::grouping_sets::AnalyzedGroupingSets>>,
+}
+
+/// One complete layout observation replaces both slots, including an explicitly absent descriptor.
+#[derive(Default)]
+pub(crate) struct QueryLayoutUpdate {
     pub output: Option<RowSchema>,
     pub source: Option<SharedAnalyzedSource>,
-    pub grouping: Option<Produced<crate::semantics::grouping_sets::AnalyzedGroupingSets>>,
+}
+
+impl QueryLayoutUpdate {
+    pub(crate) fn install(self, query: &mut QueryPlan) {
+        query.analyzed_output = self.output;
+        query.analyzed_source = self.source;
+    }
 }
 
 impl QueryMetadataUpdate {
@@ -53,11 +66,8 @@ impl QueryMetadataUpdate {
                     .take();
             }
         }
-        if let Some(output) = self.output {
-            query.analyzed_output = Some(output);
-        }
-        if let Some(source) = self.source {
-            query.analyzed_source = Some(source);
+        if let Some(layouts) = self.layouts {
+            layouts.install(query);
         }
         if let Some(grouping) = self.grouping {
             let (grouping, lease) = grouping.into_parts();

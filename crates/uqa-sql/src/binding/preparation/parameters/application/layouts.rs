@@ -10,8 +10,8 @@ use super::super::{AnalysisIdentity, QuerySchemas, RewrittenBlocks};
 use crate::{
     catalog::work::Work,
     plan::{
-        MetadataObserver, MutableExecutablePlan, QueryMetadataUpdate, QueryPlan, RelationalPlan,
-        SharedAnalyzedSource,
+        MetadataObserver, MutableExecutablePlan, QueryLayoutUpdate, QueryMetadataUpdate, QueryPlan,
+        RelationalPlan, SharedAnalyzedSource,
     },
     SQLError,
 };
@@ -57,10 +57,12 @@ impl<W: Work + Send> MetadataObserver<W> for QueryLayouts<'_> {
         };
         Ok(Some(QueryMetadataUpdate {
             root,
-            output: self.0.outputs.remove(&AnalysisIdentity::from(query)),
-            source: source
-                .map(|source| SharedAnalyzedSource::from_produced(source, control))
-                .transpose()?,
+            layouts: Some(QueryLayoutUpdate {
+                output: self.0.outputs.remove(&AnalysisIdentity::from(query)),
+                source: source
+                    .map(|source| SharedAnalyzedSource::from_produced(source, control))
+                    .transpose()?,
+            }),
             ..Default::default()
         }))
     }

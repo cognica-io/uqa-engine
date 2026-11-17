@@ -508,6 +508,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
 - Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
