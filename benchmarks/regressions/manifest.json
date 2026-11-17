@@ -73799,6 +73799,32 @@
       "capability": "Retained JSON path work bounds",
       "workload": "Normalize 4,096 path operands including 8,192 cast levels on a 256 KiB stack with one-step input windows.",
       "invariant": "Existing argument constructors and retirement bound productive destruction below 64 allocations per poll, preserve all paths and release final owners without allocating cleanup state."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_fields_share_complete_parameter_call_and_nested_input_application",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/application.rs",
+      "capability": "Shared retained node input application",
+      "workload": "Apply selected parameters, function bindings, JSON path normalization, nested ROW expansion and final casts through ordinary and one-step construction; abandon, cancel either owner or deny memory at every prefix.",
+      "invariant": "Both paths consume the original analysis identities in order and retain equal values and reservations; cancellation and admission failure retire without allocation or affecting the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_nested_row_application_uses_independent_constructor_tasks_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/application.rs",
+      "capability": "Shared retained node input application",
+      "workload": "Apply 512 nested selected ROW expansions on a 256 KiB stack through the existing constructor driver.",
+      "invariant": "Parent input applications await independently admitted tasks; each work window stays bounded and complete output retires without allocation or leaked memory.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -9,6 +9,8 @@ use super::{
     SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
 };
 
+pub(super) mod input;
+
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
     /// Prepared definitions intentionally retain these same converted constants.
@@ -38,31 +40,16 @@ impl InputConstants {
     pub(super) fn apply_node_owned(
         &mut self,
         identity: AnalysisIdentity<ScalarExpr>,
-        mut expression: OwnedScalarExpr,
+        expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        control.check()?;
-        if let Some(index) = self.11.remove(&identity) {
-            expression = ScalarExpr::Param(index).copy_for_rewrite(control)?;
-        }
-        if let Some(expanded) = self.9.remove(&identity) {
-            expression = super::rows::expand(expression, expanded, control, self)?;
-        }
-        if let Some(selected) = self.1.remove(&identity) {
-            if matches!(&*expression, ScalarExpr::Func { .. }) {
-                expression = expression.replace_call_binding(Some(selected), control)?;
-                expression = crate::type_resolution::json_path::normalize_retained_owned(
-                    expression, control,
-                )?;
-            }
-        }
-        crate::catalog::work::inline(self.apply_selected_inputs_from(
+        crate::catalog::work::inline(input::apply_from(
+            &mut input::Inline(self),
             identity,
             expression,
             control,
             &mut (),
         ))
-        .map_err(Into::into)
     }
 
     #[cfg(test)]

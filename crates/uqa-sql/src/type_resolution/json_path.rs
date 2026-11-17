@@ -11,7 +11,7 @@ mod owned;
 pub(super) use binding::bind_call;
 pub(crate) use binding::normalize_retained;
 pub(super) use owned::bind_owned_call;
-pub(crate) use owned::normalize_retained_owned;
+pub(crate) use owned::normalize_retained_owned_from;
 
 use super::{
     BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload, RoutineCallDescriptor,

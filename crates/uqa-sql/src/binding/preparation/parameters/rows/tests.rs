@@ -4,19 +4,26 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::super::{AnalysisType, ConvertedInput};
+use super::super::constants::input::{self as node_input, Application};
+use super::super::{AnalysisIdentity, AnalysisType, ConvertedInput, InputConstants};
 use super::*;
 use crate::ast::BinaryOp;
+use crate::{
+    construction::{self, Read, Work},
+    plan::ScalarEditIdentity,
+};
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
     memory::{MemoryBudget, Produced, ProductionVec},
     CancellationToken, Value,
 };
 
+mod application;
 mod retirement;
 
 type Fixture = (OwnedScalarExpr, RowExpansion, InputConstants);
 type Input = ImageDecoder<OwnedScalarExpr, SQLError>;
+type AppliedInput = Result<(OwnedScalarExpr, InputConstants), SQLError>;
 
 fn scalar(text: &str, control: &ProductionControl<'_>) -> OwnedScalarExpr {
     OwnedScalarExpr::literal(
@@ -102,7 +109,7 @@ fn fixture(control: &ProductionControl<'_>) -> Fixture {
     (row, expansion, constants)
 }
 
-struct Selected(InputConstants);
+struct Selected(Option<InputConstants>);
 impl ScalarEditIdentity for Selected {
     type Identity = AnalysisIdentity<ScalarExpr>;
     const BEFORE_CHILDREN: bool = false;
@@ -110,22 +117,55 @@ impl ScalarEditIdentity for Selected {
         expression.into()
     }
 }
-impl<W: ScalarInputWork> ScalarEdit<W> for Selected
-where
-    W::Error: From<SQLError> + From<CatalogRetentionError> + Into<SQLError>,
-{
+impl Application<Work<'_>> for Selected {
+    fn constants(&mut self) -> &mut InputConstants {
+        self.0
+            .as_mut()
+            .expect("active node owns its input selections")
+    }
+}
+impl<'a> ScalarEdit<Work<'a>> for Selected {
     async fn apply(
         &mut self,
         identity: Self::Identity,
         expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
-        work: &mut W,
+        work: &mut Work<'a>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        self.0
-            .apply_selected_inputs_from(identity, expression, control, work)
-            .await
-            .map_err(Into::into)
+        let constants = self.0.take().expect("parent transfers input selections");
+        let owner = control.capture();
+        let output = work.submit(move |work| async move {
+            apply_node(constants, identity, expression, owner, work)?.await
+        })?;
+        let (expression, constants) = construction::receive(output).await?;
+        self.0 = Some(constants);
+        Ok(expression)
     }
+}
+
+fn apply_node(
+    constants: InputConstants,
+    identity: AnalysisIdentity<ScalarExpr>,
+    expression: OwnedScalarExpr,
+    owner: uqa_core::memory::OwnedProductionControl,
+    mut work: Work<'_>,
+) -> Result<Read<'_, AppliedInput>, SQLError> {
+    let admission = owner.clone();
+    Ok(Read::new(admission.control(), async move {
+        let control = owner.control();
+        let mut edit = Selected(Some(constants));
+        let output = Read::new(
+            control,
+            node_input::apply_from(&mut edit, identity, expression, &control, &mut work),
+        )?
+        .await?;
+        Ok((
+            output,
+            edit.0
+                .take()
+                .expect("completed node owns its input selections"),
+        ))
+    })?)
 }
 
 fn input(
@@ -140,10 +180,19 @@ fn input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut input = reader.input();
         let control = ProductionControl::new(&native, &original, input.cancellation);
-        let (row, expanded, constants) = fixture;
-        let mut edit = Selected(constants);
-        let output = expand_from(row, expanded, &control, &mut input, &mut edit).await?;
-        assert!(edit.0.is_consumed());
+        let (row, expanded, mut constants) = fixture;
+        let identity = AnalysisIdentity::from(&*row);
+        constants.9.insert(identity, expanded)?;
+        let mut driver = construction::Driver::new(control)?;
+        let owner = control.capture();
+        let output = driver.work().submit(move |work| async move {
+            apply_node(constants, identity, row, owner, work)?.await
+        })?;
+        while driver.advance().await? {
+            input.checkpoint().await?;
+        }
+        let (output, constants) = construction::receive(output).await?;
+        assert!(constants.is_consumed());
         Ok(output)
     })
     .unwrap()
@@ -243,6 +292,13 @@ fn retained_row_expansion_consumes_original_field_identities_in_order() {
 
 #[test]
 fn retained_row_expansion_retires_each_cancelled_or_unadmitted_prefix() {
+    interruptions(fixture, observe);
+}
+
+fn interruptions(
+    fixture: impl Fn(&ProductionControl<'_>) -> Fixture,
+    observe: impl Fn(&ScalarExpr),
+) {
     let native = MemoryBudget::new(1 << 20);
     let work = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
