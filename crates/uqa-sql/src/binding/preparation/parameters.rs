@@ -135,6 +135,7 @@ impl InputConstants {
 type RowExpansion = AnalysisVec<(usize, Produced<Vec<OwnedScalarExpr>>)>;
 type RowExpansions = AnalysisMap<AnalysisIdentity<ScalarExpr>, RowExpansion>;
 mod rewritten_blocks;
+mod sources;
 use rewritten_blocks::{install_rewritten_block, RewrittenBlocks};
 
 #[derive(Default)]
@@ -152,31 +153,28 @@ impl QuerySchemas {
             sources: AnalysisMap::new(control),
         }
     }
-    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
         query.analyzed_output = self.outputs.remove(&AnalysisIdentity::from(&*query));
         query.analyzed_source = match &query.root {
             crate::plan::RelationalPlan::QueryBlock(block) => block
                 .from
                 .as_ref()
-                .and_then(|source| self.take_source(source))
-                .map(|source| std::sync::Arc::new(source).into()),
+                .map(|source| {
+                    self.take_source_with_control(source, &ProductionControl::uncontrolled())
+                })
+                .transpose()?
+                .flatten()
+                .map(|source| {
+                    std::sync::Arc::new(
+                        source
+                            .into_uncontrolled()
+                            .expect("ordinary source metadata"),
+                    )
+                    .into()
+                }),
             _ => None,
         };
-    }
-
-    fn take_source(
-        &mut self,
-        source: &crate::plan::SourcePlan,
-    ) -> Option<crate::plan::AnalyzedSource> {
-        let schema = self.sources.remove(&AnalysisIdentity::from(source))?;
-        let children = match source {
-            crate::plan::SourcePlan::Join { left, right, .. } => Some(Box::new((
-                self.take_source(left)?,
-                self.take_source(right)?,
-            ))),
-            _ => None,
-        };
-        Some(crate::plan::AnalyzedSource { schema, children })
+        Ok(())
     }
 }
 
@@ -276,10 +274,10 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.unwrap_or_default();
-        query.visit_queries_mut(&mut |query| {
+        query.try_visit_queries_mut(&mut |query| {
             install_rewritten_block(&mut self.rewritten_blocks, query);
-            schemas.apply_query(query);
-        });
+            schemas.apply_query(query)
+        })?;
         schemas.groupings.apply_query(query, routines, params)
     }
 

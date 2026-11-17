@@ -6,6 +6,9 @@
 
 //! Allocation-free owned tree retirement uses the original child slots for continuation storage.
 
+mod paired;
+pub use paired::PairedRetirementNode;
+
 /// Native ownership adapters select children without allocating or visiting descendants. The first child slot remains available until all other children have been detached; local retirement must leave that slot and its ancestor link intact. A completed local transition releases its continuation state before another node uses it.
 pub trait RetirementNode: Sized {
     type Local: Default;

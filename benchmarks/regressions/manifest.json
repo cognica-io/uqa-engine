@@ -72928,6 +72928,84 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_reuses_links_and_bounds_local_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Retire alternating binary child pairs while admitting independent single-byte payload reservations.",
+      "invariant": "Reuse original optional child links, release at most one payload per productive step and preserve a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_releases_every_suspended_prefix_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon every pending prefix of a paired topology retirement.",
+      "invariant": "Destroy each node exactly once without cleanup allocation and return every owned reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_drops_deep_native_nodes_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Drop 8,192 alternating binary levels containing 16,384 nodes on a 256 KiB stack.",
+      "invariant": "Drive terminal cleanup through the same Core retirement transitions without recursive topology destruction or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_preserves_preorder_selection_and_original_schema_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Assemble a seven-node JOIN layout with complete observations or each individual observation missing in ordinary, admitted and suspended execution.",
+      "invariant": "Preserve selection order, exact remaining observations, output topology and shared row-index identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_retires_every_interruption_and_denied_parent_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon and independently cancel every prefix of complete and missing-right layout assembly, and deny the final parent allocation.",
+      "invariant": "Release private layouts and metadata maps without allocating, retain independent reservations and preserve 57014 or 53200 failures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_bounds_deep_work_and_retirement_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Assemble 512 nested JOINs containing 1,025 source layouts on a 256 KiB stack using single-step windows.",
+      "invariant": "Complete at most one topology work step per window, preserve original row indexes and retire the complete result without allocating.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

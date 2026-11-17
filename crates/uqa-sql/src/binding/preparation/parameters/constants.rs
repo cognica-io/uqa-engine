@@ -137,7 +137,7 @@ impl InputConstants {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         for query in subqueries.iter_mut() {
-            query.visit_queries_mut(&mut |query| self.apply_query(query));
+            query.try_visit_queries_mut(&mut |query| self.apply_query(query))?;
             query.visit_sources_mut(&mut |source| self.apply_source(source));
         }
         let mut groupings = std::mem::take(&mut self.8.groupings);
@@ -165,7 +165,7 @@ impl InputConstants {
         routines: &dyn crate::routines::RoutineResolution,
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        plan.visit_queries_mut(&mut |query| self.apply_query(query));
+        plan.try_visit_queries_mut(&mut |query| self.apply_query(query))?;
         if !self.11.is_empty() {
             plan.apply_projection_aliases(&mut |projections| {
                 self.projection_aliases(projections, &ProductionControl::uncontrolled())
@@ -209,9 +209,9 @@ impl InputConstants {
             && self.11.is_empty()
     }
 
-    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
         install_rewritten_block(&mut self.10, query);
-        self.8.apply_query(query);
+        self.8.apply_query(query)
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {

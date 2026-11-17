@@ -9,7 +9,7 @@
 use super::AnalyzedSource;
 use crate::SQLError;
 use std::{ops::Deref, sync::Arc};
-use uqa_core::memory::{Produced, ProductionControl};
+use uqa_core::memory::{PairedRetirementNode, Produced, ProductionControl, TreeRetirement};
 
 #[derive(Clone, Debug)]
 pub struct SharedAnalyzedSource(Storage);
@@ -52,5 +52,24 @@ impl Deref for SharedAnalyzedSource {
 impl From<Arc<AnalyzedSource>> for SharedAnalyzedSource {
     fn from(value: Arc<AnalyzedSource>) -> Self {
         Self(Storage::Ordinary(value))
+    }
+}
+
+impl PairedRetirementNode for AnalyzedSource {
+    type Local = ();
+    fn children_mut(&mut self) -> &mut Option<Box<(Self, Self)>> {
+        &mut self.children
+    }
+    fn retire_local(&mut self, (): &mut ()) -> bool {
+        // Shared row descriptors keep their existing owner; only topology retirement is driven here.
+        true
+    }
+}
+
+impl Drop for AnalyzedSource {
+    fn drop(&mut self) {
+        if self.children.is_some() {
+            drop(TreeRetirement::take(&mut self.children));
+        }
     }
 }

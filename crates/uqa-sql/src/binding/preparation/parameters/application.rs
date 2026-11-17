@@ -6,13 +6,13 @@
 
 //! Private input destinations keep their original identities until all selected metadata and scalar replacements have transferred.
 
-use super::{AnalysisIdentity, InputConstants, ParameterTypes, QuerySchemas};
+use super::{AnalysisIdentity, InputConstants, ParameterTypes};
 use crate::{
     catalog::work::{inline, Work},
     plan::{
-        AnalyzedSource, MetadataObserver, MutableExecutablePlan, ProjectionAliasUpdates,
-        ProjectionPlan, QueryMetadataUpdate, RelationalPlan, SharedAnalyzedSource,
-        SourceMetadataUpdate, SourcePlan,
+        MetadataObserver, MutableExecutablePlan, ProjectionAliasUpdates, ProjectionPlan,
+        QueryMetadataUpdate, RelationalPlan, SharedAnalyzedSource, SourceMetadataUpdate,
+        SourcePlan,
     },
     routines::RoutineResolution,
     SQLError, SQLParam,
@@ -252,36 +252,3 @@ impl<W: Work + Send> MetadataObserver<W> for ParameterNames<'_> {
 
 #[cfg(test)]
 mod tests;
-
-impl QuerySchemas {
-    fn take_source_with_control(
-        &mut self,
-        source: &SourcePlan,
-        control: &ProductionControl<'_>,
-    ) -> Result<Option<Produced<AnalyzedSource>>, SQLError> {
-        control.check()?;
-        let Some(schema) = self.sources.remove(&AnalysisIdentity::from(source)) else {
-            return Ok(None);
-        };
-        let (children, memory) = match source {
-            SourcePlan::Join { left, right, .. } => {
-                let Some(left) = self.take_source_with_control(left, control)? else {
-                    return Ok(None);
-                };
-                let Some(right) = self.take_source_with_control(right, control)? else {
-                    return Ok(None);
-                };
-                let header =
-                    control.reserve(std::mem::size_of::<(AnalyzedSource, AnalyzedSource)>())?;
-                let (left, left_memory) = left.into_parts();
-                let (right, right_memory) = right.into_parts();
-                let memory = control.combine(control.combine(left_memory, right_memory), header);
-                (Some(Box::new((left, right))), memory)
-            }
-            _ => (None, control.empty_reservation()),
-        };
-        Ok(Some(
-            control.finish(AnalyzedSource { schema, children }, memory)?,
-        ))
-    }
-}
