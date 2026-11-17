@@ -14,17 +14,23 @@ use crate::{
 /// Owned native value retirement. A caller transfers its private value before a fallible work boundary and retains its payload reservation until this owner is destroyed or completes. No value is interpreted or copied.
 pub type ValueRetirement = TreeRetirement<Value>;
 
-/// A private producer keeps native value retirement until its final infallible handoff. The enclosing produced/budgeted carrier retains the payload lease after this field.
+/// A read-only native value owner that retires its payload without recursive stack growth or cleanup allocations. Enclosing produced/budgeted carriers keep their original payload leases until this owner is destroyed or consumed.
 #[derive(Debug)]
-pub(crate) struct OwnedValue(Value);
+pub struct OwnedValue(Value);
 
 impl OwnedValue {
-    pub(crate) fn new(value: Value) -> Self {
+    pub fn new(value: Value) -> Self {
         Self(value)
     }
 
-    pub(crate) fn into_inner(mut self) -> Value {
+    /// Transfer the original payload to its next owner without copying or retiring it.
+    pub fn into_inner(mut self) -> Value {
         std::mem::take(&mut self.0)
+    }
+
+    /// Transfer the original payload into the shared productive retirement state.
+    pub fn into_retirement(self) -> ValueRetirement {
+        ValueRetirement::new(self.into_inner())
     }
 
     pub(crate) fn values(&self) -> &[Value] {

@@ -86,7 +86,7 @@ pub use temporal::{
     TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
     POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
-pub(crate) use value::OwnedValue;
+pub use value::OwnedValue;
 pub use value::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,
     ValueCopyWork, ValueRetentionError, ValueRetirement, ValueSerialization,

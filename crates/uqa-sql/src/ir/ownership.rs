@@ -7,10 +7,7 @@
 //! Native scalar IR retires nested children without allocation or recursive stack growth.
 
 use super::ScalarExpr;
-use uqa_core::{
-    memory::{RetirementNode, TreeRetirement},
-    ValueRetirement,
-};
+use uqa_core::memory::{RetirementNode, TreeRetirement};
 
 mod children;
 mod metadata;
@@ -27,7 +24,7 @@ pub(crate) fn retire(value: &mut ScalarExpr) {
 pub(crate) type Retirement = TreeRetirement<ScalarExpr>;
 
 impl RetirementNode for ScalarExpr {
-    type Local = Option<ValueRetirement>;
+    type Local = metadata::Metadata;
     fn empty() -> Self {
         Self::Star
     }

@@ -72009,6 +72009,123 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_native_values_share_iterative_reads_and_failed_publication_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Read, share and reject 8,192-level native constants or metadata on a 256 KiB stack.",
+      "invariant": "All native handoffs use existing value copying and retirement; failed publication releases the original payload reservation without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_final_owners_bound_value_and_type_retirement_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire shared 4,096-level values and types with 4,096 record fields while an independent metadata reader remains live.",
+      "invariant": "Only the final shared owner acquires private retirement; each step allocates nothing, frees at most eight allocations and releases reservations only after their payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_retirement_keeps_original_leases_at_every_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Advance every pending shared-literal prefix with exhausted native admission, independent work memory, both cancellation owners and a sibling reservation.",
+      "invariant": "Completion, cancellation and abandonment preserve original ownership and release every private allocation without allocating cleanup workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_concurrent_final_references_transfer_one_native_payload",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire independent metadata owners of one 8,192-level native value concurrently on 256 KiB stacks.",
+      "invariant": "Atomic final-reference transfer gives one owner the stepped payload cleanup without copying, recursive fallback or premature reservation release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_reads_retire_completed_external_payloads_after_late_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Return a completed 8,192-level external payload and then cancel ordinary, controlled and capture reads.",
+      "invariant": "Post-read cancellation retains the original diagnostic while completed values and their reservations retire through the native owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_capture_keeps_completed_values_owned_through_later_metadata_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Exhaust destination admission after a deep external value completes, then fail type, declaration or shared-header construction.",
+      "invariant": "Capture does not reread its source and keeps the completed value owned until later metadata failure releases all payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_retirement_preserves_opaque_external_resource_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire metadata referencing an opaque external source while independent source and value readers remain live.",
+      "invariant": "Retirement does not read or reinterpret the external source, preserves its original positional identity and releases the resource exactly once at its last reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_external_storage_admission_keeps_native_cleanup_before_handoff",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Cancel either owner after constructing an 8,192-level input before the default external storage callback.",
+      "invariant": "Rejected admission cannot call external publication and retires the complete native payload and reservation on a small stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constant_storage_retires_deep_inputs_before_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/retained/tests.rs",
+      "capability": "Native constant storage publication ownership",
+      "workload": "Cancel either owner or exhaust admission for an 8,192-level input against resident and spilled stores with an existing published row.",
+      "invariant": "The rejected input retires without stack growth or leaked reservations; prior row identity and disk bytes remain unchanged and subsequent publication succeeds.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

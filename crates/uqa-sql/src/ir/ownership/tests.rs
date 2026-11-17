@@ -21,6 +21,7 @@ use uqa_core::{
     CancellationToken, Value,
 };
 
+mod retained;
 mod values;
 
 fn ty(depth: usize) -> ColumnType {
@@ -204,7 +205,23 @@ fn input(
     invoking: &CancellationToken,
 ) -> ImageDecoder<(), SQLError> {
     let control = ProductionControl::new(native, original, invoking);
-    let (value, memory) = value.clone_with_control(&control).unwrap().into_parts();
+    owned_input(
+        value.clone_with_control(&control).unwrap(),
+        native,
+        work,
+        original,
+        invoking,
+    )
+}
+
+fn owned_input(
+    value: uqa_core::memory::Produced<ScalarExpr>,
+    native: &MemoryBudget,
+    work: &MemoryBudget,
+    original: &CancellationToken,
+    invoking: &CancellationToken,
+) -> ImageDecoder<(), SQLError> {
+    let (value, memory) = value.into_parts();
     let mut owned = OwnedRetirement {
         retirement: Retirement::new(value),
         _memory: memory,
