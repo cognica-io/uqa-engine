@@ -11,31 +11,38 @@ use crate::ColumnType;
 use uqa_core::{Value, ValueRetirement};
 
 #[derive(Default)]
-pub struct Metadata {
-    // Value retirement precedes the final shared owner's reservations during terminal cleanup.
-    value: Option<ValueRetirement>,
-    literal: Option<crate::ir::retained::ownership::LiteralRetirement>,
+pub enum Metadata {
+    #[default]
+    Empty,
+    Value(ValueRetirement),
+    Literal(crate::ir::retained::ownership::LiteralRetirement),
 }
 
 pub(super) fn advance(value: &mut ScalarExpr, local: &mut Metadata) -> bool {
-    if let Some(retirement) = &mut local.value {
-        if retirement.advance() {
-            local.value = None;
+    match local {
+        Metadata::Value(retirement) => {
+            if retirement.advance() {
+                *local = Metadata::Empty;
+            }
+            return false;
         }
-        return false;
-    }
-    if let Some(literal) = &mut local.literal {
-        if literal.advance() {
-            local.literal = None;
+        Metadata::Literal(literal) => {
+            if literal.advance() {
+                *local = Metadata::Empty;
+            }
+            return false;
         }
-        return false;
+        Metadata::Empty => (),
     }
     match value {
-        ScalarExpr::Literal(value) => take_value(value, &mut local.value),
-        ScalarExpr::RetainedLiteral(value) => {
-            local.literal = value.take_retirement();
-            local.literal.is_none()
-        }
+        ScalarExpr::Literal(value) => take_value(value, local),
+        ScalarExpr::RetainedLiteral(value) => match value.take_retirement() {
+            Some(literal) => {
+                *local = Metadata::Literal(literal);
+                false
+            }
+            None => true,
+        },
         ScalarExpr::Func { binding, .. } => binding
             .as_mut()
             .is_none_or(crate::ast::FunctionBinding::retire_step),
@@ -51,10 +58,10 @@ pub(super) fn advance(value: &mut ScalarExpr, local: &mut Metadata) -> bool {
             bound_type,
             ..
         } => {
-            take_value(value, &mut local.value)
+            take_value(value, local)
                 && composite_source
                     .as_deref_mut()
-                    .is_none_or(|source| take_value(&mut source.value, &mut local.value))
+                    .is_none_or(|source| take_value(&mut source.value, local))
                 && composite_source.as_deref_mut().is_none_or(
                     crate::expr::composites::CompositeConstantSource::retire_metadata_step,
                 )
@@ -64,11 +71,11 @@ pub(super) fn advance(value: &mut ScalarExpr, local: &mut Metadata) -> bool {
     }
 }
 
-fn take_value(value: &mut Value, local: &mut Option<ValueRetirement>) -> bool {
+fn take_value(value: &mut Value, local: &mut Metadata) -> bool {
     if matches!(value, Value::Null) {
         true
     } else {
-        *local = Some(ValueRetirement::take(value));
+        *local = Metadata::Value(ValueRetirement::take(value));
         false
     }
 }

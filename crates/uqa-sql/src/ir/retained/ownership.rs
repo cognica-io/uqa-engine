@@ -28,7 +28,7 @@ impl ConstantSource {
     }
 }
 
-pub(crate) struct LiteralRetirement {
+pub struct LiteralRetirement {
     value: Option<ValueRetirement>,
     data: RetainedLiteralData,
     value_memory: Option<MemoryReservation>,
