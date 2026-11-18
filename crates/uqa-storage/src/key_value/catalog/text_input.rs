@@ -111,7 +111,7 @@ impl KeyValueCatalog {
     }
 }
 
-fn select_metadata(
+pub(in crate::key_value) fn select_metadata(
     key: &[u8],
     prefix: &str,
     control: &StorageReadControl,

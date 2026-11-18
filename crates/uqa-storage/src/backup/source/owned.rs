@@ -50,6 +50,15 @@ impl BackupImageSource for OwnedBackupImage {
         self.source.stored_view_queries(limits, control)
     }
 
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.source.stored_metadata_values(prefix, limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.source.advance(maximum_positions)
     }

@@ -33,6 +33,17 @@ pub trait BackupRecordMapping {
         limits.validate()?;
         Ok(None)
     }
+    fn stored_metadata_values(
+        &self,
+        _records: &RecordImageCursor,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        limits.validate()?;
+        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
+        Ok(None)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -317,6 +328,23 @@ impl<M: BackupRecordMapping> BackupImageSource for MappedRecordBackupImage<M> {
             .ok_or(BackupError::Finished)?
             .stored_view_queries(
                 self.records.as_ref().ok_or(BackupError::Finished)?,
+                limits,
+                control,
+            )
+    }
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.control.check()?;
+        self.mapping
+            .as_ref()
+            .ok_or(BackupError::Finished)?
+            .stored_metadata_values(
+                self.records.as_ref().ok_or(BackupError::Finished)?,
+                prefix,
                 limits,
                 control,
             )

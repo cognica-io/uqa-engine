@@ -13,19 +13,79 @@ fn project(
     maximum: usize,
 ) -> BackupResult<Vec<u8>> {
     let control = StorageReadControl::with_limit(8192);
-    let mut row = Row::new(0..source.len(), envelope, false, &control);
+    let mut row = Row::new(
+        0..source.len(),
+        Projection::View(envelope),
+        false,
+        maximum,
+        &control,
+    )?;
     loop {
         let start = row.offset;
         row.offset = (start + window).min(source.len());
         match row.feed(&source[start..row.offset], &control, maximum)? {
             Next::More => (),
-            Next::Legacy => row = Row::new(0..source.len(), envelope, true, &control),
-            Next::Done => return Ok(row.output.to_vec()),
+            Next::Legacy => {
+                row = Row::new(
+                    0..source.len(),
+                    Projection::View(envelope),
+                    true,
+                    maximum,
+                    &control,
+                )?;
+            }
+            Next::Done => return Ok(row.into_bytes().to_vec()),
         }
     }
 }
 
 const TEXT: Envelope = Envelope::Text(|_| unreachable!());
+
+#[test]
+fn raw_metadata_preserves_split_utf8_and_denies_oversized_or_invalid_text() {
+    let control = StorageReadControl::with_limit(2048);
+    let raw = " {\n\t\"한\":\"🌱\" } \0";
+    for window in [1, 3, 16] {
+        let mut row = Row::new(
+            0..raw.len(),
+            Projection::Metadata(None),
+            false,
+            raw.len(),
+            &control,
+        )
+        .unwrap();
+        for part in raw.as_bytes().chunks(window) {
+            row.offset += part.len();
+            let finished = row.feed(part, &control, raw.len()).unwrap();
+            assert_eq!(matches!(finished, Next::Done), row.offset == raw.len());
+        }
+        assert_eq!(row.into_bytes().as_slice(), raw.as_bytes());
+        assert_eq!(control.memory().used(), 0);
+    }
+    assert!(matches!(
+        Row::new(
+            0..raw.len(),
+            Projection::Metadata(None),
+            false,
+            raw.len() - 1,
+            &control
+        ),
+        Err(BackupError::Memory(_))
+    ));
+    for invalid in [b"\xc3".as_slice(), b"\xe0\xa0x"] {
+        let mut row = Row::new(
+            0..invalid.len(),
+            Projection::Metadata(None),
+            false,
+            16,
+            &control,
+        )
+        .unwrap();
+        row.offset = invalid.len();
+        assert!(row.feed(invalid, &control, 16).is_err());
+    }
+    assert_eq!(control.memory().used(), 0);
+}
 
 #[test]
 fn query_projection_preserves_original_bytes_across_escapes_and_previous_nested_fields() {

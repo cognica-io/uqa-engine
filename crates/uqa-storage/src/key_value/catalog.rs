@@ -66,6 +66,7 @@ mod table_data;
 mod table_input;
 mod tables;
 mod text_input;
+pub(super) use text_input::select_metadata;
 mod views;
 
 use keys::{

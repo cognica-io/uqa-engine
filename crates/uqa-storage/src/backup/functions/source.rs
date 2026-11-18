@@ -73,6 +73,16 @@ impl<S: BackupFunctionSource> BackupImageSource for Functions<S> {
         self.provider.stored_view_queries(limits, control)
     }
 
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.provider
+            .stored_metadata_values(prefix, limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.control.check()?;
         if maximum_positions == 0 {
@@ -147,20 +157,7 @@ impl<S: BackupFunctionSource> BackupImageSource for Functions<S> {
             .selection
             .as_ref()
             .map_or(self.final_statistics, BackupFunctionSource::statistics);
-        BackupSourceStatistics {
-            visited_positions: provider
-                .visited_positions
-                .saturating_add(selection.visited_positions),
-            copied_payload_bytes: provider
-                .copied_payload_bytes
-                .saturating_add(selection.copied_payload_bytes),
-            metadata_read_bytes: provider
-                .metadata_read_bytes
-                .saturating_add(selection.metadata_read_bytes),
-            excluded_units: provider
-                .excluded_units
-                .saturating_add(selection.excluded_units),
-        }
+        provider.saturating_add(selection)
     }
 }
 

@@ -189,12 +189,26 @@ fn read_header(input: &mut &[u8], expected_columns: usize) -> VersionResult<usiz
 pub(super) fn view_definition_range(
     record: &mut uqa_storage::backup::RecordImageCursor,
 ) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Views, "definition_json")
+}
+
+pub(super) fn metadata_value_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Metadata, "value")
+}
+
+fn text_column_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+    family: super::NativeRecordFamily,
+    target: &str,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
     use uqa_storage::backup::BackupError;
     let length = record
         .current_unit()
         .ok_or(BackupError::Finished)?
         .decoded_bytes;
-    let layout = super::NativeRecordFamily::Views.layout();
+    let layout = family.layout();
     let mut header = [0; PREFIX.len() + 2];
     record.read_record_at(0, &mut header)?;
     read_header(&mut header.as_slice(), layout.columns.len())?;
@@ -203,7 +217,7 @@ pub(super) fn view_definition_range(
         let mut field = [0; 5];
         record.read_record_at(offset, &mut field)?;
         if field[0] != TEXT {
-            return Err(invalid("native view definition prefix requires TEXT columns").into());
+            return Err(invalid("native catalog text prefix requires TEXT columns").into());
         }
         offset += field.len();
         let bytes =
@@ -212,12 +226,12 @@ pub(super) fn view_definition_range(
             .checked_add(bytes)
             .filter(|end| *end <= length)
             .ok_or_else(|| invalid("truncated native row"))?;
-        if *column == "definition_json" {
+        if *column == target {
             return Ok(offset..end);
         }
         offset = end;
     }
-    Err(invalid("native view layout has no definition").into())
+    Err(invalid("native catalog layout has no selected column").into())
 }
 
 fn take<'a>(input: &mut &'a [u8], length: usize) -> VersionResult<&'a [u8]> {

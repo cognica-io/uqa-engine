@@ -361,15 +361,36 @@ mod tests {
         #[values(SQLiteBackupMapping::Native, SQLiteBackupMapping::KeyValue)]
         mapping: SQLiteBackupMapping,
     ) {
+        verify_stored_catalog_input(
+            mapping,
+            uqa_storage::key_value::conformance::verify_backup_view_queries,
+        );
+    }
+
+    #[rstest::rstest]
+    fn stored_metadata_values_read_the_original_physical_cut(
+        #[values(SQLiteBackupMapping::Native, SQLiteBackupMapping::KeyValue)]
+        mapping: SQLiteBackupMapping,
+    ) {
+        verify_stored_catalog_input(
+            mapping,
+            uqa_storage::key_value::conformance::verify_backup_metadata_values,
+        );
+    }
+
+    fn verify_stored_catalog_input(
+        mapping: SQLiteBackupMapping,
+        verify: fn(&dyn PersistentStorageProvider) -> BackupResult<()>,
+    ) {
         let directory = tempfile::tempdir().unwrap();
-        let connection = ManagedConnection::open(&directory.path().join("views")).unwrap();
+        let connection = ManagedConnection::open(&directory.path().join("catalog")).unwrap();
         let provider: Box<dyn PersistentStorageProvider> = match mapping {
             SQLiteBackupMapping::Native => Box::new(SQLiteStorageProvider::new(connection)),
             SQLiteBackupMapping::KeyValue => {
                 Box::new(SQLiteKeyValueStorage::from_connection(connection).unwrap())
             }
         };
-        uqa_storage::key_value::conformance::verify_backup_view_queries(&*provider).unwrap();
+        verify(&*provider).unwrap();
     }
 
     #[rstest::rstest]

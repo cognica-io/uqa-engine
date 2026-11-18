@@ -58,6 +58,23 @@ impl BackupRecordMapping for Mapping {
         BackupViewQueryInput::from_key_value_records(records, &[super::TAG_VIEW], limits, control)
             .map(Some)
     }
+    fn stored_metadata_values(
+        &self,
+        records: &RecordImageCursor,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        crate::backup::BackupCatalogTextInput::from_filtered_metadata_records(
+            records,
+            &[super::TAG_METADATA],
+            prefix,
+            super::catalog::select_metadata,
+            limits,
+            control,
+        )
+        .map(Some)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -135,6 +152,15 @@ impl BackupImageSource for KeyValueBackupImage {
     ) -> BackupResult<Option<BackupViewQueryInput>> {
         self.0.stored_view_queries(limits, control)
     }
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.0.stored_metadata_values(prefix, limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<KeyValueImageStep> {
         self.advance(maximum_positions)
     }

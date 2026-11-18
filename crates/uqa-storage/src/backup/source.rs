@@ -35,6 +35,24 @@ pub struct BackupSourceStatistics {
     pub excluded_units: u64,
 }
 
+impl BackupSourceStatistics {
+    #[must_use]
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self {
+            visited_positions: self
+                .visited_positions
+                .saturating_add(other.visited_positions),
+            copied_payload_bytes: self
+                .copied_payload_bytes
+                .saturating_add(other.copied_payload_bytes),
+            metadata_read_bytes: self
+                .metadata_read_bytes
+                .saturating_add(other.metadata_read_bytes),
+            excluded_units: self.excluded_units.saturating_add(other.excluded_units),
+        }
+    }
+}
+
 /// One provider-owned complete image over a retained cut. Units must have strictly increasing addresses; supplied lengths are exact, and an omitted length is established by draining the unit. A nonempty read returns zero only at successful EOF. Each call releases source physical reads before returning; dropping the source releases its cut. Implementing this contract does not qualify another provider or mapping.
 pub trait BackupImageSource {
     fn cut(&self) -> BackupCut;
@@ -47,6 +65,18 @@ pub trait BackupImageSource {
     ) -> BackupResult<Option<super::BackupViewQueryInput>> {
         control.check()?;
         limits.validate()?;
+        Ok(None)
+    }
+
+    /// Select the raw UTF-8 values of catalog metadata keys with a logical name prefix on this exact committed image cut.
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        limits.validate()?;
+        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
         Ok(None)
     }
 
