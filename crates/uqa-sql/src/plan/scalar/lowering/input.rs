@@ -12,7 +12,7 @@ use crate::{plan::scalar::owned::child_slot_mut, SQLError};
 use std::future::Future;
 use uqa_core::{
     image_io::AsyncImageInput,
-    memory::{BudgetedSmallVec, BudgetedVec, ProductionControl},
+    memory::{BudgetedSmallVec, ProductionControl},
 };
 
 mod children;
@@ -85,8 +85,13 @@ impl<'s, 'c> Frame<'s, 'c> {
         control.check()?;
         let mut lowering = Lowering {
             control: Some(Control::from_production(control)),
-            owned_children: retain_children
-                .then(|| BudgetedVec::new(control.budget().expect("native scalar allowance"))),
+            owned_children: retain_children.then(|| {
+                ScalarMemory::new(
+                    control
+                        .empty_reservation()
+                        .expect("native scalar allowance"),
+                )
+            }),
         };
         let (source, output) = match queries.parameter(source, &control).await? {
             Some(number) => (None, ScalarExpr::Param(number)),
@@ -124,7 +129,7 @@ impl<'s, 'c> Frame<'s, 'c> {
             .lowering
             .owned_children
             .take()
-            .unwrap_or_else(|| BudgetedVec::new(control.memory.budget()));
+            .unwrap_or_else(|| ScalarMemory::new(control.memory.budget().empty_reservation()));
         Ok(OwnedScalarExpr::from_rewrite_parts(
             std::mem::replace(&mut self.output, ScalarExpr::Star),
             Some(ScalarMemory::from_parts(control.memory, children)),
@@ -219,7 +224,7 @@ where
             parent.next += 1;
             if let Some(children) = &mut parent.lowering.owned_children {
                 children
-                    .reserve(1)
+                    .reserve_children(1)
                     .map_err(uqa_core::ValueRetentionError::from)?;
             }
             frames

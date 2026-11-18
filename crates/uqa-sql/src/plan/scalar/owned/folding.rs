@@ -29,12 +29,12 @@ impl Folding {
     /// Detach at most one descendant or retire at most one completed metadata node.
     pub(in crate::plan) fn advance(&mut self) -> bool {
         if !self.ascending {
-            if let Some(first) = self
+            if let Some(node) = self
                 .current
                 .as_mut()
-                .and_then(|node| node.children.first_mut())
+                .filter(|node| !node.children.is_empty())
             {
-                std::mem::swap(first, &mut self.pending);
+                self.pending = node.children.replace(0, self.pending.take());
                 std::mem::swap(&mut self.current, &mut self.pending);
                 return false;
             }
@@ -45,7 +45,11 @@ impl Folding {
                 self.current = parent.children.pop().expect("remaining scalar owner");
                 self.ascending = false;
             } else {
-                let previous = parent.children.first_mut().and_then(Option::take);
+                let previous = if parent.children.is_empty() {
+                    None
+                } else {
+                    parent.children.take(0)
+                };
                 absorb_leaf(
                     std::mem::replace(&mut self.pending, previous),
                     &mut self.retained,

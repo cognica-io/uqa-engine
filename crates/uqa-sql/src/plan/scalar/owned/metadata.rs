@@ -23,10 +23,7 @@ impl OwnedScalarExpr {
     ) -> Result<Self> {
         child.assert_owner(control);
         control.check()?;
-        let mut memory = control.empty_reservation().map(|direct| ScalarMemory {
-            children: Vec::new(),
-            direct,
-        });
+        let mut memory = control.empty_reservation().map(ScalarMemory::new);
         if let Some(memory) = &mut memory {
             memory.reserve_children(1)?;
         }

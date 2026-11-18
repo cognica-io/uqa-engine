@@ -142,7 +142,8 @@ impl OwnedScalarExpr {
             let (expression, memory) = replacement.into_rewrite_parts();
             **branch = expression;
             if let Some(parent) = &mut self.memory {
-                *parent.children.last_mut().expect("CASE fallback owner") = memory;
+                let index = parent.children.len() - 1;
+                drop(parent.children.replace(index, memory));
             }
         } else {
             if let Some(parent) = &mut self.memory {
@@ -169,7 +170,7 @@ impl OwnedScalarExpr {
         if let Some(memory) = &mut self.memory {
             let count = removed.len();
             let retained = memory.children.len() - count;
-            memory.children[removed.start..].rotate_left(count);
+            memory.children.rotate_suffix_left(removed.start, count);
             memory.children.truncate(retained);
         }
     }

@@ -15,7 +15,7 @@ use crate::{
     schema::retention::CatalogRetentionError,
     ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 mod normalization;
 mod replacement;
@@ -77,7 +77,9 @@ impl OwnedWindowSpec {
     {
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: control.budget().map(BudgetedVec::new),
+            owned_children: control
+                .budget()
+                .map(|budget| ScalarMemory::new(budget.empty_reservation())),
         };
         let mut value = Pending::new(ScalarWindowSpec {
             definition,

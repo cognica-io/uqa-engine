@@ -14,7 +14,7 @@ use crate::{
     },
     ColumnType,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_core::Value;
 
 impl OwnedScalarExpr {
@@ -53,7 +53,9 @@ impl OwnedScalarExpr {
         };
         let mut lowering = Lowering {
             control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: control.budget().map(BudgetedVec::new),
+            owned_children: control
+                .budget()
+                .map(|budget| ScalarMemory::new(budget.empty_reservation())),
         };
         let composite_source = lowering.composite_source(composite_source.map(Source::Borrowed))?;
         let value = lowering.value(Source::Borrowed(value))?;

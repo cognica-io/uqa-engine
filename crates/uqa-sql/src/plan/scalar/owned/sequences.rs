@@ -37,7 +37,7 @@ where
     async fn apply(
         &mut self,
         (): (),
-        mut expression: OwnedScalarExpr,
+        expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<OwnedScalarExpr, SQLError> {
@@ -46,43 +46,48 @@ where
         {
             return Ok(expression);
         }
-        let ScalarExpr::Func { args, .. } = &mut expression.expression else {
-            unreachable!()
+        expression
+            .map_child_from(0, control, |argument| async {
+                argument
+                    .edit_from((), control, work, &mut Name(&mut self.0))
+                    .await
+            })
+            .await
+    }
+}
+
+struct Name<F>(F);
+
+impl<F> EditIdentity for Name<F> {
+    type Identity = ();
+    const BEFORE_CHILDREN: bool = false;
+    fn identity(_: &ScalarExpr) {}
+
+    fn child_count(expression: &ScalarExpr) -> usize {
+        usize::from(matches!(expression, ScalarExpr::Cast { ty, .. } if is_regclass_cast(ty)))
+    }
+}
+
+impl<F, W: Work> Edit<W> for Name<F>
+where
+    F: FnMut(&str, &ProductionControl<'_>) -> Result<Produced<String>, SQLError> + Send,
+    W::Error: Into<SQLError>,
+{
+    async fn apply(
+        &mut self,
+        (): (),
+        expression: OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+        _work: &mut W,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        let ScalarExpr::Literal(Value::Str(reference)) = &*expression else {
+            return Ok(expression);
         };
-        let mut value = &mut args[0];
-        let mut memory = expression
-            .memory
-            .as_mut()
-            .map(|owner| owner.children[0].as_mut().expect("sequence argument owner"));
-        loop {
-            control.check()?;
-            work.checkpoint().await.map_err(Into::into)?;
-            control.check()?;
-            match value {
-                ScalarExpr::Literal(Value::Str(reference)) => {
-                    let (name, reservation) = (self.0)(reference, control)?.into_parts();
-                    let replacement = OwnedScalarExpr::literal(
-                        control.finish(Value::Str(name), reservation)?,
-                        control,
-                    )?;
-                    let (replacement, owner) = replacement.into_rewrite_parts();
-                    let old = std::mem::replace(value, replacement);
-                    let old_owner = memory.map(|memory| {
-                        std::mem::replace(memory, owner.expect("controlled sequence name"))
-                    });
-                    drop(OwnedScalarExpr::from_rewrite_parts(old, old_owner));
-                    break;
-                }
-                ScalarExpr::Cast { expr, ty, .. } if is_regclass_cast(ty) => {
-                    value = expr;
-                    memory = memory
-                        .map(|owner| owner.children[0].as_mut().expect("regclass operand owner"));
-                }
-                _ => break,
-            }
-        }
-        control.check()?;
-        Ok(expression)
+        let (name, reservation) = (self.0)(reference, control)?.into_parts();
+        Ok(OwnedScalarExpr::literal(
+            control.finish(Value::Str(name), reservation)?,
+            control,
+        )?)
     }
 }
 

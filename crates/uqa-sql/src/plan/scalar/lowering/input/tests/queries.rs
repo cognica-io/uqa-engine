@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::ast::SelectStmt;
+use uqa_core::memory::BudgetedVec;
 
 struct Queries<'a> {
     work: crate::construction::Work<'a>,

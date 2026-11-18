@@ -22223,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -73913,6 +73913,32 @@
       "capability": "Shared scalar-query index editing",
       "workload": "Remap 8192 cast levels on a 256 KiB stack and deny scratch admission at every prefix of a retained nested expression.",
       "invariant": "Ordinary and suspended edits reuse the scalar editor; work windows remain bounded, rejected scratch precedes the query callback and all payloads and reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_footprint_is_exact_without_scratch_on_deep_unary_and_branching_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/footprint.rs",
+      "capability": "Retained scalar footprint observation",
+      "workload": "Observe 8192 unary levels and an additional 8192 branching levels on a 256 KiB stack, replacing and transferring children while an independent sibling remains live.",
+      "invariant": "Every observed scalar total equals the independent live allowance, including with no headroom; observation and final cleanup allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_query_observes_deep_scalar_footprint_after_slot_transfer_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/footprint.rs",
+      "capability": "Retained scalar footprint observation",
+      "workload": "Transfer an 8192-level scalar into a retained query projection and observe it before and after cancellation with the allowance exhausted.",
+      "invariant": "The public query footprint includes the complete scalar owner without recursion or scratch, excludes independent owners and preserves allocation-free retirement.",
       "case_names": [
         ""
       ]

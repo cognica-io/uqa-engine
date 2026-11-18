@@ -89,7 +89,9 @@ impl OwnedScalarExpr {
             + state.specification.value.order_by.len()
             + frame_children(&state.specification.value);
         if let Some(memory) = &mut state.expression.memory {
-            memory.reserve_children(new_count.saturating_sub(old_count))?;
+            memory
+                .reserve_children(new_count.saturating_sub(old_count))
+                .map_err(CatalogRetentionError::from)?;
         }
         let ScalarExpr::WindowCall { spec, .. } = &mut state.expression.expression else {
             unreachable!()
@@ -103,7 +105,7 @@ impl OwnedScalarExpr {
             // Preserve the original release order while each detached subtree folds through the shared iterative owner.
             for index in arguments..arguments + old_count {
                 checkpoint(control, work).await?;
-                state.retiring = parent.children[index].take().map(Folding::new);
+                state.retiring = parent.children.take(index).map(Folding::new);
                 if let Some(memory) = &mut state.retiring {
                     while !memory.is_complete() {
                         checkpoint(control, work).await?;
@@ -125,7 +127,7 @@ impl OwnedScalarExpr {
             for index in 0..new_count {
                 checkpoint(control, work).await?;
                 parent
-                    .push_child(replacement.children[index].take())
+                    .push_child(replacement.children.take(index))
                     .expect("window child slots admitted before replacement");
             }
             while !replacement.children.is_empty() {

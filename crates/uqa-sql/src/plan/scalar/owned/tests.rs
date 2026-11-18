@@ -11,6 +11,7 @@ mod construction;
 mod copies;
 mod edits;
 mod fixtures;
+mod footprint;
 mod input;
 mod query_ids;
 mod retirement;

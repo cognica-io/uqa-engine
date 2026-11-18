@@ -129,10 +129,7 @@ where
     let owner = memory.as_mut().map(|owner| {
         std::mem::replace(
             *owner,
-            ScalarMemory {
-                children: Vec::new(),
-                direct: control.empty_reservation().expect("controlled scalar slot"),
-            },
+            ScalarMemory::new(control.empty_reservation().expect("controlled scalar slot")),
         )
     });
     let input = OwnedScalarExpr::from_rewrite_parts(

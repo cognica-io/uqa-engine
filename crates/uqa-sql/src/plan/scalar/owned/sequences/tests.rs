@@ -307,6 +307,7 @@ fn retained_sequence_binding_bounds_wide_work_and_handles_deep_casts_on_small_st
                         allocated.count_total
                     );
                     if let Some(value) = output {
+                        assert_eq!(value.reserved_bytes(), native.used());
                         let allocated = allocation_counter::measure(|| drop(value));
                         assert_eq!(allocated.count_total, 0);
                         break;

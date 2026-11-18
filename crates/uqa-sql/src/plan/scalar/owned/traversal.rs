@@ -16,6 +16,10 @@ pub(crate) trait EditIdentity {
     const BEFORE_CHILDREN: bool;
 
     fn identity(expression: &ScalarExpr) -> Self::Identity;
+
+    fn child_count(expression: &ScalarExpr) -> usize {
+        children::count(expression)
+    }
 }
 
 pub(crate) trait Edit<W: Work>: EditIdentity {
@@ -61,7 +65,7 @@ impl OwnedScalarExpr {
                 }
                 entering = false;
             }
-            let count = self.child_count();
+            let count = E::child_count(&self);
             if ordinal < count {
                 let child = visit_index(&self, ordinal, count);
                 // Child slots remain in the original parent boxes/vectors; capture their analysis identity before moving the payload.

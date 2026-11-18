@@ -75,10 +75,10 @@ impl OwnedScalarExpr {
             panic!("argument selection requires a function call");
         };
         let count = args.len();
-        let mut selected_memory = self.memory.as_ref().map(|parent| ScalarMemory {
-            direct: parent.direct.budget().empty_reservation(),
-            children: Vec::new(),
-        });
+        let mut selected_memory = self
+            .memory
+            .as_ref()
+            .map(|parent| ScalarMemory::new(parent.direct.budget().empty_reservation()));
         if let Some(selected) = &mut selected_memory {
             selected.reserve_children(count)?;
         }
@@ -97,9 +97,9 @@ impl OwnedScalarExpr {
                     .direct
                     .split(arguments.capacity() * size_of::<ScalarExpr>()),
             );
-            for child in &mut parent.children[..count] {
+            for index in 0..count {
                 output
-                    .push_child(child.take())
+                    .push_child(parent.children.take(index))
                     .expect("admitted selected argument slot");
             }
             parent.children.rotate_left(count);
@@ -138,15 +138,15 @@ impl OwnedScalarExpr {
         *args = items;
         if let (Some(parent), Some(mut replacement)) = (&mut self.memory, memory) {
             drop(parent.direct.split(previous_bytes));
-            for child in &mut parent.children[..previous_count] {
-                *child = None;
+            for index in 0..previous_count {
+                drop(parent.children.take(index));
             }
             parent.children.rotate_left(previous_count);
             let retained = parent.children.len() - previous_count;
             parent.children.truncate(retained);
-            for child in &mut *replacement.children {
+            for index in 0..replacement.children.len() {
                 parent
-                    .push_child(child.take())
+                    .push_child(replacement.children.take(index))
                     .expect("admitted replacement argument slot");
             }
             parent.children.rotate_right(count);

@@ -15,7 +15,7 @@ use crate::{
     },
     schema::retention::CatalogRetentionError,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl OwnedScalarExpr {
     /// Construct CASE from independent scalar owners, admitting each container before moving its children.
@@ -254,7 +254,9 @@ where
 pub(super) fn owned_lowering<'a>(control: &ProductionControl<'a>) -> Lowering<'a> {
     Lowering {
         control: control.budget().map(|_| Control::from_production(*control)),
-        owned_children: control.budget().map(BudgetedVec::new),
+        owned_children: control
+            .budget()
+            .map(|budget| ScalarMemory::new(budget.empty_reservation())),
     }
 }
 

@@ -13,7 +13,7 @@ use crate::{
     plan::{retirement::Pending, scalar::resources::input::Work},
     schema::retention::CatalogRetentionError,
 };
-use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 
 mod parts;
 mod steps;
@@ -84,7 +84,7 @@ impl<'s, 'c> Frame<'s, 'c> {
             owned_children: control
                 .budget()
                 .filter(|_| mode == CopyMode::Mutable)
-                .map(BudgetedVec::new),
+                .map(|budget| ScalarMemory::new(budget.empty_reservation())),
         };
         lowering.checkpoint(work).await?;
         let (parts, retained_children) = match (mode, source) {
@@ -112,7 +112,7 @@ impl<'s, 'c> Frame<'s, 'c> {
         let next = self.step()?;
         if let Some((source, slot)) = next {
             if let Some(children) = &mut self.lowering.owned_children {
-                children.reserve(1)?;
+                children.reserve_children(1)?;
             }
             self.pending = Some(slot);
             Ok(Some(source))
@@ -146,7 +146,7 @@ impl<'s, 'c> Frame<'s, 'c> {
                 .owned_children
                 .as_mut()
                 .expect("mutable copy")
-                .push(Some(memory))
+                .push_child(Some(memory))
                 .expect("admitted child slot"),
         }
         self.parts.attach(slot, expression.take());

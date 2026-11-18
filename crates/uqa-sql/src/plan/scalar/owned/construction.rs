@@ -29,10 +29,7 @@ impl OwnedScalarExpr {
                 composite_source: None,
                 parameter_index: None,
             },
-            memory: memory.map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: memory.map(ScalarMemory::new),
         };
         control.check()?;
         Ok(output)
@@ -80,12 +77,12 @@ impl OwnedScalarExpr {
         child.assert_owner(&control);
         control.check()?;
         if let Some(children) = &mut lowering.owned_children {
-            children.reserve(1)?;
+            children.reserve_children(1)?;
         }
         let (expression, memory) = child.into_rewrite_parts();
         if let Some(children) = &mut lowering.owned_children {
             children
-                .push(memory)
+                .push_child(memory)
                 .expect("scalar child slot was admitted");
         }
         Ok(expression)

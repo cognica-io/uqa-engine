@@ -286,6 +286,7 @@ fn query_index_edits_bound_deep_traversal_and_unadmitted_scratch_on_small_stack(
             for before in [false, true] {
                 let value = deep(&control, 8192);
                 let retained = native.used();
+                assert_eq!(value.reserved_bytes(), retained);
                 let value = if before {
                     value
                         .remap_subquery_ids(&control, &mut |index| index + 1)
@@ -297,6 +298,7 @@ fn query_index_edits_bound_deep_traversal_and_unadmitted_scratch_on_small_stack(
                     value
                 };
                 assert_eq!(native.used(), retained);
+                assert_eq!(value.reserved_bytes(), retained);
                 let mut leaf = &*value;
                 for _ in 0..8192 {
                     let ScalarExpr::Cast { expr, .. } = leaf else {
