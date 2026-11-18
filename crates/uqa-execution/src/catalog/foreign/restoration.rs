@@ -233,11 +233,16 @@ fn restore_wrappers(
         allow_migration,
         &control,
     )?;
-    uqa_sql::catalog::foreign_wrapper::validate_functions(
+    uqa_sql::catalog::foreign_wrapper::validate_functions_with_control(
         &restored.definitions,
         &context.routines.routine_snapshot(),
+        &control,
     )
-    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    .map_err(|error| match error {
+        uqa_sql::SQLError::Cancelled(cause) => StorageBackendError::Cancelled(cause),
+        error @ uqa_sql::SQLError::Internal(_) => StorageBackendError::Other(error.to_string()),
+        error => StorageBackendError::backend("foreign wrapper callback validation", error),
+    })?;
     Ok(restored)
 }
 

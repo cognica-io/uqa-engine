@@ -140,6 +140,22 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
     });
     let mut wrappers = ForeignWrappers::try_from_iter([("custom".into(), wrapper)]).unwrap();
     validate_functions(&wrappers, &routines).unwrap();
+    let memory = uqa_core::memory::MemoryBudget::new(0);
+    let original = uqa_core::CancellationToken::new();
+    let invoking = uqa_core::CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&memory, &original, &invoking);
+    let exhausted = validate_functions_with_control(&wrappers, &routines, &control).unwrap_err();
+    assert_eq!(exhausted.sqlstate(), Some("53200"));
+    validate_functions_with_control(
+        &wrappers,
+        &crate::routines::registry::RoutineRegistry::new(),
+        &control,
+    )
+    .unwrap();
+    invoking.cancel();
+    let cancelled = validate_functions_with_control(&wrappers, &routines, &control).unwrap_err();
+    assert_eq!(cancelled.sqlstate(), Some("57014"));
+    assert_eq!(memory.used(), 0);
     validate_functions(
         &wrappers,
         &crate::routines::registry::RoutineRegistry::new(),
@@ -148,6 +164,14 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
     wrappers
         .edit("custom", |wrapper| {
             wrapper.validator.as_mut().unwrap().oid += 1;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    assert!(validate_functions(&wrappers, &routines).is_err());
+    wrappers
+        .edit("custom", |wrapper| {
+            wrapper.handler = ForeignWrapperHandler::Function(wrapper.validator.take().unwrap());
             Ok(())
         })
         .unwrap()

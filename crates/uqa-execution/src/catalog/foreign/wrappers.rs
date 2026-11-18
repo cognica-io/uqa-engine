@@ -13,6 +13,9 @@ use uqa_sql::catalog::foreign_wrapper::{
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
+mod callbacks;
+pub(crate) use callbacks::validate_callback_bindings;
+
 const FORMAT_KEY: &str = "foreign-wrapper-catalog-format";
 const RECORD_PREFIX: &str = "foreign-wrapper/";
 const FORMAT_MARKER: &str = r#"{"version":2}"#;

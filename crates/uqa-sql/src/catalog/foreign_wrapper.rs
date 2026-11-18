@@ -155,7 +155,22 @@ pub fn validate_functions(
     wrappers: &ForeignWrappers,
     routines: &crate::routines::lifecycle::RoutineRegistry,
 ) -> Result<(), SQLError> {
+    validate_functions_with_control(
+        wrappers,
+        routines,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+/// Resolve retained handler and validator identities against SQL routines under the caller's limits.
+pub fn validate_functions_with_control(
+    wrappers: &ForeignWrappers,
+    routines: &crate::routines::lifecycle::RoutineRegistry,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     for wrapper in wrappers.values() {
+        control.check()?;
         let handler = match &wrapper.handler {
             ForeignWrapperHandler::Function(function) => Some(function),
             _ => None,
@@ -164,22 +179,23 @@ pub fn validate_functions(
             if reference.binding.builtin {
                 continue;
             }
-            let Some(function) = routines
-                .values()
-                .flatten()
-                .find(|function| function.def.object_id == reference.binding.object_id)
-            else {
-                continue;
-            };
-            if function.def.catalog_oid != Some(reference.oid)
-                || function.def.is_procedure
-                || crate::routines::routine_signature_types(&function.def)
-                    != reference.binding.argument_types
-            {
-                return Err(invalid(
-                    &wrapper.name,
-                    "live function disagrees with its retained identity",
-                ));
+            for function in routines.values().flatten() {
+                control.check()?;
+                if function.def.object_id != reference.binding.object_id {
+                    continue;
+                }
+                if function.def.catalog_oid != Some(reference.oid)
+                    || function.def.is_procedure
+                    || !crate::routines::routine_signature_matches_with_control(
+                        &function.def,
+                        &reference.binding.argument_types,
+                        control,
+                    )?
+                {
+                    let message = control.format(format_args!("foreign-data wrapper `{}`: live function disagrees with its retained identity", wrapper.name))?;
+                    return Err(SQLError::Internal(message.into_parts().0));
+                }
+                break;
             }
         }
     }

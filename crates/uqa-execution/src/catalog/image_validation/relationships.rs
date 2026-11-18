@@ -40,6 +40,7 @@ pub fn validate(
         &snapshot.definitions.foreign_wrappers,
         &production,
     )?;
+    crate::catalog::foreign::wrappers::validate_callback_bindings(snapshot, &production)?;
     crate::catalog::foreign::reference::validate_live_servers(
         snapshot.definitions.foreign_tables.values(),
         &snapshot.definitions.foreign_servers,

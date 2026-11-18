@@ -90,7 +90,7 @@ fn restore_rejects_a_live_foreign_server_bound_to_a_different_oid_or_name(
     assert_rejected(provider, &repository, root, &target, "foreign server");
 }
 
-fn begin_provider<'a>(
+pub(super) fn begin_provider<'a>(
     provider: Provider,
     repository: &'a LocalRepository,
     root: BackupRoot,
@@ -108,7 +108,7 @@ fn begin_provider<'a>(
         .unwrap()
 }
 
-fn assert_rejected(
+pub(super) fn assert_rejected(
     provider: Provider,
     repository: &LocalRepository,
     root: BackupRoot,
@@ -174,21 +174,7 @@ fn wrapper_archive(
     binding: Binding,
 ) -> (BackupRoot, u32) {
     let source = provider.open(path);
-    let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/parity/pg18/foreign_wrapper_oracle.expected.json"
-    )))
-    .unwrap();
-    let declaration = oracle["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["id"] == "server_callback_removes_wrapper")
-        .unwrap();
-    assert!(declaration["error"].is_null());
-    source
-        .sql(declaration["sql"].as_str().unwrap(), &[])
-        .unwrap();
+    run_wrapper_declarations(&source, &["server_callback_removes_wrapper"]);
     let historical = source.durable.foreign_servers.read()["orphaned_server"]
         .metadata
         .wrapper_reference
@@ -228,6 +214,22 @@ fn wrapper_archive(
         capture(&source, repository, None)
     };
     (root, historical.oid)
+}
+
+pub(super) fn run_wrapper_declarations(source: &Engine, ids: &[&str]) {
+    let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/foreign_wrapper_oracle.expected.json"
+    )))
+    .unwrap();
+    let cases = oracle["cases"].as_array().unwrap();
+    for id in ids {
+        let declaration = cases.iter().find(|case| case["id"] == *id).unwrap();
+        assert!(declaration["error"].is_null());
+        source
+            .sql(declaration["sql"].as_str().unwrap(), &[])
+            .unwrap();
+    }
 }
 
 #[rstest::rstest]
