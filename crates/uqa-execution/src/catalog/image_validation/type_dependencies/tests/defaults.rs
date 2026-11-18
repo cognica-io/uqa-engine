@@ -55,7 +55,7 @@ fn call(binding: FunctionBinding, args: Vec<Expr>) -> Expr {
     }
 }
 
-fn assert_work(catalog: &CatalogReadView, minimum: usize, expected: &str) {
+pub(super) fn assert_work(catalog: &CatalogReadView, minimum: usize, expected: &str) {
     let memory = MemoryBudget::new(8 << 20);
     let token = CancellationToken::new();
     let inline = validate(catalog.snapshot(), &memory, &token)

@@ -9,6 +9,8 @@
 use super::{inline, invalid, type_metadata, TypeReferences, Work};
 use crate::{
     ast::{CompositeRowBinding, Expr, FunctionBinding, FunctionDispatch, UserTypeKind},
+    binding::view_dependencies::{visit_plan_type_metadata, StoredPlanOutput, TypeObserver},
+    ir::observation::{visit_all, ScalarObserver},
     plan::{PlanRef, UnifiedPlan},
     SQLError, ScalarExpr,
 };
@@ -39,7 +41,7 @@ impl TypeReferences<'_> {
                     ..
                 } => self.function_types_with_work(binding, work).await?,
                 Expr::RetainedLiteral(literal) => {
-                    self.retained_literal_with_work(&literal.0, work).await?
+                    self.retained_literal_with_work(&literal.0, work).await?;
                 }
                 Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
                     return Err(crate::schema::dependencies::subquery_error(&control));
@@ -51,40 +53,13 @@ impl TypeReferences<'_> {
     }
 
     pub fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        expression.try_visit(&mut |node| {
-            self.cancellation.check()?;
-            match node {
-                ScalarExpr::Cast { ty, .. }
-                | ScalarExpr::TypedLiteral { ty, .. }
-                | ScalarExpr::CompositeRow {
-                    binding: CompositeRowBinding { ty, .. },
-                    ..
-                } => {
-                    self.stored_name(ty)?;
-                }
-                ScalarExpr::Func {
-                    binding: Some(binding),
-                    ..
-                } => self.function_types(binding)?,
-                ScalarExpr::RetainedLiteral(literal) => {
-                    inline(self.retained_literal_with_work(literal, &mut ()))?
-                }
-                _ => {}
-            }
-            match node {
-                ScalarExpr::TypedLiteral {
-                    bound_type: Some(ty),
-                    ..
-                }
-                | ScalarExpr::CompositeRow {
-                    bound_type: Some(ty),
-                    ..
-                }
-                | ScalarExpr::Collated { ty, .. } => self.column_type(ty)?,
-                _ => {}
-            }
-            Ok(true)
-        })
+        let mut observer = self;
+        inline(visit_all(
+            expression,
+            &self.control(),
+            &mut (),
+            &mut observer,
+        ))
     }
 
     async fn retained_literal_with_work(
@@ -162,24 +137,92 @@ impl TypeReferences<'_> {
     }
 
     pub fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError> {
-        self.cancellation.check()?;
-        plan.try_visit_scalar_expressions(&mut |root| self.scalar(root))?;
-        crate::binding::view_dependencies::visit_stored_plan_function_bindings(
-            plan,
-            &self.control(),
-            &mut |binding| self.function_types(binding),
-        )?;
-        crate::binding::view_dependencies::visit_stored_plan_output_types(
-            plan,
-            &self.control(),
-            &mut |ty| self.stored_name(ty),
-            &mut |ty| self.column_type(ty),
-        )
+        inline(self.plan_with_work(plan, &mut ()))
+    }
+
+    pub async fn plan_with_work(
+        &self,
+        plan: PlanRef<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let mut observer = self;
+        crate::plan::visit_scalar_nodes_with_work(plan, &control, work, &mut observer).await?;
+        visit_plan_type_metadata(plan, &control, work, &mut observer).await
     }
 
     pub fn statement(&self, statement: &crate::ast::Statement) -> Result<(), SQLError> {
+        inline(self.statement_with_work(statement, &mut ()))
+    }
+
+    pub async fn statement_with_work(
+        &self,
+        statement: &crate::ast::Statement,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         let control = self.control();
         let plan = UnifiedPlan::lower_borrowed_for_rewrite(statement, &|_: &str| false, &control)?;
-        self.plan(plan.as_plan_ref())
+        self.plan_with_work(plan.as_plan_ref(), work).await
+    }
+}
+
+impl ScalarObserver for &TypeReferences<'_> {
+    async fn scalar<W: Work + Send>(
+        &mut self,
+        node: &ScalarExpr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        match node {
+            ScalarExpr::Cast { ty, .. }
+            | ScalarExpr::TypedLiteral { ty, .. }
+            | ScalarExpr::CompositeRow {
+                binding: CompositeRowBinding { ty, .. },
+                ..
+            } => {
+                self.stored_name_with_work(ty, work).await?;
+            }
+            ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } => self.function_types_with_work(binding, work).await?,
+            ScalarExpr::RetainedLiteral(literal) => {
+                self.retained_literal_with_work(literal, work).await?;
+            }
+            _ => {}
+        }
+        match node {
+            ScalarExpr::TypedLiteral {
+                bound_type: Some(ty),
+                ..
+            }
+            | ScalarExpr::CompositeRow {
+                bound_type: Some(ty),
+                ..
+            }
+            | ScalarExpr::Collated { ty, .. } => self.column_type_with_work(ty, work).await?,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+impl TypeObserver for &TypeReferences<'_> {
+    async fn binding<W: Work + Send>(
+        &mut self,
+        binding: &FunctionBinding,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        self.function_types_with_work(binding, work).await
+    }
+
+    async fn output<W: Work + Send>(
+        &mut self,
+        value: StoredPlanOutput<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        match value {
+            StoredPlanOutput::Name(name) => self.stored_name_with_work(name, work).await,
+            StoredPlanOutput::Concrete(ty) => self.column_type_with_work(ty, work).await,
+        }
     }
 }

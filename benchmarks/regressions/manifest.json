@@ -53480,6 +53480,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "stored_routine_plan_type_checks_yield_for_original_and_bound_scalar_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/plans.rs",
+      "capability": "Restored routine plan scalar types",
+      "workload": "Validate 4,096 VALUES expressions in both the stored routine syntax and its lowered plan, including a missing late type.",
+      "invariant": "One-step and 32-step windows preserve the same first syntax or bound-plan error. Cancellation retires the private cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_routine_plan_type_checks_yield_for_bindings_and_optional_output_slots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/plans.rs",
+      "capability": "Restored routine plan output types",
+      "workload": "Visit 4,096 function argument types, declared output types or optional query output slots before the last invalid type.",
+      "invariant": "Each selected binding or output advances the type check. Batching preserves the first type diagnostic and cancellation releases private state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "type_membership_yields_for_each_edge_and_during_successful_claim_retirement",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",

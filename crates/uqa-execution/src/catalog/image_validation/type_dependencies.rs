@@ -112,14 +112,14 @@ async fn validate_with_work(
             if let FunctionBody::Statements(statements) = &function.def.body {
                 for statement in statements {
                     types.checkpoint(work).await?;
-                    types.statement(statement)?;
+                    types.statement_with_work(statement, work).await?;
                 }
             }
             if let RoutineBody::Bound(body) = &function.body {
                 if let CompiledFunctionBody::SQL(plans) = &***body {
                     for plan in plans {
                         types.checkpoint(work).await?;
-                        types.plan(plan.into())?;
+                        types.plan_with_work(plan.into(), work).await?;
                     }
                 }
             }

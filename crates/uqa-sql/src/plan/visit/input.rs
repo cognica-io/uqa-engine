@@ -12,7 +12,7 @@ use crate::{
     construction::Stack,
     ir::{
         children::Scope,
-        observation::{visit_in, Decision},
+        observation::{visit_all, ScalarObserver},
     },
     plan::{query::ExpressionOrder, ExpressionPlan, PlanRef},
     semantics::view_rewrite::DeferredOuterRewrite,
@@ -37,11 +37,11 @@ enum Node<'a, D> {
 
 type Nodes<'a, D> = Stack<Node<'a, D>, 4>;
 
-pub(crate) async fn visit_scalar_nodes_with_work<'a, W: Work>(
-    plan: PlanRef<'a>,
+pub(crate) async fn visit_scalar_nodes_with_work<W: Work + Send>(
+    plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
     work: &mut W,
-    visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
+    visit: &mut impl ScalarObserver,
 ) -> Result<(), SQLError> {
     let mut nodes = Nodes::new(*control);
     nodes.push(Node::Plan(plan))?;
@@ -195,11 +195,11 @@ fn push_root<'a, D>(root: &'a RelationalPlan, nodes: &mut Nodes<'a, D>) -> Resul
     Ok(())
 }
 
-async fn local<'a, W: Work>(
-    root: &'a RelationalPlan,
+async fn local<W: Work + Send>(
+    root: &RelationalPlan,
     control: &ProductionControl<'_>,
     work: &mut W,
-    visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
+    visit: &mut impl ScalarObserver,
 ) -> Result<(), SQLError> {
     match root {
         RelationalPlan::QueryBlock(block) => {
@@ -239,11 +239,11 @@ async fn local<'a, W: Work>(
     }
 }
 
-async fn expressions<'a, W: Work>(
+async fn expressions<'a, W: Work + Send>(
     items: impl Iterator<Item = Option<&'a ScalarExpr>> + Send,
     control: &ProductionControl<'_>,
     work: &mut W,
-    visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
+    visit: &mut impl ScalarObserver,
 ) -> Result<(), SQLError> {
     for item in items {
         if let Some(root) = item {
@@ -255,22 +255,17 @@ async fn expressions<'a, W: Work>(
     Ok(())
 }
 
-async fn expression<'a, W: Work>(
-    root: &'a ScalarExpr,
+async fn expression<W: Work + Send>(
+    root: &ScalarExpr,
     control: &ProductionControl<'_>,
     work: &mut W,
-    visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
+    visit: &mut impl ScalarObserver,
 ) -> Result<(), SQLError> {
     if root.children(Scope::Complete).len() == 0 {
         checkpoint(control, work).await?;
-        return visit(root);
+        return visit.scalar(root, work).await;
     }
-    visit_in(root, control, work, Scope::Complete, &mut |node| {
-        visit(node)?;
-        Ok(Decision::Descend)
-    })
-    .await?;
-    Ok(())
+    visit_all(root, control, work, visit).await
 }
 
 async fn checkpoint<W: Work>(
