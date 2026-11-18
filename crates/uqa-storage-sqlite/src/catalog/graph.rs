@@ -486,11 +486,7 @@ impl Catalog {
                 "DELETE FROM _graph_membership WHERE graph_name = ?1",
                 params![graph_name],
             )?;
-            tx.execute(
-                "DELETE FROM _path_indexes
-                  WHERE substr(graph_name, 1, length(?1) + 2) = ?1 || '::'",
-                params![graph_name],
-            )?;
+            Self::drop_graph_path_indexes_on(&tx, graph_name)?;
             for vertex in &snapshot.vertices {
                 let vertex_id = encode_catalog_id("vertex", vertex.vertex_id)?;
                 tx.execute(
@@ -551,6 +547,7 @@ impl Catalog {
         }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
+            Self::drop_graph_path_indexes_on(&tx, graph_name)?;
             tx.execute(
                 "DELETE FROM _named_graphs WHERE name = ?1",
                 params![graph_name],
@@ -562,11 +559,6 @@ impl Catalog {
             tx.execute(
                 "DELETE FROM _metadata WHERE key = ?1",
                 params![format!("graph_label_registry::{graph_name}")],
-            )?;
-            tx.execute(
-                "DELETE FROM _path_indexes
-                  WHERE substr(graph_name, 1, length(?1) + 2) = ?1 || '::'",
-                params![graph_name],
             )?;
             Self::purge_orphan_graph_entities_on(&tx)?;
             tx.commit()?;

@@ -84,7 +84,7 @@ pub(in crate::catalog) fn purge(
     Ok(())
 }
 
-fn remove_paths(
+pub(in crate::catalog) fn remove_paths(
     snapshot: &NativeSnapshot,
     batch: &mut dyn KeyValueBatch,
     graph: &str,
@@ -122,9 +122,13 @@ fn remove_paths(
                         "native path definition identity is not text",
                     )
                 })?;
-                if name
-                    .strip_prefix(graph)
-                    .is_some_and(|suffix| suffix.starts_with("::"))
+                if uqa_storage::catalog::path_index::belongs_to(
+                    name,
+                    graph,
+                    || paths::recorded_graph(snapshot, name).map_err(Into::into),
+                    |candidate| super::named_graph_exists(snapshot, candidate).map_err(Into::into),
+                )
+                .map_err(uqa_storage::mvcc::VersionError::Storage)?
                 {
                     paths::definition(snapshot, batch, name, None)
                         .map_err(|error| uqa_storage::mvcc::VersionError::Storage(error.into()))?;

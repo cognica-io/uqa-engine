@@ -418,13 +418,24 @@ impl GraphRead<'_> {
         Ok(())
     }
 
-    fn remove_paths(&self, batch: &mut dyn KeyValueBatch, graph: &str) -> StorageBackendResult<()> {
+    pub(super) fn remove_paths(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        graph: &str,
+    ) -> StorageBackendResult<()> {
         for_each_key(self.read, &[TAG_PATH_INDEX], &mut |key| {
             let name = read_str(key, &mut 1)?;
-            if name
-                .strip_prefix(graph)
-                .is_some_and(|suffix| suffix.starts_with("::"))
-            {
+            if crate::catalog::path_index::belongs_to(
+                &name,
+                graph,
+                || KeyValueCatalog::path_index_graph_from(self.read, &name),
+                |candidate| {
+                    Ok(self
+                        .read
+                        .get(&single_str_key(TAG_NAMED_GRAPH, candidate)?)?
+                        .is_some())
+                },
+            )? {
                 KeyValueCatalog::clear_path_index_data_into(self.read, batch, &name)?;
                 self.observe_definition_change(batch, GraphDefinitionKind::PathIndex, &name, None)?;
                 batch.delete(key)?;

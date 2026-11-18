@@ -214,6 +214,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.store.transaction_affinity()
     }
 
+    fn path_index_graph(&self, index: &str) -> StorageBackendResult<Option<String>> {
+        self.with_graph_read(|read| Self::path_index_graph_from(read.read, index))
+    }
+
+    fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
+        self.with_graph_mutation(|read, batch| read.remove_paths(batch, graph))
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         self.clear_path_index_data_impl(index)
     }

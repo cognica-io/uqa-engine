@@ -28,6 +28,7 @@ mod identity;
 pub mod index_load;
 pub mod input;
 mod ordering;
+pub mod path_index;
 pub use ordering::compare_names;
 mod record_revisions;
 mod relation;
@@ -925,6 +926,29 @@ pub trait CatalogFacade: Send + Sync {
     ) -> StorageBackendResult<()>;
     fn drop_path_index(&self, graph_name: &str) -> StorageBackendResult<()>;
     fn load_path_indexes(&self) -> StorageBackendResult<Vec<(String, String)>>;
+    /// Original owning graph from optional physical materialization, including invalidated data.
+    fn path_index_graph(&self, _index: &str) -> StorageBackendResult<Option<String>> {
+        Ok(None)
+    }
+
+    /// Drop this graph's path definitions within the enclosing graph mutation.
+    fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
+        let mut selected = Vec::new();
+        for (key, _) in self.load_path_indexes()? {
+            if path_index::belongs_to(
+                &key,
+                graph,
+                || self.path_index_graph(&key),
+                |name| self.named_graph_exists(name),
+            )? {
+                selected.push(key);
+            }
+        }
+        for key in selected {
+            self.drop_path_index(&key)?;
+        }
+        Ok(())
+    }
 
     /// Durable reachability records, paged lexicographically by (source, target).
     /// Building calls clear, bounded saves, then finish inside one transaction.

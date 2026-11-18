@@ -125,6 +125,14 @@ impl CatalogFacade for Catalog {
         Some(self.conn.transaction_affinity())
     }
 
+    fn path_index_graph(&self, index: &str) -> StorageBackendResult<Option<String>> {
+        into_storage_result(Catalog::path_index_graph(self, index))
+    }
+
+    fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_graph_path_indexes(self, graph))
+    }
+
     fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::clear_path_index_data(self, index))
     }

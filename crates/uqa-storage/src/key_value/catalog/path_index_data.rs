@@ -37,6 +37,19 @@ fn pair_key(mut prefix: Vec<u8>, source: u64, target: u64) -> Vec<u8> {
 }
 
 impl KeyValueCatalog {
+    pub(super) fn path_index_graph_from(
+        read: &dyn KeyValueRead,
+        index: &str,
+    ) -> StorageBackendResult<Option<String>> {
+        read.get(&key(b's', index)?)?
+            .map(|value| {
+                std::str::from_utf8(&value)
+                    .map(str::to_owned)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))
+            })
+            .transpose()
+    }
+
     pub(super) fn invalidate_graph_path_data(
         read: &dyn KeyValueRead,
         batch: &mut dyn KeyValueBatch,
