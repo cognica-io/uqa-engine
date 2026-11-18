@@ -100,7 +100,7 @@ impl OwnedScalarExpr {
         retire_old(&mut state.old, old, control, work).await?;
         if let Some(parent) = &mut state.expression.memory {
             if filter {
-                state.filter = parent.children.pop().expect("window filter owner");
+                state.filter = parent.children.pop();
             }
             // Preserve the original release order while each detached subtree folds through the shared iterative owner.
             for index in arguments..arguments + old_count {

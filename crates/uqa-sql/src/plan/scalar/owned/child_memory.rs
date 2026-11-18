@@ -23,6 +23,7 @@ impl ChildMemory {
         self.bytes += bytes;
     }
 
+    #[cfg(test)]
     pub(super) fn capacity(&self) -> usize {
         self.values.capacity()
     }
@@ -51,10 +52,10 @@ impl ChildMemory {
         self.replace(index, None)
     }
 
-    pub(super) fn pop(&mut self) -> Option<Option<ScalarMemory>> {
-        let value = self.values.pop()?;
+    pub(super) fn pop(&mut self) -> Option<ScalarMemory> {
+        let value = self.values.pop().expect("remaining scalar child slot");
         self.bytes -= value.as_ref().map_or(0, ScalarMemory::reserved_bytes);
-        Some(value)
+        value
     }
 
     pub(super) fn truncate(&mut self, len: usize) {

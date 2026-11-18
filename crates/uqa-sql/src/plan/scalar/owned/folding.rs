@@ -42,7 +42,7 @@ impl Folding {
             self.ascending = true;
         } else if let Some(parent) = self.pending.as_mut() {
             if parent.children.len() > 1 {
-                self.current = parent.children.pop().expect("remaining scalar owner");
+                self.current = parent.children.pop();
                 self.ascending = false;
             } else {
                 let previous = if parent.children.is_empty() {
