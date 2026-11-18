@@ -62877,6 +62877,160 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "restored_aggregates_follow_runtime_dispatch_and_ranking_uses_its_kernel",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/application_priority.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture ordinary and windowed sum with an active and retired aggregate and a ranking kernel with a same-name registration.",
+      "invariant": "Restore preserves the lookup used by each call and first executes application aggregates when a client reads the view.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_domain_preserves_functions_in_defaults_and_checks",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a domain CHECK or DEFAULT with scalar, aggregate and table registrations under the same name. Retire the scalar and remove the archive before resuming persistent restore requests.",
+      "invariant": "Domain expressions use the scalar registration. The other registrations cannot satisfy a missing scalar or prevent restoration with the correct one.",
+      "case_names": [
+        "case_1_memory::domain_default_1_false",
+        "case_1_memory::domain_default_2_true",
+        "case_2_sqlite_native::domain_default_1_false",
+        "case_2_sqlite_native::domain_default_2_true",
+        "case_3_sqlite_kv::domain_default_1_false",
+        "case_3_sqlite_kv::domain_default_2_true",
+        "case_4_redb::domain_default_1_false",
+        "case_4_redb::domain_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "backup_domain_declarations_select_named_and_positional_records_with_bounded_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read current and positional domain records with short work windows and a large unrelated record field.",
+      "invariant": "Both forms preserve the stored constraint and default under the same allocation allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "raw_metadata_preserves_split_utf8_and_denies_oversized_or_invalid_text",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read raw metadata with split UTF-8, truncated characters and a restricted value size.",
+      "invariant": "Valid bytes stay intact and memory and encoding limits are enforced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_metadata_values_read_the_original_physical_cut",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Select metadata with a literal text prefix after captured entries are deleted or replaced.",
+      "invariant": "Native and Key/Value mappings expose original bytes and exclude unrelated metadata under the reader allowance.",
+      "case_names": [
+        "mapping_1_SQLiteBackupMapping__Native",
+        "mapping_2_SQLiteBackupMapping__KeyValue"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "stored_metadata_values_read_the_original_physical_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read metadata from the captured record cut after subsequent commits insert, replace and delete matching keys.",
+      "invariant": "Prefix selection yields only committed values from the captured sequence and honors cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runtime_calls_keep_placement_and_ignore_selected_builtins",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Observe a stored lowered query with nested, fixed and runtime-resolved calls using both native SQL and physical query input.",
+      "invariant": "The original SQL placements and bindings agree across both representations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wide_and_deep_native_view_pauses_before_late_calls_and_honors_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Step through a wide and deeply nested native view and cancel before reaching its last calls.",
+      "invariant": "The traversal yields within the requested window and retires its admitted working memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_native_query_children_retain_only_outstanding_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Visit a deeply nested native query under a limited reader allowance.",
+      "invariant": "Traversal retains only outstanding siblings and reaches the scalar call at the leaf.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_command_empty_rows_yield_before_returning_and_release_reader_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Traverse many empty input rows before a command output call under single-step windows.",
+      "invariant": "Empty rows consume bounded work and partial traversal releases its scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_call_order_matches_ordinary_roots_across_queries_and_commands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Compare stored call order under ordinary and resumable SQL traversal across queries and commands.",
+      "invariant": "Both entry points visit the same call names and placements in the same order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "restored_sql_body_advances_through_each_statement",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",

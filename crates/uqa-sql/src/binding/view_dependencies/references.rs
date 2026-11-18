@@ -96,6 +96,7 @@ pub enum StoredFunctionSite {
     Expression,
     Window,
     From,
+    Domain,
 }
 
 /// Visit calls whose stored selection still permits runtime lookup. A selected SQL object, builtin, structural operation or retained resolution error keeps its original authority. Window calls and FROM items keep their distinct SQL placement; scalar arguments are visited by the ordinary plan expression walker.

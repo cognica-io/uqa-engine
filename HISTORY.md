@@ -525,7 +525,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve the application function selected by a stored view when its name also identifies a builtin. Full and standalone incremental restores check the captured binding before publishing the destination.
+- Preserve application function selection in views, materialized view refreshes, domain defaults and domain `CHECK` constraints when an application and a builtin share a name. Full and standalone incremental restores check the captured selection before publishing the destination.
 
 - Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
 - Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.

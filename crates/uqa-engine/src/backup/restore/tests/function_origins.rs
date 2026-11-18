@@ -30,6 +30,20 @@ fn register_abs(engine: &Engine, value: i64) -> (SQLFunctionRegistration, Arc<At
     (handle, calls)
 }
 
+fn register_non_scalar_abs(engine: &Engine) {
+    engine
+        .register_table_function("abs", |_: &[Value]| {
+            Ok(crate::SQLTableFunctionResult::new(
+                ["v"],
+                vec![vec![Value::Int(37)]],
+            ))
+        })
+        .unwrap();
+    engine
+        .register_aggregate_function("abs", || super::external_functions::Total(47))
+        .unwrap();
+}
+
 fn values(engine: &Engine) -> (Value, Value) {
     let result = engine
         .sql(
@@ -305,5 +319,116 @@ fn archives_without_function_requirements_keep_known_builtin_bindings(#[case] pr
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     drop((engine, job));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restored_domain_preserves_functions_in_defaults_and_checks(
+    #[case] provider: Provider,
+    #[values(false, true)] domain_default: bool,
+) {
+    let files = tempfile::tempdir().unwrap();
+    let store = repository(&files.path().join("archive"));
+    let source = provider.open(&files.path().join("source"));
+    let (mut registered, source_calls) = register_abs(&source, 17);
+    let (definition, query, expected) = if domain_default {
+        ("CREATE DOMAIN saved_domain AS integer DEFAULT abs(-5)::integer; CREATE TABLE use_domain(v saved_domain)",
+         "INSERT INTO use_domain DEFAULT VALUES RETURNING v", 17)
+    } else {
+        (
+            "CREATE DOMAIN saved_domain AS integer CHECK (abs(VALUE) = 17)",
+            "SELECT (-5)::saved_domain AS v",
+            -5,
+        )
+    };
+    source.sql(definition, &[]).unwrap();
+    register_non_scalar_abs(&source);
+    assert_eq!(
+        source.sql(query, &[]).unwrap().rows[0]["v"],
+        Value::Int(expected)
+    );
+    let called = source_calls.load(Ordering::SeqCst);
+    let control = StorageReadControl::with_limit(32 << 20);
+    let pending = source
+        .begin_backup(&store, BackupOptions::new(32 << 20, 16 << 20), &control)
+        .unwrap();
+    registered.unregister().unwrap();
+    let root = finish_capture(pending);
+    assert_eq!(source_calls.load(Ordering::SeqCst), called);
+    if domain_default {
+        assert_eq!(source.sql(query, &[]).unwrap().rows[0]["v"], Value::Int(5));
+    } else {
+        assert_eq!(
+            source.sql(query, &[]).unwrap_err().sqlstate(),
+            Some("23514")
+        );
+    }
+    drop(source);
+
+    let target = files.path().join("restored");
+    let options = RestoreOptions::new(16 << 20, 8 << 20);
+    let runtime = Engine::new();
+    let incompatible = Engine::new();
+    register_non_scalar_abs(&incompatible);
+    assert_binding_failure(
+        runtime.begin_restore(
+            &store,
+            root.backup(),
+            destination(provider, &target),
+            options.with_registered_functions(&incompatible),
+            &control,
+        ),
+        &target,
+        &control,
+    );
+    let (_registration, calls) = register_abs(&runtime, 17);
+    let mut job = runtime
+        .begin_restore(
+            &store,
+            root.backup(),
+            destination(provider, &target),
+            options.with_registered_functions(&runtime),
+            &control,
+        )
+        .unwrap();
+    prepare(&mut job);
+    if let Some(request) = job.id() {
+        drop(job);
+        store.remove_backup(root.backup(), &control).unwrap();
+        let other = Engine::new();
+        register_non_scalar_abs(&other);
+        let mut incompatible = other
+            .resume_restore(
+                &store,
+                request,
+                destination(provider, &target),
+                options.with_registered_functions(&other),
+                &control,
+            )
+            .unwrap();
+        assert!(incompatible.publish().is_err());
+        drop(incompatible);
+        assert!(!target.exists());
+        job = runtime
+            .resume_restore(
+                &store,
+                request,
+                destination(provider, &target),
+                options.with_registered_functions(&runtime),
+                &control,
+            )
+            .unwrap();
+    }
+    let restored = job.publish().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        restored.sql(query, &[]).unwrap().rows[0]["v"],
+        Value::Int(expected)
+    );
+    drop((restored, job));
     assert_eq!(control.memory().used(), 0);
 }

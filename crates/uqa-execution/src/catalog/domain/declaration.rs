@@ -14,10 +14,10 @@ use uqa_sql::ast::CreateDomain;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
 /// Read the SQL declaration of one stored domain from its original record. Named and positional records select the same field. Authority and physical identity stay with the domain catalog.
-pub async fn read_stored_domain_declaration(
-    record: &[u8],
-    control: &StorageReadControl,
-    work: &mut AsyncImageInput<'_>,
+pub async fn read_stored_domain_declaration<'a, 'input: 'a>(
+    record: &'a [u8],
+    control: &'a StorageReadControl,
+    work: &'a mut AsyncImageInput<'input>,
 ) -> StorageBackendResult<Produced<CreateDomain>> {
     let production =
         ProductionControl::new(control.memory(), control.cancellation(), work.cancellation);

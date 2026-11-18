@@ -18,7 +18,6 @@ pub use restore::{
 
 use crate::{Engine, SQLError};
 use std::sync::Arc;
-use uqa_storage::backup::BackupImageSource;
 
 pub use uqa_storage::backup::{
     BackupCapabilities, BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport,
@@ -75,8 +74,7 @@ impl Engine {
         control: &StorageReadControl,
     ) -> Result<BackupJob<'a>, SQLError> {
         let control = control.with_temporary_limit(options.maximum_workspace_bytes);
-        let mut declarations = None;
-        let mut authorize = |engine: &Self| {
+        let authorize = |engine: &Self| -> Result<_, SQLError> {
             control.check().map_err(|error| {
                 uqa_execution::storage_errors::storage_error("start backup", &error)
             })?;
@@ -89,58 +87,51 @@ impl Engine {
             if options.maximum_encoded_bytes == 0 || options.maximum_workspace_bytes == 0 {
                 return Err(start_error(BackupError::Invalid("zero backup job limit")));
             }
-            declarations = Some(
-                engine
-                    .extensions
-                    .functions
-                    .capture_declarations(control.memory())?,
-            );
-            Ok(())
+            Ok(engine
+                .extensions
+                .functions
+                .capture_declarations(control.memory())?)
         };
-        let (source, views) = if self.storage.memory_capture.is_some() {
-            let cut = self.capture_committed_memory_query(&control, authorize)?;
-            let views = cut
-                .catalogs
-                .views
-                .captured(&cut.cut)
-                .map_err(|error| start_error(error.into()))?;
-            (
-                memory::from_snapshot(self, cut, &control).map_err(start_error)?,
-                Some(functions::Views::Memory(views)),
-            )
+        let (source, catalogs, declarations) = if self.storage.memory_capture.is_some() {
+            let (cut, declarations) = self.capture_committed_memory_query(&control, authorize)?;
+            let catalogs =
+                functions::Catalogs::memory(&cut).map_err(|error| start_error(error.into()))?;
+            let image = memory::from_snapshot(self, cut, &control).map_err(start_error)?;
+            (image, Some(catalogs), declarations)
         } else {
-            self.with_direct_query_snapshot(true, |engine| {
-                authorize(engine)?;
-                let provider = engine
-                    .storage
-                    .provider
-                    .as_ref()
-                    .filter(|provider| provider.backup_capabilities().export)
-                    .ok_or_else(|| start_error(BackupError::Unsupported("Engine backup export")))?;
-                if provider.auxiliary_encryption_key().is_some()
-                    && repository.protection_domain().is_none()
-                    && !options.allow_plaintext_export
-                {
-                    return Err(start_error(BackupError::Invalid(
-                        "encrypted source requires a protected repository or explicit plaintext export",
-                    )));
-                }
-                let image = provider.capture_backup_image(&control).map_err(start_error)?;
-                let limit = usize::try_from(options.maximum_encoded_bytes).unwrap_or(usize::MAX);
-                let limits = uqa_storage::catalog::input::CatalogInputLimits { maximum_key_bytes: limit, maximum_value_bytes: limit };
-                let views = image.stored_view_queries(limits, &control).map_err(start_error)?;
-                Ok((image, views.map(functions::Views::Provider)))
-            },
-            std::convert::identity,
-        )?
+            self.with_direct_query_snapshot(
+                true,
+                |engine| {
+                    let declarations = authorize(engine)?;
+                    let provider = engine
+                        .storage
+                        .provider
+                        .as_ref()
+                        .filter(|provider| provider.backup_capabilities().export)
+                        .ok_or_else(|| start_error(BackupError::Unsupported("Engine backup export")))?;
+                    if provider.auxiliary_encryption_key().is_some()
+                        && repository.protection_domain().is_none()
+                        && !options.allow_plaintext_export
+                    {
+                        return Err(start_error(BackupError::Invalid(
+                            "encrypted source requires a protected repository or explicit plaintext export",
+                        )));
+                    }
+                    let image = provider.capture_backup_image(&control).map_err(start_error)?;
+                    let limit = control.memory().limit();
+                    let limits = uqa_storage::catalog::input::CatalogInputLimits {
+                        maximum_key_bytes: limit,
+                        maximum_value_bytes: limit,
+                    };
+                    let catalogs = functions::Catalogs::provider(&image, limits, &control).map_err(start_error)?;
+                    Ok((image, catalogs, declarations))
+                },
+                std::convert::identity,
+            )?
         };
-        let source = if let Some(views) = views {
-            let references = functions::References::new(
-                views,
-                declarations.expect("authorized backup registry"),
-                &control,
-            )
-            .map_err(start_error)?;
+        let source = if let Some(catalogs) = catalogs {
+            let references = functions::References::new(catalogs, declarations, &control)
+                .map_err(start_error)?;
             source
                 .with_function_references(references, &control)
                 .map_err(start_error)?

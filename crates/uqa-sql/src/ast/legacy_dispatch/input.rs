@@ -27,7 +27,32 @@ impl CreateFunction {
         original: &CancellationToken,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<bool, ImageIoError> {
-        observe(Node::Function(self), original, input).await
+        let mut nodes = BorrowedNodes::new(Node::Function(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            if node.needs_migration(original, input).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+impl Expr {
+    /// Visit scalar function calls in stored syntax without evaluating them or copying their children. The original and invoking controls govern every traversal frame.
+    pub(crate) async fn visit_stored_scalar_calls_from_input(
+        &self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+        visit: &mut (impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), crate::SQLError>
+                  + Send),
+    ) -> Result<(), crate::SQLError> {
+        let mut nodes = BorrowedNodes::new(Node::Expression(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            if let Node::Expression(Self::Func { name, binding, .. }) = node {
+                visit(name, binding.as_ref())?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -93,39 +118,63 @@ fn item<'a, T>(
         .map_or(Child::Done, |value| Child::Node(node(value)))
 }
 
-async fn observe(
-    root: Node<'_>,
-    original: &CancellationToken,
-    input: &mut AsyncImageInput<'_>,
-) -> Result<bool, ImageIoError> {
-    original.check()?;
-    input.checkpoint().await?;
-    original.check()?;
-    let mut frames = BudgetedVec::new(input.memory);
-    frames.push(Frame {
-        node: root,
-        position: 0,
-    })?;
-    while let Some(frame) = frames.last_mut() {
+struct BorrowedNodes<'a> {
+    frames: BudgetedVec<Frame<'a>>,
+    entering: bool,
+}
+
+impl<'a> BorrowedNodes<'a> {
+    async fn new(
+        root: Node<'a>,
+        input: &mut AsyncImageInput<'_>,
+        original: &CancellationToken,
+    ) -> Result<Self, ImageIoError> {
         original.check()?;
         input.checkpoint().await?;
         original.check()?;
-        if frame.position == 0 && frame.node.needs_migration(original, input).await? {
-            return Ok(true);
-        }
-        let child = frame.node.child(frame.position);
-        frame.position += 1;
-        match child {
-            Child::Node(node) => frames.push(Frame { node, position: 0 })?,
-            Child::Skip => {}
-            Child::Done => {
-                frames.pop();
+        let mut frames = BudgetedVec::new(input.memory);
+        frames.push(Frame {
+            node: root,
+            position: 0,
+        })?;
+        Ok(Self {
+            frames,
+            entering: true,
+        })
+    }
+
+    async fn next(
+        &mut self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Option<Node<'a>>, ImageIoError> {
+        while let Some(frame) = self.frames.last_mut() {
+            if self.entering || frame.position != 0 {
+                original.check()?;
+                input.checkpoint().await?;
+                original.check()?;
+            }
+            if self.entering {
+                self.entering = false;
+                return Ok(Some(frame.node));
+            }
+            let child = frame.node.child(frame.position);
+            frame.position += 1;
+            match child {
+                Child::Node(node) => {
+                    self.frames.push(Frame { node, position: 0 })?;
+                    self.entering = true;
+                }
+                Child::Skip => {}
+                Child::Done => {
+                    self.frames.pop();
+                }
             }
         }
+        original.check()?;
+        input.cancellation.check()?;
+        Ok(None)
     }
-    original.check()?;
-    input.cancellation.check()?;
-    Ok(false)
 }
 
 impl<'a> Node<'a> {

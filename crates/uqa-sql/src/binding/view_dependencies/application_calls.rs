@@ -44,9 +44,10 @@ impl StoredFunctionSite {
         mut installed: impl FnMut(ApplicationFunctionKind) -> bool,
     ) -> Result<(), SQLError> {
         use ApplicationFunctionKind::{Aggregate, Scalar, Table};
-        let local = crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
         match self {
             Self::From => {
+                let local =
+                    crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
                 if !builtin_returns_set(&local)
                     && !crate::registry::is_operator_join_table_function(&local)
                 {
@@ -54,9 +55,14 @@ impl StoredFunctionSite {
                 }
             }
             Self::Window => {
+                let local =
+                    crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
                 if BuiltinWindowFunction::from_dispatch_name(&local).is_none() {
                     installed(Aggregate);
                 }
+            }
+            Self::Domain => {
+                installed(Scalar);
             }
             Self::Expression if crate::semantics::is_builtin_aggregate_call(name, None) => {
                 installed(Aggregate);

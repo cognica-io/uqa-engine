@@ -445,6 +445,8 @@ An Engine image can carry an optional application function references unit (kind
 
 The inventory covers the section's length and SHA-256. Each incremental root carries its own selection, including an empty section when applicable. Images without a section retain their original lookup behavior. A persistent restore with a section records its digest in the version 2 restore intent and preparation marker. This permits verification against the private restored catalog and the next process's registrations even after the archive has been removed.
 
+The four built-in Engine sources select these entries from the stored view queries and domain declarations at the captured cut. For each runtime call, they record the registration kinds consulted in SQL dispatch order through the first match. A domain default or constraint consults the scalar registry. A dedicated ranking function and a stored builtin binding need no entry. Matching the recorded decisions therefore selects the same registration kind or builtin fallback at restore. The application supplies the implementation of a registered function.
+
 ## Protection and bounded I/O
 
 Plaintext frames append SHA-256 over the complete header and payload. This detects accidental corruption and is not authentication against an attacker who can rewrite the archive. Encrypted frames append a 16-byte XChaCha20-Poly1305 tag and use a fresh random 24-byte nonce. The complete header is associated data, binding the protocol, protection domain, repository, object, position, kind and length. Frames have no compression in this version, so encoded payload length equals decoded payload length. A future compressed encoding requires a distinct understood protocol.

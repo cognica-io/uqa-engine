@@ -13,32 +13,21 @@ use crate::{
 use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_core::{
-    image_io::{AsyncImageInput, ImageDecodeWindow, ImageDecoder},
+    image_io::{ImageDecodeWindow, ImageDecoder},
     memory::{Budgeted, OwnedMap, OwnedMapIntoIter, Produced, ProductionControl, RetainedValue},
 };
-use uqa_sql::{
-    binding::view_dependencies::{
-        visit_stored_query_json_runtime_calls, visit_stored_runtime_calls, StoredFunctionSite,
-    },
-    catalog::stored_view::CapturedViewDefinitions,
-    plan::PlanRef,
-};
+use uqa_sql::binding::view_dependencies::StoredFunctionSite;
 use uqa_storage::{
     backup::{
-        BackupError, BackupFunctionKind as Kind, BackupFunctionReference, BackupFunctionSource,
-        BackupResult, BackupSourceStatistics, BackupSourceStep, BackupViewQueryInput,
+        BackupFunctionKind as Kind, BackupFunctionReference, BackupFunctionSource, BackupResult,
+        BackupSourceStatistics, BackupSourceStep,
     },
-    catalog::input::CatalogInputStep,
-    memory_capture::CapturedMemoryValue,
     read_control::StorageReadControl,
     StorageBackendError,
 };
 
-pub(super) enum Views {
-    Memory(Arc<Budgeted<CapturedMemoryValue<CapturedViewDefinitions>>>),
-    Staged(Produced<CapturedViewDefinitions>),
-    Provider(BackupViewQueryInput),
-}
+mod catalogs;
+pub(super) use catalogs::Catalogs;
 
 pub(super) struct References {
     stage: Stage,
@@ -56,7 +45,7 @@ enum Stage {
 
 impl References {
     pub(super) fn new(
-        views: Views,
+        catalogs: Catalogs,
         declarations: CapturedDeclarations,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
@@ -95,37 +84,9 @@ impl References {
                     }
                     Ok(())
                 };
-                match views {
-                    Views::Provider(mut views) => loop {
-                        input.checkpoint().await?;
-                        let step = views.advance().map_err(|error| match error {
-                            BackupError::Storage(error) => error,
-                            BackupError::Cancelled(error) => error.into(),
-                            BackupError::Memory(error) => error.into(),
-                            _ => StorageBackendError::backend("stored view source", error),
-                        })?;
-                        *counts.lock() = views.statistics();
-                        match step {
-                            CatalogInputStep::Pending => (),
-                            CatalogInputStep::Row(query) => visit_stored_query_json_runtime_calls(
-                                &query,
-                                &production,
-                                &mut input,
-                                &mut visit,
-                            )
-                            .await
-                            .map_err(sql_error)?,
-                            CatalogInputStep::Complete => break,
-                        }
-                    },
-                    Views::Memory(views) => {
-                        visit_native(views.get()?, &production, &mut input, &counts, &mut visit)
-                            .await?
-                    }
-                    Views::Staged(views) => {
-                        visit_native(&views, &production, &mut input, &counts, &mut visit).await?
-                    }
-                }
+                catalogs
+                    .visit(&original, &mut input, &counts, &mut visit)
+                    .await?;
                 if selected.is_empty() {
                     return Ok(None);
                 }
@@ -150,35 +111,14 @@ impl References {
             control.cancellation(),
             control.cancellation(),
         );
-        let views = engine
-            .durable
-            .views
-            .read()
-            .capture(&production)
-            .map_err(sql_error)?;
+        let catalogs = Catalogs::staged(engine, &production).map_err(sql_error)?;
         let registrations = engine
             .extensions
             .functions
             .capture_declarations(control.memory())
             .map_err(|error| sql_error(error.into()))?;
-        Self::new(Views::Staged(views), registrations, control)
+        Self::new(catalogs, registrations, control)
     }
-}
-
-async fn visit_native(
-    views: &CapturedViewDefinitions,
-    control: &ProductionControl<'_>,
-    input: &mut AsyncImageInput<'_>,
-    counts: &Mutex<BackupSourceStatistics>,
-    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
-) -> Result<(), StorageBackendError> {
-    for (_, view) in views {
-        input.checkpoint().await?;
-        counts.lock().visited_positions += 1;
-        visit_stored_runtime_calls(PlanRef::Query(&view.query), control, visit)
-            .map_err(sql_error)?;
-    }
-    Ok(())
 }
 
 const KINDS: [Kind; 6] = [
