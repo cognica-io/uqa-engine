@@ -19,12 +19,16 @@ mod references;
 mod stored_query;
 pub use application_calls::ApplicationFunctionKind;
 pub(crate) use owned::bind_query_relation_targets_owned;
-pub(crate) use references::{visit_plan_type_metadata, StoredPlanOutput, TypeObserver};
+pub(crate) use references::{
+    visit_expression_plan_runtime_calls, visit_plan_type_metadata, visit_statement_runtime_calls,
+    StoredPlanOutput, TypeObserver,
+};
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
     visit_stored_plan_relation_references, visit_stored_runtime_calls,
     visit_stored_runtime_calls_from, StoredFunctionSite,
 };
+pub(crate) use stored_query::visit_expression_plan_json_runtime_calls;
 pub use stored_query::visit_stored_query_json_runtime_calls;
 
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {

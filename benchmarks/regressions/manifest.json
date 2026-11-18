@@ -63373,6 +63373,106 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "event_calls_preserve_the_selected_predicate_and_action_placements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Observe trigger predicates and rewrite-rule conditions, subqueries and actions using the original stored call sites.",
+      "invariant": "Explicit builtin calls retain their selection. Window, table and scalar calls keep their placement, including in stored rule condition plans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "late_trigger_predicate_calls_yield_and_release_original_input_on_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Place an application call after 4,096 predicate children and compare one-step and grouped windows.",
+      "invariant": "Both windows reach the same call. Cancellation before the last child releases the private input and retains its original diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_event_records_preserve_original_selections_and_legacy_positional_fields",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/events/persistence/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read trigger and rewrite-rule records as named objects and positional arrays, including older records without analyzed conditions.",
+      "invariant": "Recorded selections, declaration order and existing accepted formats agree with the native event. Unknown catalog versions retain their original error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_event_records_bound_late_calls_cancellation_and_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/events/persistence/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read a physical catalog with the only reference in the final trigger under one-step and grouped work windows.",
+      "invariant": "Only the final trigger reports its call. Cancellation and a denied allocation release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_event_writes_follow_the_function_selected_at_capture",
+      "cases": 36,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins/events.rs",
+      "capability": "Application function references in backups",
+      "workload": "Restore a trigger predicate, a rewrite action and a rewrite condition on four providers with an active or retired application scalar or a selected builtin. Remove archives before prepared recovery on persistent providers.",
+      "invariant": "Published writes match the source before and after replacing or removing callbacks. Required and conflicting registrations are rejected before publication, and capture and restore never execute the callback.",
+      "case_names": [
+        "case_1_memory::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_1_memory::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_1_memory::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_1_memory::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_1_memory::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_1_memory::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_1_memory::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_1_memory::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_1_memory::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_4_redb::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_4_redb::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_4_redb::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_4_redb::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_4_redb::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_4_redb::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_4_redb::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_4_redb::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_4_redb::event_3_Event__RuleCondition::origin_3_Origin__Retired"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "restore_preserves_late_function_lookup_after_source_registration_retirement",

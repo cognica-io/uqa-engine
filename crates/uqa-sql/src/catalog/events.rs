@@ -10,8 +10,10 @@ use std::collections::BTreeSet;
 use uqa_core::memory::OwnedSet;
 
 mod registry;
+mod runtime_calls;
 pub(crate) use registry::EventIter;
 pub use registry::{CapturedEventCatalog, EventCatalog, EventDefinitions, EventValues};
+pub use runtime_calls::{EventRuntimeCalls, EventRuntimeDefinition};
 
 /// Dependency rewrites preserve their existing diagnostic text and keep native admission errors typed across storage publication.
 #[derive(Debug, thiserror::Error)]

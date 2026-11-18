@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Backup and restore preserve the application functions used by trigger predicates and rewrite rules. An insert after restore now fires the same trigger and writes the same values as on the source, including when a function shares its name with a builtin.
+- Copy long deferred SQL and PL/pgSQL function bodies in chunks of at most 4,096 bytes during restore. The original source text remains available in `pg_proc`.
+
 - Restore persistent routine declarations from the captured catalog and publish their compiled bodies together after loading foreign tables and views. The [Rust restore API](docs/manual/reference/02-rust-engine-api.md#restore-a-backup) exposes writable destinations for full and standalone incremental backups. The advertised import capability remains under qualification.
 
 - Retain exact scalar reservation totals as children are constructed, replaced or transferred. Deep scalar footprint observation uses no recursive traversal or scratch allocation, including when reached through an enclosing query. Sequence name binding shares the scalar editor and preserves the selected resolver order. Immediate scalar copies preserve their existing shallow allowance, while suspended sequence edits and window copies retain admitted workspace without expanding enclosing poll frames.

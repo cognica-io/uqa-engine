@@ -72,6 +72,8 @@ macro_rules! entry {
 entry!(Statement);
 entry!(CreateFunction);
 projected_entry!(crate::ast::CreateDomain);
+projected_entry!(crate::ast::CreateTrigger);
+projected_entry!(crate::ast::CreateRule);
 projected_entry!(crate::ast::ColumnDef);
 projected_entry!(crate::ast::TableCheck);
 

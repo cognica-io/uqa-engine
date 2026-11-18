@@ -8,8 +8,9 @@
 
 use crate::{
     ast::{CreateFunction, FunctionBody},
-    binding::view_dependencies::{visit_stored_runtime_calls_from, StoredFunctionSite},
-    plan::UnifiedPlan,
+    binding::view_dependencies::{
+        visit_statement_runtime_calls, visit_stored_runtime_calls_from, StoredFunctionSite,
+    },
     routines::CompiledFunctionBody,
     SQLError,
 };
@@ -52,14 +53,7 @@ where
         for statement in statements {
             input.checkpoint().await?;
             super::super::compilation::validate_sql_standard_statement(statement)?;
-            let plan = UnifiedPlan::lower_executable_from_input(
-                statement,
-                &|_: &str| false,
-                &control,
-                input,
-            )
-            .await?;
-            visit_stored_runtime_calls_from(plan.as_plan_ref(), &control, input, visit).await?;
+            visit_statement_runtime_calls(statement, &control, input, visit).await?;
         }
     }
     Ok(control.check()?)

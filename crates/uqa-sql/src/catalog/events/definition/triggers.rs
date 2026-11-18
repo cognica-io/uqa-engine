@@ -537,7 +537,7 @@ impl EventAnalysisContext<'_> {
         }
         // Bound identities and constants belong to the syntax as written, before a boolean coercion rewrites it.
         let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
-        let changed = crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
+        let changed = super::call_origin(lookup_mode).bind_expression_sites(condition, &sites)?;
         if !ty.as_ref().is_some_and(is_boolean_type) {
             if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
                 *value = crate::expr::cast_value(value, "boolean")?;

@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod events;
 mod retired;
 
 use super::{providers::destination, *};

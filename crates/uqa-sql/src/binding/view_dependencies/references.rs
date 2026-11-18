@@ -146,6 +146,45 @@ pub async fn visit_stored_runtime_calls_from(
     runtime_calls(plan, control, input, visit).await
 }
 
+pub(crate) async fn visit_statement_runtime_calls(
+    statement: &crate::ast::Statement,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> Result<(), SQLError> {
+    let plan = crate::plan::UnifiedPlan::lower_executable_from_input(
+        statement,
+        &|_: &str| false,
+        control,
+        input,
+    )
+    .await?;
+    visit_stored_runtime_calls_from(plan.as_plan_ref(), control, input, visit).await
+}
+
+pub(crate) async fn visit_expression_plan_runtime_calls(
+    plan: &crate::plan::ExpressionPlan,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> Result<(), SQLError> {
+    crate::ir::observation::visit_all(
+        &plan.scalar,
+        control,
+        input,
+        &mut RuntimeCalls {
+            control: *control,
+            visit,
+        },
+    )
+    .await?;
+    for query in &plan.subqueries {
+        checkpoint(control, input).await?;
+        visit_stored_runtime_calls_from(PlanRef::Query(query), control, input, visit).await?;
+    }
+    Ok(())
+}
+
 struct RuntimeCalls<'v, 'c, F> {
     control: ProductionControl<'c>,
     visit: &'v mut F,

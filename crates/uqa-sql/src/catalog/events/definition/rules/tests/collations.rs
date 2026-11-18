@@ -47,7 +47,6 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
         let mut condition = rule.condition.unwrap();
         let (plan, binding) = context
             .validate_rule_condition(&mut condition, &columns, rule.event, None, None, created)
-            .unwrap()
             .unwrap();
         assert_eq!(
             binding.referenced_columns(&plan).len(),
@@ -65,7 +64,6 @@ fn rule_condition_row_metadata_matches_postgresql_event_variables() {
                 Some(&binding),
                 RelationLookupMode::Bound,
             )
-            .unwrap()
             .unwrap();
         assert_eq!(
             binding.referenced_columns(&plan).len(),

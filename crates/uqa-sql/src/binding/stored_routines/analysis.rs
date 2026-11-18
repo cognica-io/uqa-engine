@@ -100,6 +100,21 @@ impl CatalogRoutineAnalysisContext<'_> {
         outer: &RowSchema,
         event: crate::ast::RuleEvent,
     ) -> Result<Option<ColumnType>, SQLError> {
+        self.bind_rule_condition_with_origin(
+            expression,
+            outer,
+            event,
+            super::StoredCallOrigin::Definition,
+        )
+    }
+
+    pub(crate) fn bind_rule_condition_with_origin(
+        &self,
+        expression: &mut ExpressionPlan,
+        outer: &RowSchema,
+        event: crate::ast::RuleEvent,
+        origin: super::StoredCallOrigin,
+    ) -> Result<Option<ColumnType>, SQLError> {
         self.with_scope_result(|scope| {
             crate::binding::routine_binding::bind_rule_condition_routines(
                 self.routines,
@@ -107,6 +122,7 @@ impl CatalogRoutineAnalysisContext<'_> {
                 &scope.binding_context()?,
                 outer,
                 event,
+                origin,
             )
         })
     }

@@ -50,9 +50,8 @@ fn ordinary_rule_conditions_retain_analyzed_constants_without_composite_casts() 
         .context()
         .bind_rule_condition_object_dependencies(
             &mut condition,
-            Some(&plan),
-            &[crate::ast::ColumnDef::nullable("id", ColumnType::Integer)],
-            RuleEvent::Update,
+            &plan,
+            RelationLookupMode::Dynamic,
             &mut dependencies,
         )
         .unwrap();

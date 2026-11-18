@@ -297,7 +297,7 @@ impl EventAnalysisContext<'_> {
         stored_plan: Option<&crate::plan::ExpressionPlan>,
         stored_binding: Option<&RuleConditionBinding>,
         lookup_mode: RelationLookupMode,
-    ) -> Result<Option<(crate::plan::ExpressionPlan, RuleConditionBinding)>, SQLError> {
+    ) -> Result<(crate::plan::ExpressionPlan, RuleConditionBinding), SQLError> {
         let has_subquery = rule_condition_has_subquery(condition);
         self.reject_rule_condition_aggregates(condition)?;
         if !has_subquery && condition.any_node(&|node| matches!(node, Expr::Column(_))) {
@@ -373,9 +373,12 @@ impl EventAnalysisContext<'_> {
             }
         }
         let schema = binding.row_schema(columns);
-        let ty = self
-            .stored_routines
-            .bind_rule_condition(&mut plan, &schema, event)?;
+        let ty = self.stored_routines.bind_rule_condition_with_origin(
+            &mut plan,
+            &schema,
+            event,
+            super::call_origin(lookup_mode),
+        )?;
         self.reject_rule_condition_sets(&plan.scalar, &schema, lookup_mode)?;
         // A new or restored condition records each call's input collation; a rule catalog stored before conditions recorded them migrates once.
         self.stored_routines
@@ -393,7 +396,7 @@ impl EventAnalysisContext<'_> {
             condition,
             None,
         )?;
-        Ok(Some((plan, binding)))
+        Ok((plan, binding))
     }
 
     fn bind_rule_condition_subquery_relations(
@@ -527,7 +530,7 @@ impl EventAnalysisContext<'_> {
                 &mut dependencies,
             );
         }
-        crate::catalog::stored_ast::bind_stored_statement_sites(action, &bound_routines.sites)?;
+        super::call_origin(lookup_mode).bind_statement_sites(action, &bound_routines.sites)?;
         if let Some(schema) = schema {
             validate_rule_returning_shape(&schema, &event_row_type)?;
         }
@@ -537,59 +540,27 @@ impl EventAnalysisContext<'_> {
     fn bind_rule_condition_object_dependencies(
         &self,
         condition: &mut Expr,
-        condition_plan: Option<&crate::plan::ExpressionPlan>,
-        columns: &[crate::ast::ColumnDef],
-        event: RuleEvent,
+        plan: &crate::plan::ExpressionPlan,
+        lookup_mode: RelationLookupMode,
         dependencies: &mut RuleDependencies,
     ) -> Result<(), SQLError> {
-        if let Some(plan) = condition_plan {
-            // Every analyzed constant and coercion belongs to the stored definition, including implicit enum inputs.
-            let lowered =
-                crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
-                    self.routines.has_registered_aggregate_function(name)
-                });
-            let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, plan)?;
-            crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
-            crate::catalog::events::dependencies::collect_expression_routine_dependencies(
-                plan,
-                dependencies,
-            );
-            for subquery in &plan.subqueries {
-                crate::catalog::events::dependencies::collect_query_relation_dependencies(
-                    subquery,
-                    dependencies,
-                    &std::collections::BTreeSet::new(),
-                )?;
-            }
-            let routine_references =
-                crate::binding::stored_routines::collect_expression_routine_references(plan)?;
-            crate::catalog::stored_ast::bind_stored_expression_routines(
-                condition,
-                &routine_references,
-            )?;
-            return Ok(());
-        }
-
-        let bound = bind_expr(
-            condition,
-            &mut RuleRowTypeResolver::for_condition(columns, event),
-        )?;
-        let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
+        let lowered = crate::plan::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
         });
-        let mut dependency_plan = lowered.clone();
-        self.stored_routines.bind_expression(
-            &mut dependency_plan,
-            &[],
-            &crate::RowSchema::default(),
-        )?;
+        let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, plan)?;
+        super::call_origin(lookup_mode).bind_expression_sites(condition, &sites)?;
         crate::catalog::events::dependencies::collect_expression_routine_dependencies(
-            &dependency_plan,
+            plan,
             dependencies,
         );
-        let sites =
-            crate::binding::syntax_sites::expression_syntax_sites(&lowered, &dependency_plan)?;
-        crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites).map(|_| ())
+        for subquery in &plan.subqueries {
+            crate::catalog::events::dependencies::collect_query_relation_dependencies(
+                subquery,
+                dependencies,
+                &std::collections::BTreeSet::new(),
+            )?;
+        }
+        Ok(())
     }
 
     pub fn validate_rule_definition(
@@ -627,7 +598,8 @@ impl EventAnalysisContext<'_> {
         Self::validate_select_rule_contract(definition, is_view)?;
         let columns = self.rule_relation_definitions(&definition.table)?;
         let mut dependencies = RuleDependencies::default();
-        if let Some(condition) = &mut definition.condition {
+        let (condition_plan, condition_binding) = if let Some(condition) = &mut definition.condition
+        {
             let condition_dependencies =
                 crate::binding::stored_relations::bind_rule_condition_relation_dependencies(
                     self.relations,
@@ -643,32 +615,18 @@ impl EventAnalysisContext<'_> {
                     condition,
                 )?,
             );
-        }
-        let condition = definition
-            .condition
-            .as_mut()
-            .map(|condition| {
-                self.validate_rule_condition(
-                    condition,
-                    &columns,
-                    definition.event,
-                    stored_condition_plan,
-                    stored_condition_binding,
-                    lookup_mode,
-                )
-            })
-            .transpose()?
-            .flatten();
-        let (condition_plan, condition_binding) = condition.map_or_else(
-            || (None, None),
-            |(plan, binding)| (Some(plan), Some(binding)),
-        );
-        if let Some(condition) = &mut definition.condition {
-            self.bind_rule_condition_object_dependencies(
+            let (plan, binding) = self.validate_rule_condition(
                 condition,
-                condition_plan.as_ref(),
                 &columns,
                 definition.event,
+                stored_condition_plan,
+                stored_condition_binding,
+                lookup_mode,
+            )?;
+            self.bind_rule_condition_object_dependencies(
+                condition,
+                &plan,
+                lookup_mode,
                 &mut dependencies,
             )?;
             dependencies.columns.extend(
@@ -679,7 +637,10 @@ impl EventAnalysisContext<'_> {
                         column,
                     }),
             );
-        }
+            (Some(plan), Some(binding))
+        } else {
+            (None, None)
+        };
         validate_rule_action_contract(definition)?;
         for action in &mut definition.actions {
             let action_dependencies = self.validate_rule_action_definition(

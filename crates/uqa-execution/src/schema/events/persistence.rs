@@ -5,6 +5,9 @@
 //
 
 //! Event metadata I/O and catalog restoration inside the caller's existing transaction boundary.
+mod runtime_calls;
+pub use runtime_calls::{visit_stored_rule_runtime_calls, visit_stored_trigger_runtime_calls};
+
 use super::EventCatalogContext;
 use sha2::{Digest, Sha256};
 use uqa_sql::{

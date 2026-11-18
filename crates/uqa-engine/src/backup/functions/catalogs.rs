@@ -16,12 +16,18 @@ use uqa_execution::catalog::{
     domain::{read_stored_domain_declaration, DOMAIN_RECORD_PREFIX},
     table_capture::visit_stored_table_functions,
 };
+use uqa_execution::schema::events::persistence::{
+    visit_stored_rule_runtime_calls, visit_stored_trigger_runtime_calls, RULES_METADATA_KEY,
+    TRIGGERS_METADATA_KEY,
+};
 use uqa_sql::{
     binding::view_dependencies::{
         visit_stored_query_json_runtime_calls, visit_stored_runtime_calls_from,
     },
     catalog::{
-        domain::StoredDomain, stored_view::CapturedViewDefinitions,
+        domain::StoredDomain,
+        events::{CapturedEventCatalog, EventRuntimeCalls, StoredRule, StoredTrigger},
+        stored_view::CapturedViewDefinitions,
         type_definitions::CapturedTypeDefinitions,
     },
     plan::PlanRef,
@@ -44,12 +50,15 @@ pub(in crate::backup) enum Catalogs {
         domains: Native<CapturedTypeDefinitions<StoredDomain>>,
         tables: Tables,
         routines: Native<CapturedRoutines>,
+        triggers: Native<CapturedEventCatalog<StoredTrigger>>,
+        rules: Native<CapturedEventCatalog<StoredRule>>,
     },
     Provider {
         views: BackupCatalogTextInput,
         domains: BackupCatalogTextInput,
         tables: [BackupCatalogTextInput; 2],
         routines: BackupCatalogTextInput,
+        events: [BackupCatalogTextInput; 2],
     },
 }
 
@@ -74,6 +83,8 @@ impl Catalogs {
             domains: Native::Memory(cut.catalogs.domains.captured(&cut.cut)?),
             tables: Tables::Memory(cut.tables.clone()),
             routines: Native::Memory(cut.catalogs.sql_user_functions.captured(&cut.cut)?),
+            triggers: Native::Memory(cut.catalogs.triggers.captured(&cut.cut)?),
+            rules: Native::Memory(cut.catalogs.rules.captured(&cut.cut)?),
         })
     }
 
@@ -86,6 +97,8 @@ impl Catalogs {
             domains: Native::Staged(engine.durable.domains.read().capture(control)?),
             tables: Tables::Staged(engine.storage.tables.live_snapshot()),
             routines: Native::Staged(engine.durable.sql_user_functions.read().capture(control)?),
+            triggers: Native::Staged(engine.durable.triggers.read().capture(control)?),
+            rules: Native::Staged(engine.durable.rules.read().capture(control)?),
         })
     }
 
@@ -113,6 +126,10 @@ impl Catalogs {
             routines: required(BackupCatalogField::Metadata(
                 uqa_execution::routines::catalog::FUNCTIONS_METADATA_KEY,
             ))?,
+            events: [
+                required(BackupCatalogField::Metadata(TRIGGERS_METADATA_KEY))?,
+                required(BackupCatalogField::Metadata(RULES_METADATA_KEY))?,
+            ],
         }))
     }
 
@@ -131,6 +148,8 @@ impl Catalogs {
                 domains,
                 tables,
                 routines,
+                triggers,
+                rules,
             } => {
                 for (_, view) in views.get()? {
                     work.checkpoint().await?;
@@ -155,12 +174,15 @@ impl Catalogs {
                 }
                 tables.visit(source, work, counts, visit).await?;
                 routines::native(routines.get()?, source, work, counts, visit).await?;
+                visit_events(triggers.get()?, source, work, counts, visit).await?;
+                visit_events(rules.get()?, source, work, counts, visit).await?;
             }
             Self::Provider {
                 views,
                 domains,
                 tables,
                 routines,
+                events: [triggers, rules],
             } => {
                 let [columns, checks] = tables;
                 for (kind, mut records) in [
@@ -169,6 +191,8 @@ impl Catalogs {
                     (Definition::Table(BackupTableField::Columns), columns),
                     (Definition::Table(BackupTableField::Constraints), checks),
                     (Definition::Routines, routines),
+                    (Definition::Triggers, triggers),
+                    (Definition::Rules, rules),
                 ] {
                     let before = *counts.lock();
                     loop {
@@ -181,6 +205,14 @@ impl Catalogs {
                             CatalogInputStep::Row(bytes) => match kind {
                                 Definition::Routines => {
                                     routines::record(&bytes, source, work, visit).await?;
+                                }
+                                Definition::Triggers => {
+                                    visit_stored_trigger_runtime_calls(&bytes, source, work, visit)
+                                        .await?;
+                                }
+                                Definition::Rules => {
+                                    visit_stored_rule_runtime_calls(&bytes, source, work, visit)
+                                        .await?;
                                 }
                                 Definition::Table(field) => {
                                     visit_stored_table_functions(
@@ -224,6 +256,30 @@ enum Definition {
     Domain,
     Table(BackupTableField),
     Routines,
+    Triggers,
+    Rules,
+}
+
+async fn visit_events<T: EventRuntimeCalls>(
+    catalog: &CapturedEventCatalog<T>,
+    source: &StorageReadControl,
+    work: &mut AsyncImageInput<'_>,
+    counts: &Mutex<BackupSourceStatistics>,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> StorageBackendResult<()> {
+    for (_, entries) in catalog {
+        work.checkpoint().await?;
+        for entry in entries.values() {
+            work.checkpoint().await?;
+            counts.lock().visited_positions += 1;
+            entry
+                .runtime_definition()
+                .visit_runtime_calls(source.cancellation(), work, visit)
+                .await
+                .map_err(sql_error)?;
+        }
+    }
+    Ok(())
 }
 
 fn source_error(error: BackupError) -> StorageBackendError {

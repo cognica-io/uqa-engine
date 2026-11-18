@@ -90,6 +90,38 @@ impl Expr {
         .await
     }
 
+    /// Legacy rewrite predicates retain their SQL placements until ordinary binding installs a condition plan.
+    pub(crate) async fn visit_runtime_query_calls(
+        &self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+        visit: &mut (impl FnMut(
+            &str,
+            crate::binding::view_dependencies::StoredFunctionSite,
+        ) -> Result<(), crate::SQLError>
+                  + Send),
+    ) -> Result<(), crate::SQLError> {
+        use crate::binding::view_dependencies::StoredFunctionSite as Site;
+        let mut nodes = BorrowedNodes::new(Node::Expression(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            let (name, site, binding) = match node {
+                Node::Expression(Self::Func { name, binding, .. }) => {
+                    (name, Site::Expression, binding.as_ref())
+                }
+                Node::Expression(Self::WindowCall { name, .. }) => (name, Site::Window, None),
+                Node::From(FromClause::Function { name, binding, .. })
+                | Node::TableFunction(TableFunction { name, binding, .. }) => {
+                    (name, Site::From, binding.as_ref())
+                }
+                _ => continue,
+            };
+            if let Some(site) = site.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Visit scalar function calls in stored syntax without evaluating them or copying their children. The original and invoking controls govern every traversal frame.
     pub(crate) async fn visit_stored_scalar_calls_from_input(
         &self,

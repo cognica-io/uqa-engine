@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::UnifiedPlan;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
     memory::MemoryBudget,
