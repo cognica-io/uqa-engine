@@ -29,3 +29,5 @@ The [persistent Nori binding contract](../tests/parity/nori/BINDINGS.md) supplem
 Rust, Python, Node.js and Browser WASM also expose the local and Cloud HTTP SQL path: Rust uses `uqa_client::HttpEngine`, while Python, Node.js, and Browser WASM export `HttpEngine` from their existing packages. Rust, Python, and Node.js can resolve a project through the installed `uqa` CLI; browsers require explicit connection material. The binding test suites execute materialized SQL, atomic batch, and streaming requests against controlled HTTP servers; the [HTTP Engine reference](../docs/manual/reference/09-http-engine.md) contains user-facing examples.
 
 The engine also ships smaller single-file Rust examples under [`crates/uqa-engine/examples/`](../crates/uqa-engine/examples), including encrypted-storage variants and the `doomql` demo.
+
+Run `cargo run --locked -p uqa-api --example backup` to capture, verify and restore a standalone incremental backup, then write to the restored database. The [complete example](../crates/uqa-api/examples/backup.rs) uses the public Rust API.
