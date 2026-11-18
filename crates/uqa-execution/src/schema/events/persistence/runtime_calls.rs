@@ -181,7 +181,7 @@ impl Catalog {
     }
 }
 
-/// Each selected field borrows its original complete value. The catalog itself may hold arbitrarily many definitions; selecting its entries does not retain their trees or unknown keys.
+/// Each selected field borrows its complete original value. Scanning the catalog retains only the requested field ranges.
 async fn fields<'a, const N: usize>(
     bytes: &'a [u8],
     selection: [(&str, usize); N],

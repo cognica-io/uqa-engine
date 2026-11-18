@@ -125,7 +125,7 @@ impl Role {
     }
 }
 
-// Serde accepts positional fields as well as names for native structs. Both encodings feed the same field roles; list elements retain their element role.
+// Serde accepts positional and named fields for native structs. Both encodings use the same field roles, and lists retain their element role.
 impl Role {
     fn element(self, index: usize) -> Self {
         if let Self::List(element) = self {
