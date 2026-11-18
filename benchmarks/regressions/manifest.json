@@ -62740,6 +62740,22 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "archives_without_function_requirements_keep_known_builtin_bindings",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Restore an image without application binding metadata into an Engine that has an application function named abs.",
+      "invariant": "A view explicitly bound to the builtin returns 5 without invoking the application function and restore memory is released.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "restored_sql_body_advances_through_each_statement",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",

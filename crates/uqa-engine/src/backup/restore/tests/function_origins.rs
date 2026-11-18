@@ -47,10 +47,29 @@ fn source_views(engine: &Engine) -> (SQLFunctionRegistration, Arc<AtomicUsize>) 
         .unwrap();
     let registration = register_abs(engine, 17);
     engine
-        .sql("CREATE VIEW saved_host AS SELECT abs(-5) AS v", &[])
+        .sql(
+            "CREATE VIEW saved_host AS SELECT abs(-5) AS v;
+             CREATE MATERIALIZED VIEW saved_materialized AS SELECT abs(-5)::integer AS v",
+            &[],
+        )
         .unwrap();
     assert_eq!(values(engine), (Value::Int(5), Value::Int(17)));
     registration
+}
+
+fn verify_materialized(engine: &Engine, refreshed: i64) {
+    let read = || {
+        engine
+            .sql("SELECT v FROM saved_materialized", &[])
+            .unwrap()
+            .rows[0]["v"]
+            .clone()
+    };
+    assert_eq!(read(), Value::Int(17));
+    engine
+        .sql("REFRESH MATERIALIZED VIEW saved_materialized", &[])
+        .unwrap();
+    assert_eq!(read(), Value::Int(refreshed));
 }
 
 fn assert_binding_failure(
@@ -124,6 +143,7 @@ fn standalone_restore_preserves_the_function_selected_at_the_source_cut(
     let restored = matched.publish().unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(values(&restored), (Value::Int(5), Value::Int(31)));
+    verify_materialized(&restored, 31);
     drop((restored, matched));
     store.remove_backup(active.backup(), &control).unwrap();
 
@@ -137,11 +157,10 @@ fn standalone_restore_preserves_the_function_selected_at_the_source_cut(
         )
         .unwrap();
     prepare(&mut fallback);
-    assert_eq!(
-        values(&fallback.publish().unwrap()),
-        (Value::Int(5), Value::Int(5))
-    );
-    drop(fallback);
+    let restored = fallback.publish().unwrap();
+    assert_eq!(values(&restored), (Value::Int(5), Value::Int(5)));
+    verify_materialized(&restored, 5);
+    drop((restored, fallback));
     let conflict = files.path().join("conflict");
     assert_binding_failure(
         authority.begin_restore(
@@ -222,6 +241,52 @@ fn prepared_restore_keeps_the_function_requirement_after_archive_removal(
     let engine = job.publish().unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(values(&engine), (Value::Int(5), Value::Int(47)));
+    drop((engine, job));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn archives_without_function_requirements_keep_known_builtin_bindings(#[case] provider: Provider) {
+    let files = tempfile::tempdir().unwrap();
+    let store = repository(&files.path().join("archive"));
+    let source = provider.open(&files.path().join("source"));
+    source
+        .sql("CREATE VIEW saved AS SELECT abs(-5) AS v", &[])
+        .unwrap();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let image = match &source.storage.provider {
+        Some(storage) => storage.capture_backup_image(&control),
+        None => crate::backup::memory::capture(&source, &control),
+    }
+    .unwrap();
+    let root = finish_capture(
+        store
+            .begin_image_backup(image, None, 32 << 20, 16 << 20, &control)
+            .unwrap(),
+    );
+    drop(source);
+    let next = Engine::new();
+    let (_binding, calls) = register_abs(&next, 23);
+    let mut job = next
+        .begin_restore(
+            &store,
+            root.backup(),
+            destination(provider, &files.path().join("installed")),
+            RestoreOptions::new(16 << 20, 8 << 20).with_registered_functions(&next),
+            &control,
+        )
+        .unwrap();
+    prepare(&mut job);
+    let engine = job.publish().unwrap();
+    assert_eq!(
+        engine.sql("SELECT v FROM saved", &[]).unwrap().rows[0]["v"],
+        Value::Int(5)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     drop((engine, job));
     assert_eq!(control.memory().used(), 0);
 }
