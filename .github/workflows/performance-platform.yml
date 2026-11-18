@@ -25,8 +25,8 @@ jobs:
   build:
     name: Build regression tests and validate local macOS checks (${{ inputs.os }})
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
-    # macOS builds and executes the inventory here; execution has its own deadline.
-    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 60 }}
+    # macOS also executes the inventory. The Linux build runs with two Cargo jobs.
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 90 }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
@@ -48,7 +48,10 @@ jobs:
       - name: Verify the regression inventory and failure detection
         run: python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
       - name: Build the selected existing test targets
-        timeout-minutes: 60
+        timeout-minutes: ${{ runner.os == 'Linux' && 90 || 60 }}
+        env:
+          # The largest optimized test binaries can exceed the Linux runner's 16 GB when built together.
+          CARGO_BUILD_JOBS: ${{ runner.os == 'Linux' && '2' || env.CARGO_BUILD_JOBS }}
         run: python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Build the independent-process claim fixture
         run: |
