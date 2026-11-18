@@ -135,6 +135,7 @@ thread_local! {
 #[derive(Clone, Copy)]
 enum ScalarBindingMode {
     References,
+    RoutineParameters,
     Stored,
     CompositeInputs,
 }

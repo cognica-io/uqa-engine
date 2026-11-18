@@ -237,7 +237,7 @@ fn routine_parameter_references(
     control: &ProductionControl<'_>,
 ) -> Result<super::super::parameters::InputConstants, SQLError> {
     scope.routine_parameters = Some(parameters.clone());
-    scope.scalar_binding = crate::binding::ScalarBindingMode::References;
+    scope.scalar_binding = crate::binding::ScalarBindingMode::RoutineParameters;
     scope.preserve_syntax_shape = true;
     let mut analysis = Preparation {
         bound_condition_queries: None,
