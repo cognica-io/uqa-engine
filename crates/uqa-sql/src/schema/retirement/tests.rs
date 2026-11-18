@@ -13,6 +13,10 @@ use uqa_core::{
 
 mod metadata;
 
+std::thread_local! {
+    pub(super) static FIELD_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn nested_type(depth: usize) -> ColumnType {
     (0..depth).fold(ColumnType::Text, |child, _| {
         ColumnType::Array(Box::new(child))
@@ -30,6 +34,36 @@ fn schema(width: usize, depth: usize, control: &ProductionControl<'_>) -> RowSch
         control,
     )
     .unwrap()
+}
+
+#[test]
+fn ordinary_row_schema_drop_releases_shared_and_final_owners_without_stepped_field_visits() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let original = schema(32, 16, &control);
+    let reader = original.clone();
+    let columns = reader.columns().as_ptr();
+    let remaining = budget.reserve(budget.limit() - budget.used()).unwrap();
+
+    FIELD_VISITS.set(0);
+    let shared = allocation_counter::measure(|| drop(original));
+    assert_eq!(shared.count_total, 0);
+    assert_eq!(reader.columns().as_ptr(), columns);
+    assert_eq!(reader.qualified_slot("q", "column_31"), Some(31));
+    assert_eq!(budget.used(), budget.limit());
+    assert_eq!(FIELD_VISITS.get(), 0);
+    assert_eq!(allocation_counter::measure(|| drop(reader)).count_total, 0);
+    assert_eq!(budget.used(), remaining.bytes());
+    assert_eq!(FIELD_VISITS.get(), 0);
+    drop(remaining);
+
+    let mut original = schema(32, 16, &control);
+    FIELD_VISITS.set(0);
+    let mut retirement = original.take_retirement();
+    while !retirement.advance() {}
+    assert!(FIELD_VISITS.get() > 0);
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]
