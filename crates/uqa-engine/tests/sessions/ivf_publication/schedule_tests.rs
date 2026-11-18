@@ -5,9 +5,11 @@
 //
 
 use super::{run, OwnedChild, Progress};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use tempfile::NamedTempFile;
 
 const PREFIX: &str = "schedule_probe::";
 
@@ -72,17 +74,17 @@ fn repeated_or_unrelated_results_cannot_extend_fixture_progress() {
     }
 }
 
-fn child_command(mode: &str) -> Command {
+fn test_command(name: &str) -> Command {
     let module = module_path!().split_once("::").unwrap().1;
     let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", &format!("{module}::{name}")]);
     command
-        .args([
-            "--exact",
-            &format!("{module}::child_fixture"),
-            "--ignored",
-            "--nocapture",
-            "--format=terse",
-        ])
+}
+
+fn child_command(mode: &str) -> Command {
+    let mut command = test_command("child_fixture");
+    command
+        .args(["--ignored", "--nocapture", "--format=terse"])
         .env("UQA_NATIVE_SCHEDULE_PROBE", mode);
     command
 }
@@ -94,50 +96,61 @@ fn probe(mode: &str, allowance: Duration) -> Result<(), String> {
 #[test]
 fn observed_child_exit_precedes_an_expired_progress_deadline() {
     for (mode, success) in [("complete", true), ("failed_exit", false)] {
-        let mut child = child_command(mode).stdout(Stdio::null()).spawn().unwrap();
-        assert_eq!(child.wait().unwrap().success(), success);
-        let mut child = OwnedChild(Some(child));
+        let capture = NamedTempFile::new().unwrap();
+        let writer = capture.as_file().try_clone().unwrap();
+        let mut child = OwnedChild::spawn(&mut child_command(mode), capture).unwrap();
+        assert_eq!(
+            child.process.as_mut().unwrap().wait().unwrap().success(),
+            success
+        );
         let progress = Progress::new(PREFIX, 2, Duration::ZERO, Instant::now());
-        assert_eq!(child.finish(&progress).unwrap().success(), success);
-        assert!(child.0.is_none());
+        let result = child.watch(progress, mode);
+        if success {
+            result.unwrap();
+        } else {
+            assert!(result.unwrap_err().contains("23"));
+        }
+        assert!(child.process.is_none());
+        assert!(writer.metadata().unwrap().len() > 0);
     }
 }
 
 #[test]
 fn buffered_results_and_closed_output_precede_an_expired_observation_deadline() {
-    let start = Instant::now();
-    let mut progress = Progress::new(PREFIX, 2, Duration::ZERO, start);
-    let (send, receive) = mpsc::sync_channel(3);
-    for line in [
-        "test schedule_probe::one ... ok",
-        "test schedule_probe::two ... ok",
-        "test result: ok. 2 passed; 0 failed; 0 ignored;",
-    ] {
-        send.send(Ok(line.to_owned())).unwrap();
-    }
-    drop(send);
-    while let Some(line) = progress.receive(&receive).unwrap() {
-        progress.observe(&line, start).unwrap();
-    }
-    progress.finish().unwrap();
+    let module = module_path!().split_once("::").unwrap().1;
+    let mut command = test_command("repeated_or_unrelated_results_cannot_extend_fixture_progress");
+    command.arg("--format=pretty");
+    let capture = NamedTempFile::new().unwrap();
+    let mut trailing_output = capture.as_file().try_clone().unwrap();
+    let mut child = OwnedChild::spawn(&mut command, capture).unwrap();
+    assert!(child.process.as_mut().unwrap().wait().unwrap().success());
+    writeln!(trailing_output).unwrap();
+    drop(trailing_output);
+    child
+        .watch(
+            Progress::new(module, 1, Duration::ZERO, Instant::now()),
+            "libtest",
+        )
+        .unwrap();
 }
 
 #[test]
 fn buffered_diagnostics_do_not_extend_a_running_childs_deadline() {
-    let start = Instant::now();
-    let mut progress = Progress::new(PREFIX, 2, Duration::ZERO, start);
-    let (send, receive) = mpsc::sync_channel(1);
-    send.send(Ok("diagnostic output".to_owned())).unwrap();
-    let line = progress.receive(&receive).unwrap().unwrap();
-    assert!(progress
-        .observe(&line, start)
-        .unwrap_err()
-        .contains("no new fixture completed"));
-    assert!(progress
-        .receive(&receive)
-        .unwrap_err()
-        .contains("no new fixture completed"));
-    drop(send);
+    let mut capture = NamedTempFile::new().unwrap();
+    capture.write_all(&vec![b' '; 64 * 1024]).unwrap();
+    writeln!(
+        capture,
+        "\ntest schedule_probe::one ... ok\ntest schedule_probe::two ... ok"
+    )
+    .unwrap();
+    writeln!(capture, "test result: ok. 2 passed; 0 failed; 0 ignored;").unwrap();
+    let mut child = OwnedChild::spawn(&mut child_command("silent_stall"), capture).unwrap();
+    let progress = Progress::new(PREFIX, 2, Duration::ZERO, Instant::now());
+    let error = child.watch(progress, "backlog").unwrap_err();
+    assert!(
+        error.contains("completed 2/2; successful summary observed, child still running"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -148,9 +161,52 @@ fn completed_child_requires_every_fixture_and_successful_process_exit() {
         ("duplicate", "duplicate or extra fixture"),
         ("failed_case", "unexpected fixture result"),
         ("failed_exit", "child suite failed"),
+        ("late_duplicate", "duplicate or extra fixture"),
+        ("late_summary", "unexpected fixture summary"),
     ] {
         let error = probe(mode, Duration::from_secs(30)).unwrap_err();
         assert!(error.contains(message), "{mode}: {error}");
+    }
+}
+
+fn wait_for_marker(path: &Path) {
+    let stop = Instant::now() + Duration::from_secs(60);
+    while !path.exists() {
+        assert!(Instant::now() < stop, "missing marker {}", path.display());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn independent_stdout_writer_does_not_own_a_direct_childs_exit() {
+    for (mode, success) in [("complete", true), ("failed_exit", false)] {
+        let directory = tempfile::tempdir().unwrap();
+        let markers = directory.path();
+        let result = std::thread::scope(|scope| {
+            let (input, release_writer) = std::io::pipe().unwrap();
+            let (send, receive) = std::sync::mpsc::channel();
+            scope.spawn(move || {
+                let mut command = child_command(mode);
+                command
+                    .stdin(input)
+                    .env("UQA_NATIVE_SCHEDULE_WRITER", markers);
+                send.send(run(&mut command, PREFIX, 2, Duration::from_secs(60), mode))
+                    .unwrap();
+            });
+            let outcome = receive.recv_timeout(Duration::from_secs(90));
+            drop(release_writer);
+            wait_for_marker(&markers.join("released"));
+            outcome.unwrap()
+        });
+        if success {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.contains("child suite failed") && error.contains("23"),
+                "{error}"
+            );
+        }
     }
 }
 
@@ -169,6 +225,27 @@ fn stalled_or_noisy_children_are_terminated_and_reaped() {
 #[ignore = "subprocess entry point exercised by the schedule lifecycle tests"]
 fn child_fixture() {
     let mode = std::env::var("UQA_NATIVE_SCHEDULE_PROBE").unwrap();
+    if let Some(markers) = std::env::var_os("UQA_NATIVE_SCHEDULE_WRITER") {
+        let markers = Path::new(&markers);
+        if mode == "hold_stdout" {
+            std::fs::write(markers.join("holding"), []).unwrap();
+            assert_eq!(std::io::stdin().read(&mut [0]).unwrap(), 0);
+            std::fs::write(markers.join("released"), []).unwrap();
+            std::process::exit(0);
+        }
+        // The observer owns this writer's release through the inherited stdin pipe.
+        let holder = child_command("hold_stdout")
+            .stdin(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        wait_for_marker(&markers.join("holding"));
+        drop(holder);
+    }
+    if mode == "silent_stall" {
+        loop {
+            std::thread::park();
+        }
+    }
     println!("test schedule_probe::one ... ok");
     match mode.as_str() {
         "missing" => std::process::exit(0),
@@ -181,16 +258,20 @@ fn child_fixture() {
             println!("diagnostic output cannot extend the deadline");
             std::thread::sleep(Duration::from_millis(10));
         },
-        "complete" | "failed_exit" | "complete_stalled" => {
+        "complete" | "failed_exit" | "complete_stalled" | "late_duplicate" | "late_summary" => {
             println!("test schedule_probe::two ... ok");
             println!("test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;");
-            if mode == "complete_stalled" {
-                loop {
+            match mode.as_str() {
+                "complete_stalled" => loop {
                     std::thread::park();
-                }
+                },
+                "late_duplicate" => print!("test schedule_probe::two ... ok"),
+                "late_summary" => print!("test result: ok. 2 passed; 0 failed; 0 ignored;"),
+                _ => println!(),
             }
         }
         _ => panic!("unknown schedule probe"),
     }
+    std::io::stdout().flush().unwrap();
     std::process::exit(if mode == "failed_exit" { 23 } else { 0 });
 }
