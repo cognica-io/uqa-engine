@@ -59,33 +59,28 @@ pub async fn validate_with_work<'a, W: Work + Send>(
         control: &control,
         work,
     };
-    let result = async {
-        for declaration in declarations {
-            claims.checkpoint().await?;
-            match declaration {
-                NativeNameInput::Relation(identity) => {
-                    claims.relation(&mut relations, identity).await?;
-                }
-                NativeNameInput::RowRelation(identity, array) => {
-                    claims.relation(&mut relations, identity).await?;
-                    claims.data_type(&mut types, identity).await?;
-                    claims.array_type(&mut types, identity, array).await?;
-                }
-                NativeNameInput::Type(identity) => claims.data_type(&mut types, identity).await?,
-                NativeNameInput::TypeWithArray(identity, array) => {
-                    claims.data_type(&mut types, identity).await?;
-                    claims.array_type(&mut types, identity, array).await?;
-                }
+    for declaration in declarations {
+        claims.checkpoint().await?;
+        match declaration {
+            NativeNameInput::Relation(identity) => {
+                claims.relation(&mut relations, identity).await?;
+            }
+            NativeNameInput::RowRelation(identity, array) => {
+                claims.relation(&mut relations, identity).await?;
+                claims.data_type(&mut types, identity).await?;
+                claims.array_type(&mut types, identity, array).await?;
+            }
+            NativeNameInput::Type(identity) => claims.data_type(&mut types, identity).await?,
+            NativeNameInput::TypeWithArray(identity, array) => {
+                claims.data_type(&mut types, identity).await?;
+                claims.array_type(&mut types, identity, array).await?;
             }
         }
-        control.check()?;
-        Ok(())
     }
-    .await;
     for map in [relations, types] {
         super::work::retire_entries(map.into_iter(), &control, work).await?;
     }
-    result
+    Ok(control.check()?)
 }
 
 struct Claims<'a, 'c, W> {

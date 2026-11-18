@@ -23,8 +23,9 @@ pub(super) async fn from_input(
     original: &CancellationToken,
     input: &mut AsyncImageInput<'_>,
 ) -> Result<(), SQLError> {
+    let mut declarations = declarations(catalog.snapshot());
     uqa_sql::catalog::namespace_names::validate_with_work(
-        declarations(catalog.snapshot()),
+        &mut declarations,
         input.memory,
         original,
         input,

@@ -205,4 +205,46 @@ fn long_namespace_claims_yield_during_comparison_and_successful_retirement() {
     let (wide, retiring) = exercise(20_480);
     assert!(wide > short + 100);
     assert!(retiring >= 16);
+
+    let memory = MemoryBudget::new(1 << 20);
+    let cancellation = CancellationToken::new();
+    let original = cancellation.clone();
+    let delivered = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&delivered);
+    let mut decoder = ImageDecoder::new(&memory, &cancellation, move |mut reader| async move {
+        let mut input = reader.input();
+        let mut names: Vec<_> = (0..32)
+            .map(|i| RelationIdentity::new("public", format!("entry_{i}")))
+            .collect();
+        names.push(RelationIdentity::new("pg_catalog", "pg_class"));
+        let declarations = names.iter().map(|identity| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            NativeNameInput::Relation(identity)
+        });
+        validate_with_work(declarations, input.memory, &original, &mut input).await
+    })
+    .unwrap();
+    let mut windows = 0;
+    loop {
+        let result = decoder.advance(
+            &mut std::io::empty(),
+            ImageDecodeWindow { bytes: 1, steps: 1 },
+        );
+        if delivered.load(Ordering::Relaxed) == 33 {
+            windows += 1;
+        }
+        match result {
+            Ok(None) => (),
+            Err(error) => {
+                assert!(error
+                    .to_string()
+                    .contains("invalid native catalog name: fixed relation"));
+                break;
+            }
+            Ok(Some(())) => panic!("fixed relation claim was accepted"),
+        }
+    }
+    assert!(windows <= 2, "a known name error waited {windows} windows");
+    drop(decoder);
+    assert_eq!(memory.used(), 0);
 }
