@@ -42,21 +42,13 @@ impl BackupImageSource for OwnedBackupImage {
         self.source.cut()
     }
 
-    fn stored_view_queries(
+    fn stored_catalog_text(
         &self,
+        field: crate::backup::BackupCatalogField<'_>,
         limits: crate::catalog::input::CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupViewQueryInput>> {
-        self.source.stored_view_queries(limits, control)
-    }
-
-    fn stored_metadata_values(
-        &self,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
     ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        self.source.stored_metadata_values(prefix, limits, control)
+        self.source.stored_catalog_text(field, limits, control)
     }
 
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {

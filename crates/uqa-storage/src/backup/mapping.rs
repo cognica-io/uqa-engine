@@ -23,25 +23,15 @@ pub trait BackupRecordMapping {
     fn format(&self) -> ImageFormat;
     fn namespace(&self) -> NamespaceId;
     fn header(&self) -> &[u8];
-    fn stored_view_queries(
+    fn stored_catalog_text(
         &self,
         _records: &RecordImageCursor,
+        _field: super::BackupCatalogField<'_>,
         limits: crate::catalog::input::CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+    ) -> BackupResult<Option<super::BackupCatalogTextInput>> {
+        limits.validate()?;
         control.check()?;
-        limits.validate()?;
-        Ok(None)
-    }
-    fn stored_metadata_values(
-        &self,
-        _records: &RecordImageCursor,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        limits.validate()?;
-        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
         Ok(None)
     }
     fn include(
@@ -344,34 +334,19 @@ impl<M: BackupRecordMapping> BackupImageSource for MappedRecordBackupImage<M> {
         self.cut()
     }
 
-    fn stored_view_queries(
+    fn stored_catalog_text(
         &self,
+        field: super::BackupCatalogField<'_>,
         limits: crate::catalog::input::CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+    ) -> BackupResult<Option<super::BackupCatalogTextInput>> {
         self.control.check()?;
         self.mapping
             .as_ref()
             .ok_or(BackupError::Finished)?
-            .stored_view_queries(
+            .stored_catalog_text(
                 self.records.as_ref().ok_or(BackupError::Finished)?,
-                limits,
-                control,
-            )
-    }
-    fn stored_metadata_values(
-        &self,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        self.control.check()?;
-        self.mapping
-            .as_ref()
-            .ok_or(BackupError::Finished)?
-            .stored_metadata_values(
-                self.records.as_ref().ok_or(BackupError::Finished)?,
-                prefix,
+                field,
                 limits,
                 control,
             )

@@ -72,26 +72,15 @@ impl BackupSourceStatistics {
 pub trait BackupImageSource {
     fn cut(&self) -> BackupCut;
 
-    /// Open the stored view queries on this exact image cut when its mapping exposes physical catalog rows.
-    fn stored_view_queries(
+    /// Read the selected catalog field from the retained image cut using its original storage mapping.
+    fn stored_catalog_text(
         &self,
+        _field: super::BackupCatalogField<'_>,
         limits: crate::catalog::input::CatalogInputLimits,
         control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+    ) -> BackupResult<Option<super::BackupCatalogTextInput>> {
+        limits.validate()?;
         control.check()?;
-        limits.validate()?;
-        Ok(None)
-    }
-
-    /// Select the raw UTF-8 values of catalog metadata keys with a logical name prefix on this exact committed image cut.
-    fn stored_metadata_values(
-        &self,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        limits.validate()?;
-        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
         Ok(None)
     }
 

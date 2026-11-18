@@ -9,7 +9,7 @@
 use super::{invalid, BackupError, BackupResult, StorageReadControl};
 use uqa_core::json::{decode_json_string, JsonReadError};
 
-const KEY_CAPACITY: usize = 96; // Includes the longest possible escaped spelling of "definition_json".
+const KEY_CAPACITY: usize = 2 + b"constraints_json".len() * 6;
 
 #[derive(Clone, Copy)]
 pub(super) enum FieldStep {
@@ -23,6 +23,7 @@ pub(super) enum FieldStep {
 enum Field {
     Definition,
     Query,
+    Table(super::BackupTableField),
 }
 
 #[derive(Clone, Copy)]
@@ -76,6 +77,14 @@ impl FieldProjector {
         Self::new(Field::Query)
     }
 
+    pub(super) fn table(field: super::BackupTableField) -> Self {
+        Self::new(Field::Table(field))
+    }
+
+    pub(super) fn allows_missing(&self) -> bool {
+        matches!(self.field, Field::Table(_))
+    }
+
     fn new(field: Field) -> Self {
         Self {
             field,
@@ -124,6 +133,7 @@ impl FieldProjector {
                         == match self.field {
                             Field::Definition => 0,
                             Field::Query => 1,
+                            Field::Table(_) => return Err(invalid()),
                         };
                     if self.index == 0
                         && matches!(self.field, Field::Query)
@@ -205,6 +215,7 @@ impl FieldProjector {
         self.selected = match self.field {
             Field::Definition => key == b"definition_json",
             Field::Query => key == b"query",
+            Field::Table(field) => key == field.key(),
         };
         Ok(())
     }
@@ -212,7 +223,7 @@ impl FieldProjector {
     fn start_value(&mut self, byte: u8) -> BackupResult<FieldStep> {
         if self.selected
             && !match self.field {
-                Field::Definition => byte == b'"',
+                Field::Definition | Field::Table(_) => byte == b'"',
                 Field::Query => matches!(byte, b'{' | b'['),
             }
         {

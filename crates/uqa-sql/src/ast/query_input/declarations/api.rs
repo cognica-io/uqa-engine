@@ -72,6 +72,8 @@ macro_rules! entry {
 entry!(Statement);
 entry!(CreateFunction);
 projected_entry!(crate::ast::CreateDomain);
+projected_entry!(crate::ast::ColumnDef);
+projected_entry!(crate::ast::TableCheck);
 
 impl CreateFunction {
     /// Consume prepared native authority in this declaration's original field order. Its allocations must belong to the supplied control. Nested declarations retain ordinary stored authority semantics.

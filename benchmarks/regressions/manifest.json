@@ -2,6 +2,32 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_defaults_and_bound_bodies_keep_their_call_placements_while_source_remains_deferred",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Visit SQL-standard and quoted routines with parameter defaults, FROM calls, window calls and scalar expressions under two work windows.",
+      "invariant": "Stored and retained executable statements select the same call placements. Quoted source remains deferred, utility statements retain their SQL diagnostic and traversal releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_routine_records_resume_overloads_and_release_their_private_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read multiple versions of a routine signature from one encoded catalog with short work windows. Cancel one input during decoding.",
+      "invariant": "The physical catalog yields the bound call and the deferred routine’s parameter default, preserves overload order, and retires all private allocations after completion or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "bounded_fingerprint_cache_rejects_evicted_and_replaced_owners",
@@ -63122,6 +63148,46 @@
         "case_3_sqlite_kv::domain_default_2_true",
         "case_4_redb::domain_default_1_false",
         "case_4_redb::domain_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_table_preserves_functions_in_defaults_and_checks",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored table CHECK or column default with scalar, table and aggregate registrations named abs. Retire the source registration and remove the archive before recovering persistent targets.",
+      "invariant": "A missing scalar rejects publication. The original scalar preserves values and constraints independently of same-name table or aggregate registrations.",
+      "case_names": [
+        "case_1_memory::column_default_1_false",
+        "case_1_memory::column_default_2_true",
+        "case_2_sqlite_native::column_default_1_false",
+        "case_2_sqlite_native::column_default_2_true",
+        "case_3_sqlite_kv::column_default_1_false",
+        "case_3_sqlite_kv::column_default_2_true",
+        "case_4_redb::column_default_1_false",
+        "case_4_redb::column_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routines_preserve_functions_in_defaults_and_eager_bodies",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored SQL routine with an application scalar in its argument default or eager statement body. Check fresh and archive-free prepared targets before invoking the routine.",
+      "invariant": "A missing registration rejects publication and the supplied scalar preserves the original routine result without executing callbacks while restoring.",
+      "case_names": [
+        "case_1_memory::argument_default_1_false",
+        "case_1_memory::argument_default_2_true",
+        "case_2_sqlite_native::argument_default_1_false",
+        "case_2_sqlite_native::argument_default_2_true",
+        "case_3_sqlite_kv::argument_default_1_false",
+        "case_3_sqlite_kv::argument_default_2_true",
+        "case_4_redb::argument_default_1_false",
+        "case_4_redb::argument_default_2_true"
       ]
     },
     {

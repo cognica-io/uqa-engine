@@ -61,7 +61,7 @@ impl StoredFunctionSite {
                     installed(Aggregate);
                 }
             }
-            Self::Domain => {
+            Self::ScalarOnly => {
                 installed(Scalar);
             }
             Self::Expression if crate::semantics::is_builtin_aggregate_call(name, None) => {

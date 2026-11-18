@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use crate::{
     backup::{
-        BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
-        BackupSourceStatistics, BackupViewQueryInput, ImageFormat, ImageProvider,
+        BackupCatalogField, BackupCatalogTextInput, BackupCut, BackupError, BackupImageSource,
+        BackupRecordMapping, BackupResult, BackupSourceStatistics, ImageFormat, ImageProvider,
         MappedRecordBackupImage, NamespaceId, RecordImageCursor,
     },
     catalog::input::CatalogInputLimits,
@@ -49,30 +49,48 @@ impl BackupRecordMapping for Mapping {
     fn header(&self) -> &[u8] {
         &self.header
     }
-    fn stored_view_queries(
+    fn stored_catalog_text(
         &self,
         records: &RecordImageCursor,
+        field: BackupCatalogField<'_>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> BackupResult<Option<BackupViewQueryInput>> {
-        BackupViewQueryInput::from_key_value_records(records, &[super::TAG_VIEW], limits, control)
-            .map(Some)
-    }
-    fn stored_metadata_values(
-        &self,
-        records: &RecordImageCursor,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        crate::backup::BackupCatalogTextInput::from_filtered_metadata_records(
-            records,
-            &[super::TAG_METADATA],
-            prefix,
-            super::catalog::select_metadata,
-            limits,
-            control,
-        )
+    ) -> BackupResult<Option<BackupCatalogTextInput>> {
+        match field {
+            BackupCatalogField::ViewQuery => BackupCatalogTextInput::from_key_value_records(
+                records,
+                &[super::TAG_VIEW],
+                limits,
+                control,
+            ),
+            BackupCatalogField::MetadataPrefix(prefix) => {
+                BackupCatalogTextInput::from_filtered_metadata_records(
+                    records,
+                    &[super::TAG_METADATA],
+                    prefix,
+                    super::catalog::select_metadata,
+                    limits,
+                    control,
+                )
+            }
+            BackupCatalogField::Table(field) => BackupCatalogTextInput::from_table_records(
+                records,
+                &[super::TAG_TABLE],
+                field,
+                limits,
+                control,
+            ),
+            BackupCatalogField::Metadata(name) => {
+                control.check_value_size(name.len(), limits.maximum_key_bytes)?;
+                let key = super::codec::single_str_key_prefix(
+                    super::TAG_METADATA,
+                    name,
+                    name.len(),
+                    control.memory(),
+                )?;
+                BackupCatalogTextInput::from_metadata_key(records, &key, None, limits, control)
+            }
+        }
         .map(Some)
     }
     fn include(
@@ -148,22 +166,14 @@ impl BackupImageSource for KeyValueBackupImage {
     fn cut(&self) -> BackupCut {
         self.cut()
     }
-    fn stored_view_queries(
+    fn stored_catalog_text(
         &self,
+        field: BackupCatalogField<'_>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
-    ) -> BackupResult<Option<BackupViewQueryInput>> {
-        self.0.stored_view_queries(limits, control)
+    ) -> BackupResult<Option<BackupCatalogTextInput>> {
+        self.0.stored_catalog_text(field, limits, control)
     }
-    fn stored_metadata_values(
-        &self,
-        prefix: &str,
-        limits: crate::catalog::input::CatalogInputLimits,
-        control: &crate::read_control::StorageReadControl,
-    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
-        self.0.stored_metadata_values(prefix, limits, control)
-    }
-
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<KeyValueImageStep> {
         self.advance(maximum_positions)
     }

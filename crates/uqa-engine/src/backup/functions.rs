@@ -27,7 +27,9 @@ use uqa_storage::{
 };
 
 mod catalogs;
+mod routines;
 pub(super) use catalogs::Catalogs;
+mod tables;
 
 pub(super) struct References {
     stage: Stage,

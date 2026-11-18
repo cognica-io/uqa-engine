@@ -18,6 +18,8 @@ use uqa_core::{
 
 mod bodies;
 pub use bodies::validate_captured_body;
+mod runtime_calls;
+pub use runtime_calls::visit_stored_routine_runtime_calls;
 mod bindings;
 pub use bindings::validate_captured_bindings;
 
