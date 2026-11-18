@@ -10,6 +10,7 @@
 use crate::{Direction, GraphStore, GraphStoreError, GraphStoreResult, PersistentGraphStore};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation, RetainedValue};
 use uqa_storage::{CatalogFacade, PersistentStorageBackend};
 
 type Pairs = BTreeSet<(u64, u64)>;
@@ -20,7 +21,7 @@ mod image;
 
 mod catalog;
 mod snapshot;
-pub use catalog::{CapturedPathIndexes, PathIndexCatalog};
+pub use catalog::{CapturedPathIndexes, PathIndexCatalog, PathIndexCatalogInput};
 pub use snapshot::PathIndexImageSnapshot;
 
 mod capture;
@@ -29,22 +30,35 @@ pub use capture::{CapturedPath, CapturedPathIndex};
 #[derive(Clone)]
 enum PathStorage {
     Memory(Arc<MemoryPaths>),
-    Persistent(Arc<DurablePathIndex>),
+    Persistent(RetainedValue<DurablePathIndex>),
     ReadView {
         store: Arc<crate::GraphStoreHandle>,
-        graph: String,
-        sequences: Vec<Vec<String>>,
+        declaration: RetainedValue<PathDeclaration>,
     },
 }
 
 struct DurablePathIndex {
     catalog: Arc<dyn CatalogFacade>,
     backend: Arc<dyn PersistentStorageBackend>,
+    declaration: RetainedValue<PathDeclaration>,
+    read_gate: parking_lot::ReentrantMutex<()>,
+}
+
+/// Handles in different physical sessions share the immutable declaration and its original reservation.
+struct PathDeclaration {
     key: String,
     graph: String,
     sequences: Vec<Vec<String>>,
     definition: String,
-    read_gate: parking_lot::ReentrantMutex<()>,
+    _memory: Option<MemoryReservation>,
+}
+
+impl std::ops::Deref for DurablePathIndex {
+    type Target = PathDeclaration;
+
+    fn deref(&self) -> &PathDeclaration {
+        &self.declaration
+    }
 }
 
 /// Fixed-label-sequence reachability. Durable clones copy only a handle.
@@ -97,6 +111,20 @@ fn observed_store(
 }
 
 impl PathIndex {
+    #[cfg(test)]
+    fn test_read_view(graph: &str) -> Self {
+        let records = Arc::new(uqa_storage::MemoryKeyValueStore::new());
+        Self::open_persistent(
+            Arc::new(uqa_storage::KeyValueCatalog::new(records.clone())),
+            Arc::new(uqa_storage::KeyValueStorageBackend::new(records)),
+            "unused",
+            graph,
+            &[vec!["edge".into()]],
+        )
+        .unwrap()
+        .with_graph_read_view(Arc::default())
+    }
+
     /// Physical definitions created under an older key keep that key for page lookup, replacement and transaction observations.
     pub fn physical_key(&self) -> Option<&str> {
         match &self.storage {
@@ -132,16 +160,34 @@ impl PathIndex {
         graph: &str,
         sequences: &[Vec<String>],
     ) -> GraphStoreResult<Self> {
+        let declaration = RetainedValue::new(PathDeclaration {
+            key: key.to_owned(),
+            graph: graph.to_owned(),
+            sequences: sequences.to_vec(),
+            definition: serde_json::to_string(sequences).map_err(|error| json_error(&error))?,
+            _memory: None,
+        });
+        Ok(Self::bind_persistent(catalog, backend, declaration, None)?)
+    }
+
+    fn bind_persistent(
+        catalog: Arc<dyn CatalogFacade>,
+        backend: Arc<dyn PersistentStorageBackend>,
+        declaration: RetainedValue<PathDeclaration>,
+        memory: Option<&MemoryBudget>,
+    ) -> Result<Self, MemoryError> {
+        let bound = DurablePathIndex {
+            catalog,
+            backend,
+            declaration,
+            read_gate: parking_lot::ReentrantMutex::new(()),
+        };
+        let handle = match memory {
+            Some(budget) => RetainedValue::with_budget(bound, budget)?,
+            None => RetainedValue::new(bound),
+        };
         Ok(Self {
-            storage: PathStorage::Persistent(Arc::new(DurablePathIndex {
-                catalog,
-                backend,
-                key: key.to_owned(),
-                graph: graph.to_owned(),
-                sequences: sequences.to_vec(),
-                definition: serde_json::to_string(sequences).map_err(|error| json_error(&error))?,
-                read_gate: parking_lot::ReentrantMutex::new(()),
-            })),
+            storage: PathStorage::Persistent(handle),
         })
     }
 
@@ -170,9 +216,12 @@ impl PathIndex {
     ) -> GraphStoreResult<Self> {
         match &self.storage {
             PathStorage::Memory(_) | PathStorage::ReadView { .. } => Ok(self.clone()),
-            PathStorage::Persistent(index) => {
-                Self::open_persistent(catalog, backend, &index.key, &index.graph, &index.sequences)
-            }
+            PathStorage::Persistent(index) => Ok(Self::bind_persistent(
+                catalog,
+                backend,
+                index.declaration.clone(),
+                None,
+            )?),
         }
     }
 
@@ -181,18 +230,15 @@ impl PathIndex {
     /// sequences are evaluated; no resident index or graph is constructed.
     #[must_use]
     pub fn with_graph_read_view(&self, store: Arc<crate::GraphStoreHandle>) -> Self {
-        let (graph, sequences) = match &self.storage {
+        let declaration = match &self.storage {
             PathStorage::Memory(_) => return self.clone(),
-            PathStorage::Persistent(index) => (&index.graph, &index.sequences),
-            PathStorage::ReadView {
-                graph, sequences, ..
-            } => (graph, sequences),
+            PathStorage::Persistent(index) => &index.declaration,
+            PathStorage::ReadView { declaration, .. } => declaration,
         };
         Self {
             storage: PathStorage::ReadView {
                 store,
-                graph: graph.clone(),
-                sequences: sequences.clone(),
+                declaration: declaration.clone(),
             },
         }
     }
@@ -202,16 +248,16 @@ impl PathIndex {
             PathStorage::Memory(paths) => Ok(paths
                 .get(sequence)
                 .map(|pairs| pairs.iter().copied().collect())),
-            PathStorage::ReadView {
-                store,
-                graph,
-                sequences,
-            } => {
-                if !sequences.iter().any(|candidate| candidate == sequence) {
+            PathStorage::ReadView { store, declaration } => {
+                if !declaration
+                    .sequences
+                    .iter()
+                    .any(|candidate| candidate == sequence)
+                {
                     return Ok(None);
                 }
                 let mut pairs = Pairs::new();
-                visit_pairs(store.as_ref(), graph, sequence, |pair| {
+                visit_pairs(store.as_ref(), &declaration.graph, sequence, |pair| {
                     pairs.insert(pair);
                     Ok(())
                 })?;
@@ -233,9 +279,10 @@ impl PathIndex {
     pub fn has_path(&self, sequence: &[String]) -> bool {
         match &self.storage {
             PathStorage::Memory(paths) => paths.get(sequence).is_some(),
-            PathStorage::ReadView { sequences, .. } => {
-                sequences.iter().any(|candidate| candidate == sequence)
-            }
+            PathStorage::ReadView { declaration, .. } => declaration
+                .sequences
+                .iter()
+                .any(|candidate| candidate == sequence),
             PathStorage::Persistent(index) => index
                 .sequences
                 .iter()
@@ -251,7 +298,8 @@ impl PathIndex {
                 .iter()
                 .map(|path| path.sequence.join("/"))
                 .collect(),
-            PathStorage::ReadView { sequences, .. } => sequences
+            PathStorage::ReadView { declaration, .. } => declaration
+                .sequences
                 .iter()
                 .map(|sequence| sequence.join("/"))
                 .collect(),

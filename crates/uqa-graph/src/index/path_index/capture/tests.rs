@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::{GraphStore, GraphStoreHandle, MemoryGraphStore};
+use crate::{GraphStore, MemoryGraphStore};
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{Edge, Vertex};
 
@@ -107,13 +107,7 @@ fn path_capture_admits_large_labels_and_pairs_before_copy_and_retires_failures()
 
 #[test]
 fn path_capture_rejects_query_views_without_evaluating_the_graph() {
-    let source = PathIndex {
-        storage: PathStorage::ReadView {
-            store: Arc::new(GraphStoreHandle::default()),
-            graph: "not-created".into(),
-            sequences: vec![vec!["edge".into()]],
-        },
-    };
+    let source = PathIndex::test_read_view("not-created");
     let control = StorageReadControl::with_limit(4096);
     let error = source.capture_memory_with_control(&control).unwrap_err();
     assert_eq!(

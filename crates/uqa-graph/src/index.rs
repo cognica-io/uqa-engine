@@ -132,7 +132,7 @@ impl VertexPropertyIndex {
 mod path_index;
 pub use path_index::{
     CapturedPath, CapturedPathIndex, CapturedPathIndexes, PathIndex, PathIndexCatalog,
-    PathIndexImageSnapshot,
+    PathIndexCatalogInput, PathIndexImageSnapshot,
 };
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ mod capture;
 mod input;
 mod persistent;
 pub use capture::CapturedPathIndexes;
+pub use persistent::PathIndexCatalogInput;
 
 #[derive(Clone)]
 pub struct PathIndexCatalog {
@@ -35,6 +36,10 @@ impl PathIndexCatalog {
             indexes: RetainedMap::new(memory),
             non_memory: 0,
         }
+    }
+
+    pub fn budget(&self) -> &MemoryBudget {
+        self.indexes.budget()
     }
 
     pub fn len(&self) -> usize {

@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::GraphCatalog;
+use crate::{GraphCatalog, GraphStoreHandle};
 use uqa_core::{
     image_io::{decode_image, ImageDecodeWindow, ImageDecoder},
     memory::Budgeted,

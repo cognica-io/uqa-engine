@@ -156,13 +156,7 @@ fn path_image_framing_distinguishes_empty_labels_sequences_and_all_pair_bits() {
 
 #[test]
 fn path_image_readers_reject_query_views_without_visiting_graphs() {
-    let source = PathIndex {
-        storage: PathStorage::ReadView {
-            store: Arc::new(crate::GraphStoreHandle::default()),
-            graph: "missing".into(),
-            sequences: vec![vec!["edge".into()]],
-        },
-    };
+    let source = PathIndex::test_read_view("missing");
     let control = StorageReadControl::with_limit(4096);
     let mut bytes = Vec::new();
     assert!(source.image_reader(&control).is_err());
