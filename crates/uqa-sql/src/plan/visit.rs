@@ -95,23 +95,10 @@ impl QueryPlan {
                     source.try_visit_scalar_expressions(visit)?;
                 }
                 for expression in block
-                    .r#where
-                    .iter()
-                    .chain(block.projections.iter().map(|projection| &projection.expr))
-                    .chain(&block.group_by)
-                    .chain(block.grouping_sets.iter().flatten())
-                    .chain(block.having.iter())
-                    .chain(block.order_by.iter().map(|order| &order.expr))
-                    .chain(block.limit.iter())
-                    .chain(block.offset.iter())
-                    .chain(&block.distinct_on)
+                    .expression_steps(super::query::ExpressionOrder::Visit)
+                    .flatten()
                 {
                     visit(expression)?;
-                }
-                for window in &block.windows {
-                    for expression in window.spec.expressions() {
-                        visit(expression)?;
-                    }
                 }
                 for subquery in &block.subqueries {
                     subquery.try_visit_scalar_expressions(visit)?;
@@ -167,37 +154,20 @@ impl SourcePlan {
         &'a self,
         visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
-        match self {
-            crate::plan::SourcePlan::RetainedRows(_) => {}
-            Self::Table { .. } => {}
-            Self::Subquery { body, .. } => body.try_visit_scalar_expressions(visit)?,
-            Self::Join {
-                left, right, on, ..
-            } => {
-                left.try_visit_scalar_expressions(visit)?;
-                right.try_visit_scalar_expressions(visit)?;
-                if let Some(on) = on {
-                    visit(on)?;
-                }
-            }
-            Self::Values { rows, .. } => {
-                for expression in rows.iter().flatten() {
-                    visit(expression)?;
-                }
-            }
-            Self::Function { args, .. } => {
-                for argument in args {
-                    visit(argument)?;
-                }
-            }
-            Self::FunctionGroup { functions, .. } => {
-                for argument in functions.iter().flat_map(|function| &function.args) {
-                    visit(argument)?;
-                }
-            }
+        if let Self::Subquery { body, .. } = self {
+            body.try_visit_scalar_expressions(visit)?;
+        }
+        let (children, expressions) = self.expression_inputs();
+        for child in children.into_iter().flatten() {
+            child.try_visit_scalar_expressions(visit)?;
+        }
+        for expression in expressions.flatten() {
+            visit(expression)?;
         }
         Ok(())
     }
 }
 
 mod command;
+mod input;
+pub(crate) use input::visit_scalar_nodes_with_work;
