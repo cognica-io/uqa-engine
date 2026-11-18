@@ -63,6 +63,8 @@ enum Stage {
     GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
     Registries(RestoredAuthorities),
+    RoutineBodies(RestoredAuthorities),
+    DependentRegistries(uqa_execution::catalog::domain::DomainRestoreState),
     Caches(CacheInput),
 }
 
@@ -231,7 +233,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Stored routine declarations and placeholders share the native polling boundary with the catalog inputs, analyzers, models and scoring parameters. Routine body compilation and the remaining registry finalizers still run synchronously. Any error or unwind retires the private session and its read transaction.
+    /// Read declarations and assemble overload groups across polls. Each compilation step binds one routine against the complete placeholder namespace. Individual bodies and the remaining registry validations still run synchronously. A failure or unwind retires the private session and its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -354,8 +356,23 @@ impl Candidate {
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
             Stage::Registries(retained) => {
+                engine.restore_relations_before_routine_bodies(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                )?;
+                Stage::RoutineBodies(retained)
+            }
+            Stage::RoutineBodies(RestoredAuthorities { domains, routines }) => {
+                match routines.advance(&engine.routine_restore_context())? {
+                    Some(routines) => {
+                        Stage::RoutineBodies(RestoredAuthorities { domains, routines })
+                    }
+                    None => Stage::DependentRegistries(domains),
+                }
+            }
+            Stage::DependentRegistries(domains) => {
                 self.session
-                    .restore_remaining_registries(catalog.as_ref(), retained)?;
+                    .restore_remaining_registries(catalog.as_ref(), domains)?;
                 Stage::Caches(CacheInput::Models)
             }
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
@@ -462,13 +479,12 @@ impl PersistentEngineState {
     fn restore_remaining_registries(
         &self,
         catalog: &dyn uqa_storage::CatalogFacade,
-        restored: RestoredAuthorities,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
     ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_analyzers(
+        self.engine.restore_registries_after_routine_bodies(
             catalog,
             CatalogRestoreMode::LoadOnly,
-            restored.domains,
-            restored.routines,
+            domains,
         )?;
         uqa_execution::schema::types::relation_arrays::restoration::validate(
             &self.engine.restored_catalog_read_view(),

@@ -210,7 +210,7 @@ impl Engine {
     ) -> Result<(), SQLError> {
         catalog::persist_sql_functions_snapshot(self.storage.catalog.as_deref(), registry)
     }
-    fn routine_restore_context(&self) -> RoutineRestoreContext<'_> {
+    pub(crate) fn routine_restore_context(&self) -> RoutineRestoreContext<'_> {
         RoutineRestoreContext {
             registry: self,
             roles: self,

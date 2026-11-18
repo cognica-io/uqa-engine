@@ -115,14 +115,29 @@ impl Engine {
             uqa_execution::routines::restoration::PendingSQLFunctionRestore,
         >,
     ) -> StorageBackendResult<()> {
-        self.restore_foreign_registries_from_catalog(catalog, mode)?;
-        // Stored view plans are rebound only after every row-producing
-        // relation kind is present. Legacy unqualified sources may refer to a
-        // foreign table and must not be classified as missing during reopen.
-        self.restore_views_from_catalog(catalog, mode)?;
+        self.restore_relations_before_routine_bodies(catalog, mode)?;
         if let Some(pending) = pending_sql_functions {
             self.finalize_sql_function_restore(pending, mode)?;
         }
+        self.restore_registries_after_routine_bodies(catalog, mode, domains)
+    }
+
+    pub(super) fn restore_relations_before_routine_bodies(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
+        self.restore_foreign_registries_from_catalog(catalog, mode)?;
+        // Legacy unqualified view sources can refer to foreign tables.
+        self.restore_views_from_catalog(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_routine_bodies(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+    ) -> StorageBackendResult<()> {
         // Triggers and rules may target views, so both event registries must be
         // restored only after the complete relation namespace is available.
         self.event_restore_context()

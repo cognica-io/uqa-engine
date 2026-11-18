@@ -96,15 +96,15 @@ impl SQLUserFunction {
     }
 }
 
-pub(super) fn retained_bytes(function: &SQLRoutine) -> Result<usize, SQLError> {
+pub(super) fn retained_bytes(function: &SQLRoutine) -> Result<usize, MemoryError> {
     let body = match &function.body {
         RoutineBody::Source => 0,
         RoutineBody::Bound(body) => body.reserved_bytes(),
     };
-    Ok(function
+    function
         .reserved_bytes()
         .checked_add(body)
-        .ok_or(MemoryError::SizeOverflow)?)
+        .ok_or(MemoryError::SizeOverflow)
 }
 
 pub(super) fn retained_by(function: &SQLRoutine, control: &ProductionControl<'_>) -> bool {

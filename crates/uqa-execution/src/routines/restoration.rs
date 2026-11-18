@@ -15,40 +15,18 @@ use uqa_sql::{
     ast::CreateFunction,
     routines::{
         lifecycle::{restoration as analysis, RoutineRegistry},
-        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLRoutine, SQLUserFunction,
+        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
 };
-use uqa_storage::{
-    read_control::StorageReadControl, CatalogFacade, StorageBackendError, StorageBackendResult,
-};
+use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
+
+mod input;
+pub use input::RetainedRoutineFinalization;
 
 pub struct PendingSQLFunctionRestore {
-    definitions: RestoreDefinitions,
+    definitions: BTreeMap<String, Vec<CreateFunction>>,
     migrated: bool,
     previous: RoutineRegistry,
-}
-
-enum RestoreDefinitions {
-    Owned(BTreeMap<String, Vec<CreateFunction>>),
-    Retained(analysis::PendingRoutineDefinitions, StorageReadControl),
-}
-
-impl PendingSQLFunctionRestore {
-    /// Publish only a completely prepared namespace. Retain its predecessor and the original
-    /// declaration order for the same publication or rollback used by initial open.
-    pub fn install(
-        registry: &dyn RoutineRegistryState,
-        prepared: analysis::RoutineRestorePlaceholders,
-        control: &StorageReadControl,
-    ) -> Self {
-        let (placeholders, definitions) = prepared.into_parts();
-        let previous = std::mem::replace(&mut **registry.routines_write(), placeholders);
-        Self {
-            definitions: RestoreDefinitions::Retained(definitions, control.clone()),
-            migrated: false,
-            previous,
-        }
-    }
 }
 pub trait RoutineRestoreSchemas {
     fn routine_schema_exists(&self, schema: &str) -> bool;
@@ -161,7 +139,7 @@ pub fn install_sql_function_restore_placeholders(
     }
     let previous = std::mem::replace(&mut **registry, restored);
     Ok(Some(PendingSQLFunctionRestore {
-        definitions: RestoreDefinitions::Owned(canonical_defs),
+        definitions: canonical_defs,
         migrated,
         previous,
     }))
@@ -179,45 +157,23 @@ pub fn finalize_sql_function_restore(
     } = pending;
     let compiled = (|| {
         let mut restored = super::catalog::temporary_snapshot(&previous);
-        let bind = |def: &mut CreateFunction| {
-            let bound = compile_catalog_bound_routine(
-                &context.definition,
-                def,
-                RoutineBodyCompilation::Stored,
-            )?;
-            Ok((bound.body, bound.changed))
-        };
-        match definitions {
-            RestoreDefinitions::Owned(groups) => {
-                for (name, definitions) in groups {
-                    let compiled = definitions.into_iter().map(|mut def| {
-                        let (body, changed) = bind(&mut def)?;
-                        Ok((SQLUserFunction::new(def, body).shared(), changed))
-                    });
-                    migrated |= insert_compiled_group(&mut restored, name, compiled)?;
-                }
+        for (name, definitions) in definitions {
+            let mut overloads = Vec::with_capacity(definitions.len());
+            for mut def in definitions {
+                // A stored source body is not compiled here: the sessions that run it compile it, so a body that no longer compiles cannot keep the catalog from loading.
+                let (body, changed) = bind_stored(context, &mut def)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+                migrated |= changed;
+                overloads.push(SQLUserFunction::new(def, body).shared());
             }
-            RestoreDefinitions::Retained(groups, read) => {
-                restored = restored.into_mutation_budget(read.memory());
-                let control = uqa_core::memory::ProductionControl::new(
-                    read.memory(),
-                    read.cancellation(),
-                    read.cancellation(),
-                );
-                for group in groups.groups() {
-                    let name = group
-                        .first()
-                        .expect("canonical routine group contains an overload")
-                        .def
-                        .name
-                        .clone();
-                    let compiled = group
-                        .iter()
-                        .map(|routine| routine.rebind_stored_with_control(&control, bind));
-                    migrated |= insert_compiled_group(&mut restored, name, compiled)?;
-                }
-                restored = restored.into_mutation_budget(previous.budget());
-            }
+            overloads.sort_by(|left, right| {
+                routine_signature_types(&left.def)
+                    .cmp(&routine_signature_types(&right.def))
+                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+            });
+            restored.insert(name, overloads).map_err(|error| {
+                StorageBackendError::backend("admit restored routine definition", error)
+            })?;
         }
         Ok(restored)
     })();
@@ -228,6 +184,28 @@ pub fn finalize_sql_function_restore(
             return Err(error);
         }
     };
+    publish_restored(context, previous, restored, migrated, allows_migration)
+}
+
+fn bind_stored(
+    context: &RoutineRestoreContext<'_>,
+    definition: &mut CreateFunction,
+) -> Result<(RoutineBody, bool), uqa_sql::SQLError> {
+    let bound = compile_catalog_bound_routine(
+        &context.definition,
+        definition,
+        RoutineBodyCompilation::Stored,
+    )?;
+    Ok((bound.body, bound.changed))
+}
+
+fn publish_restored(
+    context: &RoutineRestoreContext<'_>,
+    previous: RoutineRegistry,
+    restored: RoutineRegistry,
+    migrated: bool,
+    allows_migration: bool,
+) -> StorageBackendResult<()> {
     if migrated && !allows_migration {
         **context.registry.routines_write() = previous;
         return Err(StorageBackendError::Other(
@@ -243,30 +221,4 @@ pub fn finalize_sql_function_restore(
     }
     **context.registry.routines_write() = restored;
     Ok(())
-}
-
-fn insert_compiled_group(
-    restored: &mut RoutineRegistry,
-    name: String,
-    definitions: impl ExactSizeIterator<Item = Result<(SQLRoutine, bool), uqa_sql::SQLError>>,
-) -> StorageBackendResult<bool> {
-    let mut changed = false;
-    let mut overloads = Vec::with_capacity(definitions.len());
-    for definition in definitions {
-        let (routine, migrated) = definition.map_err(|error| match error {
-            uqa_sql::SQLError::Cancelled(error) => error.into(),
-            error => StorageBackendError::Other(error.to_string()),
-        })?;
-        changed |= migrated;
-        overloads.push(routine);
-    }
-    overloads.sort_by(|left, right| {
-        routine_signature_types(&left.def)
-            .cmp(&routine_signature_types(&right.def))
-            .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-    });
-    restored.insert(name, overloads).map_err(|error| {
-        StorageBackendError::backend("admit restored routine definition", error)
-    })?;
-    Ok(changed)
 }

@@ -21,6 +21,19 @@ fn reach_routines(input: &mut PersistentEngineInput) {
     }
 }
 
+fn compiling(input: &PersistentEngineInput) -> bool {
+    matches!(
+        input.candidate.as_ref().unwrap().stage,
+        Stage::RoutineBodies(_)
+    )
+}
+
+fn reach_bodies(input: &mut PersistentEngineInput) {
+    while !compiling(input) {
+        assert!(input.advance(1).unwrap().is_none());
+    }
+}
+
 #[rstest::rstest]
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
@@ -88,6 +101,29 @@ fn persistent_routines_publish_complete_placeholders_and_finalize_after_views(
             assert!(matches!(&***body, CompiledFunctionBody::SQL(plans) if plans.is_empty()));
         }
     }
+    reach_bodies(&mut input);
+    let mut polls = 0;
+    while compiling(&input) {
+        let functions = input
+            .candidate
+            .as_ref()
+            .unwrap()
+            .session
+            .engine()
+            .durable
+            .sql_user_functions
+            .read();
+        for (name, group) in placeholders.iter() {
+            assert!(functions[name.as_str()]
+                .iter()
+                .zip(group)
+                .all(|(a, b)| Arc::ptr_eq(a, b)));
+        }
+        drop(functions);
+        assert!(input.advance(1).unwrap().is_none());
+        polls += 1;
+    }
+    assert!(polls > original.values().map(Vec::len).sum::<usize>());
     let session = finish(&mut input);
     {
         let functions = session.engine().durable.sql_user_functions.read();
@@ -159,12 +195,21 @@ fn persistent_routine_input_retires_partial_declarations_and_the_private_transac
         .unwrap();
     let catalog = source.storage.catalog.as_ref().unwrap();
     let before = catalog.get_metadata("sql_functions_json").unwrap();
-    for terminal in ["cancel", "zero", "memory", "drop"] {
+    for (terminal, bodies) in ["cancel", "zero", "memory", "drop"]
+        .into_iter()
+        .flat_map(|terminal| [(terminal, false), (terminal, true)])
+    {
         let control = StorageReadControl::with_limit(32 << 20);
         let mut input = input(&source, &control);
-        reach_routines(&mut input);
-        assert!(input.advance(16).unwrap().is_none());
-        assert!(reading_routines(&input));
+        if bodies {
+            reach_bodies(&mut input);
+            assert!(input.advance(1).unwrap().is_none());
+            assert!(compiling(&input));
+        } else {
+            reach_routines(&mut input);
+            assert!(input.advance(16).unwrap().is_none());
+            assert!(reading_routines(&input));
+        }
         let engine = input.candidate.as_ref().unwrap().session.engine();
         let backend = Arc::clone(engine.storage.backend.as_ref().unwrap());
         let native = engine.durable.sql_user_functions.read().budget().clone();

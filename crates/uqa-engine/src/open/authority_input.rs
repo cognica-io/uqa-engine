@@ -15,7 +15,7 @@ use uqa_execution::{
         security::system_relations::input::SystemRelationCatalogInput,
     },
     routines::{
-        catalog::input::RoutineCatalogPlaceholderInput, restoration::PendingSQLFunctionRestore,
+        catalog::input::RoutineCatalogPlaceholderInput, restoration::RetainedRoutineFinalization,
     },
 };
 use uqa_storage::{
@@ -24,7 +24,7 @@ use uqa_storage::{
 
 pub(super) struct RestoredAuthorities {
     pub domains: DomainRestoreState,
-    pub routines: Option<PendingSQLFunctionRestore>,
+    pub routines: RetainedRoutineFinalization,
 }
 
 pub(super) enum PersistentAuthorityInput {
@@ -106,7 +106,7 @@ impl PersistentAuthorityInput {
             Self::Routines { mut input, domains } => match input.advance(1)? {
                 None => Self::Routines { input, domains },
                 Some(prepared) => {
-                    let routines = PendingSQLFunctionRestore::install(engine, prepared, control);
+                    let routines = RetainedRoutineFinalization::install(engine, prepared, control)?;
                     Self::Builtins {
                         input: BuiltinRoutineCatalogInput::new(
                             Arc::clone(catalog),
@@ -115,10 +115,7 @@ impl PersistentAuthorityInput {
                             engine.durable.builtin_routine_security.read().budget(),
                             control,
                         )?,
-                        retained: RestoredAuthorities {
-                            domains,
-                            routines: Some(routines),
-                        },
+                        retained: RestoredAuthorities { domains, routines },
                     }
                 }
             },

@@ -9,7 +9,7 @@
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
       "capability": "Persistent routine catalog restoration",
       "workload": "Restore overloaded source and SQL-standard routines that reference a domain, a view and a later routine while another session publishes a function.",
-      "invariant": "Suspended work preserves the selected generation. Completed declarations preserve revision, signature ordering and later reads and writes after the read allowance is exhausted.",
+      "invariant": "Each compilation and group assembly step preserves every installed placeholder. Final publication preserves revision, signature order and later reads and writes after the read allowance is exhausted.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
@@ -23,7 +23,7 @@
       "cases": 3,
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
       "capability": "Persistent routine catalog restoration",
-      "workload": "Cancel, deny read memory, submit zero work and abandon a private Engine during stored declaration input.",
+      "workload": "Cancel, deny read memory, submit zero work and abandon a private Engine during declaration input and after compiling its first body.",
       "invariant": "The published source metadata survives every terminal path and all private memory and read transactions retire.",
       "case_names": [
         "case_1_sqlite_native",

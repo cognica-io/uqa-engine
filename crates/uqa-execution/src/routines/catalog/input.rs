@@ -25,6 +25,7 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 mod authority;
 pub use authority::RoutineCatalogAuthority;
 mod definitions;
+pub(in crate::routines) use definitions::restore_error;
 pub use definitions::RoutineCatalogDefinitions;
 mod canonical;
 pub use canonical::{
