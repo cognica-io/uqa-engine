@@ -2,6 +2,32 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_defaults_and_bound_bodies_keep_their_call_placements_while_source_remains_deferred",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Visit SQL-standard and quoted routines with parameter defaults, FROM calls, window calls and scalar expressions under two work windows.",
+      "invariant": "Stored and retained executable statements select the same call placements. Quoted source remains deferred, utility statements retain their SQL diagnostic and traversal releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_routine_records_resume_overloads_and_release_their_private_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read multiple versions of a routine signature from one encoded catalog with short work windows. Cancel one input during decoding.",
+      "invariant": "The physical catalog yields the bound call and the deferred routine’s parameter default, preserves overload order, and retires all private allocations after completion or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "bounded_fingerprint_cache_rejects_evicted_and_replaced_owners",
